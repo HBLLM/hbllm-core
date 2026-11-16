@@ -10,7 +10,6 @@ import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.library_learning import LibraryLearner
 from hbllm.hcir.world.option_discovery import OptionDiscoveryEngine
 
 
@@ -80,32 +79,6 @@ def test_option_induction_and_declarative_skill() -> None:
     assert len(tx_ops) == 1
     assert tx_ops[0].op == TransactionOp.UPSERT_NODE
     assert tx_ops[0].node_id == "discovered_option_opt_bottleneck_2_4"
-
-
-def test_option_reuse_tracking_and_library_consolidation() -> None:
-    """Option executions update reuse metrics and consolidate into LibraryLearner."""
-    engine = OptionDiscoveryEngine(min_reuse_for_consolidation=2)
-    opt = engine.induce_option(bottleneck=(2, 4))
-
-    # Primitive step
-    engine.record_primitive_execution(steps=5)
-    assert engine.get_option_reuse_rate() == 0.0
-
-    # Option execution 1 (success)
-    engine.record_option_execution(opt.option_id, steps=10, success=True)
-    assert engine.get_option_reuse_rate() == 10 / 15
-    assert opt.reuse_count == 1
-    assert opt.success_rate == 1.0
-
-    # Option execution 2 (success)
-    engine.record_option_execution(opt.option_id, steps=5, success=True)
-    assert opt.reuse_count == 2
-
-    # Consolidate into LibraryLearner
-    library = LibraryLearner()
-    consolidated = engine.consolidate_options_to_library(library)
-    assert opt.name in consolidated
-    assert opt.name in library.macro_skills
 
 
 def test_epistemic_engine_option_discovery_integration() -> None:

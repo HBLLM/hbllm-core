@@ -1906,53 +1906,6 @@ class EpistemicGoalScheduler:
             if reachable_goals:
                 goals = reachable_goals
 
-        # DreamCoder LibraryLearner proposal prior guidance over unconfirmed exploratory goals
-        if (
-            len(goals) > 1
-            and not confirmed_goals
-            and getattr(engine, "library_learner", None)
-            and getattr(engine.library_learner, "proposal_distribution", None) is not None
-        ):
-            ll_ctx = {
-                "has_goal": bool(engine.symbolic_theory.goal_features),
-                "has_cargo": bool(engine.symbolic_theory.cargo_features),
-                "has_switches": bool(
-                    engine.symbolic_theory.conditional_affordances
-                    or getattr(getattr(engine, "remote_causal", None), "remote_actuators", None)
-                ),
-                "has_threats": bool(getattr(engine.hazard_tracker, "known_lethal_features", None)),
-                "n_actions": len(available_actions),
-            }
-            ll_proposals = engine.library_learner.sample_proposals(ll_ctx, top_k=5)
-            if len(ll_proposals) >= 2 and ll_proposals[0][1] > ll_proposals[1][1] + 0.01:
-                top_intent = ll_proposals[0][0].upper()
-                actuator_feats = getattr(engine.symbolic_theory, "actuator_features", set())
-                cargo_feats = getattr(engine.symbolic_theory, "cargo_features", set())
-                goal_feats = (
-                    engine.symbolic_theory.goal_features
-                    | engine.symbolic_theory.candidate_goal_features
-                )
-
-                def _ll_priority(g: tuple[int, int]) -> tuple[int, int]:
-                    feat = int(curr_grid[g[0], g[1]])
-                    sw_feat = satisfied_when.get(g, {}).get("feature")
-                    dist = (
-                        abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
-                        if avatar_pos is not None
-                        else 0
-                    )
-                    if "INTERACT" in top_intent or "ACTIVATE" in top_intent:
-                        tier = 0 if (feat in actuator_feats or sw_feat in actuator_feats) else 1
-                    elif "PICKUP" in top_intent:
-                        tier = 0 if feat in cargo_feats else 1
-                    elif "NAV" in top_intent:
-                        tier = 0 if feat in goal_feats else 1
-                    else:
-                        tier = 0
-                    return (tier, dist)
-
-                goals.sort(key=_ll_priority)
-
         return EpistemicGoalProposal(
             goals=goals,
             confirmed_goals=confirmed_goals,
@@ -2619,46 +2572,6 @@ class MentalSimulationPlanner:
             return imm_stance_plan
 
         # Faculty D: Bilateral Convergent Coordinate Frames
-        if engine.bilateral_state is not None and len(engine.action_dynamics) >= 2:
-            passable_mask = np.ones((H, W), dtype=bool)
-            for r in range(H):
-                for c in range(W):
-                    feat = int(curr_grid[r, c])
-                    if (
-                        engine.symbolic_theory.is_barrier(feat)
-                        or feat in engine.hazard_tracker.known_lethal_features
-                        or (r, c) in engine.learned_barriers
-                    ):
-                        passable_mask[r, c] = False
-
-            action_deltas = engine.action_deltas
-            bilateral_plan = engine.bilateral_integrator.plan_convergence_sequence(
-                pos1=engine.bilateral_state.pos1,
-                pos2=engine.bilateral_state.pos2,
-                axis=engine.bilateral_state.symmetry_axis,
-                passable_mask=passable_mask,
-                action_deltas=action_deltas,
-                target_positions=goals if goals else None,
-            )
-            if bilateral_plan:
-                logger.info(
-                    "MentalSimulationPlanner: Formulated Bilateral Callosal Convergence plan (%d steps)",
-                    len(bilateral_plan),
-                )
-                curr_b_pos = engine.avatar_pos or engine.bilateral_state.pos1
-                steps = []
-                for act in bilateral_plan:
-                    dr_b, dc_b = action_deltas.get(act, (0, 0))
-                    curr_b_pos = (curr_b_pos[0] + dr_b, curr_b_pos[1] + dc_b)
-                    steps.append(
-                        MentalSimulationStep(
-                            action=act,
-                            predicted_avatar_pos=curr_b_pos,
-                            expected_mutation="bilateral_convergence",
-                        )
-                    )
-                return steps
-
         # 2. Identify candidate pushable blocks / cargo
         pushable_blocks: list[tuple[int, int]] = [
             e.grid_pos
@@ -2877,27 +2790,11 @@ class MentalSimulationPlanner:
         unknown_entity_cells.difference_update(threat_cells)
 
         init_threats = frozenset(threat_cells)
-        trajectory_features = {
-            proj.feature_id for proj in engine.collision_cones.projected_trajectories
-        }
         patrol_items: set[tuple[tuple[int, int], tuple[int, int]]] = {
             (t.pos, t.facing)
             for t in oriented_threats
-            if t.feature_id in engine.mobile_threat_features
-            and t.facing != (0, 0)
-            and t.feature_id not in trajectory_features
+            if t.feature_id in engine.mobile_threat_features and t.facing != (0, 0)
         }
-        for proj in engine.collision_cones.projected_trajectories:
-            if proj.feature_id in cargos_known:
-                continue
-            if (
-                proj.feature_id in engine.mobile_threat_features
-                or proj.feature_id in engine.hazard_tracker.known_lethal_features
-            ):
-                vr, vc = proj.velocity
-                if vr != 0 or vc != 0:
-                    f = (int(np.sign(vr)), int(np.sign(vc)))
-                    patrol_items.add((proj.initial_pos, f))
         init_patrols: frozenset[tuple[tuple[int, int], tuple[int, int]]] = frozenset(patrol_items)
 
         def advance_patrols(
@@ -3013,12 +2910,7 @@ class MentalSimulationPlanner:
             bool(engine.hazard_tracker.periodic_cells)
             and engine.hazard_tracker.environmental_period >= 2
         )
-        has_temporal = (
-            bool(init_patrols)
-            or bool(init_chasers)
-            or has_periodic
-            or bool(engine.collision_cones.projected_trajectories)
-        )
+        has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
 
         # ─────────────────────────────────────────────────────────────────────
         # Fast Topological Geodesic & Kinematics Router (Substrate Layer)
@@ -3209,12 +3101,7 @@ class MentalSimulationPlanner:
             bool(engine.hazard_tracker.periodic_cells)
             and engine.hazard_tracker.environmental_period >= 2
         )
-        has_temporal = (
-            bool(init_patrols)
-            or bool(init_chasers)
-            or has_periodic
-            or bool(engine.collision_cones.projected_trajectories)
-        )
+        has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
         meta_depth = get_sub_attr(engine.prediction_budget.counterfactual_budget, "max_depth", None)
         meta_mode = (
             getattr(
@@ -3579,12 +3466,6 @@ class MentalSimulationPlanner:
                     ):
                         continue
                     collision_cone_penalty = 0.0
-                    if engine.collision_cones.is_collision_hazard(nr, nc, sim_step):
-                        if not _relaxed_safety:
-                            had_relaxable_block = True
-                            continue
-                        else:
-                            collision_cone_penalty = 30.0
                     is_flanked_step = (
                         (nr, nc) in cur_threats
                         and threat_map.get((nr, nc)) is not None
@@ -3748,25 +3629,6 @@ class MentalSimulationPlanner:
                         ):
                             continue
 
-                        if engine.physics_engine.has_gravity:
-                            if not engine.physics_engine.is_supported(
-                                pushed_r,
-                                pushed_c,
-                                curr_grid,
-                                set(engine.symbolic_theory.barrier_features),
-                                static_barriers,
-                            ):
-                                land_b, _, is_b_lethal = engine.physics_engine.project_fall(
-                                    pushed_r,
-                                    pushed_c,
-                                    curr_grid,
-                                    set(engine.symbolic_theory.barrier_features),
-                                    static_barriers,
-                                )
-                                if is_b_lethal:
-                                    continue
-                                pushed_r, pushed_c = land_b
-
                         if (is_block_delivery or bool(cur_blocks)) and (
                             pushed_r,
                             pushed_c,
@@ -3907,24 +3769,7 @@ class MentalSimulationPlanner:
                 movable_actions,
             )
             if subgoal_plan:
-                # Prefrontal Safety Gate: Validate first step does not step into a collision hazard
-                first_pos = subgoal_plan[0].predicted_avatar_pos
-                if (
-                    isinstance(first_pos, tuple)
-                    and len(first_pos) >= 2
-                    and isinstance(first_pos[0], (int, float))
-                    and isinstance(first_pos[1], (int, float))
-                    and engine.collision_cones.is_collision_hazard(
-                        int(first_pos[0]), int(first_pos[1]), 1
-                    )
-                ):
-                    logger.info(
-                        "MentalSimulationPlanner: Hierarchical static plan rejected - first step collides with dynamic hazard at %s",
-                        first_pos,
-                    )
-                    subgoal_plan = None
-                else:
-                    return subgoal_plan
+                return subgoal_plan
 
         # Teleological Backward Cut-Set Decomposition Fallback (Human BA10 Reasoning)
         if (not is_block_delivery or bool(mutation_triggers)) and goals and start_pos is not None:
@@ -3939,23 +3784,7 @@ class MentalSimulationPlanner:
                 oriented_threats=oriented_threats,
             )
             if teleo_plan:
-                first_pos = teleo_plan[0].predicted_avatar_pos
-                if (
-                    isinstance(first_pos, tuple)
-                    and len(first_pos) >= 2
-                    and isinstance(first_pos[0], (int, float))
-                    and isinstance(first_pos[1], (int, float))
-                    and engine.collision_cones.is_collision_hazard(
-                        int(first_pos[0]), int(first_pos[1]), 1
-                    )
-                ):
-                    logger.info(
-                        "MentalSimulationPlanner: Teleological static plan rejected - first step collides with dynamic hazard at %s",
-                        first_pos,
-                    )
-                    teleo_plan = None
-                else:
-                    return teleo_plan
+                return teleo_plan
 
         # Reachable Unvisited Frontier Fallback: only when calibrated movement axes are
         # incomplete (e.g., partial axis calibration in a straight corridor before any turn),
@@ -3984,19 +3813,36 @@ class MentalSimulationPlanner:
                     override_goal_set=set(frontier_goals[:12]),
                 )
                 if frontier_plan:
-                    first_pos = frontier_plan[0].predicted_avatar_pos
-                    if not (
-                        isinstance(first_pos, tuple)
-                        and len(first_pos) >= 2
-                        and isinstance(first_pos[0], (int, float))
-                        and isinstance(first_pos[1], (int, float))
-                        and engine.collision_cones.is_collision_hazard(
-                            int(first_pos[0]), int(first_pos[1]), 1
-                        )
-                    ):
-                        return frontier_plan
+                    return frontier_plan
 
         return None
+
+    @staticmethod
+    def _query_barrier_clearance(
+        engine: AutonomousEpistemicEngine,
+        barrier_pos: tuple[int, int],
+        barrier_feature: Any,
+    ) -> tuple[tuple[int, int] | None, Any | None]:
+        """Query if a barrier can be cleared by a remote trigger or held/known tool."""
+        body_schema = getattr(getattr(engine, "working_memory", None), "body_schema", None)
+        if body_schema is not None and body_schema.is_barrier_permeable(barrier_feature):
+            for tool in body_schema.held_tools:
+                if barrier_feature in tool.unlocked_barriers or tool.feature_id == barrier_feature:
+                    return (None, tool.feature_id)
+        remote_causal = getattr(engine, "remote_causal", None)
+        if remote_causal is not None:
+            affordance = remote_causal.get_trigger_for_barrier(
+                barrier_pos,
+                barrier_feature=barrier_feature,
+            )
+            if affordance is not None:
+                return (affordance.trigger_pos, None)
+        if body_schema is not None:
+            tools = body_schema.get_tools_for_barrier(barrier_feature)
+            for t_feat in tools:
+                if t_feat in body_schema.tool_barrier_affinities:
+                    return (None, t_feat)
+        return (None, None)
 
     @staticmethod
     def _plan_hierarchical_subgoals(
@@ -4123,7 +3969,9 @@ class MentalSimulationPlanner:
 
             for b_pos in boundary_barriers:
                 b_feat = int(curr_grid[b_pos[0], b_pos[1]])
-                trig_pos, req_tool = engine.causal_cortex.query_barrier_clearance(b_pos, b_feat)
+                trig_pos, req_tool = MentalSimulationPlanner._query_barrier_clearance(
+                    engine, b_pos, b_feat
+                )
                 if trig_pos is not None:
                     if trig_pos in visited_triggers:
                         continue
@@ -4167,8 +4015,8 @@ class MentalSimulationPlanner:
                                             ]
                                         )
                                         ib_trig, ib_tool = (
-                                            engine.causal_cortex.query_barrier_clearance(
-                                                intervening_barrier, ib_feat
+                                            MentalSimulationPlanner._query_barrier_clearance(
+                                                engine, intervening_barrier, ib_feat
                                             )
                                         )
                                         if ib_trig and ib_trig in reachable_cells:

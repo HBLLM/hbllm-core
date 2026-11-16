@@ -4,10 +4,10 @@
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
 > [!WARNING]
-> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-16, R1+R2 complete on `199e6b17`).**  
-> The engine generalizes across palettes, orientations, action relabelings, two-key chains, and remote switches (`reports/audit/2026-11-15_phase2_generalization_review.md` §2). Full suite green (7219 passed). R1+R2 established honest all-seed dev evaluation (`n=80`, `zero_shot=0.7501`, `solve_rate=0.7875`, CI `[0.6858, 0.8629]`; `cross_seed transfer_solve_rate=0.8553`, CI `[0.7591, 0.9172]`), sealed held-out v2 with `eval-*` gate & `reports/heldout/LEDGER.md`, retired held-out v1, and promoted `novelty.yaml`.
+> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-16, R1–R5 complete).**  
+> R1–R5 established honest all-seed `dev` evaluation (`n=80`, `zero_shot=0.7547`, `solve_rate=0.8000`, CI `[0.6995, 0.8730]`, `cross_seed transfer_solve_rate=0.9211`, latency `p50=21.33ms / p95=60.24ms`, `reports/dev/dev_handcrafted_20261116_123256.json`), sealed held-out v2 with `eval-*` gate & `reports/heldout/LEDGER.md`, retired held-out v1, promoted `novelty.yaml` (`zero_shot=0.7770`), wired grounding into runtime decisions, deleted 28 zero-effect/dead faculties + unwired all dead pipeline hooks, and brought `hbllm/**/*.py` down to `242,638` LOC (`tests/unit/architecture/test_loc_budget.py` enforces `<= 250,000`).
 >
-> **Remaining issues from review §5:** grounding has measured effect 0.0000 (`no_grounding == system`); LOC is 260,709 (budget 250k) with ~35 faculties measured at zero effect and none deleted. Work the review's §5 in order: **R3** fix background≠0 negative transfer and the corridor freeze → **R4** wire grounding into decisions or disable it by default → **R5** delete/demote per ablation, back under 250k → R6–R9. No new faculties or pipeline hooks; no held-out run while iterating; no headline from fewer than 20 seeds. Production gaps are listed in §6 and start with choosing which system is the product.
+> **Remaining issues from review §5:** Work the review's §5 in order: **R6** structural debt ratchets → **R7** risk-aware exploration + exploration deaths metric → **R8** compaction/retention + bounded memory/node budget + latency budget → **R9** widen task regimes. No new faculties or pipeline hooks; no held-out run while iterating; no headline from fewer than 20 seeds. Production gaps are listed in §6.
 
 ---
 
@@ -95,10 +95,11 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 > **Domain-Agnostic Invariant:** Cortical faculties must never be coupled to a specific game, level, or simulation environment. Mechanisms must be based on universal physical principles (topology, collision cones, reachability, symmetries, causal credit assignment).
 
 > [!NOTE]
-> **Faculty Roster (WP2 measured ablation, `reports/ablation/20261101_211519.json`):**
+> **Faculty Roster (post-R5 measured R1 ablation, `reports/ablation/20261116_175717_r1_dev.json`):**
 > - **Stage owners (core, always kept):** `perception`, `assimilator`, `deliberation_engine`, `planner`, `motor`, `episodic_cortex`, `working_memory`, `symbolic_theory`.
-> - **Kept faculties (Δlevels > sd or load-bearing):** `acc_conflict_monitor`, `collision_cones`, `deformation_tracker`, `dorsal_kinetic_stream`, `hazard_tracker`, `metacognitive_agency_cortex`, `neuromodulatory_system`, `precision_controller`, `prediction_budget`, `predictive_coding_cortex`, `snn_predictor`, `surprise_engine`.
-> - **Experimental/unused (ablated to `AblatedFaculty` nulls; classes importable via `hbllm.hcir.world.experimental`):** 52 faculties — see the report for the measured evidence and the decision rule.
+> - **Measured R1 keepers (positive Δgen / Δsr / Δxs):** `prediction_budget` (+0.0880 gen, +0.2375 sr, +0.2369 xs), `budget_governor` (+0.0181 gen, +0.0500 sr, +0.1053 xs), `option_discovery` (+0.0168 gen, +0.0125 sr), `acc_conflict_monitor` (+0.0114 gen), `object_planner` (+0.0067 gen, +0.0125 sr), `remote_causal` (+0.0054 gen, +0.0125 sr).
+> - **Working-memory / hazard stores retained:** `body_schema`, `subgoal_stack`, `habenular_ior`, `hazard_tracker` (patrol/decoy invariance on `novelty.yaml`), `world_kernel`.
+> - **Removed in R5:** 28 zero-effect/dead modules deleted and dead pipeline hooks unwired; `hbllm/**/*.py` reduced to `242,638` LOC (`<= 250,000` budget enforced by `tests/unit/architecture/test_loc_budget.py`).
 
 ---
 

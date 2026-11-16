@@ -15,7 +15,6 @@ from hbllm.hcir.kernel.safety_corrigibility import (
 )
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace_tiers import TieredWorkspace
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
 
 def test_value_uncertainty_safe_action_approval() -> None:
@@ -144,33 +143,3 @@ def test_corrigibility_resistance_detection() -> None:
     is_corrigible = monitor.verify_no_instrumental_resistance([malicious_op])
     assert is_corrigible is False
     assert len(monitor.resistance_violations) == 1
-
-
-def test_epistemic_engine_safety_and_provenance_integration() -> None:
-    """AutonomousEpistemicEngine evaluates action safety and explains goal provenance."""
-    epistemic_engine = AutonomousEpistemicEngine()
-
-    approved, request = epistemic_engine.evaluate_action_value_safety(
-        action_id=4,
-        action_type="HIGH_RISK_PROBE",
-        expected_value=0.4,
-        epistemic_variance=0.6,
-    )
-    assert approved is False
-    assert request is not None
-
-    epistemic_engine.record_goal_provenance(
-        goal_id="root_mission",
-        intent="SOLVE",
-        justification="Primary task",
-    )
-    epistemic_engine.record_goal_provenance(
-        goal_id="active_subgoal",
-        parent_goal_id="root_mission",
-        intent="EXPLORE",
-        justification="Explore unknown region",
-    )
-
-    explanation = epistemic_engine.explain_goal_provenance("active_subgoal")
-    assert "root_mission" in explanation
-    assert "active_subgoal" in explanation

@@ -207,10 +207,8 @@ class TestEpisodicBoundaryRoleTransfer:
         """consolidate_schema_and_reset snapshots templates and clears bindings on is_new_level."""
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
         from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
-        from hbllm.hcir.world.experimental import restore_all as _restore_all
 
         engine = AutonomousEpistemicEngine()
-        _restore_all(engine)
         theory = engine.symbolic_theory
 
         # Simulate episode 1: learn key(3)→door(2)→goal(8)
@@ -278,10 +276,8 @@ class TestEpisodicBoundaryRoleTransfer:
         """On same-level retry (death, is_new_level=False), feature bindings are NOT cleared."""
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
         from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
-        from hbllm.hcir.world.experimental import restore_all as _restore_all
 
         engine = AutonomousEpistemicEngine()
-        _restore_all(engine)
         theory = engine.symbolic_theory
 
         theory.bind_feature_to_role(3, "key")

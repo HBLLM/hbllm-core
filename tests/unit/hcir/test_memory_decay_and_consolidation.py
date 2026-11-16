@@ -22,8 +22,6 @@ from hbllm.hcir.nodes import ConceptNode
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TieredWorkspace, WorkspaceTier
-from hbllm.hcir.world.cortex_episodic import EpisodicTransition
-from hbllm.hcir.world.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
 
 
 def test_exponential_decay_reduces_activation_energy() -> None:
@@ -180,29 +178,6 @@ def test_full_memory_hygiene_cycle() -> None:
     report = tiered.run_memory_hygiene_cycle(half_life_seconds=3600.0)
     assert report["decayed_brain_nodes"] >= 1
     assert report["total_pruned"] >= 1
-
-
-def test_cls_bidirectional_consolidation_hippocampus_mpfc() -> None:
-    """Validate Complementary Learning Systems (CLS) interaction: replay -> schema induction -> primed retrieval."""
-    schema_engine = MedialPrefrontalSchemaEngine()
-
-    # 1. Existing schema retrieval & induction from replay
-    initial_schema = schema_engine.get_schema("schema_clearance_sequential")
-    assert initial_schema is not None
-
-    # Replay trajectory that matches sequential clearance sequence hints
-    traj = [
-        EpisodicTransition(step=0, action_id=1, avatar_pos=(1, 1)),
-        EpisodicTransition(step=1, action_id=2, avatar_pos=(1, 2)),
-    ]
-    updated = schema_engine.consolidate_replayed_trajectory(traj, terminal_reward=1.0)
-    assert updated is not None
-    assert updated.activation_count >= 1
-
-    # 2. Top-down retrieval priming
-    primed = schema_engine.prime_hippocampal_retrieval(["barrier", "actor"])
-    assert len(primed) > 0
-    assert any(s.schema_id == "schema_clearance_sequential" for s in primed)
 
 
 @pytest.mark.asyncio

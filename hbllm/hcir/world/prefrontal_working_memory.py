@@ -17,12 +17,9 @@ import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
 
 from hbllm.hcir.graph import ConceptNode, FactNode, ProcedureNode, SkillNode
 from hbllm.hcir.skills.declarative import (
@@ -39,7 +36,6 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_hypothesis import InductiveHypothesisEngine
 from hbllm.hcir.world.cortex_morphology import MorphologicalSaliencyEngine
 from hbllm.hcir.world.engine_state import get_engine_state_attr
-from hbllm.hcir.world.experimental import ablated as _ablated
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
@@ -582,9 +578,6 @@ class PrefrontalWorkingMemory:
         self.macro_plan: MacroActionPlan = MacroActionPlan()
         self.remote_causal: RemoteCausalAttributor = RemoteCausalAttributor()
         self.habenular_ior: HabenularEpisodicIOR = HabenularEpisodicIOR()
-        self.optical_projector: OpticalRayProjector | Any = _ablated(
-            "optical_projector", "OpticalRayProjector"
-        )
         self.it_segmenter: InferotemporalSegmentationEngine = InferotemporalSegmentationEngine()
         self.acc_conflict: AnteriorCingulateConflictMonitor = AnteriorCingulateConflictMonitor()
         self.exogenous_tracker: ExogenousSignalTracker = ExogenousSignalTracker()
@@ -756,11 +749,7 @@ class PrefrontalWorkingMemory:
         n_act = len(get_engine_state_attr(engine, "action_dynamics", {}))
         n_goals = len(get_engine_state_attr(engine, "learned_goal_positions", set()))
         n_barriers = len(get_engine_state_attr(engine, "learned_barriers", set()))
-        n_traj = len(
-            getattr(
-                get_engine_state_attr(engine, "collision_cones", None), "projected_trajectories", []
-            )
-        )
+        n_traj = 0
         n_threats = len(get_engine_state_attr(engine, "mobile_threat_features", set()))
 
         b = self._salience_baseline
@@ -787,11 +776,7 @@ class PrefrontalWorkingMemory:
         n_act = len(get_engine_state_attr(engine, "action_dynamics", {}))
         n_goals = len(get_engine_state_attr(engine, "learned_goal_positions", set()))
         n_barriers = len(get_engine_state_attr(engine, "learned_barriers", set()))
-        n_traj = len(
-            getattr(
-                get_engine_state_attr(engine, "collision_cones", None), "projected_trajectories", []
-            )
-        )
+        n_traj = 0
         n_threats = len(get_engine_state_attr(engine, "mobile_threat_features", set()))
         self._salience_baseline = WorkingMemorySalienceState(
             calibrated_actions=n_act,

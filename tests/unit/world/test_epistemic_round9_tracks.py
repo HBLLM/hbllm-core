@@ -6,7 +6,6 @@ Track 3: Prefrontal Counterfactual Blame Attribution & Causal Credit Assignment
 Track 4: Native Structural Graph Minimum Spanning Tree (MST) & Geodesic Spine Extraction
 """
 
-from typing import Any
 
 import pytest
 
@@ -22,86 +21,11 @@ from hbllm.hcir.native_adapter import (
 )
 from hbllm.hcir.world import (
     AutonomousEpistemicEngine,
-    PlanAttributionReport,
-)
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.experimental.prefrontal_blame_attribution import (
-    PrefrontalBlameAttributor,
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Track 3: Prefrontal Counterfactual Blame Attribution
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_prefrontal_blame_attribution_culprit_isolation() -> None:
-    """Isolates pivotal faulty subgoal in a dead-end plan trace using Pearl causality."""
-    attributor = PrefrontalBlameAttributor()
-
-    trace: list[dict[str, Any]] = [
-        {"id": "sg_1", "intent": "NAVIGATE", "target_coord": (1, 1), "alternatives": []},
-        {
-            "id": "sg_2",
-            "intent": "NAVIGATE",
-            "target_coord": (2, 3),
-            "alternatives": ["take_west_hall"],
-        },
-        {"id": "sg_3", "intent": "INTERACT", "target_coord": (5, 5), "alternatives": []},
-    ]
-
-    report = attributor.attribute_plan_failure(
-        subgoal_trace=trace,
-        failure_condition="dead_end",
-        blocked_targets={(5, 5)},
-    )
-
-    assert isinstance(report, PlanAttributionReport)
-    assert report.failed_outcome == "dead_end"
-    assert report.primary_culprit_id == "sg_3"
-
-    # sg_3 led directly to blocked target -> rho = 1.0
-    blame_map = {b.subgoal_id: b for b in report.subgoal_blames}
-    assert blame_map["sg_3"].responsibility_score == 1.0
-    assert blame_map["sg_3"].is_primary_cause is True
-
-    # sg_2 had an alternative branch -> contributory responsibility rho = 0.5
-    assert blame_map["sg_2"].responsibility_score == 0.5
-    assert blame_map["sg_2"].counterfactual_alternative == "take_west_hall"
-
-    # sg_1 had no alternatives -> rho = 0.0
-    assert blame_map["sg_1"].responsibility_score == 0.0
-
-    # Serialization
-    pred = report.to_causal_predicate()
-    assert pred.variable == "blame:plan_attribution_report"
-    assert pred.value == "sg_3"
-
-    ops = report.to_transaction_operations()
-    assert len(ops) >= 4  # report + 3 subgoals
-
-
-def test_prefrontal_blame_attribution_engine_integration() -> None:
-    """Engine attributes blame to failed trace and registers causal predicates."""
-    engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
-    assert hasattr(engine, "blame_attributor")
-
-    trace: list[dict[str, Any]] = [
-        {"id": "step_a", "intent": "EXPLORE", "target_coord": (2, 2), "alternatives": []},
-        {
-            "id": "step_b",
-            "intent": "MOVE",
-            "target_coord": (9, 9),
-            "alternatives": ["safe_corridor"],
-        },
-    ]
-
-    report = engine.attribute_plan_failure(trace, failure_condition="trap")
-    assert report.primary_culprit_id == "step_b"
-    assert any(
-        "blame:plan_attribution_report" in p.variable
-        for p in engine.symbolic_theory.causal_predicates
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -169,7 +93,6 @@ def test_cognitive_graph_minimum_spanning_tree() -> None:
 def test_engine_extract_geodesic_spine() -> None:
     """Engine extracts geodesic spine from cognitive graph via Kruskal's MST."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
 
     graph = CognitiveGraph(enable_native_substrate=False)
     for nid in ["X", "Y", "Z"]:

@@ -9,15 +9,8 @@ ARC-AGI-specific assumptions.
 from __future__ import annotations
 
 from hbllm.hcir.skills.common_subskills import DiscreteVectorTranslator
-from hbllm.hcir.world.cortex_causal import (
-    CausalInductionCortex,
-    HCIRSymbolicWorldTheory,
-)
+from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
 from hbllm.hcir.world.percept import EntityRole, SpatialEntity
-from hbllm.hcir.world.skill_program_synthesizer import (
-    SkillProgramSynthesizer,
-    SpatialActionIntent,
-)
 
 
 def test_symbolic_theory_string_concepts_and_features():
@@ -114,19 +107,6 @@ def test_symbolic_theory_string_tool_barrier_affinities():
     assert not theory.is_tool_barrier_incompatible("crowbar", "wooden_planks")
 
 
-def test_causal_induction_cortex_string_barriers_and_tools():
-    """Verify CausalInductionCortex handles string entities and passability checks."""
-    cortex = CausalInductionCortex()
-    cortex.symbolic_theory.induce_walkable("corridor")
-    cortex.symbolic_theory.induce_goal("flag")
-    cortex.symbolic_theory.induce_barrier("laser_grid")
-
-    assert cortex.is_passable("corridor")
-    assert cortex.is_passable("flag")
-    assert not cortex.is_passable("laser_grid")
-    assert cortex.is_passable("unseen_feature")  # not confirmed as barrier
-
-
 def test_discrete_vector_translator_custom_action_schema():
     """Verify DiscreteVectorTranslator handles custom non-integer action schemas (e.g. robotics/browser)."""
     custom_map = {
@@ -148,29 +128,6 @@ def test_discrete_vector_translator_custom_action_schema():
     assert len(path_actions) == 2
     assert path_actions[0] == ("MOVE_SOUTH", None)
     assert path_actions[1] == ("MOVE_EAST", None)
-
-
-def test_skill_program_synthesizer_domain_general():
-    """Verify SkillProgramSynthesizer synthesizes skills without hardcoded ARC action restrictions."""
-    synth = SkillProgramSynthesizer()
-    pattern = (SpatialActionIntent.NAVIGATE_TO, SpatialActionIntent.INTERACT)
-
-    # Synthesize without specifying required actions -> should allow any affordance
-    skill = synth.synthesize_skill_from_pattern(pattern, skill_name="general_pickup_skill")
-    assert skill.skill_name == "general_pickup_skill"
-    assert skill.signature is not None
-    # ActionAffordancePredicate with required=set() matches any available actions
-    mock_ctx = {"available_actions": {"CLICK", "DRAG", "TYPE"}}
-    assert skill.signature.evaluate(mock_ctx)
-
-    # Synthesize with custom domain actions (e.g. robotics primitives)
-    custom_skill = synth.synthesize_skill_from_pattern(
-        pattern,
-        skill_name="robot_arm_skill",
-        required_actions={"GRASP", "RELEASE"},
-    )
-    assert not custom_skill.signature.evaluate({"available_actions": {"CLICK"}})
-    assert custom_skill.signature.evaluate({"available_actions": {"GRASP", "RELEASE", "MOVE"}})
 
 
 def test_engine_state_supports_general_actions_and_features():

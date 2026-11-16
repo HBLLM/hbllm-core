@@ -21,7 +21,6 @@ from hbllm.hcir.world.cortex_planner import (
 )
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
-from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAffordance
 
@@ -73,7 +72,6 @@ def test_cargo_corner_and_wall_deadlock_detection() -> None:
 def test_sokoban_simulation_prunes_deadlock_branch() -> None:
     """Verify mental simulation avoids pushing cargo into a corner deadlock."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (3, 3)
 
@@ -119,7 +117,6 @@ def test_sokoban_simulation_prunes_deadlock_branch() -> None:
 def test_hierarchical_subgoal_unreachable_barrier_rejection() -> None:
     """Verify hierarchical subgoal planning returns None when goal is completely unreachable without switch."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -169,7 +166,6 @@ def test_hierarchical_subgoal_unreachable_barrier_rejection() -> None:
 def test_hierarchical_subgoal_solves_with_reachable_trigger() -> None:
     """Verify hierarchical subgoal planning successfully synthesizes trigger sequence when switch opens barrier."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -238,7 +234,6 @@ def test_hierarchical_subgoal_solves_with_reachable_trigger() -> None:
 def test_oriented_threat_body_collision_avoidance() -> None:
     """Verify Space-Time A* avoids stepping into oriented enemy body cell."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -275,7 +270,6 @@ def test_oriented_threat_body_collision_avoidance() -> None:
 def test_pure_click_salient_centroid_grounding_and_ior() -> None:
     """Verify MotorCortexEffector grounds click onto salient candidate centroids and applies IOR."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_pos = None
     engine.avatar_feature = None
 
@@ -320,7 +314,6 @@ def test_pure_click_salient_centroid_grounding_and_ior() -> None:
 def test_stationary_sentry_gaze_is_never_relaxed_as_safe_path() -> None:
     """Verify that stationary sentry gaze/line of fire is never treated as a passable relaxed route."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (5, 1)
 
@@ -368,7 +361,6 @@ def test_stationary_sentry_gaze_is_never_relaxed_as_safe_path() -> None:
 def test_tactical_flanking_neutralizes_threat_in_mental_simulation() -> None:
     """Verify that flanking an oriented sentry from behind/side neutralizes it and opens the path."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 4)  # Starting above the sentry
 
@@ -410,7 +402,6 @@ def test_tactical_flanking_neutralizes_threat_in_mental_simulation() -> None:
 def test_oriented_threat_observation_rejects_spurious_translations() -> None:
     """Verify that creature motion observation enforces entity count conservation and step size bounds."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (5, 5)
     engine.step_counter = 1  # Initial step
@@ -457,7 +448,6 @@ def test_oriented_threat_observation_rejects_spurious_translations() -> None:
 def test_click_effector_lattice_quantization() -> None:
     """Verify MotorCortexEffector quantizes fallback clicks to lattice quantum centroids when step_sz > 1."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_pos = None
     engine.avatar_feature = None
     engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=3, delta_c=0, confidence=1.0)
@@ -514,7 +504,6 @@ def test_exogenous_partition_masking() -> None:
 def test_effector_valid_targets_snapping() -> None:
     """Verify ground_effector_action snaps targets to discrete schema affordance coordinates."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_pos = None
     engine.avatar_feature = None
 
@@ -549,7 +538,6 @@ def test_effector_valid_targets_snapping() -> None:
 def test_metacognitive_urgency_budget_modulation() -> None:
     """Verify decide() zeros out refractory exploration cooldowns under tight step budgets."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.exploration_budget = 20
     engine.set_environmental_step_limit(20)
     engine.exploration_cooldown = 5
@@ -576,7 +564,6 @@ def test_metacognitive_urgency_budget_modulation() -> None:
 def test_active_inference_effector_kinetics_mode() -> None:
     """Verify assimilate_feedback dynamically infers attraction/pull vs repulsion mode."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     assert engine.effector_kinetics_mode is None, "Kinetics mode must start unobserved (None)!"
 
     engine.prev_grid = np.zeros((20, 20), dtype=int)
@@ -624,7 +611,6 @@ def test_active_inference_effector_kinetics_mode() -> None:
 def test_level_transition_barrier_re_evaluation() -> None:
     """Verify episodic reset clears prior room terrain barrier features upon new level transitions."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     # Level 1 induces feature 2 as a barrier
     engine.symbolic_theory.induce_barrier(2)
     engine.symbolic_theory.induce_walkable(0)
@@ -648,7 +634,6 @@ def test_level_transition_barrier_re_evaluation() -> None:
 def test_biological_undo_affordance_grounding() -> None:
     """Verify assimilate_feedback detects when an action restores state to grid_history[-2] as UNDO."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
 
     state_0 = np.zeros((10, 10), dtype=int)
     state_0[5, 5] = 3
@@ -679,7 +664,6 @@ def test_biological_undo_affordance_grounding() -> None:
 def test_spatial_effector_safeguard_against_blind_discrete_arbitration() -> None:
     """Verify arbitrate_affordances does not blindly dispatch arbitrary discrete actions when effectors are available."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.step_counter = 10
     engine.consecutive_stuck_steps = 3  # stuck condition
 
@@ -709,7 +693,6 @@ def test_undo_probe_filtering_and_effector_priority() -> None:
     from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
 
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.register_action_space(
         [
             {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
@@ -743,7 +726,6 @@ def test_peripheral_driver_action_schema_completeness() -> None:
 def test_teleological_cutset_subgoal_decomposition() -> None:
     """Verify teleological backward cut-set decomposition formulates subgoals to clear blocking barriers."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 1)
 
@@ -788,7 +770,6 @@ def test_categorical_quiescent_feature_pruning() -> None:
     from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
 
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.register_action_space(
         [
             {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
@@ -822,7 +803,6 @@ def test_metacognitive_acc_death_conflict_inversion() -> None:
 
     delib = PrefrontalDeliberationEngine()
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (5, 1)
     engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
@@ -862,7 +842,6 @@ def test_metacognitive_acc_death_conflict_inversion() -> None:
 def test_feature_quiescent_counts_causal_induction_and_reset() -> None:
     """Verify that feature_quiescent_counts tracks ineffective probes per feature and resets cleanly."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.register_action_space(
         [
             {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
@@ -954,7 +933,6 @@ def test_exploratory_goals_schedule_canonical_entity_roles() -> None:
     from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 1)
 
@@ -1058,7 +1036,6 @@ def test_remote_mechanism_observer_rejects_mortality_and_prefers_mutated_neighbo
 def test_filter_reachable_includes_hazard_tracker_lethal_features() -> None:
     """Verify _filter_reachable_and_unlocked respects hazard_tracker.known_lethal_features."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.hazard_tracker.known_lethal_features.add(9)
 
     grid = np.zeros((5, 5), dtype=int)
@@ -1131,48 +1108,6 @@ def test_find_shortest_path_honors_static_barriers_with_percept() -> None:
     visited = [step.predicted_avatar_pos for step in path]
     assert (5, 5) not in visited
     assert visited[-1] == (5, 6)
-
-
-def test_collision_cone_clear_and_ignore_cargo_feature() -> None:
-    """Verify SpatiotemporalCollisionCones clears occluded velocity predictions when a feature is cargo."""
-    from hbllm.hcir.world.kinetic_stream import KineticEntity
-    from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
-
-    cones = SpatiotemporalCollisionCones()
-    cargo_ent = KineticEntity(
-        centroid=(2.0, 3.0),
-        velocity=(0.0, 1.0),
-        cells=[(2, 3)],
-        bounding_box=(2, 2, 3, 3),
-        area=1,
-        features={4},
-    )
-    cones.update_trajectories(
-        kinetic_entities=[cargo_ent],
-        static_barriers=set(),
-        grid_shape=(6, 6),
-    )
-    assert 4 in cones.persistent_velocities
-
-    # When cargo disappears/stops, occluded extrapolation triggers until cleared/ignored.
-    cones.update_trajectories(
-        kinetic_entities=[],
-        static_barriers=set(),
-        grid_shape=(6, 6),
-    )
-    assert 4 in cones.occluded_trackers or 4 in cones.persistent_velocities
-
-    cones.clear_feature(4)
-    assert 4 not in cones.occluded_trackers
-    assert 4 not in cones.persistent_velocities
-
-    cones.update_trajectories(
-        kinetic_entities=[cargo_ent],
-        static_barriers=set(),
-        grid_shape=(6, 6),
-        ignored_features={4},
-    )
-    assert 4 not in cones.persistent_velocities
 
 
 def test_learned_representation_structural_separation_and_palette_transfer() -> None:

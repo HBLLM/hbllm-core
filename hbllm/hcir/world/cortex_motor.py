@@ -657,24 +657,6 @@ class EpistemicCuriosityExplorer:
             return None
 
         ar, ac = engine.avatar_pos
-        is_looming_threat = any(
-            engine.collision_cones.is_collision_hazard(ar, ac, t_future) for t_future in (1, 2)
-        )
-        if not is_looming_threat:
-            return None
-
-        for act, (dr_cal, dc_cal) in disp_actions:
-            nr, nc = ar + dr_cal, ac + dc_cal
-            if not EpistemicCuriosityExplorer._is_ray_passable(
-                engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
-            ):
-                continue
-            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
-                continue
-            if (engine.avatar_pos, act) in engine.failed_transitions:
-                continue
-            return act
-
         return None
 
     @staticmethod
@@ -710,10 +692,6 @@ class EpistemicCuriosityExplorer:
             if not EpistemicCuriosityExplorer._is_ray_passable(
                 engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
             ):
-                continue
-
-            # Premotor Collision Cones
-            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
                 continue
 
             cell_feat = int(curr_grid[nr, nc])
@@ -769,7 +747,9 @@ class EpistemicCuriosityExplorer:
             node_to_act_map[act_id] = act
 
         if candidate_action_nodes:
-            eval_results = engine.active_inference.evaluate_candidates(
+            from hbllm.hcir.world.active_inference import ActiveInferenceEngine
+
+            eval_results = ActiveInferenceEngine().evaluate_candidates(
                 candidate_action_nodes,
                 information_gain_map=info_gain_map,
             )
@@ -801,8 +781,6 @@ class EpistemicCuriosityExplorer:
             if not EpistemicCuriosityExplorer._is_ray_passable(
                 engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
             ):
-                continue
-            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
                 continue
             return act
 
@@ -852,9 +830,6 @@ class EpistemicCuriosityExplorer:
                 if not EpistemicCuriosityExplorer._is_ray_passable(
                     engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
                 ):
-                    continue
-                step_idx = len(path) + 1
-                if engine.collision_cones.is_collision_hazard(nr, nc, step_idx):
                     continue
                 if p == engine.avatar_pos and (
                     (p, act) in engine.failed_transitions
@@ -978,9 +953,6 @@ class EpistemicCuriosityExplorer:
             if osc_prop is not None:
                 return osc_prop
 
-            # Update room topology
-            engine.update_room_topology(curr_grid)
-
             candidate_entities = [
                 e
                 for e in entities
@@ -1001,11 +973,6 @@ class EpistemicCuriosityExplorer:
 
             if engine.active_probe_target is None and candidate_entities:
                 scored: list[tuple[SpatialEntity, float]] = []
-                current_room_cells = (
-                    set(engine.topology_rooms.get(engine.current_room_id, []))
-                    if engine.current_room_id is not None
-                    else set()
-                )
                 for e in candidate_entities:
                     dist = abs(e.grid_pos[0] - engine.avatar_pos[0]) + abs(
                         e.grid_pos[1] - engine.avatar_pos[1]
@@ -1028,8 +995,6 @@ class EpistemicCuriosityExplorer:
                         affordance_uncertainty += 1.5
 
                     info_val = (12.0 * affordance_uncertainty) / (visits + 1.0)
-                    if current_room_cells and e.grid_pos in current_room_cells:
-                        info_val *= 1.5
                     cost = dist + 1.0
                     scored.append((e, info_val / cost))
                 scored.sort(key=lambda x: x[1], reverse=True)
@@ -1124,7 +1089,6 @@ class EpistemicCuriosityExplorer:
                 and not engine.working_memory.habenular_ior.is_action_inhibited(
                     engine.avatar_pos, act
                 )
-                and not engine.collision_cones.is_collision_hazard(ar + dr_cal, ac + dc_cal, 1)
                 and (ar + dr_cal, ac + dc_cal) not in visited_cells
                 and (abs(ar + dr_cal - tr) + abs(ac + dc_cal - tc)) < (abs(ar - tr) + abs(ac - tc))
                 for act, (dr_cal, dc_cal) in disp_actions

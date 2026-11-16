@@ -138,61 +138,6 @@ class StaticLethalHazardPredicate(PlanSafetyPredicate):
         return SafetyGateResult(is_safe=True)
 
 
-class SpatiotemporalCollisionConePredicate(PlanSafetyPredicate):
-    """Rejects steps intersecting spatiotemporal looming collision cones."""
-
-    def evaluate(
-        self,
-        view: Any,
-        curr_grid: np.ndarray,
-        next_step: MentalSimulationStep,
-        future_steps: Sequence[MentalSimulationStep],
-        available_actions: Sequence[Any],
-    ) -> SafetyGateResult:
-        if view.avatar_pos is None:
-            return SafetyGateResult(is_safe=True)
-
-        ar, ac = view.avatar_pos
-        is_stationary = (
-            next_step.predicted_avatar_pos is None or next_step.predicted_avatar_pos == (ar, ac)
-        )
-        if is_stationary:
-            if any(view.collision_cones.is_collision_hazard(ar, ac, t_f) for t_f in (1, 2)):
-                return SafetyGateResult(
-                    is_safe=False, reason="Stationary avatar in looming collision cone"
-                )
-        elif (
-            isinstance(next_step.predicted_avatar_pos, tuple)
-            and len(next_step.predicted_avatar_pos) >= 2
-            and isinstance(next_step.predicted_avatar_pos[0], (int, float))
-            and isinstance(next_step.predicted_avatar_pos[1], (int, float))
-        ):
-            nr, nc = (
-                int(next_step.predicted_avatar_pos[0]),
-                int(next_step.predicted_avatar_pos[1]),
-            )
-            if view.collision_cones.is_collision_hazard(nr, nc, 1):
-                # Check if temporal wait clears the corridor
-                acc_mon = get_sub_attr(view.working_memory, "acc_conflict", None)
-                if acc_mon is not None:
-                    should_w, w_steps = acc_mon.should_advise_temporal_wait(
-                        (ar, ac), (nr, nc), view.collision_cones
-                    )
-                    if should_w:
-                        return SafetyGateResult(
-                            is_safe=False,
-                            should_wait=True,
-                            wait_steps=w_steps,
-                            reason=f"looming collision cone at ({nr}, {nc}) clearing in {w_steps} steps",
-                        )
-                return SafetyGateResult(
-                    is_safe=False,
-                    reason=f"Next step ({nr}, {nc}) in looming collision cone",
-                )
-
-        return SafetyGateResult(is_safe=True)
-
-
 class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
     """Simulates dynamic threat patrollers forward in time to prevent kinetic collisions."""
 
@@ -345,11 +290,7 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
-        has_temporal = (
-            bool(view.hazard_tracker.periodic_cells)
-            or bool(view.mobile_threat_features)
-            or bool(view.collision_cones.projected_trajectories)
-        )
+        has_temporal = bool(view.hazard_tracker.periodic_cells) or bool(view.mobile_threat_features)
         is_action_trigger = getattr(next_step, "expected_mutation", "") in (
             "ACTION_TRIGGER",
             "INTERACT_TRIGGER",
@@ -373,37 +314,6 @@ class HabenularInhibitionPredicate(PlanSafetyPredicate):
         return SafetyGateResult(is_safe=True)
 
 
-class CerebellarPhaseGatePredicate(PlanSafetyPredicate):
-    """Evaluates rhythm-locked oscillation windows via Cerebellar phase clock."""
-
-    def evaluate(
-        self,
-        view: Any,
-        curr_grid: np.ndarray,
-        next_step: MentalSimulationStep,
-        future_steps: Sequence[MentalSimulationStep],
-        available_actions: Sequence[Any],
-    ) -> SafetyGateResult:
-        if next_step.predicted_avatar_pos is not None:
-            phase_gate = view.cerebellar_clock.evaluate_motion_hazard_gate(
-                current_step=view.step_counter,
-                avatar_pos=view.avatar_pos,
-                target_pos=next_step.predicted_avatar_pos,
-                hazard_tracker=view.hazard_tracker,
-                background_feature=view.bg_feature,
-                avatar_features=view.avatar_features,
-                walkable_features=view.symbolic_theory.walkable_features,
-            )
-            if phase_gate.should_wait:
-                return SafetyGateResult(
-                    is_safe=True,
-                    should_wait=True,
-                    wait_steps=phase_gate.wait_steps_recommended,
-                    reason="Cerebellar phase clock advises wait window",
-                )
-        return SafetyGateResult(is_safe=True)
-
-
 class AnteriorCingulateConflictPredicate(PlanSafetyPredicate):
     """Evaluates plan safety against Anterior Cingulate Cortex (ACC) failure clusters,
     frustration states, and dynamic collision wait recommendations.
@@ -423,30 +333,12 @@ class AnteriorCingulateConflictPredicate(PlanSafetyPredicate):
 
         pred_pos = next_step.predicted_avatar_pos
         if pred_pos is not None:
-            # 1. Reject paths routing directly into recurrent death clusters
+            # Reject paths routing directly into recurrent death clusters
             if hasattr(acc, "is_in_conflict_zone") and acc.is_in_conflict_zone(pred_pos):
                 return SafetyGateResult(
                     is_safe=False,
                     reason=f"Candidate step {pred_pos} is inside an ACC recurrent failure cluster",
                 )
-
-            # 2. Check if ACC advises temporal wait due to collision cones crossing candidate pos
-            curr_pos = view.avatar_pos or (0, 0)
-            collision_cones = get_engine_state_attr(view, "collision_cones", None)
-            if collision_cones is not None and hasattr(acc, "should_advise_temporal_wait"):
-                should_wait, wait_steps = acc.should_advise_temporal_wait(
-                    current_pos=curr_pos,
-                    candidate_pos=pred_pos,
-                    collision_cones=collision_cones,
-                    max_steps=3,
-                )
-                if should_wait:
-                    return SafetyGateResult(
-                        is_safe=True,
-                        should_wait=True,
-                        wait_steps=wait_steps,
-                        reason="ACC advises temporal wait until collision hazard clears",
-                    )
 
         return SafetyGateResult(is_safe=True)
 
@@ -565,10 +457,8 @@ class PlanSafetyEvaluator:
             if predicates is not None
             else [
                 StaticLethalHazardPredicate(),
-                SpatiotemporalCollisionConePredicate(),
                 DynamicPatrolTrajectoryPredicate(),
                 HabenularInhibitionPredicate(),
-                CerebellarPhaseGatePredicate(),
                 AnteriorCingulateConflictPredicate(),
                 CausalUndoSafetyPredicate(),
                 OFCCounterfactualMentalSimulationPredicate(),
@@ -1522,10 +1412,6 @@ class PrefrontalDeliberationEngine:
                                 and cell_v not in theory.goal_features
                             ):
                                 return False
-                    if hasattr(
-                        view, "collision_cones"
-                    ) and view.collision_cones.is_collision_hazard(nr, nc, 1):
-                        return False
                     # Abort if displacement moves into limit cycle or oscillation
                     rec = list(get_engine_state_attr(view, "recent_positions", []))
                     if rec:
@@ -1560,60 +1446,6 @@ class PrefrontalDeliberationEngine:
             MacroPlanSynthesizer,
             ProceduralReplayAction,
         )
-
-        # ── DreamCoder Transferable Skill Guidance ────────────────────────
-        if (
-            (macro_plan is None or macro_plan.is_empty())
-            and not view.mental_plan
-            and getattr(view, "library_learner", None)
-            and getattr(view.library_learner, "macro_skills", None)
-            and view.is_motor_grounded()
-            and not view.learned_goal_positions
-        ):
-            ll_ctx = {
-                "has_goal": bool(view.symbolic_theory.goal_features),
-                "has_cargo": bool(view.symbolic_theory.cargo_features),
-                "has_switches": bool(
-                    view.symbolic_theory.conditional_affordances
-                    or getattr(getattr(view, "remote_causal", None), "remote_actuators", None)
-                ),
-                "has_threats": bool(getattr(view.hazard_tracker, "known_lethal_features", None)),
-                "n_actions": len(available_actions),
-            }
-            for t_skill, _score, _src in view.query_transferable_skills(
-                curr_grid, list(available_actions), metadata=ll_ctx, min_confidence=0.45
-            ):
-                prog = getattr(t_skill, "program", None)
-                subgoals = getattr(prog, "subgoals", None) if prog is not None else None
-                if not hasattr(t_skill, "compile_to_macro_plan"):
-                    if not subgoals:
-                        continue
-                    unique_intents = {
-                        str(getattr(getattr(sg, "intent", ""), "value", getattr(sg, "intent", "")))
-                        for sg in subgoals
-                    }
-                    # Pure homogeneous navigation sequences should defer to shortest-path mental simulation
-                    if unique_intents <= {"NAVIGATE", "NAVIGATE_TO"}:
-                        continue
-                ll_plan = MacroActionPlan.from_skill(t_skill, view, curr_grid, available_actions)
-                if ll_plan is not None and not ll_plan.is_empty():
-                    ll_step = ll_plan.step(
-                        view, curr_grid, available_actions, prev_grid=view.prev_grid
-                    )
-                    if ll_step is not None:
-                        ll_act, ll_data = ll_step
-                        if ll_act in available_actions and _is_macro_step_safe(
-                            ll_plan, ll_act, ll_data
-                        ):
-                            view.working_memory.macro_plan = ll_plan
-                            return self._build_proposal(
-                                view,
-                                ll_act,
-                                ll_data,
-                                branch="library_learner_skill",
-                                grid=curr_grid,
-                            )
-                        ll_plan.clear()
 
         # ── Procedural Memory Recall ───────────────────────────────────────
         # Before synthesizing a new plan from scratch, check if episodic memory
@@ -1785,11 +1617,7 @@ class PrefrontalDeliberationEngine:
                 else EpistemicPhase.EPISTEMIC_EXPLORATION
             )
 
-        has_temporal = (
-            bool(view.hazard_tracker.periodic_cells)
-            or bool(view.mobile_threat_features)
-            or bool(view.collision_cones.projected_trajectories)
-        )
+        has_temporal = bool(view.hazard_tracker.periodic_cells) or bool(view.mobile_threat_features)
 
         # Metacognitive Refractory Inhibition: decay refractory timers
         in_simulation_cooldown = view.simulation_cooldown > 0
@@ -1840,13 +1668,7 @@ class PrefrontalDeliberationEngine:
                     for s in view.mental_plan
                 )
             ) or getattr(getattr(view, "working_memory", None), "last_continuous_moved", False)
-            is_deliberate_pacing = has_temporal and (
-                view.consecutive_pacing_steps > 0
-                or bool(
-                    get_engine_state_attr(view, "collision_cones", None)
-                    and view.collision_cones.projected_trajectories
-                )
-            )
+            is_deliberate_pacing = has_temporal and view.consecutive_pacing_steps > 0
             if not has_progress and not is_deliberate_pacing:
                 for cyc_a in cyclic_acts:
                     if hasattr(view, "working_memory") and hasattr(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from hbllm.hcir.world.cortex_morphology import (
+from plugins.arc_agi_adapter.morphology_arc import (
     FractionalScaleTransformer,
     GenerativePatternStamper,
     ScaleInferenceResult,

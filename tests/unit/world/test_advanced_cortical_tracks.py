@@ -20,8 +20,7 @@ from hbllm.hcir.graph import (
     HCIRNodeType,
 )
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine, EpistemicPhase
-from hbllm.hcir.world.experimental import restore_all as _restore_all
+from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
     FrontopolarSubgoalStack,
@@ -181,58 +180,6 @@ class TestCognitiveGraphNativeSubstrate:
         cg.remove_node("n1")
         assert not cg.has_node("n1")
         assert not adapter.has_node("n1")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TRACK 3: Global Neuronal Workspace Ignition & Neuromodulation
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-class TestGNWAndNeuromodulationClosedLoop:
-    """Validate closed-loop active inference GNW conscious ignition and neuromodulatory dynamics."""
-
-    def test_assimilate_feedback_updates_snn_and_neuromodulators(self) -> None:
-        """Verify feedback assimilation steps SNN, tunes neuromodulators, and submits to GNW."""
-        engine = AutonomousEpistemicEngine(world_id="test_gnw_world")
-        _restore_all(engine)
-        engine.gnw.register_listener("executive_arbitration", engine._on_conscious_ignition)
-
-        grid1 = np.zeros((6, 6), dtype=np.int32)
-        grid1[1, 1] = 1  # avatar
-        grid1[3, 3] = 4  # moving entity
-
-        engine.assimilate_feedback(
-            curr_grid=grid1,
-            available_actions=[1, 2, 3, 4],
-            is_success=False,
-            is_failure=False,
-        )
-
-        assert engine.snn_predictor.step_counter >= 1
-        assert 4 in engine.snn_predictor.entity_tracks
-
-        # Simulate positive win: should surge Dopamine
-        grid2 = grid1.copy()
-        engine.assimilate_feedback(
-            curr_grid=grid2,
-            available_actions=[1, 2, 3, 4],
-            is_success=True,
-            is_failure=False,
-        )
-        assert engine.neuromodulatory_system.current.dopamine > 1.0
-
-        # Simulate loss: should surge Noradrenaline and trigger GNW ignition
-        grid3 = grid1.copy()
-        engine.transition_to_phase(EpistemicPhase.MENTAL_SIMULATION)
-        engine.assimilate_feedback(
-            curr_grid=grid3,
-            available_actions=[1, 2, 3, 4],
-            is_success=False,
-            is_failure=True,
-        )
-        assert engine.neuromodulatory_system.current.noradrenaline > 1.0
-        # GNW broadcast should reset phase on loss
-        assert engine.phase == EpistemicPhase.REPLANNING
 
 
 # ══════════════════════════════════════════════════════════════════════════════

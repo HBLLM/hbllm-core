@@ -332,29 +332,8 @@ class MorphologicalSaliencyEngine:
         ]
 
 
-# Backward compatibility re-exports (WP-C4):
-# Benchmark/puzzle-specific morphology solvers (FractionalScaleTransformer, GenerativePatternStamper,
-# WallpaperTilingInducer) have been demoted to hbllm.hcir.world.experimental.morphology_arc.
-from hbllm.hcir.world.experimental.morphology_arc import (  # noqa: F401
-    FractionalScaleTransformer,
-    GenerativePatternStamper,
-    ScaleInferenceResult,
-    StampInstance,
-    WallpaperSymmetryGroup,
-    WallpaperTilingInducer,
-    WallpaperTilingModel,
-)
-
 __all__ = [
     "MorphologyPrimitiveType",
     "MorphologicalEntity",
     "MorphologicalSaliencyEngine",
-    # Backward compatibility exports
-    "ScaleInferenceResult",
-    "FractionalScaleTransformer",
-    "StampInstance",
-    "GenerativePatternStamper",
-    "WallpaperSymmetryGroup",
-    "WallpaperTilingModel",
-    "WallpaperTilingInducer",
 ]

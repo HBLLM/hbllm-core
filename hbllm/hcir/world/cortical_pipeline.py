@@ -178,74 +178,6 @@ class CorticalPipeline:
                             hazard_features=hz_feats,
                         )
 
-                # Goal Arbitration Hook: Selects active TaskFrame using Expected Free Energy
-                if self.engine is not None and getattr(self.engine, "goal_arbiter", None):
-                    candidates = self.engine.goal_arbiter.extract_candidate_goals(
-                        self.engine, current_ctx
-                    )
-                    if candidates:
-                        arb_result = self.engine.goal_arbiter.arbitrate(
-                            candidates=candidates,
-                            engine=self.engine,
-                            homeostatic_state=getattr(self.engine, "homeostatic_state", None),
-                            neuromodulator_system=getattr(
-                                self.engine, "neuromodulatory_system", None
-                            ),
-                            tiered_workspace=getattr(self.engine, "tiered_workspace", None),
-                        )
-                        if arb_result is not None:
-                            current_ctx = current_ctx.with_signals(
-                                {
-                                    "arbitrated_goal": arb_result.selected_goal,
-                                    "arbitration_result": arb_result,
-                                }
-                            )
-                            if hasattr(self.engine, "consume_energy"):
-                                self.engine.consume_energy(0.1)
-
-            # Stage 3: G15 Goal Provenance Hook
-            elif stage_name == "simulation_stage" and self.engine is not None:
-                gp = getattr(self.engine, "goal_provenance", None)
-                if gp:
-                    arb_goal = current_ctx.signals.get("arbitrated_goal")
-                    active_goals = list(getattr(self.engine, "goals", ()) or ())
-                    target_str = (
-                        str(arb_goal)
-                        if arb_goal is not None
-                        else (str(active_goals[0]) if active_goals else None)
-                    )
-                    gp.register_goal(
-                        goal_id=f"step_{current_ctx.step_counter}",
-                        intent="achieve_arbitrated_goal" if arb_goal else "epistemic_explore",
-                        target_entity=target_str,
-                        justification="simulation_stage active inference selection",
-                    )
-
-            # Stage 4: G15 Value-Uncertainty Safety Evaluation Hook
-            elif stage_name == "deliberation_stage" and self.engine is not None:
-                arbiter = getattr(self.engine, "value_uncertainty_arbiter", None)
-                if arbiter:
-                    prop = result.signals.get("_proposal")
-                    act = getattr(prop, "action", None) if prop is not None else final_action
-                    if act is not None:
-                        dyn = getattr(self.engine, "action_dynamics", {}) or {}
-                        epistemic_var = 0.05 if act in dyn else 0.25
-                        approved, req = self.engine.evaluate_action_value_safety(
-                            action_id=act,
-                            action_type=str(act),
-                            expected_value=1.0,
-                            epistemic_variance=epistemic_var,
-                            is_hazard_cone=False,
-                        )
-                        current_ctx = current_ctx.with_signals(
-                            {
-                                "value_safety_approved": approved,
-                                "value_deferral_reason": (
-                                    req.deferral_reason.value if req is not None else None
-                                ),
-                            }
-                        )
-
             # WP1: each stage's journaled faculty writes commit before the next stage.
             if getattr(result, "journal", None) is not None and self.engine is not None:
                 if not self.engine.commit_faculty_journal(result.journal):
@@ -348,105 +280,6 @@ class CorticalPipeline:
         grid_arr = np.asarray(raw_grid) if raw_grid is not None else None
         has_2d_grid = grid_arr is not None and grid_arr.ndim == 2
 
-        # G10: Theory of Mind tracking for external moving / intentional entities
-        soc = getattr(engine, "social_cognition", None)
-        if soc and has_2d_grid and grid_arr is not None:
-            mobile_feats = set(getattr(engine, "mobile_threat_features", ()) or ())
-            av_feats = set(getattr(engine, "avatar_features", ()) or ())
-            av_pos = getattr(engine, "avatar_pos", None)
-            dorsal = getattr(engine, "dorsal_kinetic_stream", None)
-            ext_agents = getattr(dorsal, "external_agents", {}) if dorsal else {}
-            cand_goals = list(getattr(engine, "goals", ()) or ())
-
-            predicted_hazards: list[tuple[int, int]] = []
-            sge_states = current_ctx.signals.get("sge_entity_states")
-            if isinstance(sge_states, dict) and sge_states:
-                items = list(sge_states.items())
-                small_scene = len(items) <= 8
-                for ent_id, st in items:
-                    pos = st.get("position")
-                    feat = int(st.get("color", 0) or 0)
-                    size = int(st.get("size", 1) or 1)
-                    if not isinstance(pos, (tuple, list)) or len(pos) < 2:
-                        continue
-                    pos_2d = (int(round(pos[0])), int(round(pos[1])))
-                    if pos_2d == av_pos or feat in av_feats:
-                        continue
-                    if theory is not None and theory.is_barrier(feat):
-                        continue
-                    is_dynamic = (
-                        feat in mobile_feats
-                        or ent_id in ext_agents
-                        or (small_scene and size == 1 and bool(st.get("moved")))
-                    )
-                    if is_dynamic:
-                        model = engine.track_and_infer_agent_intents(
-                            entity_id=str(ent_id),
-                            feature_id=feat,
-                            position=pos_2d,
-                            avatar_pos=av_pos,
-                            candidate_goals=cand_goals,
-                            grid=grid_arr,
-                        )
-                        if (
-                            getattr(model, "agency_status", None) == "INTENTIONAL_AGENT"
-                            or getattr(model, "inferred_intent", None) == "PURSUING_AVATAR"
-                        ):
-                            predicted_hazards.extend(
-                                soc.project_intent_trajectory(str(ent_id), horizon=3, grid=grid_arr)
-                            )
-            elif isinstance(extracted, list) and extracted:
-                small_scene = len(extracted) <= 8
-                for ent in extracted:
-                    props = getattr(ent, "properties", None)
-                    feat_raw = getattr(ent, "feature_id", None) or getattr(ent, "color", None)
-                    if feat_raw is None and isinstance(props, dict):
-                        feat_raw = props.get("feature_id") or props.get("color")
-                    elif feat_raw is None and isinstance(ent, dict):
-                        feat_raw = ent.get("feature_id") or ent.get("color")
-                    if feat_raw is None:
-                        continue
-                    feat = int(feat_raw)
-                    pos = getattr(ent, "grid_pos", None) or getattr(ent, "centroid", None)
-                    if pos is None and isinstance(ent, dict):
-                        pos = ent.get("position")
-                    if not isinstance(pos, (tuple, list)) or len(pos) < 2:
-                        continue
-                    pos_2d = (int(round(pos[0])), int(round(pos[1])))
-                    if pos_2d == av_pos or feat in av_feats:
-                        continue
-                    if theory is not None and theory.is_barrier(feat):
-                        continue
-                    area = int(
-                        getattr(ent, "area", 1) if not isinstance(ent, dict) else ent.get("size", 1)
-                    )
-                    ent_id = str(
-                        getattr(ent, "id", None)
-                        or (ent.get("id") if isinstance(ent, dict) else None)
-                        or f"agent_f{feat}"
-                    )
-                    if feat in mobile_feats or ent_id in ext_agents or (small_scene and area == 1):
-                        model = engine.track_and_infer_agent_intents(
-                            entity_id=ent_id,
-                            feature_id=feat,
-                            position=pos_2d,
-                            avatar_pos=av_pos,
-                            candidate_goals=cand_goals,
-                            grid=grid_arr,
-                        )
-                        if (
-                            getattr(model, "agency_status", None) == "INTENTIONAL_AGENT"
-                            or getattr(model, "inferred_intent", None) == "PURSUING_AVATAR"
-                        ):
-                            predicted_hazards.extend(
-                                soc.project_intent_trajectory(ent_id, horizon=3, grid=grid_arr)
-                            )
-
-            if predicted_hazards:
-                current_ctx = current_ctx.with_signals(
-                    {"social_predicted_hazards": predicted_hazards}
-                )
-
         # G11: Topological Bottleneck & Option Discovery
         opt_eng = getattr(engine, "option_discovery", None)
         if opt_eng and has_2d_grid and grid_arr is not None and 4 <= grid_arr.size <= 256:
@@ -467,9 +300,6 @@ class CorticalPipeline:
                         break
             if matched_opt is not None:
                 engine.record_option_usage(matched_opt.option_id, steps=1, success=True)
-                lib = getattr(engine, "library_learner", None)
-                if lib is not None:
-                    opt_eng.consolidate_options_to_library(lib)
             else:
                 opt_eng.record_primitive_execution(steps=1)
 

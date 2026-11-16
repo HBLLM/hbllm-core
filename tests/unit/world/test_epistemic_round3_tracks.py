@@ -20,74 +20,11 @@ from hbllm.hcir.world.cortex_hypothesis import (
     HypothesisType,
     InductiveHypothesisEngine,
 )
-from hbllm.hcir.world.elastic_particle_induction import DeflectionMode
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.experimental.thalamocortical_binding import ThalamocorticalBindingEngine
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
     FrontopolarSubgoalStack,
     SubgoalType,
 )
-from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
-
-
-class TestTrack1ThalamocorticalBinding:
-    """Track 1: 40 Hz Kuramoto Temporal Feature Binding & TRN Gating."""
-
-    def test_kuramoto_phase_synchronization_and_binding(self):
-        engine = ThalamocorticalBindingEngine(nominal_frequency_hz=40.0)
-        entities = [
-            {"pos": (5, 5), "feature": 2, "role": "target"},
-            {"pos": (5, 6), "feature": 2, "role": "target"},
-            {"pos": (18, 18), "feature": 7, "role": "clutter"},
-        ]
-        bundles = engine.bind_features_oscillatory(entities)
-        assert len(bundles) >= 1
-        # Close entities should bind into a high-coherence bundle
-        bound_bundle = next((b for b in bundles if b.source_components_count > 1), None)
-        assert bound_bundle is not None
-        assert bound_bundle.is_bound
-        assert bound_bundle.phase_coherence_r > 0.0
-
-    def test_trn_attentional_gating(self):
-        engine = ThalamocorticalBindingEngine()
-        entities = [
-            {"pos": (2, 2), "feature": 3, "role": "goal"},
-            {"pos": (9, 9), "feature": 8, "role": "distractor"},
-        ]
-        bundles = engine.bind_features_oscillatory(entities)
-        gated = engine.apply_trn_attentional_gating(bundles, target_features={"role": "goal"})
-        assert len(gated) == len(bundles)
-        # Resonant target should be amplified and sorted to top
-        top_bundle = gated[0]
-        assert top_bundle.features.get("role") == "goal"
-        assert top_bundle.is_bound
-
-    def test_autonomous_engine_temporal_binding_in_assimilation(self):
-        ep_engine = AutonomousEpistemicEngine()
-        _restore_all(ep_engine)
-        grid = np.zeros((10, 10), dtype=int)
-        # Create a cluster of feature 3 cells (goal)
-        grid[2, 2] = 3
-        grid[2, 3] = 3
-        ep_engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
-        ep_engine.avatar_pos = (0, 0)
-        ep_engine.avatar_feature = 1
-
-        ep_engine.assimilate_feedback(
-            curr_grid=grid,
-            available_actions=[1, 2, 3, 4],
-            is_success=False,
-            is_failure=False,
-        )
-
-        assert len(ep_engine.working_memory.active_bound_bundles) > 0
-        pred_vars = [p.variable for p in ep_engine.symbolic_theory.causal_predicates]
-        assert any("bound_entity" in v for v in pred_vars)
-
-        # Verify working memory reset clears active bound bundles
-        ep_engine.working_memory.reset_episode(retain_long_term=False)
-        assert len(ep_engine.working_memory.active_bound_bundles) == 0
 
 
 class TestTrack2PopperianInductiveHypothesis:
@@ -146,56 +83,6 @@ class TestTrack2PopperianInductiveHypothesis:
             available_actions=[1, 2],
         )
         assert 4 not in ep_engine.symbolic_theory.barrier_features
-
-
-class TestTrack3BallisticParticleKinematics:
-    """Track 3: Ballistic Particle Kinematics & Angle-of-Incidence Deflections."""
-
-    def test_ballistic_particle_specular_deflection(self):
-        cones = SpatiotemporalCollisionCones(default_horizon=10)
-        grid = np.zeros((10, 10), dtype=int)
-        # Vertical wall at col 5
-        grid[:, 5] = 1
-
-        # Particle moving right towards wall at (3, 3) with velocity (0, 1)
-        particles = [{"pos": (3, 3), "velocity": (0, 1), "feature_id": 9, "entity_id": "photon_1"}]
-        cones.update_ballistic_particle_trajectories(
-            particles=particles,
-            grid=grid,
-            barrier_features={1},
-            deflection_mode=DeflectionMode.SPECULAR_NORMAL,
-            horizon=8,
-        )
-
-        assert len(cones.projected_trajectories) == 1
-        traj = cones.projected_trajectories[0]
-        assert len(traj.positions) > 0
-        # Step 1: (3, 4)
-        # Step 2: Hits wall at col 5, rebounds left to (3, 4) or specular direction
-        assert (3, 4) in cones.get_collision_cone_at_step(1)
-        assert cones.is_collision_hazard(3, 4, time_step=1)
-        assert cones.is_looming_threat(3, 4, max_horizon=3)
-
-    def test_autonomous_engine_ballistic_particle_integration(self):
-        ep_engine = AutonomousEpistemicEngine()
-        grid = np.zeros((12, 12), dtype=int)
-        grid[5, :] = 2  # Horizontal wall
-        ep_engine.symbolic_theory.induce_barrier(2, evidence="collision")
-
-        particles = [
-            {"pos": (2, 2), "velocity": (1, 0), "feature_id": 7, "entity_id": "ballistic_rock"}
-        ]
-        ep_engine.update_ballistic_particles(
-            particles=particles,
-            grid=grid,
-            deflection_mode=DeflectionMode.SPECULAR_NORMAL,
-            horizon=6,
-        )
-
-        intercept = ep_engine.collision_cones.predict_intercept_step((3, 2), max_horizon=6)
-        assert intercept == 1
-        preds = ep_engine.collision_cones.export_causal_predicates()
-        assert len(preds) > 0
 
 
 class TestTrack4FrontopolarSubgoalBytecodeVM:

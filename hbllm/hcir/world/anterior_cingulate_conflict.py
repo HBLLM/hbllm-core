@@ -20,15 +20,12 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-
-if TYPE_CHECKING:
-    from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 
 logger = logging.getLogger(__name__)
 
@@ -357,7 +354,7 @@ class AnteriorCingulateConflictMonitor:
         self,
         current_pos: tuple[int, int],
         candidate_pos: tuple[int, int],
-        collision_cones: SpatiotemporalCollisionCones | Any,
+        collision_cones: Any,
         max_steps: int = 3,
     ) -> tuple[bool, int]:
         """Check whether temporal waiting is advised due to a transient collision cone crossing candidate_pos.

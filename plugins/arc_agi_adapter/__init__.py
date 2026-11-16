@@ -1,9 +1,10 @@
 """ARC-AGI and ARC-AGI-3 Cognitive USB Peripheral Driver Adapter."""
 
+from typing import Any
+
 from hbllm.hcir.world.percept import PerceptionRegistry
 
 from .arc_driver import ARC3Driver, ArcadeDriver
-from .arc_evaluator import ARCBenchmarkRunner, ARCTaskAdapter
 from .arc_macro_actions import (
     ArcClickCell,
     ArcPrimitiveAction,
@@ -35,3 +36,11 @@ __all__ = [
     "CognitiveAgentAdapter",
     "ARC_DEFAULT_ACTION_SCHEMAS",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in ("ARCBenchmarkRunner", "ARCTaskAdapter"):
+        from . import arc_evaluator
+
+        return getattr(arc_evaluator, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

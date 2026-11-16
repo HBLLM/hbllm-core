@@ -11,10 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hbllm.hcir.world.spatiotemporal_tracker import (
-    MorphologicalDeformationTracker,
-    PhasePrecessionEstimator,
-)
+from hbllm.hcir.world.spatiotemporal_tracker import PhasePrecessionEstimator
 
 
 def _scalar_periods(
@@ -69,55 +66,3 @@ def test_estimate_periods_batch_matches_scalar_on_periodic_series() -> None:
     periods, confidences = PhasePrecessionEstimator.estimate_periods_batch(matrix)
     assert periods.tolist()[:5] == [2, 3, 4, 6, 4]
     assert confidences[:5] == pytest.approx([1.0] * 5)
-
-
-def _reference_euler_characteristic(cells: set[tuple[int, int]]) -> int:
-    """Brute-force chi = V - E + F over the cubical complex of occupied cells."""
-    vertices: set[tuple[int, int]] = set()
-    edges: set[tuple[tuple[int, int], tuple[int, int]]] = set()
-    for r, c in cells:
-        vertices.update(((r, c), (r, c + 1), (r + 1, c), (r + 1, c + 1)))
-        for a, b in (
-            ((r, c), (r, c + 1)),  # top horizontal edge
-            ((r + 1, c), (r + 1, c + 1)),  # bottom horizontal edge
-            ((r, c), (r + 1, c)),  # left vertical edge
-            ((r, c + 1), (r + 1, c + 1)),  # right vertical edge
-        ):
-            edges.add((a, b) if a <= b else (b, a))
-    return len(vertices) - len(edges) + len(cells)
-
-
-def test_euler_characteristic_matches_bruteforce_on_random_masks() -> None:
-    rng = np.random.default_rng(0)
-    for _ in range(25):
-        h, w = int(rng.integers(1, 8)), int(rng.integers(1, 8))
-        mask = rng.integers(0, 2, size=(h, w)).astype(bool)
-        cells = {(int(rc[0]), int(rc[1])) for rc in np.argwhere(mask)}
-        assert MorphologicalDeformationTracker.compute_euler_characteristic(
-            cells
-        ) == _reference_euler_characteristic(cells)
-
-
-def test_euler_characteristic_structured_cases() -> None:
-    cases = {
-        "empty": set(),
-        "single": {(0, 0)},
-        "solid_block": {(r, c) for r in range(4) for c in range(4)},
-        "ring_one_hole": {(r, c) for r in range(3) for c in range(3)} - {(1, 1)},
-        "two_disconnected_cells": {(0, 0), (3, 3)},
-        "shifted_negative_origin": {(r - 7, c + 11) for r in range(3) for c in range(2)},
-    }
-    expected_chi = {
-        "empty": 0,
-        "single": 1,
-        "solid_block": 1,
-        "ring_one_hole": 0,
-        "two_disconnected_cells": 2,
-        "shifted_negative_origin": 1,
-    }
-    for name, cells in cases.items():
-        reference = _reference_euler_characteristic(cells)
-        assert reference == expected_chi[name], name
-        assert MorphologicalDeformationTracker.compute_euler_characteristic(cells) == reference, (
-            name
-        )

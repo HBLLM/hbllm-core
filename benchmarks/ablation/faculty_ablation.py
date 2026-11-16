@@ -93,8 +93,198 @@ def _mk_engine(seed: int = 0, memory_dir: str | Path | None = None) -> Any:
 
 _ALIAS_FACULTY_CANONICAL = {
     "acc_conflict": "acc_conflict_monitor",
-    "delayed_effects": "delayed_effect_modeler",
 }
+
+_FACULTY_ALIAS_TARGETS: dict[str, tuple[tuple[str, str], ...]] = {
+    "subgoal_stack": (("working_memory", "subgoal_stack"),),
+    "body_schema": (("working_memory", "body_schema"),),
+    "habenular_ior": (("working_memory", "habenular_ior"),),
+    "remote_causal": (("working_memory", "remote_causal"),),
+    "acc_conflict_monitor": (("engine", "acc_conflict"), ("working_memory", "acc_conflict")),
+}
+
+
+def _apply_counting_proxy(engine: Any, name: str, counter: dict[str, int]) -> None:
+    """Wrap faculty attr (and any working_memory/engine aliases) in CountingProxy."""
+    fac = vars(engine).get(name)
+    if fac is None:
+        return
+    proxy = CountingProxy(fac, counter)
+    setattr(engine, name, proxy)
+    for owner_name, attr_name in _FACULTY_ALIAS_TARGETS.get(name, ()):
+        owner = engine if owner_name == "engine" else getattr(engine, owner_name, None)
+        if owner is not None and hasattr(owner, attr_name):
+            setattr(owner, attr_name, proxy)
+
+
+EXPERIMENTAL_NONKEEP_CANDIDATES: tuple[str, ...] = (
+    "body_schema",
+    "hazard_tracker",
+    "object_planner",
+    "option_discovery",
+    "remote_causal",
+)
+
+_ABLATION_BUNDLES: dict[str, tuple[str, ...]] = {
+    "__all_experimental__": EXPERIMENTAL_NONKEEP_CANDIDATES,
+    "__r5_named_demotes__": (
+        "surprise_engine",
+        "collision_cones",
+        "predictive_coding_cortex",
+        "snn_predictor",
+        "neuromodulatory_system",
+        "precision_controller",
+        "dorsal_kinetic_stream",
+        "deformation_tracker",
+        "metacognitive_agency_cortex",
+    ),
+    "__pipeline_hook_experimental__": (
+        "action_discovery",
+        "dual_memory",
+        "goal_arbiter",
+        "goal_induction",
+        "mpfc_schema_engine",
+        "option_discovery",
+        "recursive_value_inducer",
+        "room_topology",
+        "skill_synthesizer",
+        "smith_predictor",
+        "social_cognition",
+        "temporal_buffer",
+        "transition_sequence_model",
+    ),
+    "__hook_b1__": (
+        "action_discovery",
+        "goal_arbiter",
+        "goal_induction",
+        "mpfc_schema_engine",
+        "option_discovery",
+        "skill_synthesizer",
+        "social_cognition",
+    ),
+    "__hook_b2__": (
+        "dual_memory",
+        "recursive_value_inducer",
+        "room_topology",
+        "smith_predictor",
+        "temporal_buffer",
+        "transition_sequence_model",
+    ),
+    "__all_zero_r1__": (
+        "action_discovery",
+        "body_schema",
+        "causal_cortex",
+        "cerebellar_clock",
+        "collision_cones",
+        "deformation_tracker",
+        "delayed_effect_modeler",
+        "dorsal_kinetic_stream",
+        "dual_memory",
+        "goal_arbiter",
+        "goal_induction",
+        "library_learner",
+        "metacognitive_agency_cortex",
+        "mpfc_schema_engine",
+        "neuromodulatory_system",
+        "physics_engine",
+        "precision_controller",
+        "predictive_coding_cortex",
+        "recursive_value_inducer",
+        "room_topology",
+        "skill_synthesizer",
+        "smith_predictor",
+        "snn_predictor",
+        "social_cognition",
+        "surprise_engine",
+        "temporal_buffer",
+        "transition_sequence_model",
+    ),
+    "__all_zero_r1_plus_hazard__": (
+        "action_discovery",
+        "body_schema",
+        "causal_cortex",
+        "cerebellar_clock",
+        "collision_cones",
+        "deformation_tracker",
+        "delayed_effect_modeler",
+        "dorsal_kinetic_stream",
+        "dual_memory",
+        "goal_arbiter",
+        "goal_induction",
+        "hazard_tracker",
+        "library_learner",
+        "metacognitive_agency_cortex",
+        "mpfc_schema_engine",
+        "neuromodulatory_system",
+        "physics_engine",
+        "precision_controller",
+        "predictive_coding_cortex",
+        "recursive_value_inducer",
+        "room_topology",
+        "skill_synthesizer",
+        "smith_predictor",
+        "snn_predictor",
+        "social_cognition",
+        "surprise_engine",
+        "temporal_buffer",
+        "transition_sequence_model",
+    ),
+    "__xs_g1__": (
+        "action_discovery",
+        "body_schema",
+        "causal_cortex",
+        "cerebellar_clock",
+        "collision_cones",
+        "deformation_tracker",
+        "delayed_effect_modeler",
+    ),
+    "__xs_g2__": (
+        "dorsal_kinetic_stream",
+        "dual_memory",
+        "goal_arbiter",
+        "goal_induction",
+        "library_learner",
+        "metacognitive_agency_cortex",
+        "mpfc_schema_engine",
+    ),
+    "__xs_g3__": (
+        "neuromodulatory_system",
+        "physics_engine",
+        "precision_controller",
+        "predictive_coding_cortex",
+        "recursive_value_inducer",
+        "room_topology",
+        "skill_synthesizer",
+    ),
+    "__xs_g4__": (
+        "smith_predictor",
+        "snn_predictor",
+        "social_cognition",
+        "surprise_engine",
+        "temporal_buffer",
+        "transition_sequence_model",
+    ),
+}
+
+
+def _apply_null_faculty(engine: Any, name: str, inv: dict[str, str]) -> bool:
+    """Replace faculty attr (and any working_memory/engine aliases) with NullFaculty."""
+    if name in _ABLATION_BUNDLES:
+        ok = False
+        for member in _ABLATION_BUNDLES[name]:
+            ok = _apply_null_faculty(engine, member, inv) or ok
+        return ok
+    orig_inst = getattr(engine, name, None) if name in inv else None
+    cls = type(orig_inst) if orig_inst is not None else None
+    if cls is None:
+        return False
+    null_fac = NullFaculty(cls, orig_inst)
+    setattr(engine, name, null_fac)
+    for owner_name, attr_name in _FACULTY_ALIAS_TARGETS.get(name, ()):
+        owner = engine if owner_name == "engine" else getattr(engine, owner_name, None)
+        if owner is not None and hasattr(owner, attr_name):
+            setattr(owner, attr_name, null_fac)
+    return True
 
 
 def faculty_inventory(engine: Any) -> dict[str, str]:
@@ -636,14 +826,410 @@ def _std(xs: Any) -> float:
     return math.sqrt(sum((x - m) ** 2 for x in vals) / (len(vals) - 1))
 
 
+def _task_dev_cross_seed(args: tuple[str, str, str, str, list[int], int]) -> dict[str, Any]:
+    """Run one R1 cross-seed transfer chain across all seeds of a task."""
+    import tempfile
+
+    from benchmarks.suites.runner import _run_loop_with_info
+    from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    faculty, task_id, family, env_cls_path, seeds, max_budget = args
+    env_cls = _load_env_class(env_cls_path)
+    transfer_succ = 0
+    transfer_total = 0
+    transfer_deaths = 0
+    crash: str | None = None
+    with tempfile.TemporaryDirectory(prefix=f"abl_xs_{task_id}_{os.getpid()}_") as mem_dir:
+        system = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id=f"abl_xs_{task_id}_{os.getpid()}_{time.time_ns()}",
+                memory_dir=mem_dir,
+                enable_logging=False,
+                seed=seeds[0],
+            )
+        )
+        engine = system.engine
+        inv = faculty_inventory(engine)
+        if faculty != "__baseline__":
+            _apply_null_faculty(engine, faculty, inv)
+
+        prev_succ = False
+        for idx, s in enumerate(seeds):
+            if idx > 0:
+                b_kind = (
+                    EpisodeBoundaryKind.LEVEL_COMPLETE if prev_succ else EpisodeBoundaryKind.DEATH
+                )
+                try:
+                    engine.on_boundary(EpisodeBoundary(kind=b_kind, same_level=False))
+                except Exception as exc:  # noqa: BLE001
+                    crash = f"{task_id}@{s} boundary: {type(exc).__name__}: {exc}"
+                    break
+            env = env_cls(max_steps=max_budget)
+            obs = env.reset(seed=s)
+            lat: list[float] = []
+            errs: list[str] = []
+            try:
+                succ, _, lat, errs, died = _run_loop_with_info(
+                    env, obs, engine, "system", max_budget, lat, errs, seed=s
+                )
+            except Exception as exc:  # noqa: BLE001
+                crash = f"{task_id}@{s}: {type(exc).__name__}: {exc}"
+                succ, died = False, True
+            if errs and crash is None:
+                crash = f"{task_id}@{s}: {errs[0]}"
+                succ = False
+            if idx > 0:
+                transfer_total += 1
+                transfer_succ += int(bool(succ))
+                transfer_deaths += int(bool(died))
+            prev_succ = bool(succ)
+
+    return {
+        "faculty": faculty,
+        "task_id": task_id,
+        "family": family,
+        "transfer_succ": transfer_succ,
+        "transfer_total": transfer_total,
+        "transfer_deaths": transfer_deaths,
+        "crash": crash,
+    }
+
+
+def _task_dev_episode(args: tuple[str, str, str, str, int, int, bool]) -> dict[str, Any]:
+    """Run one R1 zero-shot dev episode for (__baseline__ | faculty)."""
+    import tempfile
+
+    import numpy as np
+
+    from benchmarks.suites.runner import _run_loop_with_info
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    faculty, task_id, family, env_cls_path, seed, max_budget, count_calls = args
+    env_cls = _load_env_class(env_cls_path)
+    counters: dict[str, dict[str, int]] = {}
+    with tempfile.TemporaryDirectory(prefix=f"abl_dev_{seed}_{os.getpid()}_") as mem_dir:
+        system = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id=f"abl_dev_{task_id}_{seed}_{os.getpid()}_{time.time_ns()}",
+                memory_dir=mem_dir,
+                enable_logging=False,
+                seed=seed,
+            )
+        )
+        engine = system.engine
+        inv = faculty_inventory(engine)
+        if count_calls:
+            counters = {n: {} for n in inv}
+            for n in inv:
+                _apply_counting_proxy(engine, n, counters[n])
+        elif faculty != "__baseline__":
+            _apply_null_faculty(engine, faculty, inv)
+
+        env = env_cls(max_steps=max_budget)
+        obs = env.reset(seed=seed)
+        lat: list[float] = []
+        errs: list[str] = []
+        crash: str | None = None
+        try:
+            succ, steps, lat, errs, died = _run_loop_with_info(
+                env, obs, engine, "system", max_budget, lat, errs, seed=seed
+            )
+        except Exception as exc:  # noqa: BLE001 — ablation crash is the signal
+            crash = f"{task_id}@{seed}: {type(exc).__name__}: {exc}"
+            succ, steps, died = False, max_budget, True
+        if errs and crash is None:
+            crash = f"{task_id}@{seed}: {errs[0]}"
+            succ = False
+        p50 = float(np.percentile(lat, 50)) if lat else 0.0
+        p95 = float(np.percentile(lat, 95)) if lat else 0.0
+        return {
+            "faculty": faculty,
+            "task_id": task_id,
+            "family": family,
+            "seed": seed,
+            "max_budget": max_budget,
+            "success": bool(succ),
+            "steps": int(steps),
+            "died": bool(died),
+            "p50_ms": p50,
+            "p95_ms": p95,
+            "crash": crash,
+            "calls": {n: c.get("__total__", 0) for n, c in counters.items()},
+        }
+
+
+def _aggregate_dev_results(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate 80 R1 dev zero-shot rows using exact EvaluationProtocol scoring."""
+    from hbllm.benchmarks.protocol import wilson_ci
+
+    families: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        families[r["family"]].append(r)
+
+    fam_scores: dict[str, float] = {}
+    fam_solve: dict[str, float] = {}
+    for fam, items in families.items():
+        n_fam = len(items)
+        solved = [it for it in items if it["success"]]
+        k_fam = len(solved)
+        fam_solve[fam] = round(k_fam / max(1, n_fam), 4)
+        if not solved:
+            fam_scores[fam] = 0.0
+        else:
+            sr = k_fam / n_fam
+            eff = (
+                sum(max(0.0, 1.0 - (it["steps"] / max(1, it["max_budget"]))) for it in solved)
+                / k_fam
+            )
+            fam_scores[fam] = round(0.5 * sr + 0.5 * eff, 4)
+
+    zs_gen = round(sum(fam_scores.values()) / max(1, len(fam_scores)), 4) if fam_scores else 0.0
+    n_tot = len(rows)
+    k_tot = sum(1 for r in rows if r["success"])
+    deaths = sum(1 for r in rows if r["died"])
+    mean_steps = _mean([r["steps"] for r in rows])
+    p50_ms = _mean([r["p50_ms"] for r in rows])
+    p95_ms = _mean([r["p95_ms"] for r in rows])
+    crashes = [r["crash"] for r in rows if r.get("crash")]
+    return {
+        "generality_score": zs_gen,
+        "solve_rate": round(k_tot / max(1, n_tot), 4),
+        "n_solved": k_tot,
+        "n_trials": n_tot,
+        "wilson_95_ci": list(wilson_ci(k_tot, n_tot)),
+        "deaths": deaths,
+        "mean_steps": round(mean_steps, 2),
+        "mean_p50_ms": round(p50_ms, 2),
+        "mean_p95_ms": round(p95_ms, 2),
+        "family_scores": fam_scores,
+        "family_solve_rates": fam_solve,
+        "crash": crashes[0] if crashes else None,
+    }
+
+
+def _run_dev_ablation(args: argparse.Namespace, inv: dict[str, str], mp_ctx: Any) -> None:
+    """Run screening and per-faculty leave-one-out ablation on R1 benchmarks/suites/dev.yaml."""
+    import yaml
+
+    manifest = yaml.safe_load(Path("benchmarks/suites/dev.yaml").read_text(encoding="utf-8"))
+    tasks_def = manifest["tasks"]
+    dev_slots = [
+        (t["id"], t["family"], t["env_class"], int(s), int(t.get("max_budget", 100)))
+        for t in tasks_def
+        for s in t["seeds"]
+    ]
+    n_slots = len(dev_slots)
+
+    screen_path = Path(args.screen_report or "reports/ablation/screen_dev.json")
+    if args.phase == "ablate" and screen_path.exists():
+        prior = json.loads(screen_path.read_text(encoding="utf-8"))
+        calls = prior["calls"]
+        used, unused = prior["used"], prior["unused"]
+        print(f"dev screen (cached): {len(used)} used, {len(unused)} unused across n={n_slots}")
+    else:
+        t0 = time.perf_counter()
+        screen_jobs = [
+            ("__baseline__", tid, fam, epath, s, mb, True) for tid, fam, epath, s, mb in dev_slots
+        ]
+        calls = {n: 0 for n in inv}
+        base_rows: list[dict[str, Any]] = []
+        with mp_ctx.Pool(args.workers) as pool:
+            for row in pool.imap_unordered(_task_dev_episode, screen_jobs):
+                base_rows.append(row)
+                for n, c in row["calls"].items():
+                    calls[n] = calls.get(n, 0) + c
+        unused = sorted(n for n, c in calls.items() if c == 0)
+        used = sorted(n for n, c in calls.items() if c > 0)
+        base_agg = _aggregate_dev_results(base_rows)
+        dt = time.perf_counter() - t0
+        print(
+            f"dev screen ({dt:.1f}s): baseline gen={base_agg['generality_score']:.4f} "
+            f"sr={base_agg['solve_rate']:.4f} deaths={base_agg['deaths']} | "
+            f"{len(used)} used, {len(unused)} unused"
+        )
+        screen_path.write_text(
+            json.dumps(
+                {
+                    "n_trials": n_slots,
+                    "baseline": base_agg,
+                    "calls": calls,
+                    "used": used,
+                    "unused": unused,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    if args.phase == "screen":
+        return
+
+    targets = args.faculties if args.faculties else used
+    targets = [t for t in targets if t in inv or t in _ABLATION_BUNDLES]
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    t_abl = time.perf_counter()
+    if not getattr(args, "cross_seed_only", False):
+        base_jobs = [
+            ("__baseline__", tid, fam, epath, s, mb, False) for tid, fam, epath, s, mb in dev_slots
+        ]
+        fac_jobs = [
+            (fac, tid, fam, epath, s, mb, False)
+            for fac in targets
+            for tid, fam, epath, s, mb in dev_slots
+        ]
+        with mp_ctx.Pool(args.workers) as pool:
+            for row in pool.imap_unordered(_task_dev_episode, base_jobs + fac_jobs):
+                grouped[row["faculty"]].append(row)
+
+    xs_grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    if getattr(args, "with_cross_seed", False) or getattr(args, "cross_seed_only", False):
+        xs_jobs = [
+            (
+                fac,
+                t["id"],
+                t["family"],
+                t["env_class"],
+                [int(s) for s in t["seeds"]],
+                int(t.get("max_budget", 100)),
+            )
+            for fac in ["__baseline__", *targets]
+            for t in tasks_def
+        ]
+        with mp_ctx.Pool(args.workers) as pool:
+            for row in pool.imap_unordered(_task_dev_cross_seed, xs_jobs):
+                xs_grouped[row["faculty"]].append(row)
+    dt_abl = time.perf_counter() - t_abl
+
+    def _agg_xs(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        tot = sum(r["transfer_total"] for r in rows)
+        suc = sum(r["transfer_succ"] for r in rows)
+        dth = sum(r["transfer_deaths"] for r in rows)
+        crashes = [r["crash"] for r in rows if r.get("crash")]
+        return {
+            "transfer_solve_rate": round(suc / max(1, tot), 4),
+            "transfer_deaths": dth,
+            "n_transfer": tot,
+            "crash": crashes[0] if crashes else None,
+        }
+
+    base_agg = (
+        _aggregate_dev_results(grouped["__baseline__"])
+        if grouped.get("__baseline__")
+        else {
+            "generality_score": 0.0,
+            "solve_rate": 0.0,
+            "deaths": 0,
+            "mean_steps": 1.0,
+            "mean_p50_ms": 0.0,
+            "family_solve_rates": {},
+            "crash": None,
+        }
+    )
+    base_xs = _agg_xs(xs_grouped["__baseline__"]) if xs_grouped.get("__baseline__") else None
+    report: dict[str, Any] = {
+        "suite": "dev",
+        "n_trials": n_slots,
+        "wall_seconds": round(dt_abl, 1),
+        "baseline": base_agg,
+        "baseline_cross_seed": base_xs,
+        "faculties": {},
+    }
+    eval_names = list(inv) + [t for t in targets if t not in inv]
+    for name in eval_names:
+        if name in unused and name not in targets:
+            report["faculties"][name] = {
+                "class": inv[name],
+                "calls": 0,
+                "decision": "unused",
+                "delta_generality": 0.0,
+                "delta_solve_rate": 0.0,
+                "delta_deaths": 0,
+                "evidence": f"0 calls across n={n_slots} R1 dev trials",
+            }
+            continue
+        if name not in grouped and name not in xs_grouped:
+            continue
+        agg = (
+            _aggregate_dev_results(grouped[name])
+            if name in grouped
+            else {
+                "generality_score": 0.0,
+                "solve_rate": 0.0,
+                "deaths": 0,
+                "mean_steps": 1.0,
+                "mean_p50_ms": 0.0,
+                "family_solve_rates": {},
+                "crash": None,
+            }
+        )
+        xs = _agg_xs(xs_grouped[name]) if name in xs_grouped else None
+        d_gen = round(base_agg["generality_score"] - agg["generality_score"], 4)
+        d_sr = round(base_agg["solve_rate"] - agg["solve_rate"], 4)
+        d_deaths = agg["deaths"] - base_agg["deaths"]  # positive => ablation caused more deaths
+        d_p50 = round(agg["mean_p50_ms"] - base_agg["mean_p50_ms"], 2)
+        d_steps_pct = round(
+            (agg["mean_steps"] - base_agg["mean_steps"])
+            / max(1e-9, base_agg["mean_steps"])
+            * 100.0,
+            1,
+        )
+        d_xs = (
+            round(base_xs["transfer_solve_rate"] - xs["transfer_solve_rate"], 4)
+            if base_xs and xs
+            else 0.0
+        )
+        xs_crash = xs.get("crash") if xs else None
+        if agg["crash"] or xs_crash:
+            decision = "keep"
+            why = f"load_bearing_crash: {agg['crash'] or xs_crash}"
+        elif d_gen > 0.005 or d_sr > 0.0 or d_deaths > 0 or d_xs > 0.0:
+            decision = "keep"
+            why = f"Δgen={d_gen:+.4f}, Δsr={d_sr:+.4f}, Δxs={d_xs:+.4f}, Δdeaths={d_deaths:+d}"
+        else:
+            decision = "experimental"
+            why = f"no measurable positive R1 effect (Δgen={d_gen:+.4f}, Δsr={d_sr:+.4f}, Δxs={d_xs:+.4f}, Δdeaths={d_deaths:+d})"
+        cls_label = inv.get(name, f"Bundle({len(_ABLATION_BUNDLES.get(name, ()))})")
+        report["faculties"][name] = {
+            "class": cls_label,
+            "calls": calls.get(name, 0),
+            "baseline_generality": base_agg["generality_score"],
+            "ablated_generality": agg["generality_score"],
+            "delta_generality": d_gen,
+            "baseline_solve_rate": base_agg["solve_rate"],
+            "ablated_solve_rate": agg["solve_rate"],
+            "delta_solve_rate": d_sr,
+            "baseline_transfer_solve_rate": base_xs["transfer_solve_rate"] if base_xs else None,
+            "ablated_transfer_solve_rate": xs["transfer_solve_rate"] if xs else None,
+            "delta_transfer_solve_rate": d_xs if xs else None,
+            "baseline_deaths": base_agg["deaths"],
+            "ablated_deaths": agg["deaths"],
+            "delta_deaths": d_deaths,
+            "delta_steps_pct": d_steps_pct,
+            "delta_p50_ms": d_p50,
+            "ablated_family_solve_rates": agg["family_solve_rates"],
+            "decision": decision,
+            "rule_outcome": why,
+        }
+        print(f"  [{decision:12s}] {name:28s} {why} (Δp50={d_p50:+.1f}ms)")
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    out_path = Path(f"reports/ablation/{ts}_r1_dev.json")
+    out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"R1 dev ablation report: {out_path}")
+
+
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="Faculty ablation harness on procedural environments")
+    ap.add_argument("--suite", choices=["legacy", "dev"], default="legacy")
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1])
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--episodes", type=int, default=3)
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) - 1))
     ap.add_argument("--phase", choices=["inventory", "screen", "ablate", "all"], default="all")
     ap.add_argument("--screen-report", default=None)
+    ap.add_argument("--faculties", nargs="*", default=None)
+    ap.add_argument("--with-cross-seed", action="store_true")
+    ap.add_argument("--cross-seed-only", action="store_true")
     args = ap.parse_args(argv)
 
     engine = _mk_engine(0)
@@ -657,6 +1243,9 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     mp_ctx = mp.get_context("spawn")
+    if args.suite == "dev":
+        _run_dev_ablation(args, inv, mp_ctx)
+        return
 
     # ---- screen ----
     screen_path = Path(args.screen_report or "reports/ablation/screen.json")

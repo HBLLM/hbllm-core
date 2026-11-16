@@ -12,8 +12,6 @@ import numpy as np
 from hbllm.hcir import algorithms
 from hbllm.hcir.graph import CognitiveGraph, GoalNode, HCIREdge, HCIREdgeType
 from hbllm.hcir.native_adapter import NativeGraphAdapter
-from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.cerebellar_phase_clock import CerebellarSmithPredictor
 from hbllm.hcir.world.cortex_episodic import (
     CA3RecurrentPatternCompleter,
     DentateGyrusPatternSeparator,
@@ -137,54 +135,6 @@ class TestTrack2SNNSpikeFrequencyAdaptation:
         assert snn.sensitivity_scale <= initial_scale
 
 
-class TestTrack3CerebellarSmithPredictor:
-    """Track 3: Cerebellar Smith Predictor & Latency Compensation."""
-
-    def test_efference_copy_and_sensory_assimilation(self):
-        predictor = CerebellarSmithPredictor()
-        # Dispatched action: move right by (0, 1) from (2, 2)
-        pred_pos = predictor.record_efference_copy(
-            step=1,
-            action_id="move_right",
-            expected_delta=(0, 1),
-            current_pos=(2, 2),
-        )
-        assert pred_pos == (2, 3)
-        assert predictor.get_forward_compensated_position((2, 2)) == (2, 3)
-
-        # Sensory feedback arrives confirming prediction
-        err = predictor.assimilate_sensory_feedback(step=1, observed_pos=(2, 3))
-        assert err == 0.0
-
-        # Export formal HCIR CausalPredicate and TransactionOperations
-        pred = predictor.to_causal_predicate()
-        assert "cerebellar_smith_predictor" in pred.variable
-        ops = predictor.to_transaction_operations()
-        assert len(ops) == 1
-        assert ops[0].node_id == "cerebellar_smith_predictor"
-
-    def test_engine_integration_forward_compensated_position(self):
-        engine = AutonomousEpistemicEngine()
-        engine.avatar_pos = (5, 5)
-
-        # Buffer motor efference copy
-        forward_pos = engine.record_motor_efference_copy(action=1, expected_delta=(-1, 0))
-        assert forward_pos == (4, 5)
-
-        # Engine provides zero-latency compensated position
-        comp_pos = engine.get_forward_compensated_position()
-        assert comp_pos == (4, 5)
-
-        # Sensory feedback confirms arrival at (4, 5)
-        grid = np.zeros((10, 10), dtype=int)
-        engine.avatar_pos = (4, 5)
-        engine.assimilate_feedback(
-            curr_grid=grid,
-            available_actions=[1, 2, 3, 4],
-        )
-        assert len(engine.smith_predictor.prediction_errors) > 0
-
-
 class TestTrack4HippocampalAttractorNetwork:
     """Track 4: Dentate Gyrus Pattern Separation & CA3 Auto-Association."""
 
@@ -218,24 +168,3 @@ class TestTrack4HippocampalAttractorNetwork:
         assert comp_result.retrieved_memory_id == "mem_1"
         assert comp_result.retrieval_confidence > 0.5
         assert np.count_nonzero(comp_result.completed_pattern) == 8
-
-    def test_hippocampal_attractor_network_in_engine(self):
-        engine = AutonomousEpistemicEngine()
-        grid = np.zeros((8, 8), dtype=int)
-        grid[1, 1] = 2
-        grid[5, 5] = 3
-
-        # Store winning episode attractor in episodic memory
-        engine.episodic_memory.attractor_network.store_episode_attractor(
-            memory_id="level_win_1",
-            sensory_state=grid,
-            action_plan=[1, 1, 2, 4],
-        )
-
-        # Partial cue: small patch of grid
-        partial_grid = np.zeros((8, 8), dtype=int)
-        partial_grid[1, 1] = 2
-
-        plan, conf = engine.recall_episodic_attractor_plan(partial_grid, match_threshold=0.2)
-        assert plan == [1, 1, 2, 4]
-        assert conf > 0.0

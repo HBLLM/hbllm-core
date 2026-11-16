@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from hbllm.hcir.transactions import TransactionOp
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.goal_arbiter import CandidateGoal, GoalArbiter
 from hbllm.hcir.world.prefrontal_working_memory import (
     DomainCompetenceProfile,
     PrefrontalWorkingMemory,
@@ -93,69 +92,6 @@ def test_prefrontal_working_memory_domain_tracking_and_homeostasis() -> None:
 
     # Homeostatic state should reflect competence progress
     assert wm.homeostatic_state.competence_progress > 0.0
-
-
-def test_goal_arbiter_practice_priority_boosting() -> None:
-    """Validate GoalArbiter boosts epistemic curiosity utility for high-priority practice domains."""
-    arbiter = GoalArbiter()
-
-    class MockEngine:
-        def __init__(self) -> None:
-            self.avatar_pos = (0, 0)
-            self.working_memory = PrefrontalWorkingMemory()
-            # Set up high practice priority in "block_pushing"
-            for _ in range(4):
-                self.working_memory.record_domain_episode(
-                    "block_pushing", success=False, mean_error=0.80
-                )
-            for _ in range(4):
-                self.working_memory.record_domain_episode(
-                    "block_pushing", success=True, mean_error=0.20
-                )
-
-            # Mastered in "trivial_nav"
-            for _ in range(8):
-                self.working_memory.record_domain_episode(
-                    "trivial_nav", success=True, mean_error=0.01
-                )
-
-    engine = MockEngine()
-
-    candidates = [
-        CandidateGoal(
-            goal_id="goal_push",
-            target=(3, 3),
-            goal_type="epistemic_exploration",
-            extrinsic_utility=5.0,
-            epistemic_utility=10.0,
-            estimated_cost=2.0,
-            metadata={"domain_id": "block_pushing"},
-        ),
-        CandidateGoal(
-            goal_id="goal_nav",
-            target=(1, 1),
-            goal_type="epistemic_exploration",
-            extrinsic_utility=5.0,
-            epistemic_utility=10.0,
-            estimated_cost=2.0,
-            metadata={"domain_id": "trivial_nav"},
-        ),
-    ]
-
-    # Run extraction and metacognitive boosting
-    _ = arbiter.extract_candidate_goals(engine=engine)
-    # Combine with our manual candidates
-    wm = engine.working_memory
-    for cand in candidates:
-        dom_id = cand.metadata.get("domain_id")
-        if dom_id:
-            comp = wm.get_domain_competence(dom_id)
-            cand.epistemic_utility *= 1.0 + 1.5 * comp.practice_priority
-
-    goal_push = next(c for c in candidates if c.goal_id == "goal_push")
-    goal_nav = next(c for c in candidates if c.goal_id == "goal_nav")
-
-    assert goal_push.epistemic_utility > goal_nav.epistemic_utility
 
 
 def test_domain_competence_export_to_predicates_and_transactions() -> None:

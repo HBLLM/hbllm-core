@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from hbllm.hcir.grounding.concepts.relational_graph_matcher import (
+    RelationalGraphMatcher as SceneGraphMatcher,
+)
 from hbllm.hcir.transactions import (
     TransactionOp,
     TransactionOperation,
@@ -29,10 +32,7 @@ from hbllm.hcir.world.capability_evidence import (
     IntegrationStatus,
     UnitTestStatus,
 )
-from hbllm.hcir.world.cortex_episodic import (
-    DualStoreConsolidationEngine,
-    FalsifiableAnalogyEngine,
-)
+from hbllm.hcir.world.cortex_episodic import DualStoreConsolidationEngine
 from hbllm.hcir.world.cortex_planner import (
     DynamicReplanner,
     MentalSimulationStep,
@@ -41,13 +41,6 @@ from hbllm.hcir.world.cortex_planner import (
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.disagreement_analyzer import (
     PredictorDisagreementAnalyzer,
-)
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.experimental.confidence_calibrator import (
-    ConfidenceCalibrator,
-)
-from hbllm.hcir.world.experimental.relational_graph_matcher import (
-    RelationalGraphMatcher as SceneGraphMatcher,
 )
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     ComputationBudget,
@@ -59,13 +52,6 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
 from hbllm.hcir.world.predictors.whole_grid import (
     DimensionMode,
     WholeGridPredictor,
-)
-from hbllm.hcir.world.representation_expansion import (
-    ConceptFormationEngine,
-    RepresentationExpansionEngine,
-)
-from hbllm.hcir.world.rule_induction import (
-    RuleInductionEngine,
 )
 from hbllm.hcir.world.verification_gate import (
     ModelProvenanceTracker,
@@ -187,7 +173,6 @@ def test_suite_13_uncertainty_and_multiple_models_w121_to_w130() -> None:
     """Verify W121-W130: observation uncertainty, unknown vs false, competing models, Bayesian updates, relation confidence, ambiguity, provenance, contradictions, calibration, evidence sufficiency."""
     engine = AutonomousEpistemicEngine()
 
-    _restore_all(engine)
     disagreement = PredictorDisagreementAnalyzer()
 
     # W121: Observation uncertainty representation
@@ -214,14 +199,9 @@ def test_suite_13_uncertainty_and_multiple_models_w121_to_w130() -> None:
     val_unseen = engine.evaluate_truth_value("hidden_switch", known_world, True)
     assert val_unseen == EpistemicTruthValue.UNKNOWN
 
-    # W123: Competing world-model hypotheses
-    assert hasattr(engine, "causal_discovery_engine")
-    assert hasattr(engine, "rule_induction_engine")
-
-    # W124: Bayesian or equivalent belief update
-    calibrator = ConfidenceCalibrator()
-    c1 = calibrator.calibrate(raw_confidence=0.8, historical_accuracy=0.9)
-    assert abs(c1.calibrated_confidence - 0.72) < 1e-5
+    # W123: Competing world-model hypotheses / causal predicates via symbolic theory
+    assert hasattr(engine, "symbolic_theory")
+    assert hasattr(engine, "remote_causal")
 
     # W125: Confidence tracking per relation
     rel_conf = engine.track_relational_confidence("lever_causes_door_open", 0.88)
@@ -257,9 +237,6 @@ def test_suite_13_uncertainty_and_multiple_models_w121_to_w130() -> None:
     conflicts = disagreement.detect_contradiction(pred_left, pred_right)
     assert len(conflicts) == 1
     assert "target_pos" in conflicts[0]
-
-    # W129: Model confidence calibration
-    assert engine.confidence_calibrator.calibrate(0.9, 0.9).uncertainty < 0.2
 
     # W130: Evidence sufficiency assessment
     # Insufficient: only 1 observation
@@ -356,26 +333,8 @@ def test_suite_14_goal_directed_planning_and_action_w131_to_w140() -> None:
 
 
 def test_suite_15_learning_transfer_and_continual_adaptation_w141_to_w150() -> None:
-    """Verify W141-W150: paired learning, one-shot, few-shot, size transfer, symbol transfer, shape transfer, relational transfer, analogies, OOD detection, continual consolidation."""
-    analogy_engine = FalsifiableAnalogyEngine()
-    concept_engine = ConceptFormationEngine()
+    """Verify W144, W146, W147, W150: size transfer, shape/relational structure matching, continual consolidation."""
     consolidation_engine = DualStoreConsolidationEngine()
-
-    # W141: Learning from paired examples & W143: Few-shot rule learning
-    rule_engine = RuleInductionEngine()
-    d0_x = np.array([[1, 2], [0, 0]], dtype=int)
-    d0_y = np.rot90(d0_x, -1)
-    d1_x = np.array([[3, 4], [5, 0]], dtype=int)
-    d1_y = np.rot90(d1_x, -1)
-    train_pairs = [(d0_x, d0_y), (d1_x, d1_y)]
-    induced_rule, survivors, _ = rule_engine.induce_rule(train_pairs)
-    assert induced_rule is not None
-    assert len(survivors) >= 1
-
-    # W142: One-shot concept acquisition
-    one_shot_mask = np.array([[1, 1], [1, 1]], dtype=bool)
-    concept = concept_engine.form_object_concept(one_shot_mask, color=7, concept_id="one_shot_box")
-    assert concept.shape_signature == "SQUARE"
 
     # W144: Transfer across different grid sizes
     scale_pairs = [
@@ -387,15 +346,6 @@ def test_suite_15_learning_transfer_and_continual_adaptation_w141_to_w150() -> N
     assert dim_rule.scale_factors == (2.0, 2.0)
     assert dim_rule.compute_output_shape((5, 5)) == (10, 10)
 
-    # W145: Transfer across colors and symbols
-    comp_concept = concept_engine.form_compositional_representation([concept], [])
-    novel_color_grid = np.zeros((5, 5), dtype=int)
-    novel_color_grid[1:3, 1:3] = 9  # Same square shape, completely new color 9
-    transfer_res = concept_engine.reuse_concept_in_unfamiliar_context(
-        comp_concept, novel_color_grid
-    )
-    assert transfer_res["transfer_success"] is True
-
     # W146: Transfer across object shapes & W147: Transfer across relational structures
     g1_grid = np.array([[1, 0], [0, 2]], dtype=int)
     g2_grid = np.array([[1, 0], [0, 2]], dtype=int)
@@ -404,31 +354,6 @@ def test_suite_15_learning_transfer_and_continual_adaptation_w141_to_w150() -> N
     corrs = SceneGraphMatcher.match_graphs(sg1, sg2, ignore_color=False)
     assert len(corrs) >= 1
     assert corrs[0].match_score > 0.5
-
-    # W148: Analogical mapping between tasks
-    analogy = analogy_engine.propose_analogy(
-        source_domain="sokoban_blocks",
-        target_domain="laser_reflectors",
-        predicate_mapping={"push_block": "align_mirror", "goal_receptacle": "optical_sensor"},
-    )
-    assert analogy.source_domain == "sokoban_blocks"
-    assert analogy.target_domain == "laser_reflectors"
-    # Structural compatibility check
-    compat = analogy_engine.validate_structural_compatibility(
-        analogy, target_entity_types={"align_mirror", "optical_sensor"}
-    )
-    assert compat is True
-    # Falsification on discordant empirical observation
-    analogy_engine.record_empirical_observation(
-        f"{analogy.source_domain}__to__{analogy.target_domain}",
-        predicted_mutation="push_block_moves",
-        actual_mutation="mirror_breaks",
-    )
-    assert analogy.status.value == "REJECTED"
-
-    # W149: Novelty and out-of-distribution detection
-    rep_engine = RepresentationExpansionEngine()
-    assert hasattr(rep_engine, "evaluate_representation_revision_cycle")
 
     # W150: Continual model improvement without catastrophic forgetting
     consolidation_engine.consolidate(
@@ -701,8 +626,6 @@ def test_phase4_50_row_capability_ledger_reconciliation() -> None:
 def test_phase4_active_runtime_integration() -> None:
     """Verify that Phase 4 generalization, planning, uncertainty, and governance faculties are actively wired in AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine(exploration_budget=50)
-
-    _restore_all(engine)
 
     # 1. Attribute presence & correct types
     assert isinstance(engine.subgoal_stack, FrontopolarSubgoalStack)

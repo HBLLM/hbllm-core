@@ -19,7 +19,6 @@ from hbllm.hcir.native_adapter import (
 from hbllm.hcir.world import (
     AutonomousEpistemicEngine,
 )
-from hbllm.hcir.world.experimental import restore_all as _restore_all
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Track 4: Native Structural Graph Transitive Reduction
@@ -98,7 +97,6 @@ def test_cognitive_graph_transitive_reduction_diamond() -> None:
 def test_engine_extract_minimal_causal_skeleton() -> None:
     """Engine extracts minimal transitive reduction causal skeleton from graph."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
 
     graph = CognitiveGraph(enable_native_substrate=False)
     graph.add_node(FactNode(id="X", claim="X"))

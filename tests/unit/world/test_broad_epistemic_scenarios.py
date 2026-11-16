@@ -20,14 +20,6 @@ from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicPhase,
 )
-from hbllm.hcir.world.cortex_motor import (
-    MotorCortexEffector,
-)
-from hbllm.hcir.world.experimental import restore_all as _restore_all
-from hbllm.hcir.world.experimental.bilateral_coordination import (
-    BilateralCoordinateIntegrator,
-    SymmetryAxis,
-)
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     SubgoalType,
 )
@@ -38,7 +30,6 @@ def test_e2e_lethal_learning_and_evasion_across_lives() -> None:
     """Verify agent registers lethal position upon death and deliberatively paths around it in next life."""
     engine = AutonomousEpistemicEngine()
 
-    _restore_all(engine)
     engine.current_level = 1
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
@@ -83,7 +74,6 @@ def test_e2e_peripheral_border_filtering_and_quiescent_switching() -> None:
     """Verify click effector filters outer grid borders and inhibits clicks when targets are quiescent."""
     engine = AutonomousEpistemicEngine()
 
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_features = {1}
     engine.avatar_pos = (5, 5)
@@ -124,116 +114,12 @@ def test_e2e_peripheral_border_filtering_and_quiescent_switching() -> None:
     assert engine.inhibited_actions.get(6, 0) > 0, "Action 6 must be Habenularly inhibited!"
 
 
-def test_e2e_same_color_bilateral_twins_no_collapse() -> None:
-    """Verify identical-color bilateral twins maintain distinct coordinates across multi-turn displacements."""
-    engine = AutonomousEpistemicEngine()
-
-    _restore_all(engine)
-    engine.bg_feature = 0
-
-    # 10x12 grid with two identical cyan twins (feature 5) at (4, 2) and (4, 9)
-    grid_0 = np.zeros((10, 12), dtype=int)
-    grid_0[4, 2] = 5
-    grid_0[4, 9] = 5
-    engine.prev_grid = grid_0.copy()
-
-    # Step 1: Twins move under vertical symmetry (Agent 1 moves right to (4, 3), Agent 2 moves left to (4, 8))
-    grid_1 = np.zeros((10, 12), dtype=int)
-    grid_1[4, 3] = 5
-    grid_1[4, 8] = 5
-    engine.last_action = 4
-    engine.assimilate_feedback(grid_1, [1, 2, 3, 4])
-
-    assert engine.bilateral_state is not None
-    assert engine.bilateral_state.symmetry_axis == SymmetryAxis.VERTICAL
-    assert engine.bilateral_state.features == {5}
-
-    # Step 2: Twins advance further towards center: (4, 4) and (4, 7)
-    grid_2 = np.zeros((10, 12), dtype=int)
-    grid_2[4, 4] = 5
-    grid_2[4, 7] = 5
-    engine.prev_grid = grid_1.copy()
-    engine.last_action = 4
-    engine.assimilate_feedback(grid_2, [1, 2, 3, 4])
-
-    assert engine.bilateral_state is not None
-    # Crucial assertion: Twin positions must NOT collapse to midpoint (4, 5)
-    p1 = engine.bilateral_state.pos1
-    p2 = engine.bilateral_state.pos2
-    assert p1 != p2, "Bilateral twins sharing same color must never collapse to identical centroid!"
-    assert (p1 == (4, 4) and p2 == (4, 7)) or (p1 == (4, 7) and p2 == (4, 4))
-
-
-def test_e2e_quad_lateral_4_agent_symmetry_and_convergence() -> None:
-    """Verify 4-agent quad-lateral D4 reflection detection and convergent joint planning."""
-    integrator = BilateralCoordinateIntegrator()
-
-    # 4 agents in 4 quadrants moving synchronously under reflection:
-    # Action right (+dc):
-    # - Top-Left at (2, 2) moves right -> delta = (0, 1)
-    # - Top-Right at (2, 8) moves left -> delta = (0, -1)
-    # - Bottom-Left at (8, 2) moves right -> delta = (0, 1)
-    # - Bottom-Right at (8, 8) moves left -> delta = (0, -1)
-    moved_entities = [
-        ((2, 2), (0, 1), 4),
-        ((2, 8), (0, -1), 4),
-        ((8, 2), (0, 1), 4),
-        ((8, 8), (0, -1), 4),
-    ]
-
-    state = integrator.detect_bilateral_pairing(moved_entities, (11, 11))
-    assert state is not None
-    assert state.symmetry_axis == SymmetryAxis.QUAD
-    assert len(state.quad_positions) == 4
-
-    # Plan convergence sequence to center dock targets:
-    # Targets for the 4 agents: (5, 4), (5, 6), (6, 4), (6, 6)
-    passable = np.ones((11, 11), dtype=bool)
-    action_deltas = {
-        1: (-1, 0),  # UP
-        2: (1, 0),  # DOWN
-        3: (0, -1),  # LEFT
-        4: (0, 1),  # RIGHT
-    }
-    targets = [(5, 4), (5, 6), (6, 4), (6, 6)]
-
-    plan = integrator.plan_convergence_sequence(
-        pos1=state.quad_positions[0],
-        pos2=state.quad_positions[1],
-        axis=SymmetryAxis.QUAD,
-        passable_mask=passable,
-        action_deltas=action_deltas,
-        target_positions=targets,
-    )
-
-    assert plan is not None
-    assert len(plan) > 0
-
-    # Simulate plan execution with 4-way wall slip physics
-    curr_pts = tuple(state.quad_positions)
-    for act in plan:
-        d = action_deltas[act]
-        deltas = integrator.transform_actions_for_quad(d)
-        next_pts = []
-        for p, ad in zip(curr_pts, deltas):
-            np_pos = (p[0] + ad[0], p[1] + ad[1])
-            next_pts.append(
-                np_pos if (0 <= np_pos[0] < 11 and 0 <= np_pos[1] < 11 and passable[np_pos]) else p
-            )
-        curr_pts = tuple(next_pts)
-
-    assert all(p in targets for p in curr_pts), (
-        "All 4 agents must successfully converge into docking targets!"
-    )
-
-
 def test_e2e_frontopolar_subgoal_decomposition_multi_stage_puzzle() -> None:
     """Verify recursive subgoal decomposition paths to remote switch, pushes subgoal, and reaches goal."""
     from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAffordance
 
     engine = AutonomousEpistemicEngine()
 
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -267,7 +153,7 @@ def test_e2e_frontopolar_subgoal_decomposition_multi_stage_puzzle() -> None:
         mutated_remote_feature=0,
         confidence=0.95,
     )
-    engine.causal_cortex.causal_attributor.remote_actuators[(2, 4)].append(aff)
+    engine.remote_causal.remote_actuators[(2, 4)].append(aff)
 
     available_actions = [1, 2, 3, 4]
 
@@ -304,7 +190,6 @@ def test_e2e_nested_multi_stage_subgoals_lifo_execution() -> None:
 
     engine = AutonomousEpistemicEngine()
 
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 1)
 
@@ -351,8 +236,8 @@ def test_e2e_nested_multi_stage_subgoals_lifo_execution() -> None:
         mutated_remote_feature=0,
         confidence=0.95,
     )
-    engine.causal_cortex.causal_attributor.remote_actuators[(1, 3)].append(aff1)
-    engine.causal_cortex.causal_attributor.remote_actuators[(1, 6)].append(aff2)
+    engine.remote_causal.remote_actuators[(1, 3)].append(aff1)
+    engine.remote_causal.remote_actuators[(1, 6)].append(aff2)
 
     available_actions = [1, 2, 3, 4]
     plan = engine.simulate_in_mind(grid, available_actions)
@@ -390,127 +275,12 @@ def test_e2e_nested_multi_stage_subgoals_lifo_execution() -> None:
     assert milestones[-1] == (1, 8), "Plan must culminate at final goal!"
 
 
-def test_e2e_dynamic_threat_pacing_and_looming_cone_avoidance() -> None:
-    """Verify deliberation safety gating and premotor reflex evade dynamic kinetic threat cones."""
-    from hbllm.hcir.world.cortex_deliberation import SpatiotemporalCollisionConePredicate
-    from hbllm.hcir.world.cortex_planner import MentalSimulationStep
-    from hbllm.hcir.world.kinetic_stream import KineticEntity
-
-    engine = AutonomousEpistemicEngine()
-
-    _restore_all(engine)
-    engine.avatar_feature = 1
-    engine.avatar_pos = (3, 3)
-
-    # Calibrate movements
-    engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=-1, delta_c=0, confidence=1.0)
-    engine.action_dynamics[2] = ActionDynamicsModel(2, delta_r=1, delta_c=0, confidence=1.0)
-    engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
-    engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
-
-    # 7x7 grid: Avatar at (3, 3)
-    grid = np.zeros((7, 7), dtype=int)
-    grid[3, 3] = 1
-
-    # Kinetic threat at (1, 3) heading downwards with velocity (1.0, 0.0)
-    # At t=1: enters (2, 3)
-    # At t=2: enters (3, 3) (directly striking stationary avatar!)
-    threat = KineticEntity(
-        centroid=(1.0, 3.0),
-        velocity=(1.0, 0.0),
-        cells=[(1, 3)],
-        bounding_box=(1, 1, 3, 3),
-        area=1,
-        features={9},
-        is_self=False,
-    )
-    engine.collision_cones.update_trajectories(
-        kinetic_entities=[threat],
-        static_barriers=set(),
-        grid_shape=(7, 7),
-        horizon=6,
-    )
-
-    # 1. Spatiotemporal hazard verification
-    assert engine.collision_cones.is_collision_hazard(2, 3, 1), "Threat must occupy (2, 3) at t=1!"
-    assert engine.collision_cones.is_collision_hazard(3, 3, 2), "Threat must strike (3, 3) at t=2!"
-
-    # 2. Premotor Looming Threat Reflex: Avatar at (3, 3) detects incoming threat and chooses safe evasion
-    disp_actions = [(act, engine.action_deltas[act]) for act in [1, 2, 3, 4]]
-    evasion_act = MotorCortexEffector._probe_looming_threat_evasion(
-        engine, grid, disp_actions, bg=0, bg_is_impassable_void=False
-    )
-    assert evasion_act is not None
-    # Action 1 steps UP into (2, 3), which is in the collision cone at t=1!
-    assert evasion_act != 1, "Reflex must never step directly into oncoming collision cone!"
-    assert evasion_act in [2, 3, 4], "Reflex must evade away from threat trajectory!"
-
-    # 3. Deliberation Gating: Rejects candidate forward step heading into collision cone
-    cone_predicate = SpatiotemporalCollisionConePredicate()
-    dangerous_step = MentalSimulationStep(action=1, predicted_avatar_pos=(2, 3))
-    safety_eval = cone_predicate.evaluate(engine, grid, dangerous_step, [], [1, 2, 3, 4])
-    assert not safety_eval.is_safe, "Deliberation predicate must reject step into looming cone!"
-    assert "looming collision cone" in safety_eval.reason
-
-    safe_step = MentalSimulationStep(action=4, predicted_avatar_pos=(3, 4))
-    safe_eval = cone_predicate.evaluate(engine, grid, safe_step, [], [1, 2, 3, 4])
-    assert safe_eval.is_safe, "Lateral step outside collision cone must be accepted!"
-
-
-def test_e2e_asymmetric_bilateral_wall_slip_synchronization() -> None:
-    """Verify bilateral coordinate planning exploits asymmetric obstacle wall-slip to shift parity."""
-    integrator = BilateralCoordinateIntegrator()
-
-    # 9x9 room:
-    # Twins start at (2, 2) and (2, 6) under vertical reflection symmetry (column diff = 4, even).
-    # Target positions: (5, 4) and (5, 5) (column diff = 1, odd parity!).
-    # Without wall slip, pure vertical reflection delta always preserves parity: dc2 = -dc1.
-    # An obstacle at (2, 1) allows Agent 1 to slip/stall when moving left while Agent 2 advances,
-    # breaking symmetric parity and enabling joint convergence!
-    passable = np.ones((9, 9), dtype=bool)
-    passable[2, 1] = False  # Slip obstacle for Agent 1
-
-    action_deltas = {
-        1: (-1, 0),  # UP
-        2: (1, 0),  # DOWN
-        3: (0, -1),  # LEFT
-        4: (0, 1),  # RIGHT
-    }
-    targets = [(5, 4), (5, 5)]
-
-    plan = integrator.plan_convergence_sequence(
-        pos1=(2, 2),
-        pos2=(2, 6),
-        axis=SymmetryAxis.VERTICAL,
-        passable_mask=passable,
-        action_deltas=action_deltas,
-        target_positions=targets,
-    )
-    assert plan is not None
-    assert len(plan) > 0
-
-    # Simulate joint twin physics with wall slip
-    p1, p2 = (2, 2), (2, 6)
-    for act in plan:
-        d1 = action_deltas[act]
-        d2 = integrator.transform_action_for_agent2(d1, SymmetryAxis.VERTICAL)
-        np1 = (p1[0] + d1[0], p1[1] + d1[1])
-        np2 = (p2[0] + d2[0], p2[1] + d2[1])
-        p1 = np1 if (0 <= np1[0] < 9 and 0 <= np1[1] < 9 and passable[np1]) else p1
-        p2 = np2 if (0 <= np2[0] < 9 and 0 <= np2[1] < 9 and passable[np2]) else p2
-
-    assert {p1, p2} == {(5, 4), (5, 5)}, (
-        "Asymmetric wall-slip must successfully dock both twins at odd-parity targets!"
-    )
-
-
 def test_e2e_high_surprise_hypothesis_invalidation_and_replanning() -> None:
     """Verify predictive sensory discrepancy/high surprise purges active mental plan and triggers replanning."""
     from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
     engine = AutonomousEpistemicEngine()
 
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 

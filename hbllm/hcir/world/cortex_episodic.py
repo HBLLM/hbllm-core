@@ -37,7 +37,7 @@ from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.percept import PlaceLocus, TerminalSignal, format_locus, locus_token
 
 if TYPE_CHECKING:
-    from hbllm.hcir.world.cortex_perception import SpatialEntity
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -488,9 +488,6 @@ class HippocampalEpisodicCortex:
         self.q_table: dict[tuple[str, Any], float] = {}
         self.transition_counts: dict[tuple[str, Any, str], int] = {}
 
-        # Falsifiable Cross-Task Analogy Engine (W148)
-        self.analogy_engine: FalsifiableAnalogyEngine = FalsifiableAnalogyEngine()
-
         # ── Procedural Consolidation Store ──────────────────────────────────
         # Winning trajectories compiled into replayable action macros.
         # Key: (context_id, context_epoch) or auto-generated signature.
@@ -501,7 +498,6 @@ class HippocampalEpisodicCortex:
             gamma=self.discount_factor
         )
         self.attractor_network: HippocampalAttractorNetwork = HippocampalAttractorNetwork()
-        self.distilled_relational_rules: list[Any] = []
 
     def replay_forward_and_reverse(
         self,
@@ -542,24 +538,6 @@ class HippocampalEpisodicCortex:
             sensory_state, match_threshold=match_threshold
         )
         return plan, comp_res.retrieval_confidence
-
-    def distill_relational_policy(
-        self,
-        entities: Sequence[SpatialEntity] | None = None,
-        min_support: int = 1,
-        min_confidence: float = 0.60,
-    ) -> list[Any]:
-        """Distill compact neuro-symbolic relational production rules from episodic transitions."""
-        from hbllm.hcir.world.relational_policy_distillation import RelationalPolicyDistiller
-
-        rules = RelationalPolicyDistiller.distill_trajectory(
-            trajectory=list(self.current_episode),
-            entities=entities,
-            min_support=min_support,
-            min_confidence=min_confidence,
-        )
-        self.distilled_relational_rules.extend(rules)
-        return rules
 
     def record_transition(
         self,
@@ -725,27 +703,8 @@ class HippocampalEpisodicCortex:
                         suspected_hazards.add(cand_int)
                         self.discovered_lethal_features.add(cand_int)
 
-        # 4. Long-Horizon Counterfactual Shapley Credit Attribution
-        from hbllm.hcir.world.shapley_credit_attribution import (
-            CounterfactualShapleyCreditAttributor,
-        )
-
-        shapley_res = CounterfactualShapleyCreditAttributor.attribute_blame(
-            trajectory=self.current_episode,
-            learned_goals=getattr(self, "learned_goals", set()),
-            learned_barriers=getattr(self, "learned_barriers", set()),
-        )
+        # 4. Extract inhibited state-actions from SWR backward horizon
         inhibited: list[tuple[PlaceLocus | None, Any]] = []
-        if shapley_res.root_fatal_pos is not None and shapley_res.root_fatal_action is not None:
-            inhibited.append((shapley_res.root_fatal_pos, shapley_res.root_fatal_action))
-            self.grounded_lethal_transitions.add(
-                (shapley_res.root_fatal_pos, shapley_res.root_fatal_action)
-            )
-            self.habenular_ior.preemptively_inhibit_action(
-                shapley_res.root_fatal_pos, shapley_res.root_fatal_action, penalty=50.0
-            )
-
-        # 4b. Extract inhibited state-actions from SWR backward horizon
         horizon = min(len(self.current_episode), self.replay_horizon)
         for i in range(len(self.current_episode) - 1, len(self.current_episode) - horizon - 1, -1):
             ep = self.current_episode[i]
@@ -758,11 +717,6 @@ class HippocampalEpisodicCortex:
             inhibited_transitions=inhibited,
             suspected_lethal_features=suspected_hazards,
             confidence=1.0,
-            root_causal_step=shapley_res.root_causal_step,
-            root_fatal_pos=shapley_res.root_fatal_pos,
-            root_fatal_action=shapley_res.root_fatal_action,
-            max_shapley_blame=shapley_res.max_blame_score,
-            shapley_explanation=shapley_res.causal_explanation,
         )
         self.catastrophic_replays.append(assignment)
         self._archive_and_clear()
@@ -1209,7 +1163,6 @@ class HippocampalEpisodicCortex:
             retain_long_term=retain_dynamics,
             retain_inhibitions=is_same_context_retry,
         )
-        view.collision_cones.reset_episode()
         delta.set("consecutive_plan_failures", 0)
         delta.set("exploration_cooldown", 0)
         delta.set("consecutive_simulation_failures", 0)
@@ -1237,7 +1190,6 @@ class HippocampalEpisodicCortex:
             delta.set("learned_barriers", _llb.setdefault(_epoch, set()))
             view.hazard_tracker.clear_lethal_positions()
             view.hazard_tracker.reset_episode()
-            view.physics_engine.reset_episode()
             delta.mutate("exhausted_candidate_goals", view.exhausted_candidate_goals).clear()
             delta.mutate("tested_action_positions", view.tested_action_positions).clear()
             delta.mutate("learned_goal_positions", view.learned_goal_positions).clear()
@@ -1246,7 +1198,6 @@ class HippocampalEpisodicCortex:
             delta.mutate("topology_doors", view.topology_doors).clear()
             delta.mutate("room_adjacency", view.room_adjacency).clear()
             delta.set("current_room_id", None)
-            view.surprise_engine.reset_ledger()
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
         elif new_context:
@@ -1259,7 +1210,6 @@ class HippocampalEpisodicCortex:
                 view.context_epoch, set()
             )
             view.hazard_tracker.reset_episode()
-            view.physics_engine.reset_episode()
             delta.mutate("exhausted_candidate_goals", view.exhausted_candidate_goals).clear()
             delta.mutate("tested_action_positions", view.tested_action_positions).clear()
             delta.mutate("learned_goal_positions", view.learned_goal_positions).clear()
@@ -1268,13 +1218,8 @@ class HippocampalEpisodicCortex:
             delta.mutate("topology_doors", view.topology_doors).clear()
             delta.mutate("room_adjacency", view.room_adjacency).clear()
             delta.set("current_room_id", None)
-            view.surprise_engine.reset_ledger()
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
-            view.collision_cones.reset_episode()
-            # Preserve mobile_threat_features across level transitions: the same
-            # enemy feature-types recur across levels, and forgetting them causes
-            # the agent to re-discover threats by collision.
             delta.set("_prev_oriented_threats", [])
             delta.set("prev_grid", None)
             delta.set("last_action", None)
@@ -1291,7 +1236,6 @@ class HippocampalEpisodicCortex:
             delta.mutate("tested_action_positions", view.tested_action_positions).clear()
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
-            view.collision_cones.reset_episode()
             delta.set("prev_grid", None)
             delta.set("last_action", None)
             delta.set("last_predicted_pos", None)
@@ -1340,7 +1284,6 @@ class HippocampalEpisodicCortex:
             view._avatar_controllability_evidence.clear()
             view.state_mutations.clear()
             delta.set("bilateral_state", None)
-            view.bilateral_integrator.active_bilateral_state = None
 
             view.entity_visit_counts.clear()
             view.position_visit_counts.clear()
@@ -1417,7 +1360,6 @@ class HippocampalEpisodicCortex:
             delta.mutate("topology_doors", view.topology_doors).clear()
             delta.mutate("room_adjacency", view.room_adjacency).clear()
             delta.set("current_room_id", None)
-            view.surprise_engine.reset_ledger()
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
             view.hazard_tracker.known_lethal_features.clear()
@@ -1447,7 +1389,6 @@ class HippocampalEpisodicCortex:
                 retain_inhibitions=is_same_context_retry,
             )
 
-        view.causal_cortex.reset_episode(retain_dynamics=retain_dynamics)
         view.acc_conflict_monitor.reset()
 
     def to_causal_predicate(self) -> CausalPredicate:
@@ -1461,11 +1402,9 @@ class HippocampalEpisodicCortex:
         )
 
     def export_causal_predicates(self) -> list[CausalPredicate]:
-        """Export all internal episodic traces, SWR replays, and analogies as causal predicates."""
+        """Export all internal episodic traces and SWR replays as causal predicates."""
         predicates = [self.to_causal_predicate()]
         predicates.extend(t.to_causal_predicate() for t in self.current_episode)
-        for m in self.analogy_engine.active_analogies.values():
-            predicates.append(m.to_causal_predicate())
         return predicates
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
@@ -1489,191 +1428,6 @@ class HippocampalEpisodicCortex:
 
 
 # ── W148: Falsifiable Cross-Task Analogy Engine ──────────────────────────────
-
-
-from enum import StrEnum
-
-
-class AnalogyStatus(StrEnum):
-    """Lifecycle state of an analogical schema transfer."""
-
-    TENTATIVE = "TENTATIVE"
-    CONFIRMED = "CONFIRMED"
-    REJECTED = "REJECTED"
-
-
-@dataclass
-class SchemaMorphism:
-    """Explicit relational schema mapping between source and target domains."""
-
-    source_domain: str
-    target_domain: str
-    predicate_mapping: dict[str, str]  # e.g. {"Key": "Switch", "Door": "Barrier"}
-    feature_mapping: dict[int, int] = field(default_factory=dict)
-    confidence: float = 0.5
-    status: AnalogyStatus = AnalogyStatus.TENTATIVE
-    counterexamples: int = 0
-    support_count: int = 0
-
-    def to_causal_predicate(self) -> CausalPredicate:
-        """Export relational schema morphism as a formal Pearl do(a) causal predicate."""
-        return CausalPredicate(
-            variable=f"schema_morphism:{self.source_domain}->{self.target_domain}",
-            operator="==",
-            value=str(self.status),
-            relation=f"conf:{self.confidence:.2f}:supp:{self.support_count}:ce:{self.counterexamples}",
-            target_entity=f"{self.source_domain}_to_{self.target_domain}",
-        )
-
-    def to_transaction_operations(self) -> list[TransactionOperation]:
-        """Convert schema morphism into transactional HCIR graph state mutations."""
-        node_id = f"schema_morphism_{self.source_domain}_{self.target_domain}"
-        return [
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=node_id,
-                node_data={
-                    "source_domain": self.source_domain,
-                    "target_domain": self.target_domain,
-                    "predicate_mapping": self.predicate_mapping,
-                    "feature_mapping": {str(k): v for k, v in self.feature_mapping.items()},
-                    "confidence": self.confidence,
-                    "status": str(self.status),
-                    "counterexamples": self.counterexamples,
-                    "support_count": self.support_count,
-                },
-            )
-        ]
-
-
-class FalsifiableAnalogyEngine:
-    """Cross-Task Analogy Engine with explicit structural mappings and rejection tests (W148).
-
-    Category-theoretic transfer alone is insufficient; every candidate analogy must:
-    1. Pass structural compatibility checks (matching entity arity and relational types).
-    2. Withstand empirical observation testing in the target environment.
-    3. Be immediately REJECTED if any source invariant is violated in the new context.
-    """
-
-    def __init__(self, refutation_threshold: int = 1) -> None:
-        self.refutation_threshold = refutation_threshold
-        self.active_analogies: dict[str, SchemaMorphism] = {}
-
-    def propose_analogy(
-        self,
-        source_domain: str,
-        target_domain: str,
-        predicate_mapping: dict[str, str],
-        feature_mapping: dict[int, int] | None = None,
-    ) -> SchemaMorphism:
-        """Register a tentative candidate analogy for empirical testing."""
-        analogy_id = f"{source_domain}__to__{target_domain}"
-        morphism = SchemaMorphism(
-            source_domain=source_domain,
-            target_domain=target_domain,
-            predicate_mapping=dict(predicate_mapping),
-            feature_mapping=dict(feature_mapping or {}),
-            status=AnalogyStatus.TENTATIVE,
-        )
-        self.active_analogies[analogy_id] = morphism
-        return morphism
-
-    def validate_structural_compatibility(
-        self,
-        morphism: SchemaMorphism,
-        target_entity_types: set[str],
-    ) -> bool:
-        """Rejection Predicate 1: Target context must contain mapped entity types."""
-        mapped_targets = set(morphism.predicate_mapping.values())
-        if not mapped_targets.issubset(target_entity_types):
-            morphism.status = AnalogyStatus.REJECTED
-            morphism.counterexamples += 1
-            logger.info(
-                "FalsifiableAnalogyEngine: Rejected analogy %s -> %s (missing entity types: %s)",
-                morphism.source_domain,
-                morphism.target_domain,
-                mapped_targets - target_entity_types,
-            )
-            return False
-        return True
-
-    def record_empirical_observation(
-        self,
-        analogy_id: str,
-        predicted_mutation: str,
-        actual_mutation: str,
-    ) -> bool:
-        """Rejection Predicate 2: Target state mutation must match transferred rule prediction."""
-        if analogy_id not in self.active_analogies:
-            return False
-
-        morphism = self.active_analogies[analogy_id]
-        if morphism.status == AnalogyStatus.REJECTED:
-            return False
-
-        if predicted_mutation == actual_mutation:
-            morphism.support_count += 1
-            morphism.confidence = min(0.99, morphism.confidence + 0.15)
-            if morphism.support_count >= 2:
-                morphism.status = AnalogyStatus.CONFIRMED
-            return True
-        else:
-            morphism.counterexamples += 1
-            morphism.confidence = max(0.01, morphism.confidence - 0.4)
-            if morphism.counterexamples >= self.refutation_threshold:
-                morphism.status = AnalogyStatus.REJECTED
-                logger.warning(
-                    "FalsifiableAnalogyEngine: Analogy %s REJECTED upon counterexample (predicted=%s, actual=%s)",
-                    analogy_id,
-                    predicted_mutation,
-                    actual_mutation,
-                )
-            return False
-
-    def is_analogy_active(self, analogy_id: str) -> bool:
-        """True if analogy has not been refuted and remains tentative or confirmed."""
-        if analogy_id not in self.active_analogies:
-            return False
-        m = self.active_analogies[analogy_id]
-        return m.status != AnalogyStatus.REJECTED and m.counterexamples == 0
-
-    def induce_structure_mapping_functor(
-        self,
-        source_entities: Sequence[SpatialEntity],
-        target_entities: Sequence[SpatialEntity],
-        source_domain: str = "source",
-        target_domain: str = "target",
-        source_subgoals: Sequence[Any] | None = None,
-        grid_shape: tuple[int, int] = (64, 64),
-    ) -> SchemaMorphism | None:
-        """Automatically induce a category-theoretic structure-mapping functor between domains."""
-        from hbllm.hcir.world.structure_mapping_functor import (
-            CategoryTheoreticStructureMappingEngine,
-        )
-
-        functor_res = CategoryTheoreticStructureMappingEngine.induce_functor(
-            source_entities=source_entities,
-            target_entities=target_entities,
-            source_domain=source_domain,
-            target_domain=target_domain,
-            source_subgoals=source_subgoals,
-            grid_shape=grid_shape,
-        )
-        if functor_res.alignment_score >= 0.50:
-            morphism = SchemaMorphism(
-                source_domain=source_domain,
-                target_domain=target_domain,
-                predicate_mapping=functor_res.role_mapping,
-                feature_mapping=functor_res.feature_mapping,
-                confidence=functor_res.alignment_score,
-                status=AnalogyStatus.CONFIRMED
-                if functor_res.is_homomorphic
-                else AnalogyStatus.TENTATIVE,
-            )
-            analogy_id = f"{source_domain}__to__{target_domain}"
-            self.active_analogies[analogy_id] = morphism
-            return morphism
-        return None
 
 
 @dataclass

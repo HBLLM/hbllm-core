@@ -17,10 +17,6 @@ from hbllm.benchmarks.substrate_profiler import (
     run_substrate_profile,
 )
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
-from hbllm.hcir.world.spatiotemporal_collision import (
-    ProjectedTrajectory,
-    SpatiotemporalCollisionCones,
-)
 
 try:
     import hbllm_hcir_graph as _rust_graph
@@ -95,27 +91,3 @@ class TestSubstrateAccelerationAndHotPaths:
             assert fallback_path[0] == start
             assert fallback_path[-1] == goal
             assert len(fallback_path) == len(path)
-
-    def test_spatiotemporal_collision_native_integration_and_fallback(self) -> None:
-        """Verify SpatiotemporalCollisionCones intercept prediction uses native sweep and falls back."""
-        cones = SpatiotemporalCollisionCones()
-        traj = ProjectedTrajectory(
-            entity_id="hazard_alpha",
-            feature_id=3,
-            initial_pos=(0, 5),
-            velocity=(1, 0),
-            positions=[(t, 5) for t in range(12)],
-        )
-        cones.projected_trajectories.append(traj)
-        cones.step_occupied_cells = {t: {(t, 5)} for t in range(12)}
-
-        # Direct execution
-        step = cones.predict_intercept_step(target_pos=(6, 5), max_horizon=10, clearance=0)
-        assert step == 6
-
-        # Fallback simulation with native disabled
-        with mock.patch("hbllm.hcir.world.spatiotemporal_collision._rust_graph", None):
-            fallback_step = cones.predict_intercept_step(
-                target_pos=(6, 5), max_horizon=10, clearance=0
-            )
-            assert fallback_step == 6

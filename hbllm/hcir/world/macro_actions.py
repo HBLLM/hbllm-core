@@ -1304,14 +1304,6 @@ def attribute_macro_action_outcome(
                 engine.working_memory.body_schema.register_resonance(tool_feat, barrier_feat)
                 engine.working_memory.body_schema.expend_tool(tool_feat)
                 engine.learned_barriers.discard((r, c))
-                if hasattr(engine, "causal_cortex"):
-                    engine.causal_cortex.attribute_macro_outcome(
-                        SpatialActionIntent.DROP,
-                        macro_action.receptacle_pos,
-                        tool_feat,
-                        barrier_feat,
-                        is_success=True,
-                    )
                 logger.info(
                     "Pearl do(a) causal attribution: tool %d cleared barrier %d at %s",
                     tool_feat,
@@ -1331,15 +1323,7 @@ def attribute_macro_action_outcome(
                 av_feats = engine.avatar_features or (
                     {engine.avatar_feature} if engine.avatar_feature is not None else None
                 )
-                attributor = getattr(
-                    engine,
-                    "remote_causal",
-                    getattr(
-                        get_engine_state_attr(engine, "causal_cortex", None),
-                        "causal_attributor",
-                        None,
-                    ),
-                )
+                attributor = getattr(engine, "remote_causal", None)
                 if attributor is not None:
                     attributor.record_transition(
                         prev_grid=prev_grid,
@@ -1964,34 +1948,6 @@ class MacroPlanSynthesizer:
                 curr_grid, list(available_actions), metadata={"engine": engine}
             ):
                 skill_plan = MacroActionPlan.from_skill(skill, engine, curr_grid, available_actions)
-                if skill_plan is not None and not skill_plan.is_empty():
-                    return skill_plan
-
-        # 0B-2. Query abstracted LibraryLearner & transferable macro skills
-        if getattr(engine, "library_learner", None) and hasattr(
-            engine, "query_transferable_skills"
-        ):
-            ll_ctx = {
-                "has_goal": bool(
-                    getattr(engine, "learned_goal_positions", None)
-                    or getattr(getattr(engine, "symbolic_theory", None), "goal_features", None)
-                ),
-                "has_cargo": bool(
-                    getattr(getattr(engine, "symbolic_theory", None), "cargo_features", None)
-                ),
-                "has_switches": bool(
-                    getattr(
-                        getattr(engine, "symbolic_theory", None), "conditional_affordances", None
-                    )
-                ),
-                "n_actions": len(available_actions),
-            }
-            for t_skill, _score, _src in engine.query_transferable_skills(
-                curr_grid, list(available_actions), metadata=ll_ctx, min_confidence=0.45
-            ):
-                skill_plan = MacroActionPlan.from_skill(
-                    t_skill, engine, curr_grid, available_actions
-                )
                 if skill_plan is not None and not skill_plan.is_empty():
                     return skill_plan
 

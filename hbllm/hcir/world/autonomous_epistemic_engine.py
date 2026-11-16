@@ -16,207 +16,12 @@ from __future__ import annotations
 import copy
 import logging
 from collections import deque
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hbllm.hcir.world.active_inference import HierarchicalActiveInferenceEngine
-    from hbllm.hcir.world.autonomous_learning import PointActuationAffordanceLearner
-    from hbllm.hcir.world.cortex_episodic import FalsifiableAnalogyEngine
-    from hbllm.hcir.world.cortex_perception import GibsonianAffordanceExtractor
-    from hbllm.hcir.world.counterfactual_simulation import (
-        CounterfactualComparison,
-        CounterfactualRegretEvaluator,
-    )
-    from hbllm.hcir.world.experimental.active_inference_efe import (
-        ExpectedFreeEnergyEvaluator,
-        ExpectedFreeEnergyScore,
-    )
-    from hbllm.hcir.world.experimental.amygdalar_threat_conditioning import (
-        AmygdalarThreatConditioningEngine,
-        ConditionedThreatStimulus,
-        DefensiveVigilanceState,
-    )
-    from hbllm.hcir.world.experimental.anterior_cingulate_effort_allocator import (
-        AnteriorCingulateEffortAllocator,
-        EffortAllocationDecision,
-    )
-    from hbllm.hcir.world.experimental.anterior_insular_timing import (
-        AnteriorInsularTimingEngine,
-        InteroceptivePacingState,
-    )
-    from hbllm.hcir.world.experimental.bilateral_coordination import (
-        BilateralCoordinateIntegrator,
-        BilateralState,
-    )
-    from hbllm.hcir.world.experimental.boundary_grid_phase_aligner import BoundaryGridPhaseAligner
-    from hbllm.hcir.world.experimental.cerebellar_microzone_adaptor import (
-        CerebellarMicrozoneAdaptor,
-        ClimbingFiberFeedback,
-    )
-    from hbllm.hcir.world.experimental.claustrum_interhemispheric import (
-        ClaustrumInterhemisphericIntegrator,
-        CrossModalSynchronyPacket,
-    )
-    from hbllm.hcir.world.experimental.claustrum_salience_conductor import (
-        ClaustrumSalienceConductor,
-        UnifiedPerceptualGestalt,
-    )
-    from hbllm.hcir.world.experimental.confidence_calibrator import ConfidenceCalibrator
-    from hbllm.hcir.world.experimental.dorsolateral_rule_abstraction import (
-        DorsolateralRuleAbstractionEngine,
-        RuleTransferResult,
-    )
-    from hbllm.hcir.world.experimental.entorhinal_border_cell import (
-        EntorhinalBorderCellEngine,
-        GridModuleRescalingResult,
-    )
-    from hbllm.hcir.world.experimental.entorhinal_grid_cortex import EntorhinalGridCortex
-    from hbllm.hcir.world.experimental.frontopolar_exploration_horizon import (
-        BranchSwitchDecision,
-        FrontopolarExplorationHorizonEngine,
-    )
-    from hbllm.hcir.world.experimental.global_neuronal_workspace import (
-        GlobalNeuronalWorkspace,
-        IgnitionEvent,
-    )
-    from hbllm.hcir.world.experimental.global_workspace_ignition import (
-        GlobalWorkspaceIgnitionEngine,
-    )
-    from hbllm.hcir.world.experimental.habenula_striatum_opponency import (
-        DualValueOpponencyCortex,
-        OpponencyValueState,
-    )
-    from hbllm.hcir.world.experimental.hippocampal_phase_precession import (
-        HippocampalPhasePrecessionEngine,
-        PhasePrecessionBurst,
-    )
-    from hbllm.hcir.world.experimental.hippocampal_replay import (
-        HippocampalPrioritizedReplayBuffer,
-        ReplayBatch,
-        ReplayTransition,
-    )
-    from hbllm.hcir.world.experimental.hippocampal_time_cell import (
-        HippocampalTimeCellEngine,
-        TimeIntervalState,
-    )
-    from hbllm.hcir.world.experimental.inferotemporal_shape_hasher import (
-        InferotemporalShapeHasher,
-        ShapeArchetypeSignature,
-    )
-    from hbllm.hcir.world.experimental.insula_allostasis import (
-        InteroceptiveAllostasisCortex,
-        InteroceptiveState,
-    )
-    from hbllm.hcir.world.experimental.lateral_prefrontal_switcher import (
-        LateralPrefrontalTaskSwitcher,
-        TaskArbitrationResult,
-    )
-    from hbllm.hcir.world.experimental.locus_coeruleus_noradrenaline import (
-        LocusCoeruleusNoradrenalineEngine,
-        NoradrenergicState,
-    )
-    from hbllm.hcir.world.experimental.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
-    from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
-    from hbllm.hcir.world.experimental.orbitofrontal_credit_assignment import (
-        CounterfactualCreditReport,
-        OrbitofrontalCreditAssignmentEngine,
-    )
-    from hbllm.hcir.world.experimental.parahippocampal_context import (
-        ParahippocampalContextEngine,
-        SpatialContextSchema,
-    )
-    from hbllm.hcir.world.experimental.parietal_foveated_attention import (
-        FoveatedSaliencyMap,
-        ParietalFoveatedAttentionEngine,
-    )
-    from hbllm.hcir.world.experimental.parietal_potential_field import (
-        ParietalPotentialFieldNavigator,
-        PotentialFieldVector,
-    )
-    from hbllm.hcir.world.experimental.pedunculopontine_locomotor import (
-        LocomotorDriveCommand,
-        PedunculopontineLocomotorEngine,
-    )
-    from hbllm.hcir.world.experimental.prefrontal_blame_attribution import (
-        PlanAttributionReport,
-        PrefrontalBlameAttributor,
-    )
-    from hbllm.hcir.world.experimental.pulvinar_attention_router import (
-        PulvinarAttentionRouter,
-        PulvinarRoutingState,
-    )
-    from hbllm.hcir.world.experimental.relational_graph_matcher import (
-        ObjectCorrespondence,
-    )
-    from hbllm.hcir.world.experimental.relational_graph_matcher import (
-        RelationalGraphMatcher as VentralRelationalGraphMatcher,
-    )
-    from hbllm.hcir.world.experimental.retrosplenial_heading import (
-        AllocentricHeadingVector,
-        RetrosplenialHeadingEngine,
-    )
-    from hbllm.hcir.world.experimental.retrosplenial_landmark_anchor import (
-        LandmarkRecalibrationResult,
-        RetrosplenialLandmarkAnchorEngine,
-    )
-    from hbllm.hcir.world.experimental.somatosensory_haptic import (
-        HapticAffordanceFeedback,
-        SomatosensoryHapticEngine,
-    )
-    from hbllm.hcir.world.experimental.spatial_distance_transform import (
-        EuclideanDistanceTransformResult,
-        SpatialDistanceTransformEngine,
-    )
-    from hbllm.hcir.world.experimental.subicular_boundary_vector import (
-        BoundaryVectorMap,
-        SubicularBoundaryVectorEngine,
-    )
-    from hbllm.hcir.world.experimental.subthalamic_drift_diffusion import (
-        DriftDiffusionDecision,
-        SubthalamicDriftDiffusionEngine,
-    )
-    from hbllm.hcir.world.experimental.subthalamic_threshold_escalator import (
-        SubthalamicThresholdEscalator,
-    )
-    from hbllm.hcir.world.experimental.superior_colliculus_arbiter import (
-        SaccadeTarget,
-        SuperiorColliculusTargetArbiter,
-    )
-    from hbllm.hcir.world.experimental.superposition_planner import (
-        SuperpositionEvaluationResult,
-        SuperpositionPlanner,
-    )
-    from hbllm.hcir.world.experimental.thalamic_reticular_gating import (
-        SensoryShieldingState,
-        ThalamicReticularGatingEngine,
-    )
-    from hbllm.hcir.world.experimental.thalamocortical_binding import (
-        BoundFeatureBundle,
-        ThalamocorticalBindingEngine,
-    )
-    from hbllm.hcir.world.experimental.ventral_premotor_resonator import (
-        AffordanceResonancePattern,
-        VentralPremotorAffordanceResonator,
-    )
-    from hbllm.hcir.world.experimental.ventral_tegmental_curiosity import (
-        EpistemicInformationGain,
-        VentralTegmentalCuriosityEngine,
-    )
-    from hbllm.hcir.world.experimental.ventrolateral_motor_inhibition import (
-        ResponseInhibitionCommand,
-        VentrolateralMotorInhibitionEngine,
-    )
-    from hbllm.hcir.world.experimental.ventromedial_somatic_marker import (
-        SomaticAffectiveBias,
-        VentromedialSomaticMarkerEngine,
-    )
-    from hbllm.hcir.world.parietal_coordinate_transform import (
-        RetrosplenialCoordinateTransformer,
-    )
-    from hbllm.hcir.world.skill_program_synthesizer import SkillProgramSynthesizer
     from hbllm.hcir.world_kernel import WorldKernel
 
 import uuid
@@ -239,30 +44,17 @@ from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.query import GraphQuery
-from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.stores import EventType
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TaskFrame, TieredWorkspace, WorkspaceTier
-from hbllm.hcir.world.active_inference import ActiveInferenceEngine
 from hbllm.hcir.world.anterior_cingulate_conflict import AnteriorCingulateConflictMonitor
 from hbllm.hcir.world.causal_discovery import (
-    BaseCausalDiscoveryEngine,
     BeliefTransitionEvent,
     CausalHypothesis,
     CausalPredicate,
 )
-from hbllm.hcir.world.cerebellar_phase_clock import (
-    CerebellarPhaseClock,
-    CerebellarSmithPredictor,
-    PhaseGateDecision,
-)
-from hbllm.hcir.world.counterfactual_simulation import (
-    CounterfactualComparison,
-    CounterfactualDeadlockDetector,
-)
-from hbllm.hcir.world.experimental import ablated as _ablated
 from hbllm.hcir.world.extended_body_schema import (
     ExtendedBodySchema,
 )
@@ -271,33 +63,8 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoalStack,
     SubgoalType,
 )
-from hbllm.hcir.world.frontopolar_subgoal_tree import (
-    RecursiveSubgoalTree,
-)
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
-from hbllm.hcir.world.hierarchical_precision_control import (
-    HierarchicalPrecisionController,
-)
-from hbllm.hcir.world.inferotemporal_segmentation import (
-    InferotemporalSegmentationEngine,
-)
-from hbllm.hcir.world.interactive_action_discovery import (
-    ActionBudgetGovernor,
-    ActionPreconditionLearner,
-    ConstrainedActiveExperimenter,
-    UngroundedActionDiscoveryEngine,
-    UnknownMechanicsLedger,
-)
-from hbllm.hcir.world.interactive_goal_evaluator import (
-    BayesianGoalInductionEngine,
-    DynamicProgressEstimator,
-    GoalConfirmationGate,
-    ModelBasedDeadlockDetector,
-)
-from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
-from hbllm.hcir.world.kinetic_stream import (
-    DorsalKineticStream,
-)
+from hbllm.hcir.world.interactive_action_discovery import ActionBudgetGovernor
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
@@ -305,12 +72,6 @@ from hbllm.hcir.world.motor_calibration import (
 from hbllm.hcir.world.object_state_graph import (
     ObjectStateGraphPlanner,
     RelationalGraphMatcher,
-)
-from hbllm.hcir.world.parietal_coordinate_transform import (
-    EgocentricCoordinate,
-    GeometricModelSelector,
-    HeadingOrientation,
-    ParietalCoordinateTransformer,
 )
 from hbllm.hcir.world.percept import (
     BasePerceptionAdapter,
@@ -320,40 +81,13 @@ from hbllm.hcir.world.percept import (
     TerminalSignal,
 )
 from hbllm.hcir.world.prediction_budget import PredictionBudget
-from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
-from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
 from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory
 from hbllm.hcir.world.remote_causal_attribution import (
     RemoteCausalAttributor,
 )
-from hbllm.hcir.world.representation_expansion import ConceptFormationEngine
-from hbllm.hcir.world.rule_induction import (
-    RuleInductionEngine,
-)
-from hbllm.hcir.world.spatial_containment import RoomDoor, RoomTopologyExtractor
-from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
-from hbllm.hcir.world.spatiotemporal_tracker import (
-    EntityLineageNode,
-    LifecycleTrackingResult,
-    MorphologicalDeformationTracker,
-    SpatiotemporalHazardTracker,
-)
-from hbllm.hcir.world.surprise_engine import SurpriseEngine, SurpriseEvaluation
-from hbllm.hcir.world.temporal_dependency_tracker import (
-    DelayedEffectModeler,
-    DualStoreMemoryManager,
-    EnvironmentChangeDetector,
-    LongHorizonDependencyGraph,
-    ObjectiveLearningEfficiencyTracker,
-)
+from hbllm.hcir.world.spatial_containment import RoomDoor
+from hbllm.hcir.world.spatiotemporal_tracker import SpatiotemporalHazardTracker
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
-from hbllm.hcir.world.world_state_snapshot import (
-    ReversibilityEngine,
-    StateDifferenceComputer,
-    TemporalStateBuffer,
-    TransitionSequenceModel,
-    WorldStateSnapshot,
-)
 from hbllm.perception.saccadic_attention import SaccadicAttentionSystem
 
 logger = logging.getLogger(__name__)
@@ -421,7 +155,6 @@ from hbllm.hcir.world.cortex_assimilator import (
 )
 from hbllm.hcir.world.cortex_causal import (
     ActionAffordance,
-    CausalInductionCortex,
     GovernedSetView,
     HCIRSymbolicWorldTheory,
 )
@@ -444,7 +177,6 @@ from hbllm.hcir.world.cortex_perception import (
     EpistemicObservationDiff,
     OrientedThreat,
     PerceptionEngine,
-    TopologicalContour,
 )
 from hbllm.hcir.world.cortex_planner import (
     MentalSimulationPlanner,
@@ -452,18 +184,6 @@ from hbllm.hcir.world.cortex_planner import (
 )
 from hbllm.hcir.world.cortical_stage import WorkingMemoryDelta
 from hbllm.hcir.world.engine_state import CognitiveContext, EngineState
-from hbllm.hcir.world.metacognitive_agency_cortex import (
-    MetacognitiveAgencyCortex,
-    MetacognitiveAssessment,
-)
-from hbllm.hcir.world.neuromodulatory_system import (
-    NeuromodulatorLevels,
-    NeuromodulatorySystem,
-)
-from hbllm.hcir.world.predictive_coding_cortex import (
-    HierarchicalPredictiveCodingCortex,
-    PredictiveCodingSnapshot,
-)
 
 
 class _LazyFaculty:
@@ -488,199 +208,20 @@ class _LazyFaculty:
         return value
 
 
-def _autonomous_learning_factory(class_name: str) -> Callable[[], Any]:
-    """Deferred factory for ``autonomous_learning`` faculties (avoids a circular import)."""
-
-    def _make() -> Any:
-        import hbllm.hcir.world.autonomous_learning as learning
-
-        return getattr(learning, class_name)()
-
-    return _make
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 7. Master Autonomous Epistemic Engine Orchestrator
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 class AutonomousEpistemicEngine:
     """Domain-agnostic cognitive engine for autonomous exploration, hypothesis testing,
     and forward mental simulation.
     """
 
+    MIN_PROBES_PER_ACTION: int = 3
+    consecutive_pacing_steps: int = 0
+
     # ── Lazily provisioned faculties ─────────────────────────────────────────
     # Faculties that are not on the per-step decision path are instantiated on
     # first access only, so an engine instance does not pay construction and
     # memory cost for capabilities a given episode never exercises.
-    active_experimenter: ConstrainedActiveExperimenter = _LazyFaculty(ConstrainedActiveExperimenter)
-    causal_discovery_engine: BaseCausalDiscoveryEngine = _LazyFaculty(BaseCausalDiscoveryEngine)
-    causal_planner: Any = _LazyFaculty(_autonomous_learning_factory("CausalTheoryPlanner"))
-    change_detector: EnvironmentChangeDetector = _LazyFaculty(EnvironmentChangeDetector)
-    concept_engine: ConceptFormationEngine = _LazyFaculty(ConceptFormationEngine)
-    coordinate_transformer: ParietalCoordinateTransformer = _LazyFaculty(
-        ParietalCoordinateTransformer
-    )
-    deadlock_detector: CounterfactualDeadlockDetector = _LazyFaculty(CounterfactualDeadlockDetector)
-    dependency_graph: LongHorizonDependencyGraph = _LazyFaculty(LongHorizonDependencyGraph)
-    difference_computer: StateDifferenceComputer = _LazyFaculty(StateDifferenceComputer)
-    efficiency_tracker: ObjectiveLearningEfficiencyTracker = _LazyFaculty(
-        ObjectiveLearningEfficiencyTracker
-    )
-    geometric_selector: GeometricModelSelector = _LazyFaculty(GeometricModelSelector)
-    goal_gate: GoalConfirmationGate = _LazyFaculty(GoalConfirmationGate)
-    knowledge_transfer: Any = _LazyFaculty(
-        _autonomous_learning_factory("CrossGameKnowledgeTransfer")
-    )
-    meta_governor: Any = _LazyFaculty(_autonomous_learning_factory("MetaLearningGovernor"))
-    model_deadlock_detector: ModelBasedDeadlockDetector = _LazyFaculty(ModelBasedDeadlockDetector)
-    precondition_learner: ActionPreconditionLearner = _LazyFaculty(ActionPreconditionLearner)
-    progress_estimator: DynamicProgressEstimator = _LazyFaculty(DynamicProgressEstimator)
     relational_matcher: RelationalGraphMatcher = _LazyFaculty(RelationalGraphMatcher)
-    reversibility_engine: ReversibilityEngine = _LazyFaculty(ReversibilityEngine)
-    rule_induction_engine: RuleInductionEngine = _LazyFaculty(RuleInductionEngine)
-    subgoal_tree: RecursiveSubgoalTree = _LazyFaculty(RecursiveSubgoalTree)
-    unknown_mechanics: UnknownMechanicsLedger = _LazyFaculty(UnknownMechanicsLedger)
     visual_symmetry: VisualSymmetryAnalyzer = _LazyFaculty(VisualSymmetryAnalyzer)
-    whole_grid_predictor: WholeGridPredictor = _LazyFaculty(WholeGridPredictor)
-
-    # ── Ablated faculties (lazy no-op stubs; absent from vars(engine)) ──────
-    # Only active faculties live in vars(engine). Experimental/unused faculties
-    # from WP2/P2-6 resolve lazily via __getattr__ into _ablated_cache, while
-    # preserving static type annotations and experimental.restore()/restore_all().
-    allostasis_cortex: InteroceptiveAllostasisCortex | Any
-    affordance_extractor: GibsonianAffordanceExtractor | Any
-    amygdala_threat: AmygdalarThreatConditioningEngine | Any
-    analogy_engine: FalsifiableAnalogyEngine | Any
-    anterior_insula_timing: AnteriorInsularTimingEngine | Any
-    bilateral_integrator: BilateralCoordinateIntegrator | Any
-    blame_attributor: PrefrontalBlameAttributor | Any
-    boundary_grid_aligner: BoundaryGridPhaseAligner | Any
-    cerebellar_microzone: CerebellarMicrozoneAdaptor | Any
-    claustrum_conductor: ClaustrumSalienceConductor | Any
-    claustrum_interhemispheric: ClaustrumInterhemisphericIntegrator | Any
-    confidence_calibrator: ConfidenceCalibrator | Any
-    counterfactual_regret: CounterfactualRegretEvaluator | Any
-    distance_transform_engine: SpatialDistanceTransformEngine | Any
-    drift_diffusion: SubthalamicDriftDiffusionEngine | Any
-    efe_evaluator: ExpectedFreeEnergyEvaluator | Any
-    effort_allocator: AnteriorCingulateEffortAllocator | Any
-    entorhinal_border: EntorhinalBorderCellEngine | Any
-    entorhinal_grid_cortex: EntorhinalGridCortex | Any
-    entropy_monitor: Any
-    exploration_horizon: FrontopolarExplorationHorizonEngine | Any
-    foveated_attention: ParietalFoveatedAttentionEngine | Any
-    gnw: GlobalNeuronalWorkspace | Any
-    hierarchical_active_inference: HierarchicalActiveInferenceEngine | Any
-    hippocampal_replay: HippocampalPrioritizedReplayBuffer | Any
-    hippocampal_time: HippocampalTimeCellEngine | Any
-    locus_coeruleus: LocusCoeruleusNoradrenalineEngine | Any
-    ofc_counterfactual: OrbitofrontalCreditAssignmentEngine | Any
-    optical_projector: OpticalRayProjector | Any
-    parahippocampal_context: ParahippocampalContextEngine | Any
-    phase_precession: HippocampalPhasePrecessionEngine | Any
-    point_actuation_learner: PointActuationAffordanceLearner | Any
-    potential_field_navigator: ParietalPotentialFieldNavigator | Any
-    ppn_locomotor: PedunculopontineLocomotorEngine | Any
-    premotor_resonator: VentralPremotorAffordanceResonator | Any
-    pulvinar_router: PulvinarAttentionRouter | Any
-    retrosplenial_anchor: RetrosplenialLandmarkAnchorEngine | Any
-    retrosplenial_heading: RetrosplenialHeadingEngine | Any
-    retrosplenial_transformer: RetrosplenialCoordinateTransformer | Any
-    rule_abstraction: DorsolateralRuleAbstractionEngine | Any
-    shape_hasher: InferotemporalShapeHasher | Any
-    somatic_marker: VentromedialSomaticMarkerEngine | Any
-    somatosensory_haptic: SomatosensoryHapticEngine | Any
-    stn_escalator: SubthalamicThresholdEscalator | Any
-    subicular_bvc: SubicularBoundaryVectorEngine | Any
-    superior_colliculus: SuperiorColliculusTargetArbiter | Any
-    superposition_planner: SuperpositionPlanner | Any
-    task_switcher: LateralPrefrontalTaskSwitcher | Any
-    thalamocortical_binding: ThalamocorticalBindingEngine | Any
-    trn_gating: ThalamicReticularGatingEngine | Any
-    value_opponency: DualValueOpponencyCortex | Any
-    ventral_relational_matcher: VentralRelationalGraphMatcher | Any
-    vl_motor_inhibition: VentrolateralMotorInhibitionEngine | Any
-    vta_curiosity: VentralTegmentalCuriosityEngine | Any
-    workspace_ignition: GlobalWorkspaceIgnitionEngine | Any
-
-    _ABLATED_FACULTIES: dict[str, str] = {
-        "optical_projector": "OpticalRayProjector",
-        "bilateral_integrator": "BilateralCoordinateIntegrator",
-        "hierarchical_active_inference": "HierarchicalActiveInferenceEngine",
-        "efe_evaluator": "ExpectedFreeEnergyEvaluator",
-        "affordance_extractor": "GibsonianAffordanceExtractor",
-        "retrosplenial_transformer": "RetrosplenialCoordinateTransformer",
-        "analogy_engine": "FalsifiableAnalogyEngine",
-        "counterfactual_regret": "CounterfactualRegretEvaluator",
-        "gnw": "GlobalNeuronalWorkspace",
-        "thalamocortical_binding": "ThalamocorticalBindingEngine",
-        "superposition_planner": "SuperpositionPlanner",
-        "entorhinal_grid_cortex": "EntorhinalGridCortex",
-        "ventral_relational_matcher": "VentralRelationalGraphMatcher",
-        "allostasis_cortex": "InteroceptiveAllostasisCortex",
-        "claustrum_conductor": "ClaustrumSalienceConductor",
-        "distance_transform_engine": "SpatialDistanceTransformEngine",
-        "value_opponency": "DualValueOpponencyCortex",
-        "potential_field_navigator": "ParietalPotentialFieldNavigator",
-        "shape_hasher": "InferotemporalShapeHasher",
-        "drift_diffusion": "SubthalamicDriftDiffusionEngine",
-        "foveated_attention": "ParietalFoveatedAttentionEngine",
-        "blame_attributor": "PrefrontalBlameAttributor",
-        "hippocampal_replay": "HippocampalPrioritizedReplayBuffer",
-        "task_switcher": "LateralPrefrontalTaskSwitcher",
-        "retrosplenial_anchor": "RetrosplenialLandmarkAnchorEngine",
-        "phase_precession": "HippocampalPhasePrecessionEngine",
-        "exploration_horizon": "FrontopolarExplorationHorizonEngine",
-        "superior_colliculus": "SuperiorColliculusTargetArbiter",
-        "cerebellar_microzone": "CerebellarMicrozoneAdaptor",
-        "premotor_resonator": "VentralPremotorAffordanceResonator",
-        "effort_allocator": "AnteriorCingulateEffortAllocator",
-        "subicular_bvc": "SubicularBoundaryVectorEngine",
-        "somatic_marker": "VentromedialSomaticMarkerEngine",
-        "pulvinar_router": "PulvinarAttentionRouter",
-        "parahippocampal_context": "ParahippocampalContextEngine",
-        "locus_coeruleus": "LocusCoeruleusNoradrenalineEngine",
-        "somatosensory_haptic": "SomatosensoryHapticEngine",
-        "entorhinal_border": "EntorhinalBorderCellEngine",
-        "amygdala_threat": "AmygdalarThreatConditioningEngine",
-        "vta_curiosity": "VentralTegmentalCuriosityEngine",
-        "retrosplenial_heading": "RetrosplenialHeadingEngine",
-        "trn_gating": "ThalamicReticularGatingEngine",
-        "rule_abstraction": "DorsolateralRuleAbstractionEngine",
-        "hippocampal_time": "HippocampalTimeCellEngine",
-        "vl_motor_inhibition": "VentrolateralMotorInhibitionEngine",
-        "claustrum_interhemispheric": "ClaustrumInterhemisphericIntegrator",
-        "anterior_insula_timing": "AnteriorInsularTimingEngine",
-        "ofc_counterfactual": "OrbitofrontalCreditAssignmentEngine",
-        "ppn_locomotor": "PedunculopontineLocomotorEngine",
-        "boundary_grid_aligner": "BoundaryGridPhaseAligner",
-        "stn_escalator": "SubthalamicThresholdEscalator",
-        "workspace_ignition": "GlobalWorkspaceIgnitionEngine",
-        "confidence_calibrator": "ConfidenceCalibrator",
-        "point_actuation_learner": "PointActuationAffordanceLearner",
-        "entropy_monitor": "DeliberationEntropyMonitor",
-    }
-
-    if not TYPE_CHECKING:
-
-        def __getattr__(self, name: str) -> Any:
-            cls_name = type(self)._ABLATED_FACULTIES.get(name)
-            if cls_name is None:
-                raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
-            try:
-                cache: dict[str, Any] = object.__getattribute__(self, "_ablated_cache")
-            except AttributeError:
-                cache = {}
-                object.__setattr__(self, "_ablated_cache", cache)
-            stub = cache.get(name)
-            if stub is None:
-                stub = _ablated(name, cls_name)
-                cache[name] = stub
-            return stub
-
-    MIN_PROBES_PER_ACTION: int = 3
-    consecutive_pacing_steps: int = 0
 
     @classmethod
     def for_tests(
@@ -724,7 +265,6 @@ class AutonomousEpistemicEngine:
             services = KernelServices.create_default(HCIRWorkspaceState())
 
         self.exploration_budget = exploration_budget
-        self._ablated_cache: dict[str, Any] = {}
         # Deterministic decide-path RNG (WP0.1 replay determinism)
         self._rng = __import__("numpy").random.default_rng(seed)
         self.enable_logging = enable_logging
@@ -761,7 +301,6 @@ class AutonomousEpistemicEngine:
         self._avatar_pos: tuple[int, int] | None = None
         self._avatar_size: int = 1
         self._effector_kinetics_mode: int | None = None
-        self._latest_lifecycle_result: Any | None = None
         self._last_surprise: float = 0.0
 
         # Intensional Neuro-Symbolic World Theory (SSOT for domain ontology)
@@ -779,7 +318,6 @@ class AutonomousEpistemicEngine:
         self.body_schema: ExtendedBodySchema = self.working_memory.body_schema
         self.habenular_ior: HabenularEpisodicIOR = self.working_memory.habenular_ior
         self.remote_causal: RemoteCausalAttributor = self.working_memory.remote_causal
-        self.it_segmenter: InferotemporalSegmentationEngine = self.working_memory.it_segmenter
         self.acc_conflict: AnteriorCingulateConflictMonitor = self.working_memory.acc_conflict
 
         # Motor calibration & dynamics
@@ -802,22 +340,17 @@ class AutonomousEpistemicEngine:
         # Biological hazard tracker & intuitive physics
         self.hazard_tracker: SpatiotemporalHazardTracker = SpatiotemporalHazardTracker()
         self.saccadic_attention: SaccadicAttentionSystem = SaccadicAttentionSystem()
-        self.physics_engine: IntuitivePhysicsEngine = IntuitivePhysicsEngine()
 
         # Faculty C: Dorsal Visual Stream (Area MT/V5) Kinetic Figure-Ground Segregation
-        self.dorsal_kinetic_stream: DorsalKineticStream = DorsalKineticStream()
 
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
-        self._bilateral_state: BilateralState | None = None
+        self._bilateral_state: Any | None = None
 
         # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
-        self.cerebellar_clock: CerebellarPhaseClock = CerebellarPhaseClock()
-        self.smith_predictor: CerebellarSmithPredictor = CerebellarSmithPredictor()
         self.pending_phase_wait_steps: int = 0
         self.consecutive_pacing_steps: int = 0
 
         # Faculty: Premotor Spatiotemporal Collision Cones & Trajectory Extrapolation
-        self.collision_cones: SpatiotemporalCollisionCones = SpatiotemporalCollisionCones()
 
         # Faculty: Orbitofrontal Cortex (OFC) Counterfactual Deadlock Detector
 
@@ -827,11 +360,6 @@ class AutonomousEpistemicEngine:
         )
 
         # Faculty: vmPFC Causal Induction Cortex (Pearl's do(a) intervention & tool resonance)
-        self.causal_cortex: CausalInductionCortex = CausalInductionCortex(
-            symbolic_theory=self.symbolic_theory,
-            causal_attributor=self.remote_causal,
-            body_schema=self.body_schema,
-        )
 
         # Faculty: Anterior Cingulate Cortex (ACC) Motor Conflict Monitor
         self.acc_conflict_monitor: AnteriorCingulateConflictMonitor = (
@@ -839,7 +367,6 @@ class AutonomousEpistemicEngine:
         )
 
         # Room topology & doorway subgoal reasoning (spatial containment)
-        self.room_topology: RoomTopologyExtractor = RoomTopologyExtractor()
 
         # Object-Centric Macro-Action State Graph Planner (5 Executive Directives)
         self.object_planner: ObjectStateGraphPlanner = ObjectStateGraphPlanner()
@@ -850,60 +377,22 @@ class AutonomousEpistemicEngine:
         self.current_room_id: int | None = None
 
         # Confidence-scaled predictive coding surprise engine
-        self.surprise_engine: SurpriseEngine = SurpriseEngine(surprise_threshold=0.15)
         self.last_surprise: float = 0.0
-        self.last_surprise_eval: SurpriseEvaluation | None = None
+        self.last_surprise_eval: Any | None = None
 
         # Free energy active inference decision selection
-        self.active_inference: ActiveInferenceEngine = ActiveInferenceEngine(
-            w_reward=0.35,
-            w_info_gain=0.30,
-            w_future_val=0.15,
-            w_risk=0.10,
-            w_cost=0.10,
-        )
-        self.precision_controller: HierarchicalPrecisionController = (
-            HierarchicalPrecisionController()
-        )
         self.prediction_budget: PredictionBudget = PredictionBudget()
 
         # Faculty: Prefrontal Deliberation Engine & Cognitive Arbitration
         self.deliberation_engine: PrefrontalDeliberationEngine = PrefrontalDeliberationEngine()
 
         # Faculty: Non-Rigid Topological Deformation Tracker & Entity Lineage (W059, W014)
-        self.deformation_tracker: MorphologicalDeformationTracker = (
-            MorphologicalDeformationTracker()
-        )
-        self.latest_lifecycle_result: LifecycleTrackingResult | None = None
-        self.entity_lineage_graph: dict[str, EntityLineageNode] = {}
 
         # Track 2: Four Neuromodulatory Systems (Dopamine, Noradrenaline, Acetylcholine, Serotonin)
-        self.neuromodulatory_system: NeuromodulatorySystem = NeuromodulatorySystem()
 
         # Faculty: Hierarchical Predictive Coding Cortical Columns (Rao & Ballard / Friston)
-        self.predictive_coding_cortex: HierarchicalPredictiveCodingCortex = (
-            HierarchicalPredictiveCodingCortex()
-        )
 
         # Faculty: BA10 Metacognitive Confidence Calibration & Agency Monitor (Fleming & Dolan)
-        self.metacognitive_agency_cortex: MetacognitiveAgencyCortex = MetacognitiveAgencyCortex()
-
-        # Faculty: Declarative Neuro-Symbolic Skill Synthesis & DSL Program Induction (DreamCoder)
-        from hbllm.hcir.world.skill_program_synthesizer import SkillProgramSynthesizer
-
-        self.skill_synthesizer: SkillProgramSynthesizer = SkillProgramSynthesizer(
-            min_support_traces=1
-        )
-
-        # Faculty: DreamCoder Wake/Sleep Library Learning & Macro Skill Abstraction (AGI Gap 2)
-        from hbllm.hcir.world.library_learning import LibraryLearner
-
-        self.library_learner: LibraryLearner = LibraryLearner()
-
-        # Faculty: Recursive Value Induction & Backward Causal Credit Propagation (AGI Gap 5)
-        from hbllm.hcir.world.recursive_value_induction import RecursiveValueInducer
-
-        self.recursive_value_inducer: RecursiveValueInducer = RecursiveValueInducer()
 
         # Faculty: Working Concept Store & Analogical Schema Retrieval (AGI Gap 6)
         from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
@@ -915,42 +404,19 @@ class AutonomousEpistemicEngine:
 
         self.schema_inducer: SchemaInducer = SchemaInducer()
 
-        # Faculty: Theory of Mind & Inverse Planning Social Cognition (AGI Gap 10)
-        from hbllm.hcir.world.social_cognition import SocialCognitionEngine
-
-        self.social_cognition: SocialCognitionEngine = SocialCognitionEngine()
-
         # Faculty: Temporal Option Discovery & Bottleneck Cuts (AGI Gap 11)
         from hbllm.hcir.world.option_discovery import OptionDiscoveryEngine
 
         self.option_discovery: OptionDiscoveryEngine = OptionDiscoveryEngine()
 
-        # Faculty: Value-Uncertainty Deferral, Provenance & Corrigibility (AGI Gap 15)
-        from hbllm.hcir.kernel.safety_corrigibility import (
-            CorrigibilityMonitor,
-            GoalProvenanceTracker,
-            ValueUncertaintyArbiter,
-        )
+        # Faculty: Corrigibility Monitor (AGI Gap 15)
+        from hbllm.hcir.kernel.safety_corrigibility import CorrigibilityMonitor
 
-        self.value_uncertainty_arbiter: ValueUncertaintyArbiter = ValueUncertaintyArbiter()
-        self.goal_provenance: GoalProvenanceTracker = GoalProvenanceTracker()
         self.corrigibility_monitor: CorrigibilityMonitor = CorrigibilityMonitor()
 
-        # Faculty: Spiking Neural Network Temporal Dynamics & Limit Cycle Predictor
-        self.snn_predictor: SNNTemporalPredictor = SNNTemporalPredictor()
-
-        # Round 19 Faculty: Medial Prefrontal Cortex (mPFC) Schema Induction & Abstraction (Euston / McKenzie)
-        from hbllm.hcir.world.medial_prefrontal_schema import MedialPrefrontalSchemaEngine
-
-        self.mpfc_schema_engine: MedialPrefrontalSchemaEngine = MedialPrefrontalSchemaEngine(
-            match_threshold=0.35
-        )
-
         # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
-        self.temporal_buffer: TemporalStateBuffer = TemporalStateBuffer()
 
         # Faculty: Transition Sequence Model & Reversibility Engine (W048-W050)
-        self.transition_sequence_model: TransitionSequenceModel = TransitionSequenceModel()
 
         # Faculty: Interventional Causal Discovery Engine (W061-W070)
 
@@ -963,18 +429,13 @@ class AutonomousEpistemicEngine:
 
         # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
         # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
-        self.action_discovery: UngroundedActionDiscoveryEngine = UngroundedActionDiscoveryEngine()
         self.budget_governor: ActionBudgetGovernor = ActionBudgetGovernor(
             max_budget=self.exploration_budget
         )
 
         # Module 2: Open-Set Goal Induction & Reachability Deadlock Pruning (W168-W170, W174, W175, W181, W182)
-        self.goal_induction: BayesianGoalInductionEngine = BayesianGoalInductionEngine()
 
         # Module 3: Temporal Dynamics, Dual-Store Memory & Objective Efficiency (W167, W172, W173, W176-W180, W189, W190)
-        self.delayed_effects: DelayedEffectModeler = DelayedEffectModeler()
-        self.delayed_effect_modeler: DelayedEffectModeler = self.delayed_effects
-        self.dual_memory: DualStoreMemoryManager = DualStoreMemoryManager()
 
         self.bg_feature: int = 0
         self.hypotheses: list[CausalHypothesis] = []
@@ -1015,9 +476,7 @@ class AutonomousEpistemicEngine:
             engine=self,
         )
         # Goal Arbiter (WP10, Gap 5)
-        from hbllm.hcir.world.goal_arbiter import GoalArbiter
 
-        self.goal_arbiter: GoalArbiter = GoalArbiter()
         self.active_arbitrated_goal: Any | None = None
         self.grounding_bridge: Any | None = None
         self._entity_cache: dict[tuple[Any, ...], list[SpatialEntity]] = {}
@@ -1040,7 +499,6 @@ class AutonomousEpistemicEngine:
                 services=self.services,
                 transaction_manager=self.transaction_manager,
                 symbolic_theory=self.symbolic_theory,
-                surprise_engine=getattr(self, "surprise_engine", None),
             )
         self.cortical_pipeline.grounding_bridge = self.grounding_bridge
         return self.grounding_bridge
@@ -1918,154 +1376,6 @@ class AutonomousEpistemicEngine:
         # Clear transient pending buffer
         return committed_tx
 
-    def submit_to_workspace(
-        self,
-        source_cortex: str,
-        salience: float,
-        content: dict[str, Any],
-        epistemic_uncertainty: float = 0.0,
-    ) -> IgnitionEvent | None:
-        """Submit a candidate representation to the Global Neuronal Workspace.
-
-        Triggers non-linear ignition if salience exceeds the dynamic threshold.
-        """
-        self.gnw.submit_candidate(
-            source_cortex=source_cortex,
-            salience=salience,
-            content=content,
-            epistemic_uncertainty=epistemic_uncertainty,
-        )
-        return self.gnw.compete_and_ignite()
-
-    def modulate_cognition(
-        self,
-        reward_prediction_error: float = 0.0,
-        unexpected_surprise: float = 0.0,
-        prediction_accuracy: float = 1.0,
-        risk_level: float = 0.0,
-    ) -> NeuromodulatorLevels:
-        """Step the neuromodulatory systems (DA, NE, ACh, 5-HT) and adapt active inference parameters."""
-        if reward_prediction_error != 0.0:
-            self.neuromodulatory_system.update_reward_prediction_error(reward_prediction_error)
-        if unexpected_surprise != 0.0:
-            self.neuromodulatory_system.update_unexpected_uncertainty(unexpected_surprise)
-        if prediction_accuracy != 1.0:
-            self.neuromodulatory_system.update_expected_uncertainty(prediction_accuracy)
-        if risk_level != 0.0:
-            self.neuromodulatory_system.update_temporal_stress(risk_level)
-        self.neuromodulatory_system.step_homeostatic_decay()
-        params = self.neuromodulatory_system.get_effective_hyperparameters()
-        self.hierarchical_active_inference.sensory_precision = params["sensory_precision"]
-        return self.neuromodulatory_system.current
-
-    def _on_conscious_ignition(self, event: IgnitionEvent) -> None:
-        """Handle conscious global broadcasts ignited by the Global Neuronal Workspace."""
-        winner_cortex = event.winner.source_cortex
-        if winner_cortex in ("loss_monitor", "surprise_engine"):
-            if self._phase in (EpistemicPhase.MENTAL_SIMULATION, EpistemicPhase.EXPLOITATION):
-                logger.info(
-                    "AutonomousEpistemicEngine: GNW broadcast from [%s] triggered executive reset to REPLANNING",
-                    winner_cortex,
-                )
-                self.transition_to_phase(EpistemicPhase.REPLANNING)
-
-    def synchronize_and_bind_entities(
-        self,
-        feature_entities: list[dict[str, Any]],
-        target_features: dict[str, Any] | None = None,
-    ) -> list[BoundFeatureBundle]:
-        """Apply Kuramoto phase synchronization and TRN gating to bind perceptual features."""
-        bundles = self.thalamocortical_binding.bind_features_oscillatory(feature_entities)
-        if target_features:
-            bundles = self.thalamocortical_binding.apply_trn_attentional_gating(
-                bundles, target_features
-            )
-        return bundles
-
-    def evaluate_superposition_actions(
-        self,
-        candidate_actions: list[Any],
-        simulator_fn: Any,
-    ) -> list[SuperpositionEvaluationResult]:
-        """Evaluate actions across multiple counterfactual world hypotheses in superposition."""
-        return self.superposition_planner.evaluate_superposition_actions(
-            candidate_actions=candidate_actions,
-            simulator_fn=simulator_fn,
-        )
-
-    def step_predictive_coding(
-        self,
-        sensory_inputs: dict[str, float] | None = None,
-        abstract_priors: dict[str, float] | None = None,
-    ) -> PredictiveCodingSnapshot:
-        """Execute a bidirectional predictive coding cycle across cortical column layers."""
-        return self.predictive_coding_cortex.step_hierarchical_cycle(
-            sensory_inputs=sensory_inputs,
-            abstract_priors=abstract_priors,
-        )
-
-    def path_integrate_odometry(
-        self,
-        delta_r: float,
-        delta_c: float,
-    ) -> tuple[int, int]:
-        """Perform continuous attractor odometric path integration across multi-scale grid cells."""
-        return self.entorhinal_grid_cortex.path_integrate_step(delta_r, delta_c)
-
-    def assess_metacognitive_agency(
-        self,
-        action_id: Any,
-        raw_confidence: float,
-        predicted_avatar_pos: tuple[int, int] | None,
-        observed_avatar_pos: tuple[int, int] | None,
-        observed_other_changes_count: int = 0,
-        empirical_success: bool | None = None,
-    ) -> MetacognitiveAssessment:
-        """Evaluate sense of agency and calibrate confidence to govern simulation depth."""
-        agency = self.metacognitive_agency_cortex.compute_agency_attribution(
-            predicted_avatar_pos=predicted_avatar_pos,
-            observed_avatar_pos=observed_avatar_pos,
-            observed_other_changes_count=observed_other_changes_count,
-        )
-        return self.metacognitive_agency_cortex.calibrate_confidence_and_govern_compute(
-            action_id=action_id,
-            raw_confidence=raw_confidence,
-            agency_score=agency,
-            empirical_success=empirical_success,
-        )
-
-    def synthesize_procedural_skills_from_traces(
-        self,
-        min_support: int = 2,
-    ) -> list[Any]:
-        """Induce reusable declarative skills from recurring winning episode traces."""
-        self.skill_synthesizer.min_support_traces = min_support
-        return self.skill_synthesizer.induce_all_recurrent_skills()
-
-    def update_ballistic_particles(
-        self,
-        particles: list[dict[str, Any]],
-        grid: np.ndarray,
-        barrier_features: set[int] | None = None,
-        absorbing_features: set[int] | None = None,
-        deflection_mode: str = "specular_normal",
-        horizon: int | None = None,
-    ) -> None:
-        """Project ballistic particle kinematic trajectories into spatiotemporal collision cones."""
-        barriers = (
-            barrier_features
-            if barrier_features is not None
-            else self.symbolic_theory.barrier_features
-        )
-        self.collision_cones.update_ballistic_particle_trajectories(
-            particles=particles,
-            grid=grid,
-            barrier_features=set(barriers),
-            absorbing_features=absorbing_features,
-            deflection_mode=deflection_mode,
-            horizon=horizon,
-        )
-
     async def execute_subgoal_program_with_checkpoint(
         self,
         stream: InstructionStream,
@@ -2231,24 +1541,6 @@ class AutonomousEpistemicEngine:
         self.evidence_provenance_log.append(record)
         return record
 
-    def record_motor_efference_copy(
-        self, action: Any, expected_delta: tuple[int, int]
-    ) -> tuple[int, int]:
-        """Buffer efference copy into the Cerebellar Smith Predictor ahead of sensory afferents."""
-        cur = self.avatar_pos or (0, 0)
-        return self.smith_predictor.record_efference_copy(
-            step=self.step_counter,
-            action_id=action,
-            expected_delta=expected_delta,
-            current_pos=cur,
-        )
-
-    def get_forward_compensated_position(self) -> tuple[int, int] | None:
-        """Return zero-latency forward compensated position if efference copy is unconfirmed."""
-        if self.avatar_pos is None:
-            return None
-        return self.smith_predictor.get_forward_compensated_position(self.avatar_pos)
-
     def recall_episodic_attractor_plan(
         self, sensory_cue: np.ndarray, match_threshold: float = 0.35
     ) -> tuple[list[Any] | None, float]:
@@ -2306,225 +1598,6 @@ class AutonomousEpistemicEngine:
             conflict_level=conflict_level,
         )
 
-    def to_egocentric_coordinate(
-        self,
-        target_pos: tuple[int, int],
-        heading: HeadingOrientation | None = None,
-    ) -> EgocentricCoordinate | None:
-        """Convert allocentric target to agent-centered egocentric coordinate."""
-        if self.avatar_pos is None:
-            return None
-        h = heading or self.retrosplenial_transformer.infer_heading_from_displacement(
-            getattr(self, "prev_avatar_pos", None), self.avatar_pos
-        )
-        return self.retrosplenial_transformer.allo_to_ego(target_pos, self.avatar_pos, h)
-
-    def to_allocentric_coordinate(
-        self,
-        ego_coord: EgocentricCoordinate | tuple[int, int],
-        heading: HeadingOrientation | None = None,
-    ) -> tuple[int, int] | None:
-        """Convert agent-relative egocentric coordinate to world allocentric position."""
-        if self.avatar_pos is None:
-            return None
-        h = heading or self.retrosplenial_transformer.infer_heading_from_displacement(
-            getattr(self, "prev_avatar_pos", None), self.avatar_pos
-        )
-        return self.retrosplenial_transformer.ego_to_allo(ego_coord, self.avatar_pos, h)
-
-    def evaluate_policy_expected_free_energy(
-        self,
-        candidate_transitions: dict[Any, tuple[int, int]],
-        grid: np.ndarray | None = None,
-        goal_confidence: float = 0.0,
-    ) -> list[ExpectedFreeEnergyScore]:
-        """Rank candidate actions using Karl Friston's Expected Free Energy decomposition."""
-        curr_g = grid if grid is not None else getattr(self, "last_observed_grid", None)
-        if curr_g is None:
-            curr_g = np.zeros((10, 10), dtype=int)
-
-        uncertainty = 0.5
-        unconfirmed = 0
-        if self.symbolic_theory is not None:
-            unconfirmed = len(getattr(self.symbolic_theory, "unconfirmed_hypotheses", []))
-            uncertainty = min(1.0, max(0.1, unconfirmed / 5.0))
-
-        return self.efe_evaluator.rank_candidate_actions(
-            candidate_transitions=candidate_transitions,
-            current_pos=self.avatar_pos,
-            grid=curr_g,
-            goal_positions=self.learned_goal_positions,
-            position_visit_counts=self.working_memory.position_visit_counts,
-            unconfirmed_hypotheses_count=unconfirmed,
-            goal_confidence=goal_confidence,
-            world_theory_uncertainty=uncertainty,
-        )
-
-    def evaluate_counterfactual_regret(
-        self,
-        actual_action: Any,
-        actual_reward: float,
-        actual_next_pos: tuple[int, int] | None,
-        candidate_actions: Sequence[Any],
-        grid: np.ndarray | None = None,
-    ) -> list[CounterfactualComparison]:
-        """Compute counterfactual regret across unchosen candidate actions (Pearl Level 3)."""
-        curr_g = grid if grid is not None else getattr(self, "last_observed_grid", None)
-        if curr_g is None:
-            curr_g = np.zeros((10, 10), dtype=int)
-
-        barriers: set[tuple[int, int]] = set(self.learned_barriers)
-        lethals: set[tuple[int, int]] = set()
-        if hasattr(self, "context_hazards") and self.context_epoch is not None:
-            lethals = self.context_hazards.get(self.context_epoch, set())
-
-        return self.counterfactual_regret.evaluate_counterfactuals(
-            actual_action=actual_action,
-            actual_reward=actual_reward,
-            current_pos=self.avatar_pos,
-            actual_next_pos=actual_next_pos,
-            candidate_actions=candidate_actions,
-            grid=curr_g,
-            goal_positions=self.learned_goal_positions,
-            static_barriers=barriers,
-            lethal_positions=lethals,
-            action_deltas=self.action_deltas,
-        )
-
-    def extract_affordance_field(
-        self,
-        grid: np.ndarray,
-        bg_color: int | None = None,
-    ) -> np.ndarray:
-        """Extract dense 2D Gibsonian affordance matrix across the sensory lattice."""
-        bg = bg_color if bg_color is not None else self.estimate_background(grid)
-        goals = self.learned_goal_positions
-        goal_feats = {
-            int(grid[r, c]) for r, c in goals if 0 <= r < grid.shape[0] and 0 <= c < grid.shape[1]
-        }
-        barrier_feats: set[int] = set()
-        if self.symbolic_theory is not None:
-            for p in self.symbolic_theory.barrier_predicates:
-                if isinstance(p.value, int):
-                    barrier_feats.add(p.value)
-        return self.affordance_extractor.extract_affordance_map(
-            grid=grid,
-            bg_color=bg,
-            goal_features=goal_feats,
-            barrier_features=barrier_feats,
-        )
-
-    def extract_topological_contours(
-        self,
-        grid: np.ndarray,
-        bg_color: int | None = None,
-    ) -> list[TopologicalContour]:
-        """Extract exterior boundaries and interior cavity loops for all entities."""
-        bg = bg_color if bg_color is not None else self.estimate_background(grid)
-        return self.affordance_extractor.extract_topological_contours(grid=grid, bg_color=bg)
-
-    def should_permit_deliberation(self, estimated_cost: float = 5.0) -> tuple[bool, str]:
-        """Check whether interoceptive allostasis permits expensive forward mental simulation."""
-        return self.allostasis_cortex.should_permit_deliberation(estimated_cost=estimated_cost)
-
-    def consume_allostatic_energy(
-        self, activity_type: str, scale: float = 1.0
-    ) -> InteroceptiveState:
-        """Deduct metabolic energy and update interoceptive allostasis state."""
-        state = self.allostasis_cortex.consume_energy(activity_type=activity_type, scale=scale)
-        self._record_predicate(state)
-        return state
-
-    def bind_multimodal_percept(
-        self,
-        grid_shape: tuple[int, int] | None = None,
-        visual_entities: list[SpatialEntity] | None = None,
-        hazard_map: dict[tuple[int, int], float] | None = None,
-        goal_coords: list[tuple[int, int]] | None = None,
-        affordance_fields: dict[str, Any] | None = None,
-    ) -> UnifiedPerceptualGestalt:
-        """Bind visual, hazard, and goal streams via claustrum conductor into a unified gestalt."""
-        last_g = getattr(self, "last_observed_grid", None)
-        shape = (
-            grid_shape
-            if grid_shape is not None
-            else ((int(last_g.shape[0]), int(last_g.shape[1])) if last_g is not None else (10, 10))
-        )
-        goals = goal_coords if goal_coords is not None else list(self.learned_goal_positions)
-        gestalt = self.claustrum_conductor.bind_modalities(
-            grid_shape=(int(shape[0]), int(shape[1])),
-            visual_entities=visual_entities,
-            hazard_map=hazard_map,
-            goal_coords=goals,
-            affordance_fields=affordance_fields,
-            agent_coord=self.avatar_pos,
-        )
-        self._record_predicate(gestalt)
-        return gestalt
-
-    def compute_spatial_distance_field(
-        self,
-        obstacles: set[tuple[int, int]] | None = None,
-        grid_shape: tuple[int, int] | None = None,
-    ) -> EuclideanDistanceTransformResult:
-        """Compute exact 2D Euclidean Distance Transform clearance and repulsive gradient fields."""
-        last_g = getattr(self, "last_observed_grid", None)
-        shape = (
-            grid_shape
-            if grid_shape is not None
-            else ((int(last_g.shape[0]), int(last_g.shape[1])) if last_g is not None else (10, 10))
-        )
-        obs = obstacles if obstacles is not None else set(self.learned_barriers)
-        result = self.distance_transform_engine.compute_edt(
-            grid_shape=(int(shape[0]), int(shape[1])),
-            obstacles=obs,
-        )
-        self._record_predicate(result)
-        return result
-
-    def update_value_opponency(
-        self,
-        state_key: tuple[int, int] | str,
-        reward_plus: float,
-        punishment_minus: float,
-        next_state_key: tuple[int, int] | str | None = None,
-    ) -> OpponencyValueState:
-        """Update dual appetitive and aversive values and register opponency predicate."""
-        state = self.value_opponency.update_transition(
-            state_key=state_key,
-            reward_plus=reward_plus,
-            punishment_minus=punishment_minus,
-            next_state_key=next_state_key,
-        )
-        self._record_predicate(state)
-        return state
-
-    def compute_navigational_force(
-        self,
-        goal_pos: tuple[int, int],
-        agent_pos: tuple[int, int] | None = None,
-        obstacles: set[tuple[int, int]] | None = None,
-        grid_shape: tuple[int, int] | None = None,
-    ) -> PotentialFieldVector:
-        """Synthesize attractive and repulsive potential forces into a single navigation vector."""
-        pos = agent_pos or self.avatar_pos or (0, 0)
-        edt_result = self.compute_spatial_distance_field(obstacles=obstacles, grid_shape=grid_shape)
-        vec = self.potential_field_navigator.compute_navigation_vector(
-            agent_pos=pos,
-            goal_pos=goal_pos,
-            edt_result=edt_result,
-        )
-        self._record_predicate(vec)
-        return vec
-
-    def hash_entity_shape(
-        self, coordinates: set[tuple[int, int]] | list[tuple[int, int]]
-    ) -> ShapeArchetypeSignature:
-        """Compute translation- and scale-invariant Hu moments and canonical archetype hash."""
-        sig = self.shape_hasher.compute_signature(coordinates)
-        self._record_predicate(sig)
-        return sig
-
     def extract_minimal_causal_skeleton(
         self, graph: CognitiveGraph | None = None
     ) -> CognitiveGraph:
@@ -2539,57 +1612,6 @@ class AutonomousEpistemicEngine:
             target_graph = CognitiveGraph(False)
         return algorithms.transitive_reduction_subgraph(target_graph)
 
-    def step_drift_diffusion(
-        self,
-        evidence_rates: dict[Any, float],
-        conflict_level: float = 0.0,
-    ) -> DriftDiffusionDecision:
-        """Accumulate drift-diffusion evidence modulated by STN hyperdirect conflict boundary."""
-        decision = self.drift_diffusion.step_accumulation(
-            evidence_rates=evidence_rates,
-            conflict_level=conflict_level,
-        )
-        self._record_predicate(decision)
-        return decision
-
-    def foveate_sensory_lattice(
-        self,
-        grid: np.ndarray | None = None,
-        gaze_center: tuple[int, int] | None = None,
-    ) -> FoveatedSaliencyMap:
-        """Apply parietal multi-scale foveation (fovea, parafovea, periphery) to sensory grid."""
-        curr_g = grid if grid is not None else getattr(self, "last_observed_grid", None)
-        if curr_g is None:
-            curr_g = np.zeros((10, 10), dtype=int)
-        center = gaze_center or self.avatar_pos or (curr_g.shape[0] // 2, curr_g.shape[1] // 2)
-        goals = list(self.learned_goal_positions) if hasattr(self, "learned_goal_positions") else []
-        foveated = self.foveated_attention.foveate_grid(
-            grid=curr_g,
-            gaze_center=center,
-            secondary_anchors=goals,
-        )
-        self._record_predicate(foveated)
-        return foveated
-
-    def attribute_plan_failure(
-        self,
-        subgoal_trace: list[dict[str, Any]],
-        failure_condition: str = "dead_end",
-    ) -> PlanAttributionReport:
-        """Perform Pearl-Halpern counterfactual blame attribution across executed subgoals."""
-        hazards = set()
-        if hasattr(self, "context_hazards") and self.context_epoch is not None:
-            hazards = self.context_hazards.get(self.context_epoch, set())
-        barriers = set(self.learned_barriers) if hasattr(self, "learned_barriers") else set()
-        report = self.blame_attributor.attribute_plan_failure(
-            subgoal_trace=subgoal_trace,
-            failure_condition=failure_condition,
-            lethal_hazards=hazards,
-            blocked_targets=barriers,
-        )
-        self._record_predicate(report)
-        return report
-
     def extract_geodesic_spine(
         self, graph: CognitiveGraph | None = None
     ) -> tuple[CognitiveGraph, float]:
@@ -2603,97 +1625,6 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return algorithms.minimum_spanning_tree_subgraph(target_graph)
-
-    def record_replay_transition(
-        self,
-        state: dict[str, Any],
-        action: Any,
-        reward: float,
-        next_state: dict[str, Any],
-        done: bool,
-        td_error: float = 0.0,
-        surprise: float = 0.0,
-        metadata: dict[str, Any] | None = None,
-    ) -> ReplayTransition:
-        """Record an episodic transition into hippocampal prioritized replay memory."""
-        trans = self.hippocampal_replay.add(
-            state=state,
-            action=action,
-            reward=reward,
-            next_state=next_state,
-            done=done,
-            td_error=td_error,
-            surprise=surprise,
-            timestamp=float(self.step_counter),
-            metadata=metadata,
-        )
-        return trans
-
-    def sample_prioritized_replay(
-        self, batch_size: int = 16, beta: float | None = None
-    ) -> ReplayBatch:
-        """Sample prioritized transitions with importance-sampling bias weights."""
-        return self.hippocampal_replay.sample(batch_size=batch_size, beta=beta)
-
-    def arbitrate_cognitive_task_set(
-        self,
-        hazard_distance: float | None = None,
-        goal_distance: float | None = None,
-        manipulable_adjacent: bool = False,
-        collectible_adjacent: bool = False,
-        epistemic_uncertainty: float = 0.0,
-        cognitive_load: float = 0.0,
-    ) -> TaskArbitrationResult:
-        """Arbitrate active LPFC task set (NAVIGATE, INTERACT, AVOID, COLLECT, EXPLORE)."""
-        affinities = self.task_switcher.evaluate_affinities(
-            working_memory=self.working_memory,
-            hazard_distance=hazard_distance,
-            goal_distance=goal_distance,
-            manipulable_adjacent=manipulable_adjacent,
-            collectible_adjacent=collectible_adjacent,
-            epistemic_uncertainty=epistemic_uncertainty,
-        )
-        result = self.task_switcher.arbitrate(
-            affinities=affinities,
-            cognitive_load=cognitive_load,
-            timestamp=float(self.step_counter),
-        )
-        if self.symbolic_theory is not None:
-            self.symbolic_theory.record_causal_predicate(
-                CausalPredicate(
-                    variable="active_task_set",
-                    operator="==",
-                    value=result.active_task.value,
-                    relation="lpfc_task_arbitration",
-                    target_entity="avatar",
-                )
-            )
-        return result
-
-    def recalibrate_spatial_drift_with_landmarks(
-        self,
-        odometry_pos: tuple[int, int],
-        landmark_observations: list[tuple[str, tuple[int, int]]],
-    ) -> LandmarkRecalibrationResult:
-        """Recalibrate dead-reckoning position and entorhinal coordinates using visual landmarks."""
-        result = self.retrosplenial_anchor.recalibrate(
-            odometry_pos=odometry_pos,
-            landmark_observations=landmark_observations,
-        )
-        if result.has_drift_correction:
-            if self.avatar_pos == odometry_pos:
-                self.avatar_pos = result.corrected_position
-            if self.symbolic_theory is not None:
-                self.symbolic_theory.record_causal_predicate(
-                    CausalPredicate(
-                        variable="landmark_recalibration",
-                        operator="==",
-                        value=f"drift:({result.drift_vector[0]:.2f},{result.drift_vector[1]:.2f})",
-                        relation="rsc_landmark_anchor",
-                        target_entity="avatar",
-                    )
-                )
-        return result
 
     def compute_all_pairs_geodesics(
         self,
@@ -2710,53 +1641,6 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return algorithms.all_pairs_shortest_paths(target_graph, weight_attr=weight_attribute)
-
-    def compress_trajectory_phase_precession(
-        self,
-        positions: list[tuple[int, int]],
-        actions: list[Any],
-        duration_s: float = 2.0,
-    ) -> PhasePrecessionBurst:
-        """Compress spatial trajectory and actions into a theta-gamma oscillatory burst."""
-        burst = self.phase_precession.encode_trajectory_burst(
-            positions=positions,
-            actions=actions,
-            behavioral_duration_s=duration_s,
-        )
-        self._record_predicate(burst)
-        return burst
-
-    def evaluate_counterfactual_branch_switch(self) -> BranchSwitchDecision:
-        """Evaluate BA10 counterfactual branches and execute switch if advantageous."""
-        decision = self.exploration_horizon.evaluate_branch_switch()
-        if decision is not None and getattr(decision, "should_switch", False):
-            self.exploration_horizon.execute_branch_switch(decision)
-            self._record_predicate(decision)
-        return decision
-
-    def arbitrate_saccadic_target(
-        self,
-        visual_saliency: np.ndarray | None = None,
-        goal_positions: list[tuple[int, int]] | None = None,
-        obstacle_clearance: np.ndarray | None = None,
-    ) -> SaccadeTarget | None:
-        """Generate SC multisensory topographic priority map and select primary saccade target."""
-        if visual_saliency is None:
-            visual_saliency = np.zeros((10, 10), dtype=np.float64)
-        goals = (
-            goal_positions
-            if goal_positions is not None
-            else list(getattr(self, "learned_goal_positions", []))
-        )
-        priority_map = self.superior_colliculus.build_priority_map(
-            visual_saliency=visual_saliency,
-            goal_positions=goals,
-            obstacle_clearance=obstacle_clearance,
-            avatar_pos=self.avatar_pos,
-        )
-        target = self.superior_colliculus.select_primary_saccade_target(priority_map)
-        self._record_predicate(target)
-        return target
 
     def find_graph_bottlenecks_and_bridges(
         self, graph: CognitiveGraph | None = None
@@ -2784,67 +1668,6 @@ class AutonomousEpistemicEngine:
             target_graph = CognitiveGraph(False)
         return algorithms.is_biconnected(target_graph)
 
-    def adapt_cerebellar_motor_outcome(
-        self,
-        action_id: Any,
-        state: dict[str, Any],
-        actual_displacement: tuple[float, float],
-        actual_latency_ms: float = 10.0,
-    ) -> ClimbingFiberFeedback:
-        """Adapt cerebellar microzone forward model Purkinje weights using climbing fiber feedback."""
-        feedback = self.cerebellar_microzone.adapt_from_feedback(
-            action_id=action_id,
-            current_state=state,
-            actual_displacement=actual_displacement,
-            actual_latency_ms=actual_latency_ms,
-            timestamp=float(self.step_counter),
-        )
-        self._record_predicate(feedback)
-        return feedback
-
-    def observe_external_affordance_interaction(
-        self,
-        entity_id: str,
-        entity_role: str,
-        initial_pos: tuple[int, int],
-        final_pos: tuple[int, int],
-        target_id: str,
-        target_role: str,
-        state_mutation: dict[str, Any],
-    ) -> AffordanceResonancePattern | None:
-        """Process observed external interaction and deduce vicarious causal mechanics."""
-        pattern = self.premotor_resonator.observe_interaction(
-            entity_id=entity_id,
-            entity_role=entity_role,
-            initial_pos=initial_pos,
-            final_pos=final_pos,
-            target_entity_id=target_id,
-            target_role=target_role,
-            state_mutation=state_mutation,
-        )
-        self._record_predicate(pattern)
-        return pattern
-
-    def allocate_cognitive_deliberation_effort(
-        self,
-        action_values: dict[Any, float],
-        hazard_distance: float | None = None,
-        state_familiarity: float = 1.0,
-        energy_reserve: float = 100.0,
-    ) -> EffortAllocationDecision:
-        """Dynamically regulate forward search depth and simulation budgets using ACC EVC theory."""
-        profile = self.effort_allocator.compute_conflict_profile(
-            action_values=action_values,
-            hazard_distance=hazard_distance,
-            state_familiarity=state_familiarity,
-        )
-        decision = self.effort_allocator.allocate_effort(
-            profile=profile,
-            energy_reserve=energy_reserve,
-        )
-        self._record_predicate(decision)
-        return decision
-
     def compute_network_max_flow_min_cut(
         self,
         source: str,
@@ -2865,45 +1688,6 @@ class AutonomousEpistemicEngine:
             target_graph, source, sink, capacity_attr=capacity_attribute
         )
 
-    def compute_subicular_boundary_map(
-        self,
-        boundary_grid: np.ndarray,
-        avatar_pos: tuple[int, int] = (0, 0),
-    ) -> BoundaryVectorMap:
-        """Compute egocentric-to-allocentric boundary vector map around avatar (Hartley-Burgess)."""
-        bvc_map = self.subicular_bvc.compute_bvc_activations(
-            avatar_pos=avatar_pos,
-            boundary_grid=boundary_grid,
-        )
-        self._record_predicate(bvc_map)
-        return bvc_map
-
-    def evaluate_somatic_marker_bias(
-        self,
-        candidate_actions: list[Any],
-        projected_state_hashes: dict[Any, int],
-    ) -> SomaticAffectiveBias:
-        """Evaluate pre-deliberative somatic gut-feeling biases and visceral alarms (Damasio-Bechara)."""
-        bias = self.somatic_marker.evaluate_somatic_bias(
-            candidate_actions=candidate_actions,
-            projected_state_hashes=projected_state_hashes,
-        )
-        self._record_predicate(bias)
-        return bias
-
-    def update_pulvinar_routing(
-        self,
-        cognitive_load: float,
-        threat_urgency: float = 0.0,
-    ) -> PulvinarRoutingState:
-        """Regulate cortico-cortical transthalamic information transfer bandwidth (Saalmann-Kastner)."""
-        routing_state = self.pulvinar_router.update_routing(
-            cognitive_load=cognitive_load,
-            threat_urgency=threat_urgency,
-        )
-        self._record_predicate(routing_state)
-        return routing_state
-
     def extract_minimal_feedback_arc_set(
         self,
         graph: CognitiveGraph | None = None,
@@ -2919,43 +1703,6 @@ class AutonomousEpistemicEngine:
             target_graph = CognitiveGraph(False)
         return algorithms.feedback_arc_set(target_graph)
 
-    def classify_spatial_context(
-        self,
-        boundary_grid: np.ndarray,
-    ) -> SpatialContextSchema:
-        """Classify environmental envelope into an archetypal spatial schema (Epstein-Bar)."""
-        schema = self.parahippocampal_context.analyze_environmental_envelope(boundary_grid)
-        self._record_predicate(schema)
-        return schema
-
-    def update_noradrenergic_gain(
-        self,
-        immediate_utility: float,
-        progress_made: bool,
-    ) -> NoradrenergicState:
-        """Calibrate LC exploration-exploitation regime and softmax temperature (Aston-Jones-Cohen)."""
-        state = self.locus_coeruleus.update_gain_state(
-            immediate_utility=immediate_utility,
-            progress_made=progress_made,
-        )
-        self._record_predicate(state)
-        return state
-
-    def process_haptic_surface_feedback(
-        self,
-        position: tuple[int, int],
-        expected_displacement: tuple[float, float],
-        actual_displacement: tuple[float, float],
-    ) -> HapticAffordanceFeedback:
-        """Infer surface friction, drag, and traction efficiency from kinesthetic error (Craig-Kaas)."""
-        feedback = self.somatosensory_haptic.process_kinesthetic_feedback(
-            position=position,
-            expected_displacement=expected_displacement,
-            actual_displacement=actual_displacement,
-        )
-        self._record_predicate(getattr(feedback, "inferred_profile", None))
-        return feedback
-
     def condense_graph_scc_metagraph(
         self,
         graph: CognitiveGraph | None = None,
@@ -2970,49 +1717,6 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return algorithms.condense_scc_metagraph(target_graph)
-
-    def rescale_grid_modules_from_borders(
-        self,
-        boundary_grid: np.ndarray,
-        avatar_pos: tuple[int, int],
-    ) -> GridModuleRescalingResult:
-        """Evaluate entorhinal border cell firing and rescale grid module wavelengths (Solstad-Barry)."""
-        rescaling = self.entorhinal_border.evaluate_borders_and_rescaling(
-            boundary_grid=boundary_grid,
-            avatar_pos=avatar_pos,
-        )
-        self._record_predicate(rescaling)
-        return rescaling
-
-    def condition_threat_stimulus(
-        self,
-        stimulus_key: str,
-        aversive_magnitude: float,
-    ) -> ConditionedThreatStimulus:
-        """Rapidly potentiate amygdalar threat association (CS -> US) (LeDoux-Phelps)."""
-        cs = self.amygdala_threat.associate_threat(
-            stimulus_key=stimulus_key,
-            aversive_magnitude=aversive_magnitude,
-        )
-        return cs
-
-    def evaluate_defensive_vigilance(
-        self,
-        present_stimuli: list[str],
-    ) -> DefensiveVigilanceState:
-        """Evaluate amygdalar sensory threat cues and trigger defensive vigilance mode (LeDoux-Phelps)."""
-        state = self.amygdala_threat.evaluate_sensory_vigilance(present_stimuli)
-        self._record_predicate(state)
-        return state
-
-    def compute_epistemic_curiosity_bonus(
-        self,
-        state_key: str,
-    ) -> EpistemicInformationGain:
-        """Compute VTA dopaminergic epistemic information gain and curiosity bonus (Schultz-Friston)."""
-        gain = self.vta_curiosity.record_visit(state_key)
-        self._record_predicate(gain)
-        return gain
 
     def compute_graph_eulerian_inspection_tour(
         self,
@@ -3045,59 +1749,6 @@ class AutonomousEpistemicEngine:
             target_graph = CognitiveGraph(False)
         return algorithms.chinese_postman_tour(target_graph, weight_attr=weight_attribute)
 
-    def update_allocentric_heading(
-        self,
-        omega_rad: float,
-        dt: float = 1.0,
-    ) -> AllocentricHeadingVector:
-        """Integrate self-motion angular velocity into head direction ring attractor (Taube-Burgess)."""
-        vec = self.retrosplenial_heading.integrate_angular_velocity(omega_rad=omega_rad, dt=dt)
-        self._record_predicate(vec)
-        return vec
-
-    def recalibrate_heading_from_landmark(
-        self,
-        observed_bearing_rad: float,
-        landmark_true_bearing_rad: float,
-        kalman_gain: float = 0.40,
-    ) -> AllocentricHeadingVector:
-        """Recalibrate heading against visual landmark bearing innovation (Taube-Burgess)."""
-        vec = self.retrosplenial_heading.recalibrate_from_landmark(
-            observed_bearing_rad=observed_bearing_rad,
-            landmark_true_bearing_rad=landmark_true_bearing_rad,
-            kalman_gain=kalman_gain,
-        )
-        self._record_predicate(vec)
-        return vec
-
-    def apply_trn_sensory_shielding(
-        self,
-        attended_modality: str,
-        conflict_level: float = 0.0,
-    ) -> SensoryShieldingState:
-        """Modulate TRN inhibitory gating to shield primary task modalities (Crick-Halassa)."""
-        state = self.trn_gating.modulate_sensory_shielding(
-            attended_modality=attended_modality,
-            conflict_level=conflict_level,
-        )
-        self._record_predicate(state)
-        return state
-
-    def induce_and_transfer_abstract_rules(
-        self,
-        antecedents: dict[str, Any],
-        action: str | None = None,
-    ) -> RuleTransferResult:
-        """Induce relational rule schema (if action provided) and evaluate zero-shot transfer (Badre-D'Esposito)."""
-        if action is not None:
-            self.rule_abstraction.induce_rule_schema(
-                abstract_antecedents=antecedents,
-                successful_action=action,
-            )
-        result = self.rule_abstraction.evaluate_rule_transfer(current_state_features=antecedents)
-        self._record_predicate(result)
-        return result
-
     def compute_graph_dominating_set(
         self,
         graph: CognitiveGraph | None = None,
@@ -3128,67 +1779,6 @@ class AutonomousEpistemicEngine:
             target_graph = CognitiveGraph(False)
         return algorithms.maximum_independent_set(target_graph)
 
-    def track_temporal_interval(
-        self,
-        interval_id: str,
-        duration: float,
-        dt: float = 0.0,
-    ) -> TimeIntervalState:
-        """Track temporal distance cells across a delayed interval (MacDonald-Eichenbaum)."""
-        if interval_id not in self.hippocampal_time._intervals:
-            self.hippocampal_time.register_interval(interval_id=interval_id, duration=duration)
-        if dt > 0.0:
-            states = self.hippocampal_time.step(dt=dt, interval_id=interval_id)
-            state = states[interval_id]
-        else:
-            state = self.hippocampal_time.get_interval_state(
-                interval_id
-            ) or self.hippocampal_time._compute_state(interval_id)
-        self._record_predicate(state)
-        return state
-
-    def evaluate_motor_response_inhibition(
-        self,
-        intended_action: str | int,
-        conflict_level: float = 0.0,
-        risk_score: float = 0.0,
-        time_to_impact: float = float("inf"),
-        active_conditions: set[str] | list[str] | None = None,
-    ) -> ResponseInhibitionCommand:
-        """Evaluate vlPFC motor rule retrieval and response inhibition (Aron-Wiecki)."""
-        cmd = self.vl_motor_inhibition.evaluate_action_gating(
-            intended_action=intended_action,
-            conflict_level=conflict_level,
-            risk_score=risk_score,
-            time_to_impact=time_to_impact,
-            active_conditions=active_conditions,
-        )
-        self._record_predicate(cmd)
-        return cmd
-
-    def bind_cross_modal_gestalt(
-        self,
-        timestamp: float,
-        spatial_state: dict[str, Any] | None = None,
-        somatic_valence: float = 0.0,
-        haptic_friction: float = 1.0,
-        threat_vigilance: float = 0.0,
-        temporal_progress: float = 0.0,
-        rule_active: bool = False,
-    ) -> CrossModalSynchronyPacket:
-        """Bind multimodal streams into a synchronous claustrum gestalt (Crick & Koch / Smythies)."""
-        packet = self.claustrum_interhemispheric.bind_cross_modal_streams(
-            timestamp=timestamp,
-            spatial_state=spatial_state,
-            somatic_valence=somatic_valence,
-            haptic_friction=haptic_friction,
-            threat_vigilance=threat_vigilance,
-            temporal_progress=temporal_progress,
-            rule_active=rule_active,
-        )
-        self._record_predicate(packet)
-        return packet
-
     def compute_graph_vertex_cover(
         self,
         graph: CognitiveGraph | None = None,
@@ -3218,62 +1808,6 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return algorithms.greedy_edge_coloring(target_graph)
-
-    def compute_subjective_time_dilation(
-        self,
-        objective_dt: float,
-        threat_level: float = 0.0,
-        salience_score: float = 0.0,
-        visceral_conflict: float = 0.0,
-    ) -> InteroceptivePacingState:
-        """Compute anterior insular subjective time dilation & interoceptive pacing (Craig-Wittmann)."""
-        state = self.anterior_insula_timing.compute_subjective_dilation(
-            objective_dt=objective_dt,
-            threat_level=threat_level,
-            salience_score=salience_score,
-            visceral_conflict=visceral_conflict,
-        )
-        self._record_predicate(state)
-        return state
-
-    def evaluate_counterfactual_credit(
-        self,
-        state_key: str,
-        chosen_action: str | int,
-        observed_outcome: float,
-        available_actions: Collection[str | int],
-        relational_similarities: Mapping[str, float]
-        | Mapping[int, float]
-        | Mapping[str | int, float]
-        | None = None,
-    ) -> CounterfactualCreditReport:
-        """Evaluate OFC counterfactual value updates and unchosen branch credit (Walton-Rushworth)."""
-        report = self.ofc_counterfactual.update_contingent_credit(
-            state_key=state_key,
-            chosen_action=chosen_action,
-            observed_outcome=observed_outcome,
-            available_actions=available_actions,
-            relational_similarities=relational_similarities,
-        )
-        self._record_predicate(report)
-        return report
-
-    def modulate_locomotor_velocity(
-        self,
-        distance_to_obstacle: float,
-        surface_friction: float = 1.0,
-        urgency_score: float = 0.0,
-        is_narrow_aperture: bool = False,
-    ) -> LocomotorDriveCommand:
-        """Modulate PPN graded locomotor velocity and anticipatory deceleration (Garcia-Rill / Takakusaki)."""
-        cmd = self.ppn_locomotor.modulate_locomotor_velocity(
-            distance_to_obstacle=distance_to_obstacle,
-            surface_friction=surface_friction,
-            urgency_score=urgency_score,
-            is_narrow_aperture=is_narrow_aperture,
-        )
-        self._record_predicate(cmd)
-        return cmd
 
     def compute_graph_feedback_vertex_set(
         self,
@@ -3780,18 +2314,6 @@ class AutonomousEpistemicEngine:
         self._effector_kinetics_mode = val
 
     @property
-    def latest_lifecycle_result(self) -> Any | None:
-        if hasattr(self, "state"):
-            return self.state.latest_lifecycle_result
-        return self._latest_lifecycle_result
-
-    @latest_lifecycle_result.setter
-    def latest_lifecycle_result(self, val: Any | None) -> None:
-        if hasattr(self, "state"):
-            self.state.latest_lifecycle_result = val
-        self._latest_lifecycle_result = val
-
-    @property
     def last_surprise(self) -> float:
         if hasattr(self, "state"):
             return self.state.last_surprise
@@ -4057,14 +2579,6 @@ class AutonomousEpistemicEngine:
                     self.consolidate_episodic_memory(terminal_reward=1.0)
                 except Exception as exc:  # consolidation must never break the lifecycle
                     logger.debug("Episodic consolidation failed at boundary: %s", exc)
-                if getattr(self, "library_learner", None) is not None:
-                    try:
-                        self.library_learner.sleep_consolidation(
-                            tiered_workspace=self.tiered_workspace,
-                            tenant_id=self.world_id,
-                        )
-                    except Exception as exc:
-                        logger.debug("Library sleep consolidation failed: %s", exc)
             self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
             self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
@@ -4116,12 +2630,9 @@ class AutonomousEpistemicEngine:
         if new_context or not retain_dynamics:
             self.active_arbitrated_goal = None
         self.step_counter = 0
-        if hasattr(self, "entropy_monitor") and self.entropy_monitor:
-            self.entropy_monitor.reset_for_level()
         if new_context:
             self.environmental_step_limit = None
             self.budget_governor.reset(max_budget=self.exploration_budget)
-            self.dual_memory.reset_episodic_memory()
         else:
             eff_budget = (
                 self.environmental_step_limit
@@ -4145,76 +2656,8 @@ class AutonomousEpistemicEngine:
             if hasattr(self, "procedural_macros"):
                 self.procedural_macros[schema.schema_id] = schema.action_motif
 
-        # DreamCoder-style program induction from winning episodic traces
-        from hbllm.hcir.spatial_planner import SpatialActionIntent
-        from hbllm.hcir.world.skill_program_synthesizer import ActionTraceStep
-
-        ep = self.episodic_cortex
-        unconsolidated_traces: list[list[Any]] = []
-        if terminal_reward > 0:
-            if ep.current_episode:
-                unconsolidated_traces.append(list(ep.current_episode))
-            elif len(ep.successful_trajectories) > getattr(ep, "consolidated_trajectory_count", 0):
-                unconsolidated_traces.extend(
-                    ep.successful_trajectories[getattr(ep, "consolidated_trajectory_count", 0) :]
-                )
-            ep.consolidated_trajectory_count = len(ep.successful_trajectories)
-
-        for trace in unconsolidated_traces:
-            steps: list[ActionTraceStep] = []
-            for tr in trace:
-                intent = (
-                    SpatialActionIntent.NAVIGATE_TO
-                    if self.is_displacement_action(tr.action_id)
-                    else (
-                        SpatialActionIntent.INTERACT
-                        if self.is_spatial_effector(tr.action_id)
-                        else SpatialActionIntent.ACTUATE
-                    )
-                )
-                steps.append(
-                    ActionTraceStep(
-                        intent=intent,
-                        target_query={"pos": tr.avatar_pos} if tr.avatar_pos else {},
-                        parameters={"action_id": tr.action_id, "reward": tr.reward},
-                    )
-                )
-            if steps:
-                req_acts = {tr.action_id for tr in trace if isinstance(tr.action_id, int)}
-                self.skill_synthesizer.record_winning_trace(
-                    steps=steps,
-                    required_actions=req_acts,
-                    terminal_reward=terminal_reward,
-                )
-                if hasattr(self, "library_learner") and self.library_learner is not None:
-                    context_feats = {
-                        "goal_count": len(self.learned_goal_positions),
-                        "barrier_count": len(self.learned_barriers),
-                        "has_barriers": len(self.learned_barriers) > 0,
-                    }
-                    self.library_learner.wake_record_episode(
-                        intents_or_steps=steps,
-                        context_id=self.current_context_id,
-                        context_features=context_feats,
-                        success=terminal_reward > 0,
-                    )
-
-        newly_induced = self.skill_synthesizer.induce_all_recurrent_skills()
-        res["induced_skills"] = newly_induced
-
-        # Promote newly induced skills to TieredWorkspace.persistent and register schemas in mPFC
-        if newly_induced:
-            for skill in newly_induced:
-                self.mpfc_schema_engine.register_skill_schema(skill)
-            if self.tiered_workspace is not None:
-                self.skill_synthesizer.persist_to_workspace(
-                    self.tiered_workspace, tenant_id=self.world_id
-                )
-
         # Propose state mutations through TransactionManager if present
         all_ops = list(res.get("operations", []))
-        for meta in self.skill_synthesizer.synthesized_metadata.values():
-            all_ops.extend(meta.to_transaction_operations(tenant_id=self.world_id))
 
         if self.transaction_manager is not None and all_ops:
             from hbllm.hcir.transactions import HCIRTransaction
@@ -4227,65 +2670,13 @@ class AutonomousEpistemicEngine:
 
         return res
 
-    def query_transferable_skills(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
-        min_confidence: float = 0.40,
-    ) -> list[tuple[DeclarativeNeuroSymbolicSkill, float, str]]:
-        """Query mPFC schema engine for transferable procedural skills matching current environmental context."""
-        candidates = list(self.skill_synthesizer.synthesized_skills.values())
-        if hasattr(self, "library_learner") and self.library_learner is not None:
-            for m_skill in self.library_learner.macro_skills.values():
-                if m_skill not in candidates:
-                    candidates.append(m_skill)
-
-        if not candidates and self.tiered_workspace is not None:
-            self.skill_synthesizer.load_from_workspace(
-                self.tiered_workspace, tenant_id=self.world_id
-            )
-            candidates = list(self.skill_synthesizer.synthesized_skills.values())
-            if hasattr(self, "library_learner") and self.library_learner is not None:
-                self.library_learner.load_from_workspace(
-                    self.tiered_workspace, tenant_id=self.world_id
-                )
-                for m_skill in self.library_learner.macro_skills.values():
-                    if m_skill not in candidates:
-                        candidates.append(m_skill)
-
-        if not candidates:
-            return []
-
-        from hbllm.hcir.skills.declarative import SkillEvaluationContext
-
-        ctx = SkillEvaluationContext(
-            grid=grid,
-            available_actions=available_actions,
-            metadata=metadata,
-        )
-        matched = self.mpfc_schema_engine.query_transferable_skills(
-            ctx, candidates, min_confidence=min_confidence
-        )
-
-        if hasattr(self, "library_learner") and self.library_learner is not None and matched:
-            proposals = dict(self.library_learner.sample_proposals(metadata or {}, top_k=20))
-            reranked: list[tuple[DeclarativeNeuroSymbolicSkill, float, str]] = []
-            for skill, score, reason in matched:
-                bonus = proposals.get(skill.skill_name, 0.0) * 0.2
-                reranked.append((skill, score + bonus, reason))
-            reranked.sort(key=lambda item: item[1], reverse=True)
-            return reranked
-
-        return matched
-
     def retrieve_relational_analogies(
         self,
         grid: np.ndarray,
         min_match_score: float = 0.5,
     ) -> list[tuple[Any, float, list[Any]]]:
         """Extract object scene graph from grid and retrieve analogous relational concepts (G6)."""
-        from hbllm.hcir.world.experimental.relational_graph_matcher import (
+        from hbllm.hcir.grounding.concepts.relational_graph_matcher import (
             RelationalGraphMatcher,
         )
 
@@ -4317,16 +2708,7 @@ class AutonomousEpistemicEngine:
         phase = getattr(self, "epistemic_phase", "Active Deliberation")
         target = getattr(self, "active_subgoal", None) or getattr(self, "current_target", None)
 
-        pc = getattr(self, "hierarchical_precision_controller", None) or getattr(
-            self, "precision_controller", None
-        )
-        lp_str = ""
-        if pc is not None and hasattr(pc, "current_state"):
-            lp = getattr(pc.current_state, "learning_progress", 0.0)
-            gain = getattr(pc.current_state, "epistemic_exploration_gain", 1.0)
-            lp_str = f" [Learning progress: {lp:+.2f}, Exploration gain: {gain:.2f}]"
-
-        parts = [f"Chose motor action {act} during epistemic phase '{phase}'.{lp_str}"]
+        parts = [f"Chose motor action {act} during epistemic phase '{phase}'."]
         if target is not None:
             parts.append(f"Pursuing target/subgoal at {target}.")
 
@@ -4362,28 +2744,6 @@ class AutonomousEpistemicEngine:
         """Get the domain currently in the Zone of Proximal Development with highest practice priority."""
         return self.working_memory.get_highest_priority_practice_domain()
 
-    def track_and_infer_agent_intents(
-        self,
-        entity_id: str,
-        feature_id: int,
-        position: tuple[int, int],
-        avatar_pos: tuple[int, int] | None = None,
-        candidate_goals: list[tuple[int, int]] | None = None,
-        grid: Any | None = None,
-    ) -> Any:
-        """Track entity position, detect intentional agency, and infer goal intent (G10)."""
-        self.social_cognition.track_entity_position(
-            entity_id=entity_id,
-            feature_id=feature_id,
-            position=position,
-            grid=grid,
-        )
-        return self.social_cognition.invert_planner_for_intent(
-            entity_id=entity_id,
-            avatar_pos=avatar_pos or getattr(self, "avatar_pos", None),
-            candidate_goals=candidate_goals or getattr(self, "goals", []),
-        )
-
     def discover_and_induce_options(self, grid: Any | None = None) -> list[Any]:
         """Discover topological bottleneck states and induce temporal options (G11)."""
         current_grid = grid if grid is not None else getattr(self, "grid", None)
@@ -4406,47 +2766,6 @@ class AutonomousEpistemicEngine:
     def get_option_reuse_rate(self) -> float:
         """Get the current option reuse rate across episodes (G11)."""
         return self.option_discovery.get_option_reuse_rate()
-
-    def evaluate_action_value_safety(
-        self,
-        action_id: Any,
-        action_type: str,
-        expected_value: float,
-        epistemic_variance: float,
-        is_hazard_cone: bool = False,
-    ) -> tuple[bool, Any | None]:
-        """Evaluate action under value variance and gate against irreversible hazard risk (G15)."""
-        return self.value_uncertainty_arbiter.evaluate_action_safety(
-            action_id=action_id,
-            action_type=action_type,
-            expected_value=expected_value,
-            epistemic_variance=epistemic_variance,
-            is_hazard_cone=is_hazard_cone,
-        )
-
-    def record_goal_provenance(
-        self,
-        goal_id: str,
-        intent: str,
-        parent_goal_id: str | None = None,
-        target_entity: str | None = None,
-        justification: str = "",
-        utility_score: float = 0.5,
-    ) -> Any:
-        """Record goal decomposition link in causal provenance ancestry tree (G15)."""
-        return self.goal_provenance.register_goal(
-            goal_id=goal_id,
-            intent=intent,
-            parent_goal_id=parent_goal_id,
-            target_entity=target_entity,
-            justification=justification,
-            utility_score=utility_score,
-        )
-
-    def explain_goal_provenance(self, goal_id: str) -> str:
-        """Produce human-interpretable explanation of goal provenance chain (G15)."""
-        chain = self.goal_provenance.get_provenance_chain(goal_id)
-        return chain.explain()
 
     def record_action_effect(self, action: Any, kind: str) -> None:
         """Increment the per-action effect-kind count (WP0.3)."""
@@ -4751,273 +3070,9 @@ class AutonomousEpistemicEngine:
         self.working_memory.hypothesis_engine.export_to_world_theory(self.symbolic_theory)
         self.working_memory.hypothesis_engine.retract_refuted_rules(self.symbolic_theory)
 
-        # Biological Faculty: Entorhinal Grid Cell Continuous Attractor Path Integration
-        if prev_av_pos is not None and self.avatar_pos is not None:
-            delta_r = float(self.avatar_pos[0] - prev_av_pos[0])
-            delta_c = float(self.avatar_pos[1] - prev_av_pos[1])
-            if delta_r != 0.0 or delta_c != 0.0:
-                self.path_integrate_odometry(delta_r, delta_c)
-
-        # Biological Faculty: Cerebellar Smith Predictor Sensory Afferent Assimilation
-        if self.avatar_pos is not None:
-            self.smith_predictor.assimilate_sensory_feedback(
-                step=self.step_counter,
-                observed_pos=self.avatar_pos,
-            )
-
-        # Biological Faculty: Hierarchical Predictive Coding Error Minimization
-        diff_count = (
-            float(np.sum(self.prev_grid != curr_grid))
-            if self.prev_grid is not None and self.prev_grid.shape == curr_grid.shape
-            else 0.0
-        )
-        sensory_evidence: dict[str, float] = {
-            "avatar_r": float(self.avatar_pos[0]) if self.avatar_pos else 0.0,
-            "avatar_c": float(self.avatar_pos[1]) if self.avatar_pos else 0.0,
-            "diff_count": diff_count,
-        }
-        pred_r = (
-            float(self.last_predicted_pos[0])
-            if self.last_predicted_pos
-            else (float(prev_av_pos[0]) if prev_av_pos else 0.0)
-        )
-        pred_c = (
-            float(self.last_predicted_pos[1])
-            if self.last_predicted_pos
-            else (float(prev_av_pos[1]) if prev_av_pos else 0.0)
-        )
-        abstract_priors: dict[str, float] = {
-            "avatar_r": pred_r,
-            "avatar_c": pred_c,
-            "diff_count": 0.0,
-        }
-        self.step_predictive_coding(
-            sensory_inputs=sensory_evidence, abstract_priors=abstract_priors
-        )
-
-        # Biological Faculty: Hierarchical Active Inference with Free Energy Precision Control
-        if self.prev_grid is not None and curr_grid.ndim == 2:
-            prec_state = self.precision_controller.record_observation(
-                step=self.step_counter,
-                predicted_grid=self.prev_grid,
-                observed_grid=curr_grid,
-                is_reset=is_failure,
-            )
-            self.hierarchical_active_inference.sensory_precision = prec_state.sensory_precision
-            self.hierarchical_active_inference.dynamic_precision = prec_state.prior_precision
-
-        # Biological Faculty: Spiking Neural Network Kinematic Tracking & Limit Cycles
-        if curr_grid.ndim == 2:
-            self.snn_predictor.update_tracks_from_grid(curr_grid)
-            self.snn_predictor.step_lif(curr_grid.astype(np.float32) * 0.2)
-            for feat_id, period, phase in self.snn_predictor.extract_limit_cycles():
-                self.cerebellar_clock.register_entity_cycle(feat_id, period, phase)
-
-        # Biological Faculty: Closed-Loop Neuromodulatory Dynamics (Dopamine, NE, ACh, Serotonin)
-        rpe = 1.0 if is_success else (-1.0 if is_failure else 0.0)
-        pred_fe = float(getattr(self.predictive_coding_cortex, "total_free_energy", 0.0))
-        risk_level = 0.0
-        if self.avatar_pos is not None and curr_grid.ndim == 2:
-            hazard_density = self.snn_predictor.predict_hazard_density(curr_grid, horizon_steps=2)
-            ar, ac = self.avatar_pos
-            if 0 <= ar < hazard_density.shape[0] and 0 <= ac < hazard_density.shape[1]:
-                risk_level = float(hazard_density[ar, ac])
-        surprise_val = 1.0 if is_failure else self.last_surprise
-        self.modulate_cognition(
-            reward_prediction_error=rpe,
-            unexpected_surprise=surprise_val,
-            prediction_accuracy=1.0 / (1.0 + pred_fe),
-            risk_level=risk_level,
-        )
-
-        # Biological Faculty: BA10 Metacognitive Agency Attribution & Simulation Calibration
-        if action is not None:
-            raw_confidence = max(0.1, min(0.95, (1.0 - min(1.0, surprise_val)) / (1.0 + pred_fe)))
-            meta_assess = self.assess_metacognitive_agency(
-                action_id=action,
-                raw_confidence=raw_confidence,
-                predicted_avatar_pos=self.last_predicted_pos,
-                observed_avatar_pos=self.avatar_pos,
-                observed_other_changes_count=max(0, int(diff_count) - 2),
-                empirical_success=(not is_failure),
-            )
-            self.working_memory.last_metacognitive_assessment = meta_assess
-            self.prediction_budget.counterfactual_budget.max_depth = (
-                meta_assess.recommended_simulation_depth
-            )
-
-        # Biological Faculty: Striatal & Prefrontal Delayed Contingency Modeling (W172, W173)
-        if action is not None and curr_grid.ndim == 2:
-            mutations_dict: dict[str, Any] = {}
-            if diff_count > 0:
-                mutations_dict["diff_count"] = diff_count
-            if self.avatar_pos != prev_av_pos:
-                mutations_dict["avatar_moved"] = True
-            if is_success:
-                mutations_dict["terminal_win"] = True
-            delayed_records = self.delayed_effect_modeler.record_step(
-                step=self.step_counter,
-                action_id=action,
-                state_features={"pos": self.avatar_pos},
-                observed_mutations=mutations_dict,
-            )
-            for d_rec in delayed_records:
-                if d_rec.observed_lag_steps > 0:
-                    self._record_predicate(d_rec)
-
-        # Biological Faculty: Ventral Stream Relational Scene Graph & Object Mutations (W038)
-        if self.ventral_relational_matcher and curr_grid.ndim == 2:
-            current_scene_graph = self.ventral_relational_matcher.build_scene_graph(
-                curr_grid, bg_color=self.estimate_background(curr_grid)
-            )
-            if self.working_memory.last_scene_graph is not None:
-                mutations = self.ventral_relational_matcher.detect_object_mutations(
-                    self.working_memory.last_scene_graph, current_scene_graph
-                )
-                if mutations and mutations.get("moved"):
-                    for m in mutations["moved"]:
-                        self.symbolic_theory.record_causal_predicate(
-                            CausalPredicate(
-                                variable=f"object_displacement:{m['object_id']}",
-                                operator="==",
-                                value=f"{m['delta'][0]:.1f}_{m['delta'][1]:.1f}",
-                                relation="relational_motion",
-                                target_entity=str(m["object_id"]),
-                            )
-                        )
-            self.working_memory.last_scene_graph = current_scene_graph
-
-        # Biological Faculty: Thalamocortical Gamma-Band Phase Synchronization & TRN Gating (Track 1)
-        if self.thalamocortical_binding and curr_grid.ndim == 2:
-            ventral_tokens = self.it_segmenter.segment_objects(
-                curr_grid,
-                background_feature=self.bg_feature,
-                avatar_features=self.avatar_features,
-            )
-            feature_entities = [
-                {
-                    "pos": t.centroid,
-                    "feature": t.feature_id,
-                    "area": t.area,
-                    "role": (
-                        "goal"
-                        if t.feature_id in self.symbolic_theory.goal_features
-                        else (
-                            "barrier"
-                            if t.feature_id in self.symbolic_theory.barrier_features
-                            else "unknown"
-                        )
-                    ),
-                }
-                for t in ventral_tokens
-            ]
-            if self.avatar_pos is not None:
-                feature_entities.append(
-                    {
-                        "pos": self.avatar_pos,
-                        "feature": self.avatar_feature or 999,
-                        "area": 1,
-                        "role": "avatar",
-                    }
-                )
-            target_feat = {"role": "goal"} if self.symbolic_theory.goal_features else None
-            bound_bundles = self.synchronize_and_bind_entities(
-                feature_entities, target_features=target_feat
-            )
-            self.working_memory.active_bound_bundles = bound_bundles
-            for bundle in bound_bundles:
-                if bundle.is_bound:
-                    self._record_predicate(bundle)
-
-        # Biological Faculty: Global Neuronal Workspace Competition & Conscious Ignition
-        if is_failure:
-            self.gnw.submit_candidate(
-                source_cortex="loss_monitor",
-                salience=0.95,
-                content={"event": "loss", "avatar_pos": self.avatar_pos},
-            )
-        elif is_success:
-            self.gnw.submit_candidate(
-                source_cortex="goal_monitor",
-                salience=0.95,
-                content={"event": "win", "avatar_pos": self.avatar_pos},
-            )
-        elif pred_fe > 1.2:
-            self.gnw.submit_candidate(
-                source_cortex="predictive_coding",
-                salience=min(0.9, pred_fe / 2.5),
-                content={"free_energy": pred_fe},
-            )
-        elif self.last_surprise > 0.2:
-            self.gnw.submit_candidate(
-                source_cortex="surprise_engine",
-                salience=min(0.9, self.last_surprise),
-                content={"surprise": self.last_surprise},
-            )
-        elif getattr(self.acc_conflict_monitor, "active_conflict", False):
-            self.gnw.submit_candidate(
-                source_cortex="anterior_cingulate",
-                salience=0.85,
-                content={"frustration": self.acc_conflict_monitor.frustration},
-            )
-
-        self.gnw.compete_and_ignite()
-
-        # Record spatial effector intervention feedback (domain-agnostic)
-        if (
-            action is not None
-            and action_data is not None
-            and self.prev_grid is not None
-            and hasattr(self, "point_actuation_learner")
-            and self.point_actuation_learner is not None
-        ):
-            coord = None
-            if "row" in action_data and "col" in action_data:
-                coord = (int(action_data["row"]), int(action_data["col"]))
-            elif "y" in action_data and "x" in action_data:
-                coord = (int(action_data["y"]), int(action_data["x"]))
-            elif self.is_spatial_effector(action) and "pos" in action_data:
-                coord = tuple(action_data["pos"])
-            if coord is not None:
-                self.point_actuation_learner.observe_point_actuation(
-                    coord, self.prev_grid, curr_grid
-                )
-
-        # Wire W041-W050 temporal buffer & state transition sequence modeling
-        new_snap = WorldStateSnapshot(
-            world_id=self.world_id,
-            variables={"grid": curr_grid, "avatar_pos": self.avatar_pos},
-        )
-        prev_snap = self.temporal_buffer.current_state
-        self.temporal_buffer.push(new_snap)
-        if prev_snap is not None and action is not None:
-            self.transition_sequence_model.record_transition(
-                pre_state=prev_snap,
-                action=str(action),
-                post_state=new_snap,
-            )
-
-        # Wire interactive world-modeling feedback updates (W161-W190)
         if action is not None:
             self.budget_governor.record_step()
-            prior_st = {"avatar_pos": prev_av_pos}
-            next_st = {"avatar_pos": self.avatar_pos}
-            self.action_discovery.record_transition(
-                action_id=action,
-                prior_state=prior_st,
-                next_state=next_st,
-            )
-            self.delayed_effects.record_step(
-                step=self.step_counter,
-                action_id=action,
-                state_features=next_st,
-            )
         if is_success or is_failure:
-            self.goal_induction.observe_feedback(
-                current_state=curr_grid,
-                level_incremented=is_success,
-                is_death_or_reset=is_failure,
-            )
             self._prev_oriented_threats = []
             if self.tiered_workspace is not None:
                 try:
@@ -5190,46 +3245,6 @@ class AutonomousEpistemicEngine:
 
         return pred, disagreement.high_disagreement
 
-    def evaluate_transit_safety_cerebellar_snn(
-        self,
-        target_pos: tuple[int, int],
-        curr_grid: np.ndarray | None = None,
-    ) -> PhaseGateDecision:
-        """Evaluate transit safety to target_pos combining Cerebellar timing and SNN limit cycle forecasting."""
-        agent_pos = self.avatar_pos or (0, 0)
-        grid = curr_grid if curr_grid is not None else getattr(self, "last_observed_grid", None)
-        snn = None
-        if self.world_kernel and hasattr(self.world_kernel, "predictive_reality"):
-            snn = getattr(self.world_kernel.predictive_reality, "snn", None)
-        if snn is None:
-            snn = self.snn_predictor
-
-        if snn is not None and grid is not None and isinstance(grid, np.ndarray):
-            # Compute hazard density and pre-emptively inhibit dangerous actions via Habenula
-            density = snn.predict_hazard_density(grid, horizon_steps=3)
-            action_deltas: dict[Any, tuple[int, int]] = {}
-            for act, dyn in self.action_dynamics.items():
-                dr, dc = dyn.get_displacement()
-                if dyn.confidence >= 0.5 and (dr != 0 or dc != 0):
-                    action_deltas[act] = (dr, dc)
-            if not action_deltas:
-                action_deltas = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
-
-            self.habenular_ior.preemptively_inhibit_from_snn(
-                hazard_density=density,
-                current_pos=agent_pos,
-                action_deltas=action_deltas,
-                threshold=0.45,
-            )
-
-        return self.cerebellar_clock.evaluate_crossing_safety(
-            agent_pos=agent_pos,
-            target_pos=target_pos,
-            snn_predictor=snn,
-            grid=grid,
-            current_step=self.step_counter,
-        )
-
     def schedule_causal_subgoal_chain(
         self,
         target_destination: tuple[int, int],
@@ -5249,21 +3264,6 @@ class AutonomousEpistemicEngine:
         )
         return self.subgoal_stack.decompose_causal_chain(master_sg, causal_prerequisites)
 
-    def transfer_structural_analogies(
-        self,
-        prototype_grid: np.ndarray,
-    ) -> list[ObjectCorrespondence]:
-        """Compute structural correspondences between a prototype scene and current grid."""
-        if self.prev_grid is None or prototype_grid.ndim != 2:
-            return []
-        proto_graph = self.ventral_relational_matcher.build_scene_graph(
-            prototype_grid, bg_color=self.estimate_background(prototype_grid)
-        )
-        curr_graph = self.ventral_relational_matcher.build_scene_graph(
-            self.prev_grid, bg_color=self.estimate_background(self.prev_grid)
-        )
-        return self.ventral_relational_matcher.match_graphs(proto_graph, curr_graph)
-
     def plan_epistemic_probe(
         self,
         curr_grid: np.ndarray,
@@ -5280,33 +3280,6 @@ class AutonomousEpistemicEngine:
             view=ReadOnlyEngineView(self), delta=delta, proposal=proposal
         )
         self.apply_delta(delta, author="epistemic_curiosity")
-
-    def update_room_topology(self, curr_grid: np.ndarray) -> None:
-        """Extract rooms and doorways from current occupancy grid knowledge."""
-        H, W = curr_grid.shape
-        occupancy = np.ones((H, W), dtype=bool)
-        for r in range(H):
-            for c in range(W):
-                val = int(curr_grid[r, c])
-                if (
-                    (r, c) in self.learned_barriers
-                    or self.symbolic_theory.is_barrier(val)
-                    or val in self.hazard_tracker.known_lethal_features
-                ):
-                    occupancy[r, c] = False
-
-        rooms, doors = self.room_topology.extract_rooms_and_doors(occupancy, min_room_size=4)
-        self.topology_rooms = rooms
-        self.topology_doors = doors
-        self.room_adjacency = self.room_topology.build_adjacency_graph(rooms, doors)
-
-        # Localize current room
-        self.current_room_id = None
-        if self.avatar_pos is not None:
-            for rid, coords in rooms.items():
-                if self.avatar_pos in coords:
-                    self.current_room_id = rid
-                    break
 
     def _update_avatar_position_from_grid(
         self, curr_grid: np.ndarray, known_av_feats: set[int]

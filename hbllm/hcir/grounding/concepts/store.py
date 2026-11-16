@@ -276,7 +276,7 @@ class WorkingConceptStore:
         Uses bipartite Hungarian structural isomorphism matching (RelationalGraphMatcher.match_graphs)
         to identify structurally and topologically analogous concepts in working memory.
         """
-        from hbllm.hcir.world.experimental.relational_graph_matcher import (
+        from hbllm.hcir.grounding.concepts.relational_graph_matcher import (
             ObjectGraph,
             RelationalGraphMatcher,
         )
@@ -315,7 +315,7 @@ class WorkingConceptStore:
         concept_id: str,
     ) -> dict[str, int]:
         """Maps query graph object IDs to semantic roles defined in the matched concept."""
-        from hbllm.hcir.world.experimental.relational_graph_matcher import (
+        from hbllm.hcir.grounding.concepts.relational_graph_matcher import (
             RelationalGraphMatcher,
         )
 

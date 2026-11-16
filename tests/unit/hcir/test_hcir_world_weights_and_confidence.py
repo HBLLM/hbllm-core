@@ -5,9 +5,6 @@ Tests PredictorWeightManager, WeightUpdatePolicy, ConfidenceCalibrator, and Pred
 
 from __future__ import annotations
 
-import pytest
-
-from hbllm.hcir.world.experimental.confidence_calibrator import ConfidenceCalibrator
 from hbllm.hcir.world.prediction_budget import PredictionBudget
 from hbllm.hcir.world.predictor_weights import PredictorWeightManager
 from hbllm.hcir.world.weight_policy import WeightUpdatePolicy
@@ -43,21 +40,6 @@ def test_predictor_weight_manager_and_policy():
     pred_pol = policy.to_causal_predicate()
     assert pred_pol.variable == "weight_update_policy"
     assert pred_pol.value == 0.05
-
-
-def test_confidence_calibrator_decay():
-    calibrator = ConfidenceCalibrator()
-    vec_fresh = calibrator.calibrate(raw_confidence=0.95, historical_accuracy=0.90, age_seconds=0.0)
-    assert vec_fresh.calibrated_confidence == pytest.approx(0.855, rel=1e-2)
-
-    vec_decayed = calibrator.calibrate(
-        raw_confidence=0.95, historical_accuracy=0.90, age_seconds=3600.0, half_life_seconds=3600.0
-    )
-    assert vec_decayed.calibrated_confidence < vec_fresh.calibrated_confidence
-
-    pred_vec = vec_fresh.to_causal_predicate()
-    assert pred_vec.variable == "confidence"
-    assert pred_vec.value == vec_fresh.calibrated_confidence
 
 
 def test_prediction_budget():

@@ -1,0 +1,272 @@
+{
+  "suite": "dev",
+  "n_trials": 80,
+  "wall_seconds": 900.5,
+  "baseline": {
+    "generality_score": 0.7547,
+    "solve_rate": 0.8,
+    "n_solved": 64,
+    "n_trials": 80,
+    "wilson_95_ci": [
+      0.6995,
+      0.873
+    ],
+    "deaths": 10,
+    "mean_steps": 24.16,
+    "mean_p50_ms": 58.26,
+    "mean_p95_ms": 122.25,
+    "family_scores": {
+      "grid": 0.7601,
+      "continuous": 0.6228,
+      "symbolic": 0.8812
+    },
+    "family_solve_rates": {
+      "grid": 0.725,
+      "continuous": 0.75,
+      "symbolic": 1.0
+    },
+    "crash": null
+  },
+  "baseline_cross_seed": {
+    "transfer_solve_rate": 0.9211,
+    "transfer_deaths": 0,
+    "n_transfer": 76,
+    "crash": null
+  },
+  "faculties": {
+    "subgoal_stack": {
+      "class": "FrontopolarSubgoalStack",
+      "calls": 14523,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.7547,
+      "delta_generality": 0.0,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.8,
+      "delta_solve_rate": 0.0,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.9211,
+      "delta_transfer_solve_rate": 0.0,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": 0.0,
+      "delta_p50_ms": -3.1,
+      "ablated_family_solve_rates": {
+        "grid": 0.725,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "experimental",
+      "rule_outcome": "no measurable positive R1 effect (\u0394gen=+0.0000, \u0394sr=+0.0000, \u0394xs=+0.0000, \u0394deaths=+0)"
+    },
+    "habenular_ior": {
+      "class": "HabenularEpisodicIOR",
+      "calls": 150459,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.7547,
+      "delta_generality": 0.0,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.8,
+      "delta_solve_rate": 0.0,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.9211,
+      "delta_transfer_solve_rate": 0.0,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": 0.0,
+      "delta_p50_ms": -1.36,
+      "ablated_family_solve_rates": {
+        "grid": 0.725,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "experimental",
+      "rule_outcome": "no measurable positive R1 effect (\u0394gen=+0.0000, \u0394sr=+0.0000, \u0394xs=+0.0000, \u0394deaths=+0)"
+    },
+    "remote_causal": {
+      "class": "RemoteCausalAttributor",
+      "calls": 3760,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.7493,
+      "delta_generality": 0.0054,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.7875,
+      "delta_solve_rate": 0.0125,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.9211,
+      "delta_transfer_solve_rate": 0.0,
+      "baseline_deaths": 10,
+      "ablated_deaths": 11,
+      "delta_deaths": 1,
+      "delta_steps_pct": -0.2,
+      "delta_p50_ms": 1.94,
+      "ablated_family_solve_rates": {
+        "grid": 0.7,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "keep",
+      "rule_outcome": "\u0394gen=+0.0054, \u0394sr=+0.0125, \u0394xs=+0.0000, \u0394deaths=+1"
+    },
+    "hazard_tracker": {
+      "class": "SpatiotemporalHazardTracker",
+      "calls": 198352,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.7588,
+      "delta_generality": -0.0041,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.8125,
+      "delta_solve_rate": -0.0125,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.9211,
+      "delta_transfer_solve_rate": 0.0,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": -4.0,
+      "delta_p50_ms": 0.94,
+      "ablated_family_solve_rates": {
+        "grid": 0.75,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "experimental",
+      "rule_outcome": "no measurable positive R1 effect (\u0394gen=-0.0041, \u0394sr=-0.0125, \u0394xs=+0.0000, \u0394deaths=+0)"
+    },
+    "acc_conflict_monitor": {
+      "class": "AnteriorCingulateConflictMonitor",
+      "calls": 49244,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.7433,
+      "delta_generality": 0.0114,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.8,
+      "delta_solve_rate": 0.0,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.9211,
+      "delta_transfer_solve_rate": 0.0,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": 6.1,
+      "delta_p50_ms": -3.09,
+      "ablated_family_solve_rates": {
+        "grid": 0.725,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "keep",
+      "rule_outcome": "\u0394gen=+0.0114, \u0394sr=+0.0000, \u0394xs=+0.0000, \u0394deaths=+0"
+    },
+    "object_planner": {
+      "class": "ObjectStateGraphPlanner",
+      "calls": 2337,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.748,
+      "delta_generality": 0.0067,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.7875,
+      "delta_solve_rate": 0.0125,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.9211,
+      "delta_transfer_solve_rate": 0.0,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": 8.8,
+      "delta_p50_ms": 1.37,
+      "ablated_family_solve_rates": {
+        "grid": 0.7,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "keep",
+      "rule_outcome": "\u0394gen=+0.0067, \u0394sr=+0.0125, \u0394xs=+0.0000, \u0394deaths=+0"
+    },
+    "prediction_budget": {
+      "class": "PredictionBudget",
+      "calls": 756,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.6667,
+      "delta_generality": 0.088,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.5625,
+      "delta_solve_rate": 0.2375,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.6842,
+      "delta_transfer_solve_rate": 0.2369,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": 80.8,
+      "delta_p50_ms": -2.31,
+      "ablated_family_solve_rates": {
+        "grid": 0.25,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "keep",
+      "rule_outcome": "\u0394gen=+0.0880, \u0394sr=+0.2375, \u0394xs=+0.2369, \u0394deaths=+0"
+    },
+    "option_discovery": {
+      "class": "OptionDiscoveryEngine",
+      "calls": 75878,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.7379,
+      "delta_generality": 0.0168,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.7875,
+      "delta_solve_rate": 0.0125,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.9211,
+      "delta_transfer_solve_rate": 0.0,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": 7.2,
+      "delta_p50_ms": -25.11,
+      "ablated_family_solve_rates": {
+        "grid": 0.7,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "keep",
+      "rule_outcome": "\u0394gen=+0.0168, \u0394sr=+0.0125, \u0394xs=+0.0000, \u0394deaths=+0"
+    },
+    "budget_governor": {
+      "class": "ActionBudgetGovernor",
+      "calls": 67050,
+      "baseline_generality": 0.7547,
+      "ablated_generality": 0.7366,
+      "delta_generality": 0.0181,
+      "baseline_solve_rate": 0.8,
+      "ablated_solve_rate": 0.75,
+      "delta_solve_rate": 0.05,
+      "baseline_transfer_solve_rate": 0.9211,
+      "ablated_transfer_solve_rate": 0.8158,
+      "delta_transfer_solve_rate": 0.1053,
+      "baseline_deaths": 10,
+      "ablated_deaths": 10,
+      "delta_deaths": 0,
+      "delta_steps_pct": 17.1,
+      "delta_p50_ms": -0.71,
+      "ablated_family_solve_rates": {
+        "grid": 0.625,
+        "continuous": 0.75,
+        "symbolic": 1.0
+      },
+      "decision": "keep",
+      "rule_outcome": "\u0394gen=+0.0181, \u0394sr=+0.0500, \u0394xs=+0.1053, \u0394deaths=+0"
+    },
+    "world_kernel": {
+      "class": "WorldKernel",
+      "calls": 0,
+      "decision": "unused",
+      "delta_generality": 0.0,
+      "delta_solve_rate": 0.0,
+      "delta_deaths": 0,
+      "evidence": "0 calls across n=80 R1 dev trials"
+    }
+  }
+}

@@ -14,13 +14,13 @@ from __future__ import annotations
 import numpy as np
 
 from hbllm.hcir.grounding.concepts.model import GroundedConcept
+from hbllm.hcir.grounding.concepts.relational_graph_matcher import (
+    RelationalGraphMatcher,
+)
 from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
 from hbllm.hcir.grounding.contracts.enums import ConceptLifecycle
 from hbllm.hcir.grounding.contracts.references import GroundedConceptRef
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-from hbllm.hcir.world.experimental.relational_graph_matcher import (
-    RelationalGraphMatcher,
-)
 
 
 def test_composite_concept_part_whole_and_role_bindings() -> None:

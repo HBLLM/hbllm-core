@@ -13,30 +13,35 @@ from benchmarks.envs.continuous_reach import ContinuousReachEnvironment
 
 
 def test_faculty_inventory_returns_world_faculties():
-    from hbllm.hcir.world.experimental import AblatedFaculty, restore, restore_all
-
     engine = _mk_engine(0)
     inv = faculty_inventory(engine)
     assert isinstance(inv, dict)
-    assert len(inv) >= 35
-    # Ablated stubs must not live on vars(engine) or pollute the active inventory
-    assert all(not isinstance(v, AblatedFaculty) for v in vars(engine).values())
-    assert all(cls_name != "AblatedFaculty" for cls_name in inv.values())
-    # Lazy ablated resolution works on access without adding to vars(engine)
-    assert isinstance(engine.gnw, AblatedFaculty)
-    assert "gnw" not in vars(engine)
-    # restore() and restore_all() still instantiate real faculties when requested
-    assert restore(engine, "gnw") is True
-    assert not isinstance(engine.gnw, AblatedFaculty)
-    assert "gnw" in vars(engine)
-    restored = restore_all(engine)
-    assert len(restored) >= 40
+    assert len(inv) >= 9
     # Core owners must not be present
-    assert "planner" not in inv
-    assert "deliberation_engine" not in inv
-    assert "motor" not in inv
-    # World faculties must be present
-    assert "hazard_tracker" in inv or "habenular_ior" in inv
+    for core in (
+        "planner",
+        "deliberation_engine",
+        "motor",
+        "perception",
+        "assimilator",
+        "episodic_cortex",
+        "working_memory",
+        "symbolic_theory",
+    ):
+        assert core not in inv
+    # Surviving world faculties must be present
+    for keeper in (
+        "acc_conflict_monitor",
+        "budget_governor",
+        "habenular_ior",
+        "hazard_tracker",
+        "object_planner",
+        "option_discovery",
+        "prediction_budget",
+        "remote_causal",
+        "subgoal_stack",
+    ):
+        assert keeper in inv
 
 
 def test_null_faculty_swallows_calls_and_returns_neutral():

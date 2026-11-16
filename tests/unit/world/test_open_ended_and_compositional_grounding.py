@@ -31,13 +31,12 @@ from hbllm.hcir.world.cortex_hypothesis import (
     TransitionObservationContext,
 )
 from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
-from hbllm.hcir.world.library_learning import LibraryLearner
 from hbllm.hcir.world.percept import EmbodiedObservation
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
 
-def test_live_pipeline_executes_g8_g10_g11_g15_and_dynamic_bridge() -> None:
-    """Verify G8 hints, G10 social cognition, G11 options, G15 provenance, and dynamic bridge run live."""
+def test_live_pipeline_executes_g8_g11_and_dynamic_bridge() -> None:
+    """Verify G8 hints, G11 options, and dynamic bridge run live."""
     system = build_cognitive_system(
         CognitiveSystemConfig(
             world_id="test_g7_g15_live", enable_grounding=True, enable_logging=False
@@ -110,12 +109,6 @@ def test_live_pipeline_executes_g8_g10_g11_g15_and_dynamic_bridge() -> None:
     assert (3, 3) in {
         opt.bottleneck_state for opt in engine.option_discovery.discovered_options.values()
     }
-
-    # G10: social cognition tracked dynamic agent
-    assert len(engine.social_cognition.tracked_agents) > 0
-
-    # G15: goal provenance registered active goal
-    assert len(engine.goal_provenance.nodes) > 0
 
     # Dynamic grounding_bridge lookup worked post-construction
     assert "process_perception" in bridge_calls
@@ -322,16 +315,6 @@ def test_open_ended_pcfg_hypothesis_synthesis_falsification_and_proposals() -> N
     assert len(falsified) >= 1
     weight_after_falsify = engine.pcfg_prior.production_counts.get(ast_obj.productions_used[0], 1.0)
     assert weight_after_falsify < weight_after_confirm
-
-    # LearnedProposalDistribution proposes ranked open-ended intents combining macros + hypotheses
-    learner = LibraryLearner()
-    proposals = learner.sample_open_ended_proposals(
-        context_key=(1, 2),
-        hypotheses=engine.hypotheses,
-        top_k=5,
-    )
-    assert len(proposals) > 0
-    assert all(isinstance(name, str) and isinstance(score, float) for name, score in proposals)
 
 
 def test_independent_external_benchmarks_frozenlake_and_minigrid() -> None:

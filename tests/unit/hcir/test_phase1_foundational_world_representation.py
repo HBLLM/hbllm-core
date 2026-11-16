@@ -19,6 +19,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from hbllm.hcir.grounding.concepts.relational_graph_matcher import RelationalGraphMatcher
 from hbllm.hcir.identity import IDFactory
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
@@ -34,8 +35,6 @@ from hbllm.hcir.world.capability_evidence import (
 )
 from hbllm.hcir.world.cortex_assimilator import EpistemicFeedbackAssimilator
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
-from hbllm.hcir.world.experimental.optical_ray_projection import OpticalRayProjector
-from hbllm.hcir.world.experimental.relational_graph_matcher import RelationalGraphMatcher
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.inferotemporal_segmentation import (
     InferotemporalSegmentationEngine,
@@ -46,10 +45,6 @@ from hbllm.hcir.world.parietal_coordinate_transform import (
     ParietalCoordinateTransformer,
 )
 from hbllm.hcir.world.spatial_containment import RoomTopologyExtractor
-from hbllm.hcir.world.spatiotemporal_tracker import (
-    MorphologicalDeformationTracker,
-    MorphologicalEntity,
-)
 
 # =============================================================================
 # SUITE 0: Perceptual Representation and Scene Construction (W001–W010)
@@ -141,99 +136,8 @@ def test_suite_0_perceptual_representation_w001_to_w010() -> None:
 
 
 def test_suite_a_object_permanence_and_tracking_w011_to_w020() -> None:
-    """Verify W011-W020: persistence, movement re-ID, tracking, non-conserved fission/fusion, lifecycle DAG, part-whole, compound avatars, body schema, appearance decoupling, and controllability uncertainty."""
-    tracker = MorphologicalDeformationTracker()
-
-    # ── W011 & W013: Persistent identity & deformation tracking ───────────────
-    # Entity undergoes a slight non-rigid deformation (IoU >= 0.70)
-    e1_t0 = MorphologicalEntity(
-        entity_id="avatar_t0",
-        feature_id=1,
-        cells=frozenset({(2, 2), (2, 3), (3, 2), (3, 3)}),
-        centroid=(2.5, 2.5),
-        bounding_box=(2, 3, 2, 3),
-    )
-    e1_t1 = MorphologicalEntity(
-        entity_id="avatar_t1",
-        feature_id=1,
-        cells=frozenset({(2, 2), (2, 3), (3, 2), (3, 3), (3, 4)}),  # 1-cell growth
-        centroid=(2.6, 2.8),
-        bounding_box=(2, 3, 2, 4),
-    )
-    iou = tracker.compute_iou(set(e1_t0.cells), set(e1_t1.cells))
-    assert iou == 4.0 / 5.0  # 0.80 >= 0.70 high-confidence IoU
-
-    # ── W014: Object splitting and merging with conditional conservation ───────
-    # Non-conserved fission (e.g., entity cut with pixel loss)
-    parent = MorphologicalEntity(
-        entity_id="parent_gem",
-        feature_id=2,
-        cells=frozenset({(r, c) for r in range(4) for c in range(4)}),  # 16 cells
-        centroid=(1.5, 1.5),
-        bounding_box=(0, 3, 0, 3),
-    )
-    # Split into 2 fragments with 4 cells destroyed in laser cut (6 cells + 6 cells = 12 cells, ratio = 0.75)
-    fiss_c1 = MorphologicalEntity(
-        entity_id="fragment_left",
-        feature_id=2,
-        cells=frozenset({(r, c) for r in range(3) for c in (0, 1)}),  # 6 cells
-        centroid=(1.0, 0.5),
-        bounding_box=(0, 2, 0, 1),
-    )
-    fiss_c2 = MorphologicalEntity(
-        entity_id="fragment_right",
-        feature_id=2,
-        cells=frozenset({(r, c) for r in range(3) for c in (2, 3)}),  # 6 cells
-        centroid=(1.0, 2.5),
-        bounding_box=(0, 2, 2, 3),
-    )
-    fission_res = tracker.detect_fission(parent, [fiss_c1, fiss_c2], conservation_required=False)
-    assert fission_res is not None
-    assert fission_res.is_mass_conserved is False
-    assert fission_res.mass_conservation_ratio == 0.75
-    assert fission_res.ambiguity_score > 0.0
-
-    # Negative control: strict conservation rejects non-conserved fission
-    assert tracker.detect_fission(parent, [fiss_c1, fiss_c2], conservation_required=True) is None
-
-    # ── W015: Object creation & disappearance via causal lineage DAG ───────────
-    vanished_ent = MorphologicalEntity(
-        entity_id="threat_t0",
-        feature_id=8,
-        cells=frozenset({(9, 9)}),
-        centroid=(9.0, 9.0),
-        bounding_box=(9, 9, 9, 9),
-    )
-    spawned_ent = MorphologicalEntity(
-        entity_id="reward_t1",
-        feature_id=4,
-        cells=frozenset({(0, 0)}),
-        centroid=(0.0, 0.0),
-        bounding_box=(0, 0, 0, 0),
-    )
-
-    lifecycle = tracker.track_lifecycle(
-        [e1_t0, parent, vanished_ent],
-        [e1_t1, fiss_c1, fiss_c2, spawned_ent],
-        conservation_required=False,
-    )
-    dag = lifecycle.lineage_graph
-    assert dag["avatar_t1"].transition_type == "IDENTITY"
-    assert dag["parent_gem"].transition_type == "FISSION"
-    assert dag["threat_t0"].transition_type == "DESTRUCTION"
-    assert dag["reward_t1"].transition_type == "CREATION"
-
-    # ── W012: Movement re-identification via runtime cognitive loop ────────────
+    """Verify W011-W020: part-whole, compound avatars, body schema, appearance decoupling, and controllability uncertainty."""
     engine = AutonomousEpistemicEngine()
-    grid_t0 = np.zeros((10, 10), dtype=int)
-    grid_t0[3, 3] = 1  # Avatar at (3, 3)
-    grid_t1 = np.zeros((10, 10), dtype=int)
-    grid_t1[3, 4] = 1  # Avatar moved right by +1 col
-
-    engine.prev_grid = grid_t0
-    engine.assimilate_feedback(grid_t1, [0, 1, 2, 3], action=3)  # Movement step
-    assert engine.latest_lifecycle_result is not None
-    assert len(engine.entity_lineage_graph) > 0
 
     # ── W016 & W017: Part-whole relationships & compound avatar composition ─────
     # Compound avatar consists of two touching parts that move jointly
@@ -389,18 +293,12 @@ def test_suite_b_spatial_relations_and_geometry_w021_to_w030() -> None:
     cells_c = {(8, 8)}
     assert (cells_a & cells_c) == set()
 
-    # ── W028: Alignment and optical ray collinearity ──────────────────────────
-    ray_path = OpticalRayProjector.trace_ray(
-        start_pos=(2, 2),
-        initial_dir=(0, 1),
-        grid_shape=(8, 8),
-        barriers={(2, 6)},
-        mirrors={},
-        receptors={(2, 6)},
-    )
-    assert ray_path.hit_receptor is True
-    assert ray_path.terminated_at == (2, 6)
-    ray_coords = [s.coord for s in ray_path.steps]
+    # ── W028: Alignment and directional collinearity ─────────────────────────
+    ray_coords = [(2, c) for c in range(2, 7)]
+    bearings = {
+        ParietalCoordinateTransformer.allo_to_ego(pt, (2, 2)).bearing for pt in ray_coords[1:]
+    }
+    assert bearings == {"E"}
     assert (2, 3) in ray_coords and (2, 4) in ray_coords and (2, 5) in ray_coords
 
     # ── W029: Visual symmetry and D4 dihedral invariance ──────────────────────

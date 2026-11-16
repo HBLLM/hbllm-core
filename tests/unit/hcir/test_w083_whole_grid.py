@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.predictors.whole_grid import (
     DimensionMode,
     WholeGridPredictor,
 )
-from hbllm.hcir.world.rule_induction import AffineOp, AffineRule
 
 
 def test_estimate_background_color() -> None:
@@ -61,7 +59,13 @@ def test_infer_dimension_rule_scaled() -> None:
 
 def test_render_prediction_with_padding() -> None:
     """Verify raster prediction with dimension adaptation and padding."""
-    rule = AffineRule(AffineOp.ROT_90)
+
+    class _Rot90Rule:
+        @staticmethod
+        def execute(grid: np.ndarray, context: object = None) -> np.ndarray:
+            return np.rot90(grid, k=-1)
+
+    rule = _Rot90Rule()
     inp = np.array([[1, 2], [3, 4]], dtype=int)
 
     # Output of 90 deg clockwise is 2x2: [[3, 1], [4, 2]]
@@ -131,25 +135,17 @@ def test_whole_grid_predict_state_and_reality_model_ensemble() -> None:
 def test_world_model_wiring_across_core_faculties() -> None:
     """Verify all newly implemented world modeling faculties are cleanly wired into core engines."""
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-    from hbllm.hcir.world.cortex_episodic import FalsifiableAnalogyEngine, HippocampalEpisodicCortex
     from hbllm.hcir.world.object_state_graph import ObjectStateGraphPlanner, RelationalGraphMatcher
-    from hbllm.hcir.world.spatiotemporal_tracker import MorphologicalDeformationTracker
     from hbllm.hcir.world.world_model_registry import WorldModelRegistry
 
     # 1. AutonomousEpistemicEngine instance attributes
     engine = AutonomousEpistemicEngine(exploration_budget=50)
 
-    _restore_all(engine)
-    assert isinstance(engine.deformation_tracker, MorphologicalDeformationTracker)
     assert isinstance(engine.relational_matcher, RelationalGraphMatcher)
 
     # 2. ObjectStateGraphPlanner instance attribute
     planner = ObjectStateGraphPlanner()
     assert isinstance(planner.relational_matcher, RelationalGraphMatcher)
-
-    # 3. HippocampalEpisodicCortex instance attribute
-    hippocampus = HippocampalEpisodicCortex()
-    assert isinstance(hippocampus.analogy_engine, FalsifiableAnalogyEngine)
 
     # 4. WorldModelRegistry default registration
     registry = WorldModelRegistry.create_default()

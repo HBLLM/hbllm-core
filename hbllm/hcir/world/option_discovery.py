@@ -31,7 +31,6 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 
 if TYPE_CHECKING:
     from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
-    from hbllm.hcir.world.library_learning import LibraryLearner
 
 logger = logging.getLogger(__name__)
 
@@ -307,22 +306,3 @@ class OptionDiscoveryEngine:
         if self.total_episode_steps == 0:
             return 0.0
         return min(1.0, float(self.option_executed_steps) / float(self.total_episode_steps))
-
-    def consolidate_options_to_library(
-        self,
-        library_learner: LibraryLearner,
-    ) -> list[str]:
-        """Consolidate high-reuse options into the master LibraryLearner macro skills."""
-        consolidated = []
-        for opt_id, opt in self.discovered_options.items():
-            if opt.reuse_count >= self.min_reuse_for_consolidation and opt.success_rate >= 0.5:
-                skill = opt.to_declarative_skill()
-                library_learner.macro_skills[opt.name] = skill
-                consolidated.append(opt.name)
-                logger.info(
-                    "Option %s consolidated into LibraryLearner (reuse=%d, success=%.2f)",
-                    opt.name,
-                    opt.reuse_count,
-                    opt.success_rate,
-                )
-        return consolidated
