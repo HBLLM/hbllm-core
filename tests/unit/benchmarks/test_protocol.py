@@ -109,9 +109,42 @@ def test_heldout_anti_tamper_gate_refuses_rerun(tmp_path: Path):
     assert len(heldout_files) == 1
 
     # Attempting to verify or run heldout again on same git_sha MUST raise RuntimeError
-    protocol_rerun = EvaluationProtocol(reports_dir=tmp_path, git_sha=git_sha)
+    protocol_rerun = EvaluationProtocol(reports_dir=tmp_path, git_sha=git_sha, eval_tag="eval-v2")
     with pytest.raises(RuntimeError, match="Held-out evaluation already exists for git commit"):
         protocol_rerun.verify_heldout_gate()
+
+
+def test_heldout_gate_requires_eval_tag_and_writes_ledger(tmp_path: Path):
+    """Held-out gate rejects untagged commits and appends to LEDGER.md on tagged runs."""
+    untagged = EvaluationProtocol(reports_dir=tmp_path, git_sha="deadbeef00001111", eval_tag="")
+    with pytest.raises(RuntimeError, match="not tagged with 'eval-\\*'"):
+        untagged.verify_heldout_gate(require_eval_tag=True)
+
+    tagged = EvaluationProtocol(
+        reports_dir=tmp_path, git_sha="cafebabe22223333", eval_tag="eval-phase2-m1"
+    )
+    task = TaskResult(
+        task_id="ho_v2_1",
+        family="partial_observability",
+        split="heldout",
+        steps=24,
+        max_budget=140,
+        seed_count=20,
+        success_at_budget=True,
+        zero_shot={
+            "n": 20,
+            "successes": [True] * 16 + [False] * 4,
+            "steps_per_seed": [24] * 16 + [140] * 4,
+        },
+    )
+    report = tagged.compute_report(split="heldout", tasks=[task])
+    assert report.zero_shot["n_trials"] == 20
+    assert report.zero_shot["solve_rate"] == 0.8
+    ci = report.zero_shot["wilson_95_ci"]
+    assert len(ci) == 2 and 0.55 < ci[0] < 0.80 < ci[1] < 0.95
+    ledger = (tmp_path / "heldout" / "LEDGER.md").read_text(encoding="utf-8")
+    assert "eval-phase2-m1" in ledger
+    assert "cafebabe" in ledger
 
 
 def test_family_scores_match_zero_shot_headline(tmp_path: Path):

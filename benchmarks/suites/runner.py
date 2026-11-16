@@ -1,7 +1,14 @@
 """Test suite runner for dev and held-out benchmark splits.
 
-Executes true closed-loop evaluation where agent actions are fed back to environments
-and success is determined strictly by the environment simulation.
+Executes true closed-loop evaluation across ALL seeds in each task manifest:
+1. Primary headline: Zero-shot across all manifest seeds (fresh CognitiveSystem per seed)
+   with exact Wilson 95% confidence intervals and exploration-death counting.
+2. Secondary headline: Cross-seed procedural transfer across all manifest seeds with one
+   shared CognitiveSystem (`same_level=False` boundaries) and Wilson 95% intervals.
+3. Auxiliary metrics: Same-layout replay (`same_layout_replay`, legacy `lifelong`) and
+   one-shot imitation (`demonstration`).
+4. Zero swallowed exceptions: any engine/boundary/terminal exception is recorded in `errors`
+   and marks the episode as failed.
 """
 
 from __future__ import annotations
@@ -22,8 +29,11 @@ if str(_CORE_ROOT) not in sys.path:
 
 import yaml
 
-from hbllm.benchmarks.protocol import EvaluationProtocol, TaskResult
+from hbllm.benchmarks.protocol import EvaluationProtocol, TaskResult, wilson_ci
+from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind, TerminalSignal
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+_DEATH_REASONS = frozenset({"hazard_collision", "died", "lava", "trap", "failure", "fatal"})
 
 
 def _load_env_class(class_path: str) -> type:
@@ -31,6 +41,15 @@ def _load_env_class(class_path: str) -> type:
     module_name, class_name = class_path.rsplit(".", 1)
     mod = importlib.import_module(module_name)
     return getattr(mod, class_name)
+
+
+def _is_death_outcome(success: bool, terminal_obs: Any, info: dict[str, Any]) -> bool:
+    if success:
+        return False
+    reason = str(info.get("reason", "")).lower()
+    if reason in _DEATH_REASONS:
+        return True
+    return getattr(terminal_obs, "terminal", None) == TerminalSignal.FAILURE
 
 
 def run_closed_loop_task(
@@ -43,101 +62,187 @@ def run_closed_loop_task(
     shared_memory: bool = True,
     cross_seed: bool = True,
 ) -> tuple[bool, int, list[float], list[str], dict[str, Any]]:
-    """Execute a task over N episodes in closed loop with optional shared memory.
+    """Execute a task across ALL manifest seeds for zero-shot and cross-seed transfer,
+    plus N-episode same-layout replay on the primary seed.
 
     Returns:
         (overall_success, steps, latencies_ms, errors, extra)
     """
-    seeds = task_def.get("seeds", [0])
-    task_seed = seeds[0]
-    task_id = task_def.get("id", f"task_{task_seed}")
+    seeds = [int(s) for s in task_def.get("seeds", [0])] or [0]
+    primary_seed = seeds[0]
+    task_id = task_def.get("id", f"task_{primary_seed}")
+    episodes = max(1, int(episodes))
 
     episode_successes: list[bool] = []
     episode_steps: list[int] = []
     all_latencies: list[float] = []
     all_errors: list[str] = []
 
-    def _execute(engine_factory=None):
-        system = None
-        engine = None
-        if engine_factory is not None and shared_memory:
-            system = engine_factory()
-            engine = system.engine
+    zs_seeds: list[int] = []
+    zs_successes: list[bool] = []
+    zs_steps: list[int] = []
+    zs_deaths = 0
 
-        prev_succ = False
-        for ep_idx in range(episodes):
-            if engine_factory is not None and not shared_memory:
-                system = engine_factory()
-                engine = system.engine
-            elif engine is not None and ep_idx > 0:
-                from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+    def _make_system(tmp_dir: str, tag: str, grounding: bool):
+        config = CognitiveSystemConfig(
+            world_id=f"bench_{task_id}_{tag}",
+            memory_dir=tmp_dir,
+            enable_grounding=grounding,
+            perception_mode=perception_mode,
+        )
+        return build_cognitive_system(config)
 
-                b_kind = (
-                    EpisodeBoundaryKind.LEVEL_COMPLETE if prev_succ else EpisodeBoundaryKind.DEATH
+    # 1. Same-layout replay over `episodes` on `seeds[0]` (ep 0 doubles as seed 0's zero-shot)
+    def _run_primary_replay(use_engine: bool) -> None:
+        nonlocal zs_deaths
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            system = None
+            engine = None
+            if use_engine and shared_memory:
+                system = _make_system(
+                    tmp_dir, f"{baseline}_s{primary_seed}", baseline in ("system", "demonstration")
                 )
-                try:
-                    engine.on_boundary(EpisodeBoundary(kind=b_kind, same_level=shared_memory))
-                except Exception:
-                    pass
+                engine = system.engine
 
-            env_instance = env_cls(max_steps=max_budget)
-            obs = env_instance.reset(seed=task_seed)
-            ep_baseline = baseline
-            if baseline == "demonstration":
-                ep_baseline = "demonstration_oracle" if ep_idx == 0 else "system"
-            succ, steps, lats, errs = _run_loop(
-                env_instance,
-                obs,
-                engine,
-                ep_baseline,
-                max_budget,
-                [],
-                [],
-                seed=task_seed,
-            )
-            episode_successes.append(succ)
-            episode_steps.append(steps)
+            prev_succ = False
+            for ep_idx in range(episodes):
+                ep_errors: list[str] = []
+                if use_engine and not shared_memory:
+                    with tempfile.TemporaryDirectory() as ep_dir:
+                        system = _make_system(
+                            ep_dir,
+                            f"{baseline}_s{primary_seed}_ep{ep_idx}",
+                            baseline in ("system", "demonstration"),
+                        )
+                        engine = system.engine
+                        env_instance = env_cls(max_steps=max_budget)
+                        obs = env_instance.reset(seed=primary_seed)
+                        ep_base = (
+                            ("demonstration_oracle" if ep_idx == 0 else "system")
+                            if baseline == "demonstration"
+                            else baseline
+                        )
+                        succ, steps, lats, errs, died = _run_loop_with_info(
+                            env_instance,
+                            obs,
+                            engine,
+                            ep_base,
+                            max_budget,
+                            [],
+                            ep_errors,
+                            seed=primary_seed,
+                        )
+                else:
+                    if engine is not None and ep_idx > 0:
+                        b_kind = (
+                            EpisodeBoundaryKind.LEVEL_COMPLETE
+                            if prev_succ
+                            else EpisodeBoundaryKind.DEATH
+                        )
+                        try:
+                            engine.on_boundary(
+                                EpisodeBoundary(kind=b_kind, same_level=shared_memory)
+                            )
+                        except Exception as e:
+                            ep_errors.append(
+                                f"Boundary error at seed {primary_seed} episode {ep_idx}: {e}"
+                            )
+                    env_instance = (
+                        env_cls(max_budget=max_budget) if False else env_cls(max_steps=max_budget)
+                    )
+                    obs = env_instance.reset(seed=primary_seed)
+                    ep_base = (
+                        ("demonstration_oracle" if ep_idx == 0 else "system")
+                        if baseline == "demonstration"
+                        else baseline
+                    )
+                    if ep_errors:
+                        succ, steps, lats, errs, died = False, 0, [], ep_errors, False
+                    else:
+                        succ, steps, lats, errs, died = _run_loop_with_info(
+                            env_instance,
+                            obs,
+                            engine,
+                            ep_base,
+                            max_budget,
+                            [],
+                            ep_errors,
+                            seed=primary_seed,
+                        )
+
+                if errs:
+                    succ = False
+                episode_successes.append(succ)
+                episode_steps.append(steps)
+                all_latencies.extend(lats)
+                all_errors.extend(errs)
+                prev_succ = succ
+
+                if ep_idx == 0 and baseline != "demonstration":
+                    zs_seeds.append(primary_seed)
+                    zs_successes.append(succ)
+                    zs_steps.append(steps)
+                    if died:
+                        zs_deaths += 1
+
+    _run_primary_replay(use_engine=(baseline in ("system", "no_grounding", "demonstration")))
+
+    # 2. Independent zero-shot evaluation across ALL remaining seeds (seeds[1:])
+    if baseline != "demonstration" and len(seeds) > 1:
+        for s in seeds[1:]:
+            seed_errs: list[str] = []
+            if baseline in ("system", "no_grounding"):
+                with tempfile.TemporaryDirectory() as s_dir:
+                    s_sys = _make_system(s_dir, f"{baseline}_zs_s{s}", baseline == "system")
+                    s_env = env_cls(max_steps=max_budget)
+                    s_obs = s_env.reset(seed=s)
+                    succ, steps, lats, errs, died = _run_loop_with_info(
+                        s_env, s_obs, s_sys.engine, baseline, max_budget, [], seed_errs, seed=s
+                    )
+            else:
+                s_env = env_cls(max_steps=max_budget)
+                s_obs = s_env.reset(seed=s)
+                succ, steps, lats, errs, died = _run_loop_with_info(
+                    s_env, s_obs, None, baseline, max_budget, [], seed_errs, seed=s
+                )
+            if errs:
+                succ = False
+            zs_seeds.append(s)
+            zs_successes.append(succ)
+            zs_steps.append(steps)
+            if died:
+                zs_deaths += 1
             all_latencies.extend(lats)
             all_errors.extend(errs)
-            prev_succ = succ
+    elif baseline == "demonstration":
+        # Demonstration mode reports episode 1 (post-oracle imitation)
+        im_ok = episode_successes[1] if len(episode_successes) > 1 else False
+        im_st = episode_steps[1] if len(episode_steps) > 1 else max_budget
+        zs_seeds.append(primary_seed)
+        zs_successes.append(im_ok)
+        zs_steps.append(im_st)
 
-    if baseline in ("system", "no_grounding", "demonstration"):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-
-            def make_system():
-                config = CognitiveSystemConfig(
-                    world_id=f"bench_{task_id}_{baseline}",
-                    memory_dir=tmp_dir,
-                    enable_grounding=(baseline in ("system", "demonstration")),
-                    perception_mode=perception_mode,
-                )
-                return build_cognitive_system(config)
-
-            _execute(make_system)
-    else:
-        _execute(None)
-
-    # Compute stable policy metric (first i after which 3 consecutive successes occur)
+    # Compute stable policy metric on same-layout replay
     stable_idx = None
     for i in range(len(episode_successes) - 2):
         if episode_successes[i] and episode_successes[i + 1] and episode_successes[i + 2]:
             stable_idx = i
             break
 
-    # First success
     first_succ_steps = None
-    for i, s in enumerate(episode_successes):
-        if s:
+    for i, s_ok in enumerate(episode_successes):
+        if s_ok:
             first_succ_steps = episode_steps[i]
             break
 
-    overall_success = bool(episode_successes[-1]) if episode_successes else False
-    mean_steps = (
+    replay_final_success = bool(episode_successes[-1]) if episode_successes else False
+    replay_final_steps = (
         episode_steps[-1]
-        if (episode_steps and overall_success)
-        else (int(sum(episode_steps) / max(1, len(episode_steps))))
+        if (episode_steps and replay_final_success)
+        else int(sum(episode_steps) / max(1, len(episode_steps)))
     )
 
+    # 3. One-shot imitation on primary seed
     one_shot_imitation: dict[str, Any] = {}
     if baseline == "demonstration":
         one_shot_imitation = {
@@ -146,41 +251,52 @@ def run_closed_loop_task(
             "oracle_success": episode_successes[0] if episode_successes else False,
             "oracle_steps": episode_steps[0] if episode_steps else max_budget,
         }
-    elif baseline == "system" and hasattr(env_cls, "get_oracle_action"):
+    elif baseline == "system" and callable(getattr(env_cls, "get_oracle_action", None)):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            config = CognitiveSystemConfig(
-                world_id=f"bench_{task_id}_demo",
-                memory_dir=tmp_dir,
-                enable_grounding=True,
-                perception_mode=perception_mode,
-            )
-            demo_sys = build_cognitive_system(config)
+            demo_sys = _make_system(tmp_dir, "demo", True)
             demo_engine = demo_sys.engine
             demo_env = env_cls(max_steps=max_budget)
-            d_obs = demo_env.reset(seed=task_seed)
-            d_succ, d_steps, _, _ = _run_loop(
+            d_obs = demo_env.reset(seed=primary_seed)
+            d_errs: list[str] = []
+            d_succ, d_steps, _, _, _ = _run_loop_with_info(
                 demo_env,
                 d_obs,
                 demo_engine,
                 "demonstration_oracle",
                 max_budget,
                 [],
-                [],
-                seed=task_seed,
+                d_errs,
+                seed=primary_seed,
             )
-            from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
-
-            demo_engine.on_boundary(
-                EpisodeBoundary(
-                    kind=(
-                        EpisodeBoundaryKind.LEVEL_COMPLETE if d_succ else EpisodeBoundaryKind.DEATH
+            try:
+                demo_engine.on_boundary(
+                    EpisodeBoundary(
+                        kind=(
+                            EpisodeBoundaryKind.LEVEL_COMPLETE
+                            if d_succ
+                            else EpisodeBoundaryKind.DEATH
+                        )
                     )
                 )
-            )
-            d_obs = demo_env.reset(seed=task_seed)
-            i_succ, i_steps, _, _ = _run_loop(
-                demo_env, d_obs, demo_engine, "system", max_budget, [], [], seed=task_seed
-            )
+            except Exception as e:
+                d_errs.append(f"Demo boundary error: {e}")
+            d_obs = demo_env.reset(seed=primary_seed)
+            if d_errs:
+                i_succ, i_steps = False, max_budget
+            else:
+                i_succ, i_steps, _, _, _ = _run_loop_with_info(
+                    demo_env,
+                    d_obs,
+                    demo_engine,
+                    "system",
+                    max_budget,
+                    [],
+                    d_errs,
+                    seed=primary_seed,
+                )
+                if d_errs:
+                    i_succ = False
+            all_errors.extend(d_errs)
             one_shot_imitation = {
                 "success": i_succ,
                 "steps": i_steps,
@@ -188,26 +304,18 @@ def run_closed_loop_task(
                 "oracle_steps": d_steps,
             }
 
-    # Cross-seed procedural transfer: one shared engine across DISTINCT procedural
-    # layouts (seeds[0..k]) with same_level=False boundaries, measuring whether
-    # feature-level world theory and consolidated skills transfer between layouts.
+    # 4. Cross-seed procedural transfer across ALL distinct seeds in the manifest
     cross_seed_transfer: dict[str, Any] = {}
     if cross_seed and baseline in ("system", "no_grounding") and len(seeds) > 1:
-        xs_seeds = [seeds[i % len(seeds)] for i in range(episodes)]
+        xs_seeds = list(seeds)
         xs_succ: list[bool] = []
         xs_steps: list[int] = []
+        xs_deaths = 0
         with tempfile.TemporaryDirectory() as tmp_dir:
-            config = CognitiveSystemConfig(
-                world_id=f"bench_{task_id}_xseed_{baseline}",
-                memory_dir=tmp_dir,
-                enable_grounding=(baseline == "system"),
-                perception_mode=perception_mode,
-            )
-            xs_engine = build_cognitive_system(config).engine
-            from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
-
+            xs_engine = _make_system(tmp_dir, f"xseed_{baseline}", baseline == "system").engine
             prev_ok = False
             for ep_idx, ep_seed in enumerate(xs_seeds):
+                xs_errs: list[str] = []
                 if ep_idx > 0:
                     try:
                         xs_engine.on_boundary(
@@ -220,49 +328,92 @@ def run_closed_loop_task(
                                 same_level=False,
                             )
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        xs_errs.append(f"Cross-seed boundary error at seed {ep_seed}: {e}")
                 xs_env = env_cls(max_steps=max_budget)
                 xs_obs = xs_env.reset(seed=ep_seed)
-                ok, st, _, _ = _run_loop(
-                    xs_env, xs_obs, xs_engine, "system", max_budget, [], [], seed=ep_seed
-                )
+                if xs_errs:
+                    ok, st, died = False, max_budget, False
+                else:
+                    ok, st, _, xs_errs, died = _run_loop_with_info(
+                        xs_env,
+                        xs_obs,
+                        xs_engine,
+                        baseline,
+                        max_budget,
+                        [],
+                        xs_errs,
+                        seed=ep_seed,
+                    )
+                    if xs_errs:
+                        ok = False
+                if died:
+                    xs_deaths += 1
+                all_errors.extend(xs_errs)
                 xs_succ.append(ok)
                 xs_steps.append(st)
                 prev_ok = ok
-            skills = len(getattr(getattr(xs_engine, "library_learner", None), "macro_skills", {}))
+            lib = getattr(xs_engine, "library_learner", None)
+            skills = len(getattr(lib, "macro_skills", {})) if lib is not None else 0
+        n_xs = len(xs_succ)
+        k_xs = sum(xs_succ)
+        k_tr = sum(xs_succ[1:])
+        n_tr = max(0, n_xs - 1)
         cross_seed_transfer = {
             "seeds": xs_seeds,
             "successes": xs_succ,
             "steps": xs_steps,
-            "solve_rate": round(sum(xs_succ) / max(1, len(xs_succ)), 4),
-            "transfer_solve_rate": (
-                round(sum(xs_succ[1:]) / max(1, len(xs_succ) - 1), 4) if len(xs_succ) > 1 else 0.0
-            ),
+            "solve_rate": round(k_xs / max(1, n_xs), 4),
+            "solve_rate_wilson_95_ci": list(wilson_ci(k_xs, n_xs)),
+            "transfer_solve_rate": round(k_tr / max(1, n_tr), 4) if n_tr > 0 else 0.0,
+            "transfer_wilson_95_ci": list(wilson_ci(k_tr, n_tr)) if n_tr > 0 else [0.0, 0.0],
+            "exploration_deaths": xs_deaths,
             "skills_consolidated": skills,
         }
 
+    n_zs = len(zs_successes)
+    k_zs = sum(zs_successes)
+    zs_solve_rate = round(k_zs / max(1, n_zs), 4)
+    zs_ci = list(wilson_ci(k_zs, n_zs))
+    zs_mean_steps = int(round(sum(zs_steps) / max(1, n_zs)))
+
+    replay_payload = {
+        "seed": primary_seed,
+        "success": replay_final_success,
+        "final_steps": replay_final_steps,
+        "episodes": episodes,
+        "successes": episode_successes,
+        "steps": episode_steps,
+        "steps_to_stable_policy": stable_idx,
+    }
+
     extra = {
+        "seed_count": len(seeds),
+        "exploration_deaths": zs_deaths,
         "episode_successes": episode_successes,
         "episode_steps": episode_steps,
         "steps_to_stable_policy": stable_idx,
         "steps_to_first_success": first_succ_steps,
         "zero_shot": {
-            "success": episode_successes[0] if episode_successes else False,
-            "steps": episode_steps[0] if episode_steps else max_budget,
+            "n": n_zs,
+            "seeds": zs_seeds,
+            "successes": zs_successes,
+            "steps_per_seed": zs_steps,
+            "solve_rate": zs_solve_rate,
+            "wilson_95_ci": zs_ci,
+            "exploration_deaths": zs_deaths,
+            "exploration_death_rate": round(zs_deaths / max(1, n_zs), 4),
+            "success": zs_successes[0] if n_zs == 1 else (k_zs * 2 >= n_zs and k_zs > 0),
+            "steps": zs_steps[0] if n_zs == 1 else zs_mean_steps,
         },
-        "lifelong": {
-            "success": overall_success,
-            "episodes": episodes,
-            "successes": episode_successes,
-            "steps": episode_steps,
-            "steps_to_stable_policy": stable_idx,
-        },
+        "same_layout_replay": replay_payload,
+        "lifelong": replay_payload,
         "one_shot_imitation": one_shot_imitation,
         "cross_seed_transfer": cross_seed_transfer,
     }
 
-    return overall_success, mean_steps, all_latencies, all_errors, extra
+    overall_success = replay_final_success and not all_errors
+    return overall_success, replay_final_steps, all_latencies, all_errors, extra
 
 
 def run_closed_loop_episode(
@@ -281,7 +432,6 @@ def run_closed_loop_episode(
     errors: list[str] = []
     obs = env.reset(seed=seed)
 
-    system = None
     if baseline in ("system", "no_grounding"):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config = CognitiveSystemConfig(
@@ -308,7 +458,24 @@ def _run_loop(
     errors: list[str],
     seed: int = 0,
 ) -> tuple[bool, int, list[float], list[str]]:
+    succ, step_count, lats, errs, _died = _run_loop_with_info(
+        env, obs, engine, baseline, max_budget, latencies, errors, seed=seed
+    )
+    return succ, step_count, lats, errs
+
+
+def _run_loop_with_info(
+    env: Any,
+    obs: Any,
+    engine: Any | None,
+    baseline: str,
+    max_budget: int,
+    latencies: list[float],
+    errors: list[str],
+    seed: int = 0,
+) -> tuple[bool, int, list[float], list[str], bool]:
     success = False
+    died = False
     step_count = 0
     rng = random.Random(seed)
     step_journal: list[dict[str, Any]] = []
@@ -322,27 +489,20 @@ def _run_loop(
         meta = None
         try:
             if baseline == "stub_agent":
-                # Always emits constant action (e.g. ACTION_UP = 1)
                 action = 1
             elif baseline == "random":
-                # Select random action from available actions (seeded for determinism)
                 avail = getattr(obs, "available_actions", [1, 2, 3, 4])
                 action = rng.choice(list(avail))
             elif baseline == "oracle":
-                # Compute optimal action from ground-truth state
                 action = env.get_oracle_action()
             elif baseline == "demonstration_oracle":
                 if engine is not None:
-                    try:
-                        raw_action = engine.step(obs, last_action=last_oracle_action)
-                        if isinstance(raw_action, tuple) and len(raw_action) > 1:
-                            meta = raw_action[1]
-                    except Exception:
-                        pass
+                    raw_action = engine.step(obs, last_action=last_oracle_action)
+                    if isinstance(raw_action, tuple) and len(raw_action) > 1:
+                        meta = raw_action[1]
                 action = env.get_oracle_action()
                 last_oracle_action = action
             else:
-                # AutonomousEpistemicEngine step: unpack (action, metadata)
                 assert engine is not None
                 raw_action = engine.step(obs)
                 if isinstance(raw_action, tuple) and len(raw_action) > 1:
@@ -351,21 +511,22 @@ def _run_loop(
                     action = raw_action
         except Exception as e:
             errors.append(f"Action selection error at step {step_count}: {e}")
+            success = False
             break
 
         step_journal.append({"step": step_count, "action": action, "meta": meta})
         latencies.append((time.perf_counter() - t0) * 1000.0)
 
-        # Environment closed-loop transition
         try:
             obs, reward, done, info = env.step(action)
         except Exception as e:
             errors.append(f"Environment step error at step {step_count}: {e}")
+            success = False
             break
 
         if done:
             success = bool(info.get("success", False))
-            # Feed terminal observation back to engine to trigger reward/goal learning
+            died = _is_death_outcome(success, obs, info)
             if engine is not None:
                 try:
                     engine.step(
@@ -374,11 +535,12 @@ def _run_loop(
                             last_oracle_action if baseline == "demonstration_oracle" else None
                         ),
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    errors.append(f"Terminal feedback error at step {step_count}: {e}")
+                    success = False
             break
 
-    return success, step_count, latencies, errors
+    return success, step_count, latencies, errors, died
 
 
 def run_suite(
@@ -408,7 +570,7 @@ def run_suite(
         perception_mode=perception_mode,
         config={
             "model": "deterministic_hcir",
-            "version": "1.0.0",
+            "version": "2.0.0",
             "perception_mode": perception_mode,
             "baseline": baseline,
             "split": split,
@@ -418,7 +580,11 @@ def run_suite(
     )
 
     if split == "heldout" and baseline == "system":
-        protocol.verify_heldout_gate()
+        try:
+            protocol.verify_heldout_gate()
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 2
 
     print(
         f"=== Running HBLLM Generality Suite [{split.upper()}] (baseline={baseline}, perception={perception_mode}, episodes={episodes_per_task}, shared_memory={shared_memory}) ==="
@@ -432,15 +598,16 @@ def run_suite(
         family = task_def["family"]
         env_cls = _load_env_class(task_def["env_class"])
         max_budget = task_def.get("max_budget", 100)
+        n_seeds = len(task_def.get("seeds", [0]))
 
         print(
-            f"-> Evaluating task [{task_id}] ({family}, episodes={episodes_per_task}, shared_memory={shared_memory}, budget={max_budget})..."
+            f"-> Evaluating task [{task_id}] ({family}, seeds={n_seeds}, replay_eps={episodes_per_task}, budget={max_budget})..."
         )
 
-        def make_task_runner(t_def: dict[str, Any], t_budget: int):
+        def make_task_runner(e_cls: type, t_def: dict[str, Any], t_budget: int):
             def run_task():
                 return run_closed_loop_task(
-                    env_cls=env_cls,
+                    env_cls=e_cls,
                     task_def=t_def,
                     max_budget=t_budget,
                     baseline=baseline,
@@ -456,7 +623,7 @@ def run_suite(
             task_id=f"{task_id}_{baseline}_{perception_mode}",
             family=family,
             split=split,
-            run_fn=make_task_runner(task_def, max_budget),
+            run_fn=make_task_runner(env_cls, task_def, max_budget),
             max_budget=max_budget,
         )
         tasks.append(t_res)
@@ -482,7 +649,7 @@ def run_suite(
                     perception_mode=perception_mode,
                     episodes=episodes_per_task,
                     shared_memory=shared_memory,
-                    cross_seed=False,
+                    cross_seed=(b_name == "no_grounding" and cross_seed),
                 )
                 b_task_res = TaskResult(
                     task_id=f"{t_id}_{b_name}",
@@ -490,9 +657,12 @@ def run_suite(
                     split=split,
                     steps=b_st,
                     max_budget=t_budget,
+                    seed_count=b_extra.get("seed_count", 1),
+                    exploration_deaths=b_extra.get("exploration_deaths", 0),
                     success_at_budget=b_ok,
                     steps_to_first_success=b_extra.get("steps_to_first_success"),
                     steps_to_stable_policy=b_extra.get("steps_to_stable_policy"),
+                    errors=b_er,
                     p50_latency_ms=round(sorted(b_lt)[len(b_lt) // 2], 2) if b_lt else 0.0,
                     p95_latency_ms=(
                         round(sorted(b_lt)[min(len(b_lt) - 1, int(len(b_lt) * 0.95))], 2)
@@ -502,7 +672,9 @@ def run_suite(
                     episode_successes=b_extra.get("episode_successes", []),
                     episode_steps=b_extra.get("episode_steps", []),
                     zero_shot=b_extra.get("zero_shot", {}),
+                    same_layout_replay=b_extra.get("same_layout_replay", {}),
                     lifelong=b_extra.get("lifelong", {}),
+                    cross_seed_transfer=b_extra.get("cross_seed_transfer", {}),
                 )
                 b_tasks.append(b_task_res)
 
@@ -510,45 +682,43 @@ def run_suite(
             for bt in b_tasks:
                 b_fams.setdefault(bt.family, []).append(bt)
 
-            def _compute_baseline_family_scores(use_zero_shot: bool) -> dict[str, float]:
-                scores: dict[str, float] = {}
-                for f_name, f_list in b_fams.items():
-                    if use_zero_shot:
-                        solved = [
-                            x for x in f_list if x.zero_shot.get("success", x.success_at_budget)
-                        ]
-                    else:
-                        solved = [x for x in f_list if x.success_at_budget]
-                    if not solved:
-                        scores[f_name] = 0.0
-                    else:
-                        sr = len(solved) / len(f_list)
-                        eff = sum(
-                            max(
-                                0.0,
-                                1.0
-                                - (
-                                    (
-                                        x.zero_shot.get("steps", x.steps)
-                                        if use_zero_shot
-                                        else x.steps
-                                    )
-                                    / max(1, x.max_budget)
-                                ),
-                            )
-                            for x in solved
-                        ) / len(solved)
-                        scores[f_name] = round(0.5 * sr + 0.5 * eff, 4)
-                return scores
+            zs_b_fam_scores: dict[str, float] = {}
+            b_fam_scores: dict[str, float] = {}
+            zs_tot_trials = 0
+            zs_tot_solved = 0
 
-            zs_b_fam_scores = _compute_baseline_family_scores(use_zero_shot=True)
+            for f_name, f_list in b_fams.items():
+                trials: list[tuple[bool, int, int]] = []
+                for x in f_list:
+                    trials.extend(EvaluationProtocol.extract_zero_shot_trials(x))
+                n_tr = len(trials)
+                ok_tr = [tr for tr in trials if tr[0]]
+                zs_tot_trials += n_tr
+                zs_tot_solved += len(ok_tr)
+                if not ok_tr:
+                    zs_b_fam_scores[f_name] = 0.0
+                else:
+                    sr = len(ok_tr) / n_tr
+                    eff = sum(max(0.0, 1.0 - (st / max(1, bud))) for _, st, bud in ok_tr) / len(
+                        ok_tr
+                    )
+                    zs_b_fam_scores[f_name] = round(0.5 * sr + 0.5 * eff, 4)
+
+                solved_lf = [x for x in f_list if x.success_at_budget]
+                if not solved_lf:
+                    b_fam_scores[f_name] = 0.0
+                else:
+                    sr_lf = len(solved_lf) / len(f_list)
+                    eff_lf = sum(
+                        max(0.0, 1.0 - (x.steps / max(1, x.max_budget))) for x in solved_lf
+                    ) / len(solved_lf)
+                    b_fam_scores[f_name] = round(0.5 * sr_lf + 0.5 * eff_lf, 4)
+
             zs_b_gen = round(sum(zs_b_fam_scores.values()) / max(1, len(zs_b_fam_scores)), 4)
-            zs_tot_solved = sum(
-                1 for bt in b_tasks if bt.zero_shot.get("success", bt.success_at_budget)
-            )
-            b_fam_scores = _compute_baseline_family_scores(use_zero_shot=False)
             b_gen = round(sum(b_fam_scores.values()) / max(1, len(b_fam_scores)), 4)
-            tot_solved = sum(1 for bt in b_tasks if bt.success_at_budget)
+            tot_solved_lf = sum(1 for bt in b_tasks if bt.success_at_budget)
+            zs_ci = list(wilson_ci(zs_tot_solved, zs_tot_trials))
+            b_deaths = sum(bt.exploration_deaths for bt in b_tasks)
 
             b_curves = [bt.episode_successes for bt in b_tasks if bt.episode_successes]
             avg_curve = (
@@ -561,20 +731,35 @@ def run_suite(
             ]
             b_stable = round(sum(stable_list) / len(stable_list), 2) if stable_list else None
 
+            xs_b: dict[str, Any] = {}
+            xs_bt = [bt for bt in b_tasks if bt.cross_seed_transfer.get("successes")]
+            if xs_bt:
+                tr_eps = sum(max(0, len(bt.cross_seed_transfer["successes"]) - 1) for bt in xs_bt)
+                tr_ok = sum(sum(bt.cross_seed_transfer["successes"][1:]) for bt in xs_bt)
+                xs_b = {
+                    "transfer_solve_rate": round(tr_ok / max(1, tr_eps), 4),
+                    "transfer_wilson_95_ci": list(wilson_ci(tr_ok, tr_eps)),
+                }
+
             baselines_dict[b_name] = {
                 "generality_score": zs_b_gen,
                 "zero_shot_generality_score": zs_b_gen,
                 "zero_shot_family_scores": zs_b_fam_scores,
-                "zero_shot_solve_rate": round(zs_tot_solved / max(1, len(b_tasks)), 4),
+                "zero_shot_n_trials": zs_tot_trials,
+                "zero_shot_solve_rate": round(zs_tot_solved / max(1, zs_tot_trials), 4),
+                "zero_shot_wilson_95_ci": zs_ci,
+                "exploration_deaths": b_deaths,
+                "same_layout_replay_generality_score": b_gen,
                 "lifelong_generality_score": b_gen,
                 "lifelong_family_scores": b_fam_scores,
                 "family_scores": zs_b_fam_scores,
-                "solve_rate": round(tot_solved / max(1, len(b_tasks)), 4),
+                "solve_rate": round(tot_solved_lf / max(1, len(b_tasks)), 4),
                 "lifelong_curve": avg_curve,
                 "mean_steps_to_stable_policy": b_stable,
+                "cross_seed_transfer": xs_b,
             }
             print(
-                f"  Baseline [{b_name}]: zero_shot={zs_b_gen:.4f} ({zs_tot_solved}/{len(b_tasks)}), lifelong={b_gen:.4f} ({tot_solved}/{len(b_tasks)}), curve={avg_curve}, stable={b_stable}"
+                f"  Baseline [{b_name}]: zero_shot={zs_b_gen:.4f} ({zs_tot_solved}/{zs_tot_trials}, CI={zs_ci}, deaths={b_deaths}), replay={b_gen:.4f}"
             )
 
     report = protocol.compute_report(split=split, tasks=tasks, baselines=baselines_dict)
@@ -582,33 +767,34 @@ def run_suite(
     print("\n=== Benchmark Results Summary ===")
     print(f"Split: {report.split.upper()} | Baseline: {baseline}")
     print(
-        f"Zero-shot: generality={report.zero_shot.get('generality_score', 0.0):.4f}, solve_rate={report.zero_shot.get('solve_rate', 0.0):.4f}"
-    )
-    print(
-        f"Lifelong:  generality={report.lifelong.get('generality_score', 0.0):.4f}, solve_rate={report.lifelong.get('solve_rate', 0.0):.4f}, stable_policy={report.lifelong.get('mean_steps_to_stable_policy')}"
+        f"Headline 1 — Zero-shot (n={report.zero_shot.get('n_trials', 0)}): "
+        f"generality={report.generality_score:.4f}, solve_rate={report.zero_shot.get('solve_rate', 0.0):.4f}, "
+        f"95%_CI={report.zero_shot.get('wilson_95_ci')}, deaths={report.exploration_deaths}"
     )
     if report.cross_seed_transfer:
         print(
-            f"Cross-seed: solve_rate={report.cross_seed_transfer.get('solve_rate', 0.0):.4f}, transfer_solve_rate={report.cross_seed_transfer.get('transfer_solve_rate', 0.0):.4f}, skills={report.cross_seed_transfer.get('skills_consolidated', 0)}"
+            f"Headline 2 — Cross-seed transfer (n={report.cross_seed_transfer.get('n_transfer_episodes', 0)}): "
+            f"transfer_solve_rate={report.cross_seed_transfer.get('transfer_solve_rate', 0.0):.4f}, "
+            f"95%_CI={report.cross_seed_transfer.get('transfer_wilson_95_ci')}, "
+            f"skills={report.cross_seed_transfer.get('skills_consolidated', 0)}"
         )
-    for fam, score in report.family_scores.items():
-        lf_score = report.lifelong.get("family_scores", {}).get(fam, score)
-        print(f"  Family [{fam}]: zero_shot={score:.4f}, lifelong={lf_score:.4f}")
-    print(f"Zero-Shot Generality Score: {report.generality_score:.4f} (Episode 1, no prior memory)")
     print(
-        f"Lifelong Generality Score:  {report.lifelong_generality_score:.4f} (After {episodes_per_task} episodes with shared memory)"
+        f"Auxiliary  — Same-layout replay ({episodes_per_task} eps): "
+        f"generality={report.same_layout_replay.get('generality_score', 0.0):.4f}, "
+        f"stable_policy={report.same_layout_replay.get('mean_steps_to_stable_policy')}"
     )
+    for fam, score in report.family_scores.items():
+        fam_ci = report.zero_shot.get("family_wilson_95_ci", {}).get(fam)
+        fam_sr = report.zero_shot.get("family_solve_rates", {}).get(fam, 0.0)
+        print(f"  Family [{fam}]: zero_shot={score:.4f} (sr={fam_sr:.4f}, CI={fam_ci})")
     print(
         f"Mean Latency: p50={report.mean_p50_latency_ms:.2f}ms | p95={report.mean_p95_latency_ms:.2f}ms"
     )
     for t in report.tasks:
         print(
-            f"  Task [{t.task_id}]: curve={t.episode_successes}, steps={t.episode_steps}, stable={t.steps_to_stable_policy}"
+            f"  Task [{t.task_id}]: zs_sr={t.zero_shot.get('solve_rate')} CI={t.zero_shot.get('wilson_95_ci')} "
+            f"deaths={t.exploration_deaths} replay={t.episode_successes}"
         )
-        if t.cross_seed_transfer:
-            print(
-                f"    cross-seed seeds={t.cross_seed_transfer.get('seeds')} curve={t.cross_seed_transfer.get('successes')} steps={t.cross_seed_transfer.get('steps')}"
-            )
     print("Report written successfully.")
 
     return 0
@@ -627,7 +813,7 @@ def main() -> int:
     parser.add_argument(
         "--baseline",
         default="system",
-        choices=["system", "stub_agent", "random", "oracle", "no_grounding"],
+        choices=["system", "stub_agent", "random", "oracle", "no_grounding", "demonstration"],
         help="Evaluation policy baseline",
     )
     parser.add_argument("--manifest", default=None, help="Custom manifest YAML path")
@@ -635,14 +821,14 @@ def main() -> int:
         "--episodes-per-task",
         type=int,
         default=5,
-        help="Number of episodes per task for lifelong evaluation",
+        help="Number of episodes per task for same-layout replay evaluation",
     )
     parser.add_argument(
         "--shared-memory",
         dest="shared_memory",
         action="store_true",
         default=True,
-        help="Retain memory across episodes in lifelong evaluation",
+        help="Retain memory across episodes in replay evaluation",
     )
     parser.add_argument(
         "--no-shared-memory",

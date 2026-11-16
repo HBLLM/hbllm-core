@@ -1,0 +1,44 @@
+split: dev
+seed_range: [900, 999]
+eval_seeds_per_family: 10
+tasks:
+  - id: grid_nav_palette_swap_dev
+    family: grid_invariance
+    env_class: benchmarks.envs.novelty_envs.PaletteSwapGridNavEnv
+    seeds: [900, 901, 902, 903, 904, 905, 906, 907, 908, 909]
+    max_budget: 100
+  - id: grid_nav_nonzero_bg_dev
+    family: grid_invariance
+    env_class: benchmarks.envs.novelty_envs.NonzeroBgGridNavEnv
+    seeds: [910, 911, 912, 913, 914, 915, 916, 917, 918, 919]
+    max_budget: 100
+  - id: grid_nav_transposed_dev
+    family: grid_invariance
+    env_class: benchmarks.envs.novelty_envs.TransposedGridNavEnv
+    seeds: [920, 921, 922, 923, 924, 925, 926, 927, 928, 929]
+    max_budget: 100
+  - id: grid_nav_action_relabel_dev
+    family: grid_invariance
+    env_class: benchmarks.envs.novelty_envs.ActionRelabelGridNavEnv
+    seeds: [930, 931, 932, 933, 934, 935, 936, 937, 938, 939]
+    max_budget: 100
+  - id: two_keys_chain_dev
+    family: novel_mechanics
+    env_class: benchmarks.envs.novelty_envs.TwoKeysGridEnv
+    seeds: [940, 941, 942, 943, 944, 945, 946, 947, 948, 949]
+    max_budget: 150
+  - id: switch_gate_dev
+    family: novel_mechanics
+    env_class: benchmarks.envs.novelty_envs.SwitchGateGridEnv
+    seeds: [950, 951, 952, 953, 954, 955, 956, 957, 958, 959]
+    max_budget: 150
+  - id: decoy_hazard_dev
+    family: novel_mechanics
+    env_class: benchmarks.envs.novelty_envs.DecoyHazardGridEnv
+    seeds: [960, 961, 962, 963, 964, 965, 966, 967, 968, 969]
+    max_budget: 80
+  - id: perfect_maze_15x15_dev
+    family: long_horizon_maze
+    env_class: benchmarks.envs.novelty_envs.PerfectMazeGridEnv
+    seeds: [970, 971, 972, 973, 974, 975, 976, 977, 978, 979]
+    max_budget: 250

@@ -1,24 +1,38 @@
+# Sealed Held-Out v2 Manifest (R1, 2026-11-15).
+# DO NOT edit seeds or run during development. Execution requires a git tag matching `eval-*`
+# and automatically appends an immutable audit row to reports/heldout/LEDGER.md.
 split: heldout
-seed_range: [100000, 100199]
+version: 2
+seed_range: [200000, 200299]
 eval_seeds_per_family: 20
 tasks:
-  - id: grid_nav_heldout
+  - id: grid_nav_heldout_v2
     family: grid
     env_class: benchmarks.envs.grid_nav.GridNavEnvironment
-    seeds: [100010, 100011, 100012, 100013, 100014, 100015, 100016, 100017, 100018, 100019, 100020, 100021, 100022, 100023, 100024, 100025, 100026, 100027, 100028, 100029]
+    seeds: [200010, 200011, 200012, 200013, 200014, 200015, 200016, 200017, 200018, 200019, 200020, 200021, 200022, 200023, 200024, 200025, 200026, 200027, 200028, 200029]
     max_budget: 100
-  - id: grid_push_heldout
+  - id: grid_push_heldout_v2
     family: grid
     env_class: benchmarks.envs.grid_push.GridPushEnvironment
-    seeds: [100030, 100031, 100032, 100033, 100034, 100035, 100036, 100037, 100038, 100039, 100040, 100041, 100042, 100043, 100044, 100045, 100046, 100047, 100048, 100049]
+    seeds: [200030, 200031, 200032, 200033, 200034, 200035, 200036, 200037, 200038, 200039, 200040, 200041, 200042, 200043, 200044, 200045, 200046, 200047, 200048, 200049]
     max_budget: 100
-  - id: continuous_reach_heldout
+  - id: continuous_reach_heldout_v2
     family: continuous
     env_class: benchmarks.envs.continuous_reach.ContinuousReachEnvironment
-    seeds: [100050, 100051, 100052, 100053, 100054, 100055, 100056, 100057, 100058, 100059, 100060, 100061, 100062, 100063, 100064, 100065, 100066, 100067, 100068, 100069]
+    seeds: [200050, 200051, 200052, 200053, 200054, 200055, 200056, 200057, 200058, 200059, 200060, 200061, 200062, 200063, 200064, 200065, 200066, 200067, 200068, 200069]
     max_budget: 60
-  - id: symbolic_rules_heldout
+  - id: symbolic_rules_heldout_v2
     family: symbolic
     env_class: benchmarks.envs.symbolic_rules.SymbolicRulesEnvironment
-    seeds: [100070, 100071, 100072, 100073, 100074, 100075, 100076, 100077, 100078, 100079, 100080, 100081, 100082, 100083, 100084, 100085, 100086, 100087, 100088, 100089]
+    seeds: [200070, 200071, 200072, 200073, 200074, 200075, 200076, 200077, 200078, 200079, 200080, 200081, 200082, 200083, 200084, 200085, 200086, 200087, 200088, 200089]
     max_budget: 80
+  - id: partial_obs_grid_heldout_v2
+    family: partial_observability
+    env_class: benchmarks.envs.heldout_v2_envs.PartiallyObservableGridEnv
+    seeds: [200090, 200091, 200092, 200093, 200094, 200095, 200096, 200097, 200098, 200099, 200100, 200101, 200102, 200103, 200104, 200105, 200106, 200107, 200108, 200109]
+    max_budget: 140
+  - id: stochastic_patrol_heldout_v2
+    family: stochastic_dynamic
+    env_class: benchmarks.envs.heldout_v2_envs.StochasticPatrolEnv
+    seeds: [200110, 200111, 200112, 200113, 200114, 200115, 200116, 200117, 200118, 200119, 200120, 200121, 200122, 200123, 200124, 200125, 200126, 200127, 200128, 200129]
+    max_budget: 120

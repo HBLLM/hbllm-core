@@ -134,7 +134,8 @@ def test_suite_manifests_disjoint_seeds_and_heldout_family():
     dev_families = {task["family"] for task in dev_manifest["tasks"]}
     heldout_families = {task["family"] for task in heldout_manifest["tasks"]}
     assert "symbolic" in heldout_families
-    assert heldout_families >= dev_families
+    assert heldout_families > dev_families
+    assert len(heldout_families - dev_families) >= 2
 
 
 def test_config_hash_covers_envs_and_heldout_manifest():
@@ -255,3 +256,106 @@ def test_closed_loop_lifelong_json_schema(tmp_path: Path):
     assert "episode_steps" in task
     assert "steps_to_stable_policy" in task
     assert len(task["episode_successes"]) == 4
+    assert "same_layout_replay" in report_data
+    assert "wilson_95_ci" in report_data["zero_shot"]
+
+
+def test_runner_evaluates_every_manifest_seed_with_wilson_ci():
+    """Runner must iterate all seeds in task_def['seeds'] for zero-shot and compute Wilson CIs."""
+    visited_seeds: list[int] = []
+
+    class _TrackingEnv(ContinuousReachEnvironment):
+        def reset(self, seed: int | None = None):
+            if seed is not None:
+                visited_seeds.append(seed)
+            return super().reset(seed=seed)
+
+    seeds = [50, 51, 52, 53, 54]
+    ok, _, _, errs, extra = run_closed_loop_task(
+        env_cls=_TrackingEnv,
+        task_def={"id": "track_reach", "family": "continuous", "seeds": seeds},
+        max_budget=40,
+        baseline="oracle",
+        episodes=2,
+        shared_memory=True,
+        cross_seed=False,
+    )
+    assert ok is True
+    assert not errs
+    assert extra["zero_shot"]["n"] == len(seeds)
+    assert extra["zero_shot"]["seeds"] == seeds
+    assert set(seeds).issubset(set(visited_seeds))
+    ci = extra["zero_shot"]["wilson_95_ci"]
+    assert len(ci) == 2 and 0.0 <= ci[0] <= ci[1] <= 1.0
+
+
+def test_heldout_suite_exits_nonzero_on_untagged_sha(tmp_path: Path):
+    """Running heldout split on an untagged commit must exit non-zero without writing a report."""
+    mini_ho = tmp_path / "mini_heldout.yaml"
+    mini_ho.write_text(
+        yaml.dump(
+            {
+                "split": "heldout",
+                "tasks": [
+                    {
+                        "id": "mini_ho",
+                        "family": "continuous",
+                        "env_class": "benchmarks.envs.continuous_reach.ContinuousReachEnvironment",
+                        "seeds": [200050],
+                        "max_budget": 20,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = run_suite(
+        split="heldout",
+        reports_dir=str(tmp_path / "reports"),
+        baseline="system",
+        manifest_path=str(mini_ho),
+        episodes_per_task=1,
+    )
+    assert code != 0
+    assert list((tmp_path / "reports" / "heldout").glob("*.json")) == []
+
+
+def test_heldout_v2_and_novelty_envs_discriminate_baselines():
+    """New held-out v2 and novelty environments pass stub/oracle/zero-leakage checks."""
+    from benchmarks.envs.heldout_v2_envs import PartiallyObservableGridEnv, StochasticPatrolEnv
+    from benchmarks.envs.novelty_envs import (
+        DecoyHazardGridEnv,
+        NonzeroBgGridNavEnv,
+        PerfectMazeGridEnv,
+        SwitchGateGridEnv,
+        TwoKeysGridEnv,
+    )
+
+    for env_cls, budget in (
+        (PartiallyObservableGridEnv, 140),
+        (StochasticPatrolEnv, 120),
+        (NonzeroBgGridNavEnv, 100),
+        (TwoKeysGridEnv, 150),
+        (SwitchGateGridEnv, 150),
+        (DecoyHazardGridEnv, 80),
+        (PerfectMazeGridEnv, 250),
+    ):
+        env = env_cls(max_steps=budget)
+        obs = env.reset(seed=901)
+        assert len(obs.entities) == 0
+        stub_ok = [
+            run_closed_loop_episode(
+                env_cls(max_steps=budget), 900 + s, budget, baseline="stub_agent"
+            )[0]
+            for s in range(5)
+        ]
+        assert sum(stub_ok) == 0, f"Stub solved {env_cls.__name__}"
+        oracle_ok = [
+            run_closed_loop_episode(env_cls(max_steps=budget), 900 + s, budget, baseline="oracle")[
+                0
+            ]
+            for s in range(8)
+        ]
+        # StochasticPatrolEnv has 15% slip noise; oracle still solves >= 75% (others >= 90%)
+        min_rate = 0.75 if env_cls is StochasticPatrolEnv else 0.875
+        assert sum(oracle_ok) / len(oracle_ok) >= min_rate, f"Oracle weak on {env_cls.__name__}"
