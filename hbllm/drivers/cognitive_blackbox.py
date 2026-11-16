@@ -643,7 +643,7 @@ class CognitiveBlackbox:
             from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
             system = build_cognitive_system(
-                CognitiveSystemConfig(world_id=source_id, memory_dir=None)
+                CognitiveSystemConfig(world_id=source_id, memory_dir=None, enable_grounding=True)
             )
             self._cognitive_systems[source_id] = system
             self._epistemic_engines[source_id] = system.engine

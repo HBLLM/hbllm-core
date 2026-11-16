@@ -39,7 +39,9 @@ from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_syste
 def test_live_pipeline_executes_g8_g10_g11_g15_and_dynamic_bridge() -> None:
     """Verify G8 hints, G10 social cognition, G11 options, G15 provenance, and dynamic bridge run live."""
     system = build_cognitive_system(
-        CognitiveSystemConfig(world_id="test_g7_g15_live", enable_logging=False)
+        CognitiveSystemConfig(
+            world_id="test_g7_g15_live", enable_grounding=True, enable_logging=False
+        )
     )
     engine = system.engine
 

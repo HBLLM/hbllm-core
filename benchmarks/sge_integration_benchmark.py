@@ -89,7 +89,9 @@ def _make_engine() -> tuple[AutonomousEpistemicEngine, CorticalGroundingBridge]:
     """Factory: creates a fresh engine with grounding bridge attached."""
     from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-    sys = build_cognitive_system(CognitiveSystemConfig(world_id="sge_bench", enable_logging=False))
+    sys = build_cognitive_system(
+        CognitiveSystemConfig(world_id="sge_bench", enable_grounding=True, enable_logging=False)
+    )
     assert sys.bridge is not None
     return sys.engine, sys.bridge
 

@@ -35,7 +35,7 @@ class CognitiveSystemConfig:
     enable_logging: bool = True
     instructions: Sequence[str] | str | None = None
     memory_dir: Path | str | None = _DEFAULT_DIR_MARKER  # type: ignore[assignment]
-    enable_grounding: bool = True
+    enable_grounding: bool = False
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
     custom_verification_stages: list[Any] | None = None
@@ -84,7 +84,6 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     5. services.workspace is identical to tiered_workspace.working_state.
     """
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-    from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
 
     cfg = config or CognitiveSystemConfig()
 
@@ -143,9 +142,11 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
                 hydrated_count,
             )
 
-    # 5. Wire Grounding Bridge with the exact same KernelServices
-    bridge: CorticalGroundingBridge | None = None
+    # 5. Wire Grounding Bridge with the exact same KernelServices only when enabled
+    bridge: Any | None = None
     if cfg.enable_grounding:
+        from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
+
         bridge = CorticalGroundingBridge(
             workspace=workspace,
             services=services,
