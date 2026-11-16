@@ -1974,7 +1974,7 @@ class HCIRSymbolicWorldTheory:
                             value=props.get("value", True),
                         )
                     except ValueError:
-                        pass
+                        logger.debug("Unknown SpelkePhysicalAxiom skipped: %r", axiom_str)
 
             elif domain == "causal_predicate":
                 pred = CausalPredicate(

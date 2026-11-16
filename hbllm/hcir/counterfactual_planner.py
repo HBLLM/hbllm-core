@@ -262,8 +262,8 @@ class CounterfactualPlanner:
                 res = action_model.predict(curr)
                 if res is not None:
                     return np.asarray(res)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Action model predict fallback triggered: %s", exc)
 
         # ── 5. Heuristic novelty if action model is known viable ─────────────
         if getattr(action_model, "confidence", 0) >= 0.5:

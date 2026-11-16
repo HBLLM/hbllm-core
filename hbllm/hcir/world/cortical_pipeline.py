@@ -247,30 +247,25 @@ class CorticalPipeline:
         if engine is None:
             return current_ctx
 
-        theory = getattr(engine, "symbolic_theory", None)
-        wm = getattr(engine, "working_memory", None)
+        theory = engine.symbolic_theory
+        wm = engine.working_memory
 
         # G8: Compile any natural-language hint metadata into CausalPredicates
-        if theory is not None and wm is not None:
-            obs_meta = getattr(wm, "last_observation_metadata", None)
-            if isinstance(obs_meta, dict):
-                hint = (
-                    obs_meta.get("rule_hint")
-                    or obs_meta.get("instruction")
-                    or obs_meta.get("mission")
-                )
-                if isinstance(hint, str) and hint.strip():
-                    clean_hint = hint.strip()
-                    compiled_set = getattr(wm, "compiled_linguistic_hints", None)
-                    if not isinstance(compiled_set, set) or clean_hint not in compiled_set:
-                        from hbllm.hcir.compiler import HCIRCompiler
+        obs_meta = wm.last_observation_metadata
+        if isinstance(obs_meta, dict):
+            hint = (
+                obs_meta.get("rule_hint") or obs_meta.get("instruction") or obs_meta.get("mission")
+            )
+            if isinstance(hint, str) and hint.strip():
+                clean_hint = hint.strip()
+                compiled_set = getattr(wm, "compiled_linguistic_hints", None)
+                if not isinstance(compiled_set, set) or clean_hint not in compiled_set:
+                    from hbllm.hcir.compiler import HCIRCompiler
 
-                        compiler = HCIRCompiler(
-                            concept_store=getattr(engine, "working_concept_store", None)
-                        )
-                        compiler.compile_utterance_to_causal_hypothesis(clean_hint, theory=theory)
-                        if isinstance(compiled_set, set):
-                            compiled_set.add(clean_hint)
+                    compiler = HCIRCompiler(concept_store=engine.working_concept_store)
+                    compiler.compile_utterance_to_causal_hypothesis(clean_hint, theory=theory)
+                    if isinstance(compiled_set, set):
+                        compiled_set.add(clean_hint)
 
         raw_grid = (
             current_ctx.curr_grid
@@ -281,7 +276,7 @@ class CorticalPipeline:
         has_2d_grid = grid_arr is not None and grid_arr.ndim == 2
 
         # G11: Topological Bottleneck & Option Discovery
-        opt_eng = getattr(engine, "option_discovery", None)
+        opt_eng = engine.option_discovery
         if opt_eng and has_2d_grid and grid_arr is not None and 4 <= grid_arr.size <= 256:
             grid_sig = (int(grid_arr.shape[0]), int(grid_arr.shape[1]), grid_arr.tobytes())
             if getattr(opt_eng, "last_scanned_grid_sig", None) != grid_sig:
@@ -291,11 +286,11 @@ class CorticalPipeline:
                 for b in bottlenecks:
                     opt_eng.induce_option(bottleneck=b)
 
-            av_pos = getattr(engine, "avatar_pos", None)
+            av_pos = engine.avatar_pos
             matched_opt = None
             if av_pos is not None:
-                for opt in getattr(opt_eng, "discovered_options", {}).values():
-                    if getattr(opt, "bottleneck_state", None) == av_pos:
+                for opt in opt_eng.discovered_options.values():
+                    if opt.bottleneck_state == av_pos:
                         matched_opt = opt
                         break
             if matched_opt is not None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from collections import OrderedDict, deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
@@ -50,6 +50,39 @@ def get_engine_state_attr(target: Any, attr: str, default: Any = None) -> Any:
     if hasattr(target, attr):
         return getattr(target, attr)
     return default
+
+
+def apply_wm_field_delta(
+    host: Any,
+    working_memory: Any,
+    state: Any,
+    field: str,
+    val: Any,
+    op: str,
+    before_recorder: Callable[[str, Any], None] | None = None,
+) -> None:
+    """Apply a declarative field mutation (`set`/`append`/`add`) to the canonical owner."""
+    candidates: tuple[tuple[str, Any], ...] = (
+        ("", host),
+        ("working_memory.", working_memory),
+        ("state.", state),
+    )
+    for prefix, target in candidates:
+        if target is None or not hasattr(target, field):
+            continue
+        if before_recorder is not None:
+            before_recorder(f"{prefix}{field}", getattr(target, field, None))
+        if op == "set":
+            setattr(target, field, val)
+        elif op == "append":
+            cur = getattr(target, field)
+            if isinstance(cur, list):
+                cur.append(val)
+        elif op == "add":
+            cur = getattr(target, field)
+            if isinstance(cur, set):
+                cur.add(val)
+        return
 
 
 @dataclass(frozen=True)
@@ -981,45 +1014,15 @@ class JournaledEngineView:
             eng.working_memory.inhibit_action(action, duration)
             return
 
-        # Engine-first if exposed on engine (properties sync backing stores cleanly)
-        if hasattr(eng, field):
-            self._record_touch(field, getattr(eng, field, _ABSENT))
-            if op == "set":
-                setattr(eng, field, val)
-            elif op == "append":
-                cur = getattr(eng, field)
-                if isinstance(cur, list):
-                    cur.append(val)
-            elif op == "add":
-                cur = getattr(eng, field)
-                if isinstance(cur, set):
-                    cur.add(val)
-        elif hasattr(eng, "working_memory") and hasattr(eng.working_memory, field):
-            self._record_touch(
-                f"working_memory.{field}", getattr(eng.working_memory, field, _ABSENT)
-            )
-            if op == "set":
-                setattr(eng.working_memory, field, val)
-            elif op == "append":
-                cur = getattr(eng.working_memory, field)
-                if isinstance(cur, list):
-                    cur.append(val)
-            elif op == "add":
-                cur = getattr(eng.working_memory, field)
-                if isinstance(cur, set):
-                    cur.add(val)
-        elif hasattr(eng, "state") and hasattr(eng.state, field):
-            self._record_touch(f"state.{field}", getattr(eng.state, field, _ABSENT))
-            if op == "set":
-                setattr(eng.state, field, val)
-            elif op == "append":
-                cur = getattr(eng.state, field)
-                if isinstance(cur, list):
-                    cur.append(val)
-            elif op == "add":
-                cur = getattr(eng.state, field)
-                if isinstance(cur, set):
-                    cur.add(val)
+        apply_wm_field_delta(
+            eng,
+            eng.working_memory,
+            eng.state,
+            field,
+            val,
+            op,
+            before_recorder=lambda key, before_val: self._record_touch(key, before_val),
+        )
 
     def __getattr__(self, name: str) -> Any:
         routes = object.__getattribute__(self, "_routes")

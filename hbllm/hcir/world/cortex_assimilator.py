@@ -67,10 +67,10 @@ class EpistemicFeedbackAssimilator:
         av = view.avatar_features or (
             {view.avatar_feature} if view.avatar_feature is not None else set()
         )
-        bg_val = getattr(view, "bg_feature", 0)
+        bg_val = view.bg_feature
         th = view.symbolic_theory
-        wm = getattr(view, "working_memory", None)
-        has_sge_priors = bool(getattr(wm, "concept_role_priors", None))
+        wm = view.working_memory
+        has_sge_priors = bool(wm.concept_role_priors)
         lethal = view.hazard_tracker.known_lethal_features
         for cr, cc in landing_cells:
             for k in range(0, max(steps, 1)):
@@ -91,7 +91,7 @@ class EpistemicFeedbackAssimilator:
                         and not th.is_verified_in_context("goal", wf)
                         and not th.cargo_features
                         and not th.receptacle_features
-                        and not getattr(view, "learned_cargo_features", None)
+                        and not view.learned_cargo_features
                     )
                     if prior_lethal_falsified or prior_goal_falsified:
                         from hbllm.hcir.world.cortex_causal import (
@@ -106,7 +106,7 @@ class EpistemicFeedbackAssimilator:
                         invalidate_stale_context_ontology(
                             th,
                             hazard_tracker=view.hazard_tracker,
-                            episodic_cortex=getattr(view, "episodic_cortex", None),
+                            episodic_cortex=view.episodic_cortex,
                             working_memory=wm,
                             engine_or_view=view,
                             bg_feature=bg_val,
@@ -121,20 +121,20 @@ class EpistemicFeedbackAssimilator:
     @staticmethod
     def _synchronize_lattice_stride(view: Any, stride: int) -> None:
         """Propagate discovered lattice quantum to uncalibrated cardinal action priors."""
-        if stride <= 1 or not hasattr(view, "action_dynamics"):
+        if stride <= 1:
             return
         view.state.spatial_lattice_stride = stride
         for other_act, other_dyn in view.action_dynamics.items():
-            if getattr(other_dyn, "probes_tested", 0) == 0:
+            if other_dyn.probes_tested == 0:
                 if abs(other_dyn.delta_r) == 1 and other_dyn.delta_c == 0:
                     other_dyn.delta_r *= stride
                     other_dyn.displacement = (float(other_dyn.delta_r), 0.0)
-                    if hasattr(view, "action_affordances") and other_act in view.action_affordances:
+                    if other_act in view.action_affordances:
                         view.action_affordances[other_act].delta = (other_dyn.delta_r, 0)
                 elif abs(other_dyn.delta_c) == 1 and other_dyn.delta_r == 0:
                     other_dyn.delta_c *= stride
                     other_dyn.displacement = (0.0, float(other_dyn.delta_c))
-                    if hasattr(view, "action_affordances") and other_act in view.action_affordances:
+                    if other_act in view.action_affordances:
                         view.action_affordances[other_act].delta = (0, other_dyn.delta_c)
 
     @staticmethod
@@ -474,8 +474,10 @@ class EpistemicFeedbackAssimilator:
             if tc is not None and tr is not None:
                 try:
                     target_coord = (int(tr), int(tc))
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(
+                        "Non-integer action target coord ignored (%r, %r): %s", tr, tc, exc
+                    )
 
         # Active Manipulandum Effector Binding (Modal Select-Then-Direct):
         if target_coord is not None:
@@ -606,13 +608,8 @@ class EpistemicFeedbackAssimilator:
 
             if is_effector_action and target_coord is not None:
                 view.quiescent_actuation_targets.add(target_coord)
-                if hasattr(view, "working_memory") and hasattr(
-                    view.working_memory, "habenular_ior"
-                ):
-                    tok = (action, target_coord[0], target_coord[1])
-                    view.working_memory.habenular_ior.active_inhibitions[(view.avatar_pos, tok)] = (
-                        20
-                    )
+                tok = (action, target_coord[0], target_coord[1])
+                view.working_memory.habenular_ior.active_inhibitions[(view.avatar_pos, tok)] = 20
 
             if is_effector_action and not is_success and not is_failure:
                 return
@@ -1482,15 +1479,13 @@ class EpistemicFeedbackAssimilator:
                 for af in view.avatar_features:
                     view.symbolic_theory.induce_avatar(af, evidence="motor_grounding")
                 view.hazard_tracker.known_lethal_features.difference_update(view.avatar_features)
-                if hasattr(view, "episodic_cortex"):
-                    view.episodic_cortex.discovered_lethal_features.difference_update(
-                        view.avatar_features
-                    )
+                view.episodic_cortex.discovered_lethal_features.difference_update(
+                    view.avatar_features
+                )
             if view.avatar_feature is not None:
                 view.symbolic_theory.induce_avatar(view.avatar_feature, evidence="motor_grounding")
                 view.hazard_tracker.known_lethal_features.discard(view.avatar_feature)
-                if hasattr(view, "episodic_cortex"):
-                    view.episodic_cortex.discovered_lethal_features.discard(view.avatar_feature)
+                view.episodic_cortex.discovered_lethal_features.discard(view.avatar_feature)
 
         leading_cell_mutated = False
         if is_known_displacement and prev_avatar_pos is not None:
@@ -1543,11 +1538,7 @@ class EpistemicFeedbackAssimilator:
                                     and val in view.symbolic_theory.goal_features
                                     and not view.symbolic_theory.is_verified_in_context("goal", val)
                                     and not view.symbolic_theory.cargo_features
-                                    and not getattr(
-                                        getattr(view, "working_memory", None),
-                                        "concept_role_priors",
-                                        None,
-                                    )
+                                    and not view.working_memory.concept_role_priors
                                 ):
                                     from hbllm.hcir.world.cortex_causal import (
                                         invalidate_stale_context_ontology,
@@ -1556,10 +1547,10 @@ class EpistemicFeedbackAssimilator:
                                     invalidate_stale_context_ontology(
                                         view.symbolic_theory,
                                         hazard_tracker=view.hazard_tracker,
-                                        episodic_cortex=getattr(view, "episodic_cortex", None),
-                                        working_memory=getattr(view, "working_memory", None),
+                                        episodic_cortex=view.episodic_cortex,
+                                        working_memory=view.working_memory,
                                         engine_or_view=view,
-                                        bg_feature=getattr(view, "bg_feature", 0),
+                                        bg_feature=view.bg_feature,
                                         preserve_current_context=True,
                                         reason=f"prior_goal_blocked_on_collision:{val}",
                                     )
@@ -1797,16 +1788,15 @@ class EpistemicFeedbackAssimilator:
         movable_features.update(view.avatar_features)
         if view.avatar_feature is not None:
             movable_features.add(view.avatar_feature)
-        if _hazard_tracker is not None and hasattr(_hazard_tracker, "mobile_threat_features"):
-            movable_features.update(_hazard_tracker.mobile_threat_features)
+        movable_features.update(view.mobile_threat_features)
 
-        _wm_exog = getattr(view, "working_memory", None)
+        _wm_exog = view.working_memory
         _eff_target = (
             (int(action_data["y"]), int(action_data["x"]))
             if isinstance(action_data, dict) and "x" in action_data and "y" in action_data
             else None
         )
-        if _wm_exog is not None and hasattr(_wm_exog, "exogenous_tracker") and diff.mutated_pixels:
+        if diff.mutated_pixels:
             _wm_exog.exogenous_tracker.observe_transition(
                 [(int(r), int(c)) for r, c, _, _ in diff.mutated_pixels],
                 action,
@@ -1816,13 +1806,11 @@ class EpistemicFeedbackAssimilator:
 
         def is_exogenous_mutation(r: int, c: int) -> bool:
             """Isolate uncontrollable exogenous / topologically partitioned mutations (I(DeltaS; A) ~ 0)."""
-            if _wm_exog is not None and hasattr(_wm_exog, "is_exogenous_locus"):
-                return bool(
-                    _wm_exog.is_exogenous_locus(
-                        (r, c), lattice=_prev_grid, bg=bg, include_outer_edge=False
-                    )
+            return bool(
+                _wm_exog.is_exogenous_locus(
+                    (r, c), lattice=_prev_grid, bg=bg, include_outer_edge=False
                 )
-            return False
+            )
 
         av_radius = max(2, int(round(math.sqrt(max(1, view.avatar_size)))))
 
@@ -1852,11 +1840,8 @@ class EpistemicFeedbackAssimilator:
                 2, int(count * 0.25)
             ):
                 movable_features.add(feat)
-                if _hazard_tracker is not None and hasattr(
-                    _hazard_tracker, "mobile_threat_features"
-                ):
-                    if feat not in view.symbolic_theory.cargo_features:
-                        _hazard_tracker.mobile_threat_features.add(feat)
+                if feat not in view.symbolic_theory.cargo_features:
+                    view.mobile_threat_features.add(feat)
 
         distant_mutations = [
             (r, c, old_v, new_v)
@@ -1985,7 +1970,7 @@ class EpistemicFeedbackAssimilator:
                             view.symbolic_theory.induce_candidate_goal(
                                 ent.feature_id, evidence="post_mutation_exploration"
                             )
-                    if hasattr(view, "subgoal_stack") and view.subgoal_stack.has_pending_goals:
+                    if view.subgoal_stack.has_pending_goals:
                         cur_sg = view.subgoal_stack.current_subgoal
                         if cur_sg is not None:
                             cur_sg.metadata["triggered"] = True
@@ -2032,8 +2017,7 @@ class EpistemicFeedbackAssimilator:
                     _sym_theory.induce_receptacle(receptacle_feat, evidence="cargo_delivery_win")
                     _sym_theory.induce_goal(receptacle_feat, evidence=TerminalSignal.SUCCESS)
                     _sym_theory.mark_verified_in_context("goal", receptacle_feat)
-                    if hasattr(view, "learned_receptacle_positions"):
-                        view.learned_receptacle_positions.add(cargo_win_target)
+                    view.learned_receptacle_positions.add(cargo_win_target)
             elif view.avatar_pos is not None and (
                 prev_avatar_pos is None or view.avatar_pos != prev_avatar_pos
             ):
@@ -2328,11 +2312,7 @@ class EpistemicFeedbackAssimilator:
                                 cand_feat_int, reason="lethal_hazard"
                             )
                             _sym_theory.induce_barrier(cand_feat_int, evidence="lethal_hazard")
-                            if was_prior_safe and not getattr(
-                                getattr(view, "working_memory", None),
-                                "concept_role_priors",
-                                None,
-                            ):
+                            if was_prior_safe and not view.working_memory.concept_role_priors:
                                 from hbllm.hcir.world.cortex_causal import (
                                     invalidate_stale_context_ontology,
                                 )
@@ -2340,8 +2320,8 @@ class EpistemicFeedbackAssimilator:
                                 invalidate_stale_context_ontology(
                                     _sym_theory,
                                     hazard_tracker=_hazard_tracker,
-                                    episodic_cortex=getattr(view, "episodic_cortex", None),
-                                    working_memory=getattr(view, "working_memory", None),
+                                    episodic_cortex=view.episodic_cortex,
+                                    working_memory=view.working_memory,
                                     engine_or_view=view,
                                     bg_feature=_bg_feature,
                                     preserve_current_context=True,
@@ -2426,17 +2406,15 @@ class EpistemicFeedbackAssimilator:
                     or _sym_theory.is_conditionally_traversable(post_val)
                 ):
                     view.learned_barriers.discard((int(mr), int(mc)))
-                    if hasattr(view, "failed_transitions") and hasattr(view, "action_deltas"):
-                        stale_txs = set()
-                        for p, act in view.failed_transitions:
-                            d = view.action_deltas.get(act)
-                            if d and (p[0] + d[0], p[1] + d[1]) == (int(mr), int(mc)):
-                                stale_txs.add((p, act))
-                        view.failed_transitions.difference_update(stale_txs)
-                        if hasattr(view.working_memory, "habenular_ior"):
-                            view.working_memory.habenular_ior.failed_transitions.difference_update(
-                                stale_txs
-                            )
+                    stale_txs = set()
+                    for p, act in view.failed_transitions:
+                        d = view.action_deltas.get(act)
+                        if d and (p[0] + d[0], p[1] + d[1]) == (int(mr), int(mc)):
+                            stale_txs.add((p, act))
+                    view.failed_transitions.difference_update(stale_txs)
+                    view.working_memory.habenular_ior.failed_transitions.difference_update(
+                        stale_txs
+                    )
                     for h_item in view.working_memory.held_items:
                         view.working_memory.register_tool_unlock(h_item.feature_id, orig_val)
 

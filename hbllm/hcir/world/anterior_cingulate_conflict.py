@@ -350,35 +350,6 @@ class AnteriorCingulateConflictMonitor:
             for cl in self.clusters
         )
 
-    def should_advise_temporal_wait(
-        self,
-        current_pos: tuple[int, int],
-        candidate_pos: tuple[int, int],
-        collision_cones: Any,
-        max_steps: int = 3,
-    ) -> tuple[bool, int]:
-        """Check whether temporal waiting is advised due to a transient collision cone crossing candidate_pos.
-
-        Returns:
-            (should_wait, wait_steps)
-        """
-        if collision_cones is None or not hasattr(collision_cones, "is_collision_hazard"):
-            return False, 0
-
-        cr, cc = candidate_pos
-        # If candidate_pos is an immediate collision hazard at step 1:
-        if collision_cones.is_collision_hazard(cr, cc, time_step=1):
-            # Check if it clears at step 2 or 3
-            for wait_step in range(2, max_steps + 1):
-                if not collision_cones.is_collision_hazard(cr, cc, time_step=wait_step):
-                    # Also ensure current position is safe to wait in during step 1
-                    if not collision_cones.is_collision_hazard(
-                        current_pos[0], current_pos[1], time_step=1
-                    ):
-                        return True, wait_step - 1
-            return False, 0
-        return False, 0
-
     def compute_heuristic_weight(self, default_weight: float = 1.0) -> float:
         """Compute modulated A* goal heuristic weight.
 

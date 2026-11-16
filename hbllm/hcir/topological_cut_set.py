@@ -100,8 +100,8 @@ class TopologicalCutSetAnalyzer:
                     if (sr, sc) in comp_set:
                         return comp_set
                 return set()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Rust topological_connected_components fallback: %s", exc)
 
         visited = {(sr, sc)}
         queue: deque[tuple[int, int]] = deque([(sr, sc)])

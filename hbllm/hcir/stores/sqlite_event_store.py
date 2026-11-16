@@ -420,5 +420,5 @@ class SQLiteEventStore(IEventStore):
     def __del__(self) -> None:
         try:
             self._conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("SqliteEventStore __del__ close skipped: %s", exc)

@@ -642,8 +642,8 @@ class PhysicsPredictor:
                 )
                 if rust_path:
                     return [(int(r), int(c)) for r, c in rust_path]
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Rust pathfinder unavailable, falling back to BFS: %s", exc)
 
         def is_footprint_valid(r: int, c: int) -> bool:
             for off_r, off_c in offsets:

@@ -373,13 +373,12 @@ class EpistemicGoalScheduler:
     ) -> tuple[list[tuple[int, int]], set[tuple[int, int]]]:
         """Filter candidate goals to currently reachable stances and detect newly unlocked compartments."""
         th = engine.symbolic_theory
-        hz = getattr(engine, "hazard_tracker", None)
+        hz = engine.hazard_tracker
         lethal_feats = set(getattr(th, "lethal_features", frozenset()) or ())
-        if hz is not None:
-            lethal_feats.update(getattr(hz, "known_lethal_features", ()) or ())
+        lethal_feats.update(hz.known_lethal_features)
         opened_portals: set[tuple[int, int]] = set()
-        for mut in getattr(engine, "state_mutations", ()):
-            mut_meta = getattr(mut, "metadata", None) or {}
+        for mut in engine.state_mutations:
+            mut_meta = mut.metadata or {}
             for mr, mc in mut_meta.get("mutated_positions", ()):
                 if 0 <= mr < H and 0 <= mc < W:
                     mv = int(curr_grid[mr, mc])
@@ -389,9 +388,7 @@ class EpistemicGoalScheduler:
         if len(goals) <= 1 and not opened_portals:
             return goals, set()
 
-        static_lethal = getattr(
-            getattr(engine, "hazard_tracker", None), "static_lethal_positions", set()
-        )
+        static_lethal = hz.static_lethal_positions
         hard_blocked: set[tuple[int, int]] = set(engine.learned_barriers) | set(static_lethal)
         unverified_blocked: set[tuple[int, int]] = set(hard_blocked)
         non_bg_rs, non_bg_cs = np.nonzero(curr_grid != bg)
@@ -466,9 +463,7 @@ class EpistemicGoalScheduler:
         th = engine.symbolic_theory
         if feat_id in th.goal_features or feat_id in th.cargo_features or th.is_walkable(feat_id):
             return False
-        wm_priors: dict[int, dict[str, float]] = (
-            getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
-        )
+        wm_priors: dict[int, dict[str, float]] = engine.working_memory.concept_role_priors
         has_cargo_ctx = bool(th.cargo_features or engine.learned_cargo_features)
         pref_s, _, haz_s = cls._role_scores_from_priors(wm_priors, int(feat_id), has_cargo_ctx)
         return haz_s >= 0.65 and pref_s < 0.45
@@ -481,9 +476,7 @@ class EpistemicGoalScheduler:
         av_feats: set[int],
     ) -> set[int]:
         """Return unverified feature IDs whose perceptual priors strongly indicate hazard."""
-        wm_priors: dict[int, dict[str, float]] = (
-            getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
-        )
+        wm_priors: dict[int, dict[str, float]] = engine.working_memory.concept_role_priors
         return {
             int(f)
             for f in wm_priors
@@ -501,13 +494,13 @@ class EpistemicGoalScheduler:
     ) -> list[tuple[int, int]]:
         """Return reachable unvisited frontier cells ordered by Manhattan distance from avatar."""
         H, W = curr_grid.shape
-        avatar_pos = getattr(engine, "avatar_pos", None)
+        avatar_pos = engine.avatar_pos
         if avatar_pos is None or not (0 <= avatar_pos[0] < H and 0 <= avatar_pos[1] < W):
             return []
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
-        wm = getattr(engine, "working_memory", None)
-        visited: set[tuple[int, int]] = set(getattr(wm, "visited_cells", ()) or ())
-        for c_pos, cnt in (getattr(engine, "position_visit_counts", None) or {}).items():
+        wm = engine.working_memory
+        visited: set[tuple[int, int]] = set(wm.visited_cells)
+        for c_pos, cnt in engine.position_visit_counts.items():
             if cnt > 0:
                 visited.add(c_pos)
         visited.add(avatar_pos)
@@ -781,9 +774,8 @@ class EpistemicGoalScheduler:
             and not engine.subgoal_stack.has_pending_goals
         ):
             cond_affs = engine.symbolic_theory.conditional_affordances
-            held_ids = getattr(engine.working_memory, "held_feature_ids", set())
-            hz = getattr(engine, "hazard_tracker", None)
-            lethal_cond_feats = set(getattr(hz, "known_lethal_features", ()) or ()) if hz else set()
+            held_ids = engine.working_memory.held_feature_ids
+            lethal_cond_feats = engine.hazard_tracker.known_lethal_features
             unfulfilled = [
                 aff
                 for aff in cond_affs.values()
@@ -840,11 +832,7 @@ class EpistemicGoalScheduler:
 
                     guarded_barrier_pos: tuple[int, int] | None = barrier_pos_in_path
                     known_trigger_pos: tuple[int, int] | None = None
-                    if (
-                        barrier_pos_in_path is not None
-                        and hasattr(engine, "remote_causal")
-                        and blocking_aff is not None
-                    ):
+                    if barrier_pos_in_path is not None and blocking_aff is not None:
                         r_affs = engine.remote_causal.remote_actuators.get(barrier_pos_in_path, [])
                         for ra in r_affs:
                             if ra.trigger_feature == blocking_aff.prerequisite_feature:
@@ -857,7 +845,7 @@ class EpistemicGoalScheduler:
                                     known_trigger_pos = ra.trigger_pos
                                     break
                     # Distal Causal Gatekeeper: Check if primary_target is guarded by an unactivated remote barrier
-                    if blocking_aff is None and hasattr(engine, "remote_causal"):
+                    if blocking_aff is None:
                         for rem_pos, aff_list in engine.remote_causal.remote_actuators.items():
                             if (
                                 abs(rem_pos[0] - primary_target[0])
@@ -1500,9 +1488,7 @@ class EpistemicGoalScheduler:
 
         if avatar_pos is not None and goals and satisfied_when:
             th = engine.symbolic_theory
-            role_priors: dict[int, dict[str, float]] = (
-                getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
-            )
+            role_priors: dict[int, dict[str, float]] = engine.working_memory.concept_role_priors
             has_cargo_ctx = bool(th.cargo_features or engine.learned_cargo_features)
             goals, newly_unlocked = cls._filter_reachable_and_unlocked(
                 engine, curr_grid, H, W, bg, av_feats, avatar_pos, goals
@@ -1622,9 +1608,7 @@ class EpistemicGoalScheduler:
                 )
             ]
         if not goals:
-            wm_priors_d: dict[int, dict[str, float]] = (
-                getattr(getattr(engine, "working_memory", None), "concept_role_priors", None) or {}
-            )
+            wm_priors_d: dict[int, dict[str, float]] = engine.working_memory.concept_role_priors
             has_cargo_d = bool(
                 engine.symbolic_theory.cargo_features or engine.learned_cargo_features
             )
@@ -1745,16 +1729,6 @@ class EpistemicGoalScheduler:
 
                 goals.sort(key=_structural_priority)
 
-        delayed_mod = getattr(engine, "delayed_effect_modeler", None)
-        if delayed_mod and getattr(engine, "symbolic_theory", None) is not None:
-            for d_rec in getattr(delayed_mod, "discovered_delayed_effects", ()):
-                if (
-                    getattr(d_rec, "observed_lag_steps", 0) > 0
-                    and getattr(d_rec, "support_count", 0) >= 1
-                    and hasattr(d_rec, "to_causal_predicate")
-                ):
-                    engine.symbolic_theory.record_causal_predicate(d_rec.to_causal_predicate())
-
         # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
         if not goals:
@@ -1779,13 +1753,11 @@ class EpistemicGoalScheduler:
             and avatar_pos is not None
             and engine.symbolic_theory.has_prior_context_transition
             and not engine.symbolic_theory.labels_non_stationary
-            and not getattr(getattr(engine, "working_memory", None), "concept_role_priors", None)
+            and not engine.working_memory.concept_role_priors
         ):
             th = engine.symbolic_theory
             verified_lethal = th.context_verified_features("lethal")
-            unverified_lethals = (
-                set(getattr(engine.hazard_tracker, "known_lethal_features", ())) - verified_lethal
-            )
+            unverified_lethals = set(engine.hazard_tracker.known_lethal_features) - verified_lethal
             if unverified_lethals and any(
                 int(curr_grid[r, c]) in unverified_lethals
                 for r in range(H)
@@ -1797,7 +1769,7 @@ class EpistemicGoalScheduler:
                 invalidate_stale_context_ontology(
                     th,
                     hazard_tracker=engine.hazard_tracker,
-                    episodic_cortex=getattr(engine, "episodic_cortex", None),
+                    episodic_cortex=engine.episodic_cortex,
                     working_memory=engine.working_memory,
                     engine_or_view=engine,
                     bg_feature=bg,

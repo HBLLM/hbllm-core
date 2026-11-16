@@ -152,8 +152,8 @@ class CausalTheoryPlanner:
                         theory.induce_candidate_goal(
                             int(sg["feature"]), evidence="structural_goal_detector"
                         )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Structural goal induction at reset skipped: %s", exc)
 
         # Discard avatar position and exhausted goals
         if engine.avatar_pos is not None:

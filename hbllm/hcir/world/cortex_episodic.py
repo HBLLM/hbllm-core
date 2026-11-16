@@ -1022,7 +1022,7 @@ class HippocampalEpisodicCortex:
                         try:
                             avail_actions.add(int(t.action_id))
                         except (ValueError, TypeError):
-                            pass
+                            logger.debug("Non-integer macro action_id ignored: %r", t.action_id)
 
                 context_id = (
                     get_engine_state_attr(view, "context_id", "")
@@ -1148,16 +1148,10 @@ class HippocampalEpisodicCortex:
         if is_same_context_retry:
             # Same level retry on death: trigger Habenular catastrophe backpropagation FIRST
             # before transient episode buffers are reset
-            if hasattr(view, "working_memory") and hasattr(view.working_memory, "habenular_ior"):
-                view.working_memory.habenular_ior.record_catastrophe(
-                    final_step=view.step_counter,
-                    is_fatal=True,
-                )
-            elif hasattr(view, "habenular_ior"):
-                view.habenular_ior.record_catastrophe(
-                    final_step=view.step_counter,
-                    is_fatal=True,
-                )
+            view.working_memory.habenular_ior.record_catastrophe(
+                final_step=view.step_counter,
+                is_fatal=True,
+            )
 
         view.working_memory.reset_episode(
             retain_long_term=retain_dynamics,

@@ -41,7 +41,6 @@ from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDet
 from hbllm.hcir.world.engine_state import CognitiveContext
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.parietal_coordinate_transform import HeadingOrientation
-from hbllm.hcir.world.percept import ExogenousSignalTracker
 from hbllm.hcir.world.spatial_containment import RoomDoor
 
 if TYPE_CHECKING:
@@ -348,17 +347,32 @@ class EpistemicCuriosityExplorer:
         return True
 
     @staticmethod
+    def _collect_visited_cells(engine: AutonomousEpistemicEngine) -> set[tuple[int, int]]:
+        """Collect all visited coordinates across working memory and position visit counters."""
+        visited_cells = set(engine.working_memory.visited_cells)
+        for c_pos, cnt in engine.position_visit_counts.items():
+            if cnt > 0:
+                visited_cells.add(c_pos)
+        if engine.avatar_pos is not None:
+            visited_cells.add(engine.avatar_pos)
+        return visited_cells
+
+    @staticmethod
+    def _collect_undo_actions(engine: AutonomousEpistemicEngine) -> set[int]:
+        """Collect all known undo actions across engine state, working memory, and symbolic theory."""
+        undo_acts = set(engine.state.undo_actions)
+        undo_acts.update(engine.working_memory.undo_actions)
+        undo_acts.update(engine.symbolic_theory.undo_actions)
+        return undo_acts
+
+    @staticmethod
     def _probe_uncalibrated_action(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
         available_actions: Sequence[int],
     ) -> EpistemicProbeProposal | None:
         """Uncalibrated actions take absolute priority for motor grounding."""
-        undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
-        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
-            undo_acts.update(engine.working_memory.undo_actions)
-        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
-            undo_acts.update(engine.symbolic_theory.undo_actions)
+        undo_acts = EpistemicCuriosityExplorer._collect_undo_actions(engine)
         uncalibrated = [
             a
             for a in available_actions
@@ -504,12 +518,7 @@ class EpistemicCuriosityExplorer:
 
         walkable_and_safe = engine.symbolic_theory.walkable_features
         bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
-        wm = getattr(engine, "working_memory", None)
-        visited_cells = set(getattr(wm, "visited_cells", ()) or ())
-        for c_pos, cnt in engine.position_visit_counts.items():
-            if cnt > 0:
-                visited_cells.add(c_pos)
-        visited_cells.add(engine.avatar_pos)
+        visited_cells = EpistemicCuriosityExplorer._collect_visited_cells(engine)
         frontier_escape = EpistemicCuriosityExplorer._probe_frontier_escape_with_target(
             engine, curr_grid, disp_actions, bg, bg_is_impassable_void
         )
@@ -614,11 +623,7 @@ class EpistemicCuriosityExplorer:
                     exploration_mode="attractor_loop_effector",
                 )
 
-        undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
-        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
-            undo_acts.update(engine.working_memory.undo_actions)
-        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
-            undo_acts.update(engine.symbolic_theory.undo_actions)
+        undo_acts = EpistemicCuriosityExplorer._collect_undo_actions(engine)
         uninhibited_available = [
             a
             for a in available_actions
@@ -799,12 +804,7 @@ class EpistemicCuriosityExplorer:
         if not disp_actions or engine.avatar_pos is None:
             return None
 
-        wm = getattr(engine, "working_memory", None)
-        visited_cells = set(getattr(wm, "visited_cells", ()) or ())
-        for c_pos, cnt in engine.position_visit_counts.items():
-            if cnt > 0:
-                visited_cells.add(c_pos)
-        visited_cells.add(engine.avatar_pos)
+        visited_cells = EpistemicCuriosityExplorer._collect_visited_cells(engine)
 
         bfs_q: deque[tuple[tuple[int, int], list[Any]]] = deque([(engine.avatar_pos, [])])
         bfs_visited = {engine.avatar_pos}
@@ -1072,12 +1072,7 @@ class EpistemicCuriosityExplorer:
             # When exploring without an active probe target, when greedy progress toward a
             # distant target is blocked by walls, or when revisiting cells, prioritize Frontier
             # Backtracking (BFS to nearest unvisited cell) over naive Manhattan steps.
-            wm = getattr(engine, "working_memory", None)
-            visited_cells = set(getattr(wm, "visited_cells", ()) or ())
-            for c_pos, cnt in engine.position_visit_counts.items():
-                if cnt > 0:
-                    visited_cells.add(c_pos)
-            visited_cells.add(engine.avatar_pos)
+            visited_cells = EpistemicCuriosityExplorer._collect_visited_cells(engine)
             has_explicit_probe_target = bool(new_probe_target or engine.active_probe_target)
             tr, tc = target_pos
             ar, ac = engine.avatar_pos
@@ -1572,25 +1567,13 @@ class MotorCortexEffector:
                 vy = int(raw_vy) if raw_vy is not None else 0
                 if (vy, vx) in engine.quiescent_actuation_targets:
                     continue
-                if hasattr(engine, "working_memory") and hasattr(
-                    engine.working_memory, "habenular_ior"
+                if engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, action, action_data={"x": vx, "y": vy}
                 ):
-                    if engine.working_memory.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                    ):
-                        continue
-                elif hasattr(engine, "habenular_ior"):
-                    if engine.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                    ):
-                        continue
-                haben_pen = 0.0
-                if hasattr(engine, "working_memory") and hasattr(
-                    engine.working_memory, "habenular_ior"
-                ):
-                    haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
-                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                    )
+                    continue
+                haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                    engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                )
                 vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
                 # Distance penalization with inhibition-of-return visit penalty and Habenular repulsion
                 d = float(abs(vx - target_c) + abs(vy - target_r)) + float(vis) * 25.0 + haben_pen
@@ -1708,13 +1691,10 @@ class MotorCortexEffector:
         engine: Any, r: int, c: int, lattice: np.ndarray, bg: Any = 0
     ) -> bool:
         """True when ``(r, c)`` lies in an enclosing border, partitioned band, or exogenous locus."""
-        wm = getattr(engine, "working_memory", None)
-        if wm is not None and hasattr(wm, "is_exogenous_locus"):
-            return bool(
-                wm.is_exogenous_locus((r, c), lattice=lattice, bg=bg, include_outer_edge=True)
+        return bool(
+            engine.working_memory.is_exogenous_locus(
+                (r, c), lattice=lattice, bg=bg, include_outer_edge=True
             )
-        return ExogenousSignalTracker.is_partitioned_or_enclosing(
-            (r, c), lattice=lattice, bg=bg, include_outer_edge=True
         )
 
     @classmethod
@@ -1826,17 +1806,13 @@ class MotorCortexEffector:
                     else 0.0
                 )
                 ior_penalty = float(visit_count) * 30.0 + (float(visit_count) ** 2) * 15.0
-                haben_pen = 0.0
-                if hasattr(engine, "working_memory") and hasattr(
-                    engine.working_memory, "habenular_ior"
+                if engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, action, action_data={"x": cc, "y": cr}
                 ):
-                    if engine.working_memory.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
-                    ):
-                        continue
-                    haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
-                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
-                    )
+                    continue
+                haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                    engine.avatar_pos, action, action_data={"x": cc, "y": cr}
+                )
                 cand_score = (
                     saliency + affordance_bonus + feat_bias + telic_bonus - ior_penalty - haben_pen
                 )

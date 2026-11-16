@@ -298,8 +298,8 @@ class ActionDynamicsModel:
         for k, bd in data.get("conditional_branches", {}).items():
             try:
                 branches[k] = cls.from_dict(bd)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Malformed conditional branch %r skipped: %s", k, exc)
         return cls(
             action_id=data.get("action_id", 0),
             delta_r=data.get("delta_r", 0),

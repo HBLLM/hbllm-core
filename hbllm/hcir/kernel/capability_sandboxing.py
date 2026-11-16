@@ -343,8 +343,8 @@ class SandboxedExecutor:
                 os.environ["HBLLM_FORCE_MOCK_TORCH"] = orig_mock_torch
         try:
             child_conn.close()
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug("Sandbox child_conn parent close skipped: %s", exc)
         timeout = self.resource_limits.timeout_seconds or 5.0
         loop = asyncio.get_running_loop()
         try:
@@ -389,8 +389,8 @@ def _await_child(proc: Any, conn: Any, timeout: float) -> tuple:
             try:
                 if conn.poll(0.01):
                     return conn.recv()
-            except Exception:
-                pass
+            except (EOFError, OSError) as exc:
+                logger.debug("Sandbox pipe drain after child exit: %s", exc)
             return ("err", "RuntimeError", f"child exited with code {proc.exitcode} without result")
 
     if proc.is_alive():
@@ -465,7 +465,7 @@ def _sandboxed_child_main(
     except BaseException as exc:  # relay the failure to the parent
         try:
             conn.send(("err", type(exc).__name__, str(exc)))
-        except Exception:
-            pass
+        except OSError as send_exc:
+            logger.debug("Sandbox child error relay failed: %s", send_exc)
     finally:
         conn.close()

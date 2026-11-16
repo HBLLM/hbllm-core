@@ -13,6 +13,7 @@ or benchmark-specific visual heuristics. Domain adapters lift raw observations
 into a PerceptionFrame, and the core operates exclusively over these percepts.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from collections import deque
 from collections.abc import Mapping, Sequence
@@ -23,6 +24,8 @@ from typing import Any, Literal
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+
+logger = logging.getLogger(__name__)
 
 
 class TerminalSignal(StrEnum):
@@ -333,8 +336,8 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
                         pos = sg.get("position")
                         if pos:
                             candidate_goals.add(pos)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Structural goal detector fallback skipped: %s", exc)
 
         if candidate_goals:
             has_known_goal_features = (

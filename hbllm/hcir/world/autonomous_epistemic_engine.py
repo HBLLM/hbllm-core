@@ -304,7 +304,7 @@ class AutonomousEpistemicEngine:
         self._last_surprise: float = 0.0
 
         # Intensional Neuro-Symbolic World Theory (SSOT for domain ontology)
-        self.default_bg_feature: Any = getattr(self, "default_bg_feature", 0)
+        self.default_bg_feature: Any = 0
         self.symbolic_theory: HCIRSymbolicWorldTheory = HCIRSymbolicWorldTheory()
         self.symbolic_theory.seed_core_knowledge(bg_feature=self.default_bg_feature)
 
@@ -480,6 +480,9 @@ class AutonomousEpistemicEngine:
         self.active_arbitrated_goal: Any | None = None
         self.grounding_bridge: Any | None = None
         self._entity_cache: dict[tuple[Any, ...], list[SpatialEntity]] = {}
+        self._last_surprise_eval: Any | None = None
+        self.rejected_delta_commits: int = 0
+        self.rejected_faculty_commits: int = 0
 
     def attach_grounding_bridge(
         self,
@@ -491,9 +494,7 @@ class AutonomousEpistemicEngine:
         else:
             from hbllm.hcir.world.cortical_grounding_bridge import CorticalGroundingBridge
 
-            ws = getattr(self, "workspace", None)
-            if ws is None and hasattr(self, "services") and self.services is not None:
-                ws = getattr(self.services, "workspace", None)
+            ws = self.services.workspace if self.services is not None else None
             self.grounding_bridge = CorticalGroundingBridge(
                 workspace=ws,
                 services=self.services,
@@ -531,8 +532,7 @@ class AutonomousEpistemicEngine:
     def mental_plan(self, val: Any) -> None:
         d = deque(val) if not isinstance(val, deque) else val
         self.working_memory.mental_plan = d
-        if hasattr(self, "state"):
-            self.state.mental_plan = d
+        self.state.mental_plan = d
 
     @property
     def active_hypothesis(self) -> Any | None:
@@ -542,8 +542,7 @@ class AutonomousEpistemicEngine:
     @active_hypothesis.setter
     def active_hypothesis(self, val: Any | None) -> None:
         self.working_memory.active_hypothesis = val
-        if hasattr(self, "state"):
-            self.state.active_hypothesis = val
+        self.state.active_hypothesis = val
 
     @property
     def consecutive_simulation_failures(self) -> int:
@@ -552,8 +551,7 @@ class AutonomousEpistemicEngine:
     @consecutive_simulation_failures.setter
     def consecutive_simulation_failures(self, val: int) -> None:
         self.working_memory.consecutive_simulation_failures = val
-        if hasattr(self, "state"):
-            self.state.consecutive_simulation_failures = val
+        self.state.consecutive_simulation_failures = val
 
     @property
     def simulation_cooldown(self) -> int:
@@ -562,8 +560,7 @@ class AutonomousEpistemicEngine:
     @simulation_cooldown.setter
     def simulation_cooldown(self, val: int) -> None:
         self.working_memory.simulation_cooldown = val
-        if hasattr(self, "state"):
-            self.state.simulation_cooldown = val
+        self.state.simulation_cooldown = val
 
     @property
     def consecutive_plan_failures(self) -> int:
@@ -572,8 +569,7 @@ class AutonomousEpistemicEngine:
     @consecutive_plan_failures.setter
     def consecutive_plan_failures(self, val: int) -> None:
         self.working_memory.consecutive_plan_failures = val
-        if hasattr(self, "state"):
-            self.state.consecutive_plan_failures = val
+        self.state.consecutive_plan_failures = val
 
     @property
     def exploration_cooldown(self) -> int:
@@ -582,8 +578,7 @@ class AutonomousEpistemicEngine:
     @exploration_cooldown.setter
     def exploration_cooldown(self, val: int) -> None:
         self.working_memory.exploration_cooldown = val
-        if hasattr(self, "state"):
-            self.state.exploration_cooldown = val
+        self.state.exploration_cooldown = val
 
     @property
     def consecutive_stuck_steps(self) -> int:
@@ -592,9 +587,7 @@ class AutonomousEpistemicEngine:
     @consecutive_stuck_steps.setter
     def consecutive_stuck_steps(self, val: int) -> None:
         self.working_memory.consecutive_stuck_steps = val
-        if hasattr(self, "state"):
-            self.state.consecutive_stuck_steps = val
-        self.working_memory.consecutive_stuck_steps = val
+        self.state.consecutive_stuck_steps = val
 
     @property
     def context_barriers(self) -> dict[int, set[tuple[int, int]]]:
@@ -764,8 +757,7 @@ class AutonomousEpistemicEngine:
     @active_probe_target.setter
     def active_probe_target(self, val: tuple[int, int] | None) -> None:
         self.working_memory.active_probe_target = val
-        if hasattr(self, "state"):
-            self.state.active_probe_target = val
+        self.state.active_probe_target = val
 
     @property
     def active_probe_id(self) -> str | None:
@@ -774,8 +766,7 @@ class AutonomousEpistemicEngine:
     @active_probe_id.setter
     def active_probe_id(self, val: str | None) -> None:
         self.working_memory.active_probe_id = val
-        if hasattr(self, "state"):
-            self.state.active_probe_id = val
+        self.state.active_probe_id = val
 
     @property
     def probe_target_steps(self) -> int:
@@ -784,8 +775,7 @@ class AutonomousEpistemicEngine:
     @probe_target_steps.setter
     def probe_target_steps(self, val: int) -> None:
         self.working_memory.probe_target_steps = val
-        if hasattr(self, "state"):
-            self.state.probe_target_steps = val
+        self.state.probe_target_steps = val
 
     @property
     def probed_entity_ids(self) -> set[str]:
@@ -901,27 +891,25 @@ class AutonomousEpistemicEngine:
 
     @property
     def active_causal_actuator_coord(self) -> tuple[int, int] | None:
-        if hasattr(self, "state") and self.state.active_causal_actuator_coord is not None:
+        if self.state.active_causal_actuator_coord is not None:
             return self.state.active_causal_actuator_coord
         return self.working_memory.active_causal_actuator_coord
 
     @active_causal_actuator_coord.setter
     def active_causal_actuator_coord(self, val: tuple[int, int] | None) -> None:
         self.working_memory.active_causal_actuator_coord = val
-        if hasattr(self, "state"):
-            self.state.active_causal_actuator_coord = val
+        self.state.active_causal_actuator_coord = val
 
     @property
     def consecutive_causal_probes(self) -> int:
-        if hasattr(self, "state") and self.state.consecutive_causal_probes is not None:
+        if self.state.consecutive_causal_probes is not None:
             return self.state.consecutive_causal_probes
         return self.working_memory.consecutive_causal_probes
 
     @consecutive_causal_probes.setter
     def consecutive_causal_probes(self, val: int) -> None:
         self.working_memory.consecutive_causal_probes = val
-        if hasattr(self, "state"):
-            self.state.consecutive_causal_probes = val
+        self.state.consecutive_causal_probes = val
 
     @property
     def causal_actuator_streak_limit(self) -> int:
@@ -949,27 +937,25 @@ class AutonomousEpistemicEngine:
 
     @property
     def feature_quiescent_counts(self) -> dict[int, int]:
-        if hasattr(self, "state") and getattr(self.state, "feature_quiescent_counts", None):
+        if self.state.feature_quiescent_counts:
             return self.state.feature_quiescent_counts
         return self.working_memory.feature_quiescent_counts
 
     @feature_quiescent_counts.setter
     def feature_quiescent_counts(self, val: dict[int, int]) -> None:
         self.working_memory.feature_quiescent_counts = val
-        if hasattr(self, "state"):
-            self.state.feature_quiescent_counts = val
+        self.state.feature_quiescent_counts = val
 
     @property
     def _feature_quiescent_counts(self) -> dict[int, int]:
-        if hasattr(self, "state") and getattr(self.state, "feature_quiescent_counts", None):
+        if self.state.feature_quiescent_counts:
             return self.state.feature_quiescent_counts
         return self.working_memory.feature_quiescent_counts
 
     @_feature_quiescent_counts.setter
     def _feature_quiescent_counts(self, val: dict[int, int]) -> None:
         self.working_memory.feature_quiescent_counts = val
-        if hasattr(self, "state"):
-            self.state.feature_quiescent_counts = val
+        self.state.feature_quiescent_counts = val
 
     @property
     def inhibited_actions(self) -> dict[Any, int]:
@@ -1140,11 +1126,7 @@ class AutonomousEpistemicEngine:
             else None
         )
         stages = [verifier] if verifier is not None else None
-        event_bus = (
-            getattr(self.services, "event_bus", None)
-            if self.services is not None
-            else getattr(self, "event_bus", None)
-        )
+        event_bus = self.services.event_bus if self.services is not None else self.event_bus
 
         from hbllm.hcir.kernel.transaction_manager import TransactionManager
 
@@ -1233,7 +1215,7 @@ class AutonomousEpistemicEngine:
                     try:
                         feat = int(nid.removeprefix("ontology_goal_"))
                     except ValueError:
-                        pass
+                        logger.debug("Non-integer ontology_goal suffix ignored: %s", nid)
                 if feat is not None:
                     has_reward = (
                         props.get("has_terminal_reward") is True
@@ -1398,7 +1380,7 @@ class AutonomousEpistemicEngine:
         if services is not None and getattr(services, "workspace", None) is sim_ws:
             branch_services = services
         else:
-            base_services = services or getattr(self, "services", None)
+            base_services = services or self.services
             resolver = (
                 base_services.capability_resolver
                 if base_services is not None
@@ -1827,21 +1809,16 @@ class AutonomousEpistemicEngine:
     @property
     def phase(self) -> EpistemicPhase:
         """Active cognitive lifecycle phase."""
-        if (
-            hasattr(self, "working_memory")
-            and getattr(self.working_memory, "phase", None) is not None
-        ):
+        if self.working_memory.phase is not None:
             return self.working_memory.phase
-        if hasattr(self, "state") and getattr(self.state, "phase", None) is not None:
+        if self.state.phase is not None:
             return self.state.phase
         return self._phase
 
     @phase.setter
     def phase(self, value: EpistemicPhase) -> None:
-        if hasattr(self, "working_memory"):
-            self.working_memory.phase = value
-        if hasattr(self, "state"):
-            self.state.phase = value
+        self.working_memory.phase = value
+        self.state.phase = value
         self.transition_to_phase(value, reason="state_assignment")
 
     @property
@@ -1901,10 +1878,8 @@ class AutonomousEpistemicEngine:
 
     def transition_to_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
         """Formal event-sourced phase transition."""
-        if hasattr(self, "working_memory"):
-            self.working_memory.phase = new_phase
-        if hasattr(self, "state"):
-            self.state.phase = new_phase
+        self.working_memory.phase = new_phase
+        self.state.phase = new_phase
         if self._phase != new_phase:
             old = self._phase
             logger.info(
@@ -2183,9 +2158,9 @@ class AutonomousEpistemicEngine:
 
     @property
     def avatar_feature(self) -> Any | None:
-        if hasattr(self, "state") and self.state.avatar_feature is not None:
+        if self.state.avatar_feature is not None:
             return self.state.avatar_feature
-        if hasattr(self, "state") and self.state.avatar_features:
+        if self.state.avatar_features:
             return next(iter(self.state.avatar_features))
         if self._avatar_feature is not None:
             return self._avatar_feature
@@ -2196,8 +2171,7 @@ class AutonomousEpistemicEngine:
     @avatar_feature.setter
     def avatar_feature(self, val: Any | None) -> None:
         self._avatar_feature = val
-        if hasattr(self, "state"):
-            self.state.avatar_feature = val
+        self.state.avatar_feature = val
         if val is not None:
             if not self.avatar_features or val not in self.avatar_features:
                 self.avatar_features = {val}
@@ -2206,159 +2180,124 @@ class AutonomousEpistemicEngine:
 
     @property
     def avatar_features(self) -> set[Any]:
-        if hasattr(self, "state"):
-            return self.state.avatar_features
-        return self._avatar_features
+        return self.state.avatar_features
 
     @avatar_features.setter
     def avatar_features(self, val: Any) -> None:
         s = set(val) if val is not None else set()
-        if hasattr(self, "state"):
-            self.state.avatar_features = s
+        self.state.avatar_features = s
         self._avatar_features = s
 
     @property
     def avatar_pos(self) -> tuple[int, int] | None:
-        if hasattr(self, "state") and self.state.avatar_pos is not None:
+        if self.state.avatar_pos is not None:
             return self.state.avatar_pos
         return self._avatar_pos
 
     @avatar_pos.setter
     def avatar_pos(self, val: tuple[int, int] | None) -> None:
-        if hasattr(self, "state"):
-            self.state.avatar_pos = val
+        self.state.avatar_pos = val
         self._avatar_pos = val
 
     @property
     def avatar_size(self) -> int:
-        if hasattr(self, "state"):
-            return self.state.avatar_size
-        return self._avatar_size
+        return self.state.avatar_size
 
     @avatar_size.setter
     def avatar_size(self, val: int) -> None:
-        if hasattr(self, "state"):
-            self.state.avatar_size = val
+        self.state.avatar_size = val
         self._avatar_size = val
 
     @property
     def prev_grid(self) -> np.ndarray | None:
-        if hasattr(self, "state"):
-            return self.state.prev_grid
-        return self._prev_grid
+        return self.state.prev_grid
 
     @prev_grid.setter
     def prev_grid(self, val: np.ndarray | None) -> None:
-        if hasattr(self, "state"):
-            self.state.prev_grid = val
+        self.state.prev_grid = val
         self._prev_grid = val
 
     @property
     def last_action(self) -> int | None:
-        if hasattr(self, "state"):
-            return self.state.last_action
-        return self._last_action
+        return self.state.last_action
 
     @last_action.setter
     def last_action(self, val: int | None) -> None:
-        if hasattr(self, "state"):
-            self.state.last_action = val
+        self.state.last_action = val
         self._last_action = val
 
     @property
     def last_action_data(self) -> dict[str, Any] | None:
-        if hasattr(self, "state"):
-            return self.state.last_action_data
-        return self._last_action_data
+        return self.state.last_action_data
 
     @last_action_data.setter
     def last_action_data(self, val: dict[str, Any] | None) -> None:
-        if hasattr(self, "state"):
-            self.state.last_action_data = val
+        self.state.last_action_data = val
         self._last_action_data = val
 
     @property
     def step_counter(self) -> int:
-        if hasattr(self, "state"):
-            return self.state.step_counter
-        return self._step_counter
+        return self.state.step_counter
 
     @step_counter.setter
     def step_counter(self, val: int) -> None:
-        if hasattr(self, "state"):
-            self.state.step_counter = val
+        self.state.step_counter = val
         self._step_counter = val
 
     @property
     def spatial_lattice_stride(self) -> int:
-        if hasattr(self, "state"):
-            return self.state.spatial_lattice_stride
-        return self._spatial_lattice_stride
+        return self.state.spatial_lattice_stride
 
     @spatial_lattice_stride.setter
     def spatial_lattice_stride(self, val: int) -> None:
-        if hasattr(self, "state"):
-            self.state.spatial_lattice_stride = val
+        self.state.spatial_lattice_stride = val
         self._spatial_lattice_stride = val
 
     @property
     def effector_kinetics_mode(self) -> int | None:
-        if hasattr(self, "state"):
-            return self.state.effector_kinetics_mode
-        return self._effector_kinetics_mode
+        return self.state.effector_kinetics_mode
 
     @effector_kinetics_mode.setter
     def effector_kinetics_mode(self, val: int | None) -> None:
-        if hasattr(self, "state"):
-            self.state.effector_kinetics_mode = val
+        self.state.effector_kinetics_mode = val
         self._effector_kinetics_mode = val
 
     @property
     def last_surprise(self) -> float:
-        if hasattr(self, "state"):
-            return self.state.last_surprise
-        return self._last_surprise
+        return self.state.last_surprise
 
     @last_surprise.setter
     def last_surprise(self, val: float) -> None:
-        if hasattr(self, "state"):
-            self.state.last_surprise = val
+        self.state.last_surprise = val
         self._last_surprise = val
 
     @property
     def last_surprise_eval(self) -> Any | None:
-        if hasattr(self, "state"):
-            return self.state.last_surprise_eval
-        return getattr(self, "_last_surprise_eval", None)
+        return self.state.last_surprise_eval
 
     @last_surprise_eval.setter
     def last_surprise_eval(self, val: Any | None) -> None:
-        if hasattr(self, "state"):
-            self.state.last_surprise_eval = val
+        self.state.last_surprise_eval = val
         self._last_surprise_eval = val
 
     @property
     def consecutive_quiescent_actions(self) -> int:
-        if hasattr(self, "state"):
-            return self.state.consecutive_quiescent_actions
-        return self._consecutive_quiescent_actions
+        return self.state.consecutive_quiescent_actions
 
     @consecutive_quiescent_actions.setter
     def consecutive_quiescent_actions(self, val: int) -> None:
-        if hasattr(self, "state"):
-            self.state.consecutive_quiescent_actions = val
+        self.state.consecutive_quiescent_actions = val
         self._consecutive_quiescent_actions = val
 
     @property
     def bilateral_state(self) -> Any | None:
-        if hasattr(self, "state") and self.state.bilateral_state is not None:
+        if self.state.bilateral_state is not None:
             return self.state.bilateral_state
-        return getattr(self, "_bilateral_state", None)
+        return self._bilateral_state
 
     @bilateral_state.setter
     def bilateral_state(self, val: Any | None) -> None:
-        if hasattr(self, "state"):
-            self.state.bilateral_state = val
+        self.state.bilateral_state = val
         self._bilateral_state = val
 
     @property
@@ -2505,15 +2444,17 @@ class AutonomousEpistemicEngine:
 
     @property
     def current_context_id(self) -> str:
-        return getattr(self, "_current_context_id", str(self._context_epoch))
+        return self._current_context_id
 
     @current_context_id.setter
     def current_context_id(self, val: str) -> None:
         self._current_context_id = str(val)
         try:
-            self.set_context_epoch(int(val))
+            epoch = int(val)
         except (ValueError, TypeError):
-            pass
+            logger.debug("Non-integer context_id %r retains epoch %d", val, self._context_epoch)
+        else:
+            self.set_context_epoch(epoch)
 
     @property
     def context_epoch(self) -> int:
@@ -2590,8 +2531,8 @@ class AutonomousEpistemicEngine:
             if callable(handler) and attr is not self:
                 try:
                     handler(boundary)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Boundary handler %r failed: %s", type(attr).__name__, exc)
 
     def reset_episode(
         self,
@@ -2712,12 +2653,8 @@ class AutonomousEpistemicEngine:
         if target is not None:
             parts.append(f"Pursuing target/subgoal at {target}.")
 
-        if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
-            active_causes = [
-                p
-                for p in getattr(self.symbolic_theory, "causal_predicates", [])
-                if getattr(p, "is_active", True)
-            ]
+        if self.symbolic_theory is not None:
+            active_causes = list(self.symbolic_theory.causal_predicates)
             if active_causes:
                 parts.append(
                     f"Conditioned on active causal hypothesis '{active_causes[-1].variable} {active_causes[-1].operator} {active_causes[-1].value}'."
@@ -2873,21 +2810,15 @@ class AutonomousEpistemicEngine:
         return PerceptionFrame(shape=(H, W))
 
     def estimate_background(self, grid: np.ndarray) -> Any:
-        theory = getattr(self, "symbolic_theory", None)
-        goals = set(theory.goal_features) if theory is not None else set()
-        walkables = (
-            {
-                w
-                for w in theory.walkable_features
-                if w not in goals and theory.has_verified_walkable(w)
-            }
-            if theory is not None
-            else None
-        )
-        barriers = set(theory.barrier_features) if theory is not None else set()
-        hz = getattr(self, "hazard_tracker", None)
-        if hz is not None:
-            barriers |= set(getattr(hz, "known_lethal_features", ()) or ())
+        theory = self.symbolic_theory
+        goals = set(theory.goal_features)
+        walkables = {
+            w
+            for w in theory.walkable_features
+            if w not in goals and theory.has_verified_walkable(w)
+        }
+        barriers = set(theory.barrier_features)
+        barriers |= set(self.hazard_tracker.known_lethal_features)
         barriers_arg: set[int] | None = barriers or None
         bg = PerceptionEngine.estimate_background(
             grid,
@@ -3077,8 +3008,8 @@ class AutonomousEpistemicEngine:
             if self.tiered_workspace is not None:
                 try:
                     self.persist_to_workspace(author="episode_boundary")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Workspace persistence at episode boundary failed: %s", exc)
 
         if is_success and self.tiered_workspace is not None and self.active_task_frame is not None:
             # Commit only delta/missing working memory state to active task frame
@@ -3589,7 +3520,7 @@ class AutonomousEpistemicEngine:
         )
         from hbllm.hcir.world.engine_state import CognitiveContext
 
-        self._pipeline_runs = getattr(self, "_pipeline_runs", 0) + 1
+        self._pipeline_runs += 1
         from types import MappingProxyType
 
         ctx = CognitiveContext(
@@ -3746,13 +3677,19 @@ class AutonomousEpistemicEngine:
         ):
             self.symbolic_theory.record_causal_predicate(obj.to_causal_predicate())
 
+    def _commit_workspace(self) -> Any | None:
+        """Resolve the TransactionManager-governed workspace (task-frame fallback)."""
+        if self.transaction_manager is not None and self.transaction_manager.workspace is not None:
+            return self.transaction_manager.workspace
+        if self.active_task_frame is not None:
+            return self.active_task_frame.workspace
+        return None
+
     def _commit_operations(self, ops: list[TransactionOperation], author: str) -> None:
         """Commit ops to the engine's TM-governed workspace (task-frame fallback)."""
         if not ops:
             return
-        ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
-        if ws is None and getattr(self, "active_task_frame", None) is not None:
-            ws = getattr(self.active_task_frame, "workspace", None)
+        ws = self._commit_workspace()
         if ws is not None:
             ws.commit_operations(ops, author=author)
 
@@ -4042,13 +3979,11 @@ class AutonomousEpistemicEngine:
         if mirrored & set(delta.items()):
             try:
                 ops = [self._telemetry_operation()]
-                ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
-                if ws is None and getattr(self, "active_task_frame", None) is not None:
-                    ws = getattr(self.active_task_frame, "workspace", None)
+                ws = self._commit_workspace()
                 if ws is not None:
                     ws.commit_operations(ops, author=author)
             except Exception as exc:
-                self.rejected_delta_commits = getattr(self, "rejected_delta_commits", 0) + 1
+                self.rejected_delta_commits += 1
                 logger.error("apply_delta commit rejected (author=%s): %s", author, exc)
 
     def apply_wm_delta(self, delta: WorkingMemoryDelta) -> None:
@@ -4062,39 +3997,9 @@ class AutonomousEpistemicEngine:
             self.working_memory.inhibit_action(action, duration)
             return
 
-        if hasattr(self, field):
-            if op == "set":
-                setattr(self, field, val)
-            elif op == "append":
-                cur = getattr(self, field)
-                if isinstance(cur, list):
-                    cur.append(val)
-            elif op == "add":
-                cur = getattr(self, field)
-                if isinstance(cur, set):
-                    cur.add(val)
-        elif hasattr(self, "working_memory") and hasattr(self.working_memory, field):
-            if op == "set":
-                setattr(self.working_memory, field, val)
-            elif op == "append":
-                cur = getattr(self.working_memory, field)
-                if isinstance(cur, list):
-                    cur.append(val)
-            elif op == "add":
-                cur = getattr(self.working_memory, field)
-                if isinstance(cur, set):
-                    cur.add(val)
-        elif hasattr(self, "state") and hasattr(self.state, field):
-            if op == "set":
-                setattr(self.state, field, val)
-            elif op == "append":
-                cur = getattr(self.state, field)
-                if isinstance(cur, list):
-                    cur.append(val)
-            elif op == "add":
-                cur = getattr(self.state, field)
-                if isinstance(cur, set):
-                    cur.add(val)
+        from hbllm.hcir.world.engine_state import apply_wm_field_delta
+
+        apply_wm_field_delta(self, self.working_memory, self.state, field, val, op)
 
     def rollback_faculty_journal(self, journal: Any) -> None:
         """Roll back all mutations recorded in a FacultyWriteJournal."""
@@ -4105,16 +4010,14 @@ class AutonomousEpistemicEngine:
             if repr(before) == "<object object>":
                 continue
             if key.startswith("working_memory."):
-                target = getattr(self, "working_memory", None)
+                target: Any = self.working_memory
                 fname = key[15:]
             elif key.startswith("state."):
-                target = getattr(self, "state", None)
+                target = self.state
                 fname = key[6:]
             else:
                 target = self
                 fname = key
-            if target is None:
-                continue
             live = getattr(target, fname, None)
             if isinstance(live, dict) and isinstance(before, dict):
                 live.clear()
@@ -4130,8 +4033,8 @@ class AutonomousEpistemicEngine:
             else:
                 try:
                     setattr(target, fname, before)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Faculty journal rollback setattr(%s) skipped: %s", fname, exc)
 
     @staticmethod
     def _journal_values_equal(before: Any, current: Any) -> bool:
@@ -4190,14 +4093,12 @@ class AutonomousEpistemicEngine:
             raw_fields = {k.removeprefix("state.").removeprefix("working_memory.") for k in changed}
             if mirrored & raw_fields:
                 ops = [self._telemetry_operation()]
-                ws = getattr(getattr(self, "transaction_manager", None), "workspace", None)
-                if ws is None and getattr(self, "active_task_frame", None) is not None:
-                    ws = getattr(self.active_task_frame, "workspace", None)
+                ws = self._commit_workspace()
                 if ws is not None:
                     ws.commit_operations(ops, author=journal.author)
             return True
         except Exception as exc:
-            self.rejected_faculty_commits = getattr(self, "rejected_faculty_commits", 0) + 1
+            self.rejected_faculty_commits += 1
             logger.error("faculty journal commit rejected (author=%s): %s", journal.author, exc)
             self.rollback_faculty_journal(journal)
             return False
