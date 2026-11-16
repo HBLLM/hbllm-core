@@ -87,6 +87,10 @@ def parse_evidence(evidence: Any) -> tuple[int, str]:
             return OntologyEvidenceRank.INTERACTION, evidence
         if "collision" in ev_lower or "bump" in ev_lower or "wall" in ev_lower:
             return OntologyEvidenceRank.COLLISION, evidence
+        if "hydration" in ev_lower or "prior" in ev_lower or "background" in ev_lower:
+            return OntologyEvidenceRank.HYDRATION_DEFAULT, evidence
+        if ev_lower.startswith("topology:"):
+            return OntologyEvidenceRank.HYDRATION_DEFAULT + 10, evidence
         if (
             "traversal" in ev_lower
             or "step" in ev_lower
@@ -94,8 +98,6 @@ def parse_evidence(evidence: Any) -> tuple[int, str]:
             or "free_space" in ev_lower
         ):
             return OntologyEvidenceRank.TRAVERSAL, evidence
-        if "hydration" in ev_lower:
-            return OntologyEvidenceRank.HYDRATION_DEFAULT, evidence
         if "candidate" in ev_lower or "hypothesis" in ev_lower or "heuristic" in ev_lower:
             return OntologyEvidenceRank.CANDIDATE, evidence
         return OntologyEvidenceRank.HEURISTIC, evidence
@@ -1220,6 +1222,7 @@ class HCIRSymbolicWorldTheory:
         self._walkable_eval_cache.clear()
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
             self.mark_verified_in_context("barrier", feature_id)
+        existing_rank, _ = self._feature_evidence.get(("barrier", feature_id), (0, ""))
         if feature_id not in self._barrier_features:
             self._barrier_features.add(feature_id)
             self._feature_evidence[("barrier", feature_id)] = (rank, ev_str)
@@ -1237,6 +1240,8 @@ class HCIRSymbolicWorldTheory:
                 ev_str,
                 rank,
             )
+        elif rank > existing_rank:
+            self._feature_evidence[("barrier", feature_id)] = (rank, ev_str)
         return True
 
     def induce_walkable(self, feature_id: Any, evidence: Any = None) -> bool:
@@ -1267,8 +1272,10 @@ class HCIRSymbolicWorldTheory:
 
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
-        if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
+        ev_low = ev_str.lower()
+        if "hydration" not in ev_low and "template" not in ev_low and "prior" not in ev_low:
             self.mark_verified_in_context("walkable", feature_id)
+        existing_rank, _ = self._feature_evidence.get(("walkable", feature_id), (0, ""))
         if feature_id not in self._walkable_features:
             self._walkable_features.add(feature_id)
             self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
@@ -1283,6 +1290,8 @@ class HCIRSymbolicWorldTheory:
                 metadata={"evidence": ev_str, "rank": rank, "role": "walkable"},
             )
             self.walkable_predicates.append(pred)
+        elif rank > existing_rank:
+            self._feature_evidence[("walkable", feature_id)] = (rank, ev_str)
         return True
 
     def induce_cargo(self, feature_id: Any, evidence: Any = None) -> bool:
@@ -1558,6 +1567,21 @@ class HCIRSymbolicWorldTheory:
         all_preds.extend(self.spelke_axioms.values())
         return all_preds
 
+    def get_feature_evidence(self, kind: str, feature_id: Any) -> tuple[int, str]:
+        """Return (rank, provenance) recorded for `(kind, feature_id)`."""
+        return self._feature_evidence.get(
+            (kind, feature_id), (OntologyEvidenceRank.UNVERIFIED, "unverified")
+        )
+
+    def has_verified_walkable(self, feature_id: Any) -> bool:
+        """Return True only when `feature_id` has empirical traversal/higher walkable evidence."""
+        if feature_id not in self._walkable_features:
+            return False
+        rank, ev_str = self.get_feature_evidence("walkable", feature_id)
+        if rank >= OntologyEvidenceRank.TRAVERSAL:
+            return True
+        return False
+
     def seed_core_knowledge(self, bg_feature: Any = 0) -> None:
         """Seed domain-general Spelke core cognitive knowledge (Physics & Free Space axioms).
 
@@ -1571,7 +1595,7 @@ class HCIRSymbolicWorldTheory:
         5. DIRECTIONAL_INERTIA: Displacements maintain directional continuity unless
            interrupted by collisions or external forces.
         """
-        self.induce_walkable(bg_feature)
+        self.induce_walkable(bg_feature, evidence="hydration:free_space_prior")
 
         # 1. Free Space
         self.spelke_axioms[SpelkePhysicalAxiom.FREE_SPACE] = CausalPredicate(

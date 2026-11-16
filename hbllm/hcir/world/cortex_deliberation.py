@@ -1140,9 +1140,25 @@ class PrefrontalDeliberationEngine:
             uninhibited_discrete = [
                 a
                 for a in discrete_transform_actions
-                if view.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
+                if view.inhibited_actions.get(a, 0) == 0
+                and a not in undo_acts
+                and (
+                    view.avatar_pos is None
+                    or (a, view.avatar_pos) not in view.tested_action_positions
+                )
             ]
-            if uninhibited_discrete:
+            # Only fire discrete fallback when genuinely stuck/oscillating (>=3 visits or
+            # >=2 blocked steps) or when no displacement actions exist; single backtrack (count==2)
+            # defers to displacement exploration/simulation.
+            truly_stuck = (
+                not has_displacement_actions
+                or view.consecutive_stuck_steps >= 2
+                or (
+                    view.avatar_pos is not None
+                    and view.recent_positions.count(view.avatar_pos) >= 3
+                )
+            )
+            if uninhibited_discrete and truly_stuck:
                 # WP0.3: prefer the action least dominated by no_op/blocked
                 # samples and never repeat a null-effect action >2x in a row
                 # (unless every action is null-dominated).
@@ -1159,6 +1175,8 @@ class PrefrontalDeliberationEngine:
                 viable = [a for a in uninhibited_discrete if not _null_score(a)[0]]
                 pool = viable or uninhibited_discrete
                 chosen_action = min(pool, key=_null_score)
+                if view.avatar_pos is not None:
+                    view.tested_action_positions.add((chosen_action, view.avatar_pos))
                 view.inhibited_actions[chosen_action] = max(
                     view.inhibited_actions.get(chosen_action, 0), 4
                 )
@@ -2473,7 +2491,9 @@ class PrefrontalDeliberationEngine:
             # If exit is not open/reachable or in search backoff, interact with intermediate objects.
             # Must not preempt initial motor calibration when uncalibrated actions remain.
             has_uncalibrated = any(
-                not view.is_action_calibrated(a) and view.inhibited_actions.get(a, 0) == 0
+                not view.is_action_calibrated(a)
+                and view.inhibited_actions.get(a, 0) == 0
+                and (a, view.avatar_pos) not in view.tested_action_positions
                 for a in available_actions
                 if not view.is_spatial_effector(a)
             )
@@ -2688,6 +2708,46 @@ class PrefrontalDeliberationEngine:
             curr_sg = getattr(sg_stack, "current_subgoal", None) if sg_stack else None
             if curr_sg and getattr(curr_sg, "target_destination", None):
                 goal_target = curr_sg.target_destination
+                goal_source = "epistemic"
+
+        # Check current simulated target or committed active epistemic probe target
+        if goal_target is None:
+            sim_goal = get_engine_state_attr(view, "current_simulated_goal", None)
+            if sim_goal is not None:
+                goal_target = sim_goal
+                goal_source = "epistemic"
+            else:
+                probe_target = getattr(view, "active_probe_target", None)
+                if probe_target is not None:
+                    goal_target = probe_target
+                    goal_source = "epistemic"
+
+        # Check nearest reachable unvisited frontier cell when localized
+        if (
+            goal_target is None
+            and grid is not None
+            and hasattr(grid, "shape")
+            and len(grid.shape) >= 2
+            and getattr(view, "avatar_pos", None) is not None
+            and getattr(view, "symbolic_theory", None) is not None
+            and getattr(view, "hazard_tracker", None) is not None
+        ):
+            bg_val = (
+                view.bg_feature
+                if getattr(view, "bg_feature", None) is not None
+                else view.estimate_background(grid)
+            )
+            av_feats = set(getattr(view, "avatar_features", ()) or ())
+            if getattr(view, "avatar_feature", None) is not None:
+                av_feats.add(view.avatar_feature)
+            frontier = EpistemicGoalScheduler.compute_frontier_candidates(
+                engine=view,
+                curr_grid=grid,
+                bg=bg_val,
+                av_feats=av_feats,
+            )
+            if frontier:
+                goal_target = frontier[0]
                 goal_source = "epistemic"
 
         # Subgoal stack representation (top-of-stack first)

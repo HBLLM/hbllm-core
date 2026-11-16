@@ -4110,6 +4110,11 @@ class AutonomousEpistemicEngine:
             context_epoch=target_epoch,
         )
         self.apply_delta(delta, author="episodic_cortex")
+        if hasattr(self, "_entity_cache") and isinstance(self._entity_cache, dict):
+            self._entity_cache.clear()
+        self._structural_goals_cache = None
+        if new_context or not retain_dynamics:
+            self.active_arbitrated_goal = None
         self.step_counter = 0
         if hasattr(self, "entropy_monitor") and self.entropy_monitor:
             self.entropy_monitor.reset_for_level()
@@ -4549,45 +4554,53 @@ class AutonomousEpistemicEngine:
         return PerceptionFrame(shape=(H, W))
 
     def estimate_background(self, grid: np.ndarray) -> Any:
+        theory = getattr(self, "symbolic_theory", None)
+        goals = set(theory.goal_features) if theory is not None else set()
         walkables = (
-            set(self.symbolic_theory.walkable_features)
-            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None
+            {
+                w
+                for w in theory.walkable_features
+                if w not in goals and theory.has_verified_walkable(w)
+            }
+            if theory is not None
             else None
         )
-        barriers = (
-            set(self.symbolic_theory.barrier_features)
-            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None
-            else None
-        )
+        barriers = set(theory.barrier_features) if theory is not None else set()
+        hz = getattr(self, "hazard_tracker", None)
+        if hz is not None:
+            barriers |= set(getattr(hz, "known_lethal_features", ()) or ())
+        barriers_arg: set[int] | None = barriers or None
         bg = PerceptionEngine.estimate_background(
             grid,
-            barrier_features=barriers,
+            barrier_features=barriers_arg,
             avatar_features=self.avatar_features,
             bg_feature=self.bg_feature,
             walkable_features=walkables,
         )
         if self.bg_feature is None or self.bg_feature != bg:
             old_bg = self.bg_feature
+            # A monochrome win/loss transition flash should not shift background ontology.
+            if int(np.unique(grid).size) <= 1 and old_bg is not None:
+                return old_bg
             self.bg_feature = bg
-            if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
-                if (
-                    old_bg is not None
-                    and old_bg != bg
-                    and old_bg not in getattr(self, "verified_safe_features", set())
-                ):
-                    self.symbolic_theory.retract_walkable(old_bg, reason="background_shift")
+            if theory is not None:
+                if old_bg is not None and old_bg != bg and not theory.has_verified_walkable(old_bg):
+                    theory.retract_walkable(old_bg, reason="background_shift")
                 elif (
                     old_bg is None
                     and hasattr(self, "default_bg_feature")
                     and self.default_bg_feature != bg
-                    and self.default_bg_feature
-                    not in getattr(self, "verified_safe_features", set())
+                    and not theory.has_verified_walkable(self.default_bg_feature)
                 ):
-                    self.symbolic_theory.retract_walkable(
-                        self.default_bg_feature, reason="background_shift"
-                    )
-                if bg in getattr(self, "verified_safe_features", set()):
-                    self.symbolic_theory.induce_walkable(bg, evidence="background_shift")
+                    theory.retract_walkable(self.default_bg_feature, reason="background_shift")
+                if (
+                    bg not in theory.barrier_features
+                    and bg not in theory.avatar_features
+                    and bg not in theory.goal_features
+                    and bg not in theory.cargo_features
+                    and not theory.has_verified_walkable(bg)
+                ):
+                    theory.induce_walkable(bg, evidence="background_shift")
         return bg
 
     def _perception_cache_key(self, grid: np.ndarray, bg: int) -> tuple[Any, ...]:
@@ -4643,6 +4656,9 @@ class AutonomousEpistemicEngine:
             if len(self._entity_cache) >= 4:
                 self._entity_cache.pop(next(iter(self._entity_cache)))
             self._entity_cache[key] = cached
+            post_key = self._perception_cache_key(grid, bg)
+            if post_key != key:
+                self._entity_cache[post_key] = cached
         return [copy.copy(e) for e in cached]
 
     def compute_frame_diff(

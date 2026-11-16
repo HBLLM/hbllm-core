@@ -491,6 +491,82 @@ class EpistemicGoalScheduler:
         }
 
     @classmethod
+    def compute_frontier_candidates(
+        cls,
+        engine: Any,
+        curr_grid: np.ndarray,
+        bg: int,
+        av_feats: set[int],
+        interactive_cluster_loci: set[tuple[int, int]] | tuple[tuple[int, int], ...] = (),
+    ) -> list[tuple[int, int]]:
+        """Return reachable unvisited frontier cells ordered by Manhattan distance from avatar."""
+        H, W = curr_grid.shape
+        avatar_pos = getattr(engine, "avatar_pos", None)
+        if avatar_pos is None or not (0 <= avatar_pos[0] < H and 0 <= avatar_pos[1] < W):
+            return []
+        prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
+        wm = getattr(engine, "working_memory", None)
+        visited: set[tuple[int, int]] = set(getattr(wm, "visited_cells", ()) or ())
+        for c_pos, cnt in (getattr(engine, "position_visit_counts", None) or {}).items():
+            if cnt > 0:
+                visited.add(c_pos)
+        visited.add(avatar_pos)
+
+        reachable_passable: set[tuple[int, int]] = {avatar_pos}
+        q_frontier: deque[tuple[int, int]] = deque([avatar_pos])
+        theory = engine.symbolic_theory
+        lethal = engine.hazard_tracker.known_lethal_features
+        while q_frontier:
+            curr_cell = q_frontier.popleft()
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = curr_cell[0] + dr, curr_cell[1] + dc
+                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in reachable_passable:
+                    c_val = int(curr_grid[nr, nc])
+                    if (
+                        (c_val == bg or theory.is_walkable(c_val))
+                        and not theory.is_barrier(c_val)
+                        and c_val not in lethal
+                        and c_val not in prior_hazard_feats
+                    ):
+                        reachable_passable.add((nr, nc))
+                        q_frontier.append((nr, nc))
+
+        excl = set(interactive_cluster_loci)
+        frontier_candidates = [
+            cp
+            for cp in reachable_passable
+            if cp not in visited
+            and cp not in excl
+            and any(
+                (cp[0] + dr, cp[1] + dc) in visited for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+            )
+        ]
+        if not frontier_candidates:
+            frontier_candidates = [
+                cp for cp in reachable_passable if cp not in visited and cp not in excl
+            ]
+
+        opt_eng = getattr(engine, "option_discovery", None)
+        if opt_eng:
+            opt_bottlenecks = {
+                opt.bottleneck_state
+                for opt in getattr(opt_eng, "discovered_options", {}).values()
+                if getattr(opt, "bottleneck_state", None) is not None
+            }
+            bottleneck_frontiers = [
+                cp
+                for cp in reachable_passable
+                if cp in opt_bottlenecks and cp not in visited and cp not in excl
+            ]
+            if bottleneck_frontiers:
+                frontier_candidates = bottleneck_frontiers
+
+        frontier_candidates.sort(
+            key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+        )
+        return frontier_candidates
+
+    @classmethod
     def schedule_goals(
         cls,
         engine: AutonomousEpistemicEngine,
@@ -1682,70 +1758,14 @@ class EpistemicGoalScheduler:
         # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
         if not goals:
-            visited = set(getattr(engine.working_memory, "visited_cells", set()))
-            if avatar_pos is not None:
-                visited.add(avatar_pos)
-
-            reachable_passable: set[tuple[int, int]] = set()
-            if avatar_pos is not None:
-                q_frontier: deque[tuple[int, int]] = deque([avatar_pos])
-                reachable_passable.add(avatar_pos)
-                while q_frontier:
-                    curr_cell = q_frontier.popleft()
-                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        nr, nc = curr_cell[0] + dr, curr_cell[1] + dc
-                        if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in reachable_passable:
-                            c_val = int(curr_grid[nr, nc])
-                            if (
-                                (c_val == bg or engine.symbolic_theory.is_walkable(c_val))
-                                and not engine.symbolic_theory.is_barrier(c_val)
-                                and c_val not in engine.hazard_tracker.known_lethal_features
-                                and c_val not in prior_hazard_feats
-                            ):
-                                reachable_passable.add((nr, nc))
-                                q_frontier.append((nr, nc))
-
-            frontier_candidates = [
-                cp
-                for cp in reachable_passable
-                if cp not in visited
-                and cp not in interactive_cluster_loci
-                and any(
-                    (cp[0] + dr, cp[1] + dc) in visited
-                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                )
-            ]
-            if not frontier_candidates:
-                frontier_candidates = [
-                    cp
-                    for cp in reachable_passable
-                    if cp not in visited and cp not in interactive_cluster_loci
-                ]
-
-            opt_eng = getattr(engine, "option_discovery", None)
-            if opt_eng and avatar_pos is not None:
-                opt_bottlenecks = {
-                    opt.bottleneck_state
-                    for opt in getattr(opt_eng, "discovered_options", {}).values()
-                    if getattr(opt, "bottleneck_state", None) is not None
-                }
-                bottleneck_frontiers = [
-                    cp
-                    for cp in reachable_passable
-                    if cp in opt_bottlenecks
-                    and cp not in visited
-                    and cp not in interactive_cluster_loci
-                ]
-                if bottleneck_frontiers:
-                    bottleneck_frontiers.sort(
-                        key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
-                    )
-                    frontier_candidates = bottleneck_frontiers
-
-            if frontier_candidates and avatar_pos is not None:
-                frontier_candidates.sort(
-                    key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
-                )
+            frontier_candidates = cls.compute_frontier_candidates(
+                engine=engine,
+                curr_grid=curr_grid,
+                bg=bg,
+                av_feats=av_feats,
+                interactive_cluster_loci=interactive_cluster_loci,
+            )
+            if frontier_candidates:
                 nearest_frontier = frontier_candidates[0]
                 goals.append(nearest_frontier)
                 satisfied_when[nearest_frontier] = {"max_visits": 1}
@@ -3147,8 +3167,19 @@ class MentalSimulationPlanner:
                         grid_dist_field[unreached], d_mat[unreached]
                     )
 
+        _active_override_goals: set[tuple[int, int]] | None = None
+
         def heuristic(pos: tuple[int, int], blocks: frozenset[tuple[int, int]]) -> float:
-            if is_block_delivery and blocks:
+            if _active_override_goals is not None:
+                base_h = (
+                    float(
+                        min(abs(pos[0] - g[0]) + abs(pos[1] - g[1]) for g in _active_override_goals)
+                    )
+                    / float(b_step)
+                    if _active_override_goals
+                    else 0.0
+                )
+            elif is_block_delivery and blocks:
                 b_list = list(blocks)
                 if len(goals) == 1:
                     goal_dist = float(min(grid_dist_field[b[0], b[1]] for b in b_list))
@@ -3224,6 +3255,19 @@ class MentalSimulationPlanner:
 
         def _search_spacetime_astar(
             _relaxed_safety: bool,
+            override_goal_set: set[tuple[int, int]] | None = None,
+        ) -> tuple[list[MentalSimulationStep] | None, bool]:
+            nonlocal counter, _active_override_goals
+            _prev_override = _active_override_goals
+            _active_override_goals = override_goal_set
+            try:
+                return _run_spacetime_astar(_relaxed_safety, override_goal_set)
+            finally:
+                _active_override_goals = _prev_override
+
+        def _run_spacetime_astar(
+            _relaxed_safety: bool,
+            override_goal_set: set[tuple[int, int]] | None = None,
         ) -> tuple[list[MentalSimulationStep] | None, bool]:
             nonlocal counter
             parent_map: dict[int, tuple[int, MentalSimulationStep]] = {}
@@ -3342,8 +3386,20 @@ class MentalSimulationPlanner:
                         )
                         engine.state.current_simulated_goal = list(goals)[0] if goals else None
                         return path, had_relaxable_block
-                elif (cur_pos in goals or cur_pos in all_goal_cells) and path_len > 0:
+                elif (
+                    (cur_pos in override_goal_set)
+                    if override_goal_set is not None
+                    else (cur_pos in goals or cur_pos in all_goal_cells)
+                ) and path_len > 0:
                     path = _reconstruct_path(node_id)
+                    if override_goal_set is not None:
+                        logger.info(
+                            "AutonomousEpistemicEngine: Frontier Mental Simulation SUCCEEDED! %d steps to %s.",
+                            len(path),
+                            cur_pos,
+                        )
+                        engine.state.current_simulated_goal = cur_pos
+                        return path, had_relaxable_block
                     # Check if cur_pos is an adjacent interaction stance for an actuator subgoal or probe entity
                     probe_target_pos: tuple[int, int] | None = None
                     if cur_pos in satisfied_when and "entity_pos" in satisfied_when[cur_pos]:
@@ -3900,6 +3956,45 @@ class MentalSimulationPlanner:
                     teleo_plan = None
                 else:
                     return teleo_plan
+
+        # Reachable Unvisited Frontier Fallback: only when calibrated movement axes are
+        # incomplete (e.g., partial axis calibration in a straight corridor before any turn),
+        # plan explicitly to a reachable unvisited frontier cell rather than returning None.
+        has_row_axis = any(dr != 0 for _, dr, _ in movable_actions)
+        has_col_axis = any(dc != 0 for _, _, dc in movable_actions)
+        if (
+            not is_block_delivery
+            and start_pos is not None
+            and movable_actions
+            and not (has_row_axis and has_col_axis)
+        ):
+            frontier_goals = [
+                fg
+                for fg in EpistemicGoalScheduler.compute_frontier_candidates(
+                    engine=engine,
+                    curr_grid=curr_grid,
+                    bg=bg,
+                    av_feats=av_feats,
+                )
+                if fg != start_pos and fg not in effective_blocked
+            ]
+            if frontier_goals:
+                frontier_plan, _ = _search_spacetime_astar(
+                    _relaxed_safety=False,
+                    override_goal_set=set(frontier_goals[:12]),
+                )
+                if frontier_plan:
+                    first_pos = frontier_plan[0].predicted_avatar_pos
+                    if not (
+                        isinstance(first_pos, tuple)
+                        and len(first_pos) >= 2
+                        and isinstance(first_pos[0], (int, float))
+                        and isinstance(first_pos[1], (int, float))
+                        and engine.collision_cones.is_collision_hazard(
+                            int(first_pos[0]), int(first_pos[1]), 1
+                        )
+                    ):
+                        return frontier_plan
 
         return None
 

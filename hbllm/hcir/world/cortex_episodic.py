@@ -1086,6 +1086,7 @@ class HippocampalEpisodicCortex:
 
                 extracted_waypoints: list[RelationalWaypoint] = []
                 seen_features: set[int] = set()
+                bg_val = get_engine_state_attr(view, "bg_feature", 0)
                 for idx, step_t in enumerate(winning_trajectory):
                     if (
                         step_t.grid_snapshot is not None
@@ -1098,7 +1099,7 @@ class HippocampalEpisodicCortex:
                         H_s, W_s = step_t.grid_snapshot.shape[:2]
                         if 0 <= ar < H_s and 0 <= ac < W_s:
                             f_val = int(step_t.grid_snapshot[ar, ac])
-                            if f_val != 0 and f_val not in seen_features:
+                            if f_val != bg_val and f_val not in seen_features:
                                 seen_features.add(f_val)
                                 extracted_waypoints.append(
                                     RelationalWaypoint(

@@ -502,6 +502,26 @@ class EpistemicCuriosityExplorer:
             engine.avatar_pos,
         )
 
+        walkable_and_safe = engine.symbolic_theory.walkable_features
+        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
+        wm = getattr(engine, "working_memory", None)
+        visited_cells = set(getattr(wm, "visited_cells", ()) or ())
+        for c_pos, cnt in engine.position_visit_counts.items():
+            if cnt > 0:
+                visited_cells.add(c_pos)
+        visited_cells.add(engine.avatar_pos)
+        frontier_escape = EpistemicCuriosityExplorer._probe_frontier_escape_with_target(
+            engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+        )
+        if frontier_escape is not None and frontier_escape[1] not in visited_cells:
+            return EpistemicProbeProposal(
+                action=frontier_escape[0],
+                clear_active_probe=True,
+                new_probe_target=frontier_escape[1],
+                new_probe_id=f"frontier_{frontier_escape[1][0]}_{frontier_escape[1][1]}",
+                exploration_mode="frontier_backtrack",
+            )
+
         uncalibrated = [
             a
             for a in available_actions
@@ -526,14 +546,12 @@ class EpistemicCuriosityExplorer:
                     exploration_mode="attractor_loop_untested",
                 )
 
-        if discrete_transform_actions and (is_stuck or is_oscillating):
-            disc_act = discrete_transform_actions[
-                engine.context_epistemic_probes % len(discrete_transform_actions)
-            ]
+        if frontier_escape is not None:
             return EpistemicProbeProposal(
-                action=disc_act,
+                action=frontier_escape[0],
                 clear_active_probe=True,
-                exploration_mode="attractor_loop_discrete",
+                new_probe_target=frontier_escape[1],
+                exploration_mode="frontier_backtrack",
             )
 
         best_act = None
@@ -569,6 +587,20 @@ class EpistemicCuriosityExplorer:
                 action=best_act,
                 clear_active_probe=True,
                 exploration_mode="attractor_loop_least_visited",
+            )
+
+        untested_discrete = [
+            a
+            for a in discrete_transform_actions
+            if (a, engine.avatar_pos) not in engine.tested_action_positions
+        ]
+        if untested_discrete and (is_stuck or is_oscillating):
+            disc_act = untested_discrete[engine.context_epistemic_probes % len(untested_discrete)]
+            return EpistemicProbeProposal(
+                action=disc_act,
+                clear_active_probe=True,
+                tested_action_position=(disc_act, engine.avatar_pos),
+                exploration_mode="attractor_loop_discrete",
             )
 
         if spatial_effector_actions and min_visits == float("inf"):
@@ -777,21 +809,31 @@ class EpistemicCuriosityExplorer:
         return None
 
     @staticmethod
-    def _probe_frontier_escape(
+    @staticmethod
+    def _probe_frontier_escape_with_target(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
         disp_actions: list[tuple[int, tuple[int, int]]],
         bg: int,
         bg_is_impassable_void: bool,
-    ) -> int | None:
+    ) -> tuple[int, tuple[int, int]] | None:
         """Frontier Backtracking: BFS shortest path to nearest unexhausted walkable frontier cell."""
         if not disp_actions or engine.avatar_pos is None:
             return None
 
+        wm = getattr(engine, "working_memory", None)
+        visited_cells = set(getattr(wm, "visited_cells", ()) or ())
+        for c_pos, cnt in engine.position_visit_counts.items():
+            if cnt > 0:
+                visited_cells.add(c_pos)
+        visited_cells.add(engine.avatar_pos)
+
         bfs_q: deque[tuple[tuple[int, int], list[Any]]] = deque([(engine.avatar_pos, [])])
         bfs_visited = {engine.avatar_pos}
         best_frontier_path: list[Any] | None = None
+        best_frontier_target: tuple[int, int] | None = None
         least_visited_path: list[Any] | None = None
+        least_visited_target: tuple[int, int] | None = None
         least_visits = float("inf")
 
         while bfs_q and len(bfs_visited) < 300:
@@ -800,23 +842,11 @@ class EpistemicCuriosityExplorer:
             if p != engine.avatar_pos and p_visits < least_visits:
                 least_visits = p_visits
                 least_visited_path = path
+                least_visited_target = p
 
-            has_unvisited_neighbor = False
             for act, (dr_cal, dc_cal) in disp_actions:
                 nbr = (p[0] + dr_cal, p[1] + dc_cal)
-                if EpistemicCuriosityExplorer._is_ray_passable(
-                    engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
-                ):
-                    if engine.position_visit_counts.get(nbr, 0) == 0:
-                        has_unvisited_neighbor = True
-                        break
-            if has_unvisited_neighbor and path:
-                best_frontier_path = path
-                break
-
-            for act, (dr_cal, dc_cal) in disp_actions:
-                nr = p[0] + dr_cal
-                nc = p[1] + dc_cal
+                nr, nc = nbr
                 if (nr, nc) in bfs_visited:
                     continue
                 if not EpistemicCuriosityExplorer._is_ray_passable(
@@ -831,14 +861,36 @@ class EpistemicCuriosityExplorer:
                     or engine.working_memory.habenular_ior.is_action_inhibited(p, act)
                 ):
                     continue
-                bfs_visited.add((nr, nc))
-                bfs_q.append(((nr, nc), path + [act]))
+                if nbr not in visited_cells:
+                    best_frontier_path = path + [act]
+                    best_frontier_target = nbr
+                    break
+                bfs_visited.add(nbr)
+                bfs_q.append((nbr, path + [act]))
 
-        chosen_escape = best_frontier_path or least_visited_path
-        if chosen_escape:
-            return chosen_escape[0]
+            if best_frontier_path is not None:
+                break
+
+        if best_frontier_path and best_frontier_target is not None:
+            return best_frontier_path[0], best_frontier_target
+        if least_visited_path and least_visited_target is not None:
+            return least_visited_path[0], least_visited_target
 
         return None
+
+    @staticmethod
+    def _probe_frontier_escape(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        disp_actions: list[tuple[int, tuple[int, int]]],
+        bg: int,
+        bg_is_impassable_void: bool,
+    ) -> int | None:
+        """Frontier Backtracking: BFS shortest path action to nearest walkable frontier cell."""
+        res = EpistemicCuriosityExplorer._probe_frontier_escape_with_target(
+            engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+        )
+        return res[0] if res is not None else None
 
     @classmethod
     def compute_epistemic_probe(
@@ -1052,23 +1104,56 @@ class EpistemicCuriosityExplorer:
                     exploration_mode="looming_threat_evasion",
                 )
 
-            # When exploring without an active probe target, prioritize Frontier Backtracking (BFS to nearest unvisited cell)
+            # When exploring without an active probe target, when greedy progress toward a
+            # distant target is blocked by walls, or when revisiting cells, prioritize Frontier
+            # Backtracking (BFS to nearest unvisited cell) over naive Manhattan steps.
+            wm = getattr(engine, "working_memory", None)
+            visited_cells = set(getattr(wm, "visited_cells", ()) or ())
+            for c_pos, cnt in engine.position_visit_counts.items():
+                if cnt > 0:
+                    visited_cells.add(c_pos)
+            visited_cells.add(engine.avatar_pos)
             has_explicit_probe_target = bool(new_probe_target or engine.active_probe_target)
-            if not has_explicit_probe_target:
-                esc_act = cls._probe_frontier_escape(
-                    engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            tr, tc = target_pos
+            ar, ac = engine.avatar_pos
+            greedy_unvisited_progress = any(
+                cls._is_ray_passable(
+                    engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
                 )
-                if esc_act is not None:
-                    return EpistemicProbeProposal(
-                        action=esc_act,
-                        clear_active_probe=clear_active_probe,
-                        new_probe_target=new_probe_target,
-                        new_probe_id=new_probe_id,
-                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                        topological_doorway=doorway_reg,
-                        exploration_mode="frontier_backtrack",
-                    )
+                and (engine.avatar_pos, act) not in engine.failed_transitions
+                and not engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, act
+                )
+                and not engine.collision_cones.is_collision_hazard(ar + dr_cal, ac + dc_cal, 1)
+                and (ar + dr_cal, ac + dc_cal) not in visited_cells
+                and (abs(ar + dr_cal - tr) + abs(ac + dc_cal - tc)) < (abs(ar - tr) + abs(ac - tc))
+                for act, (dr_cal, dc_cal) in disp_actions
+            )
+            esc_res = cls._probe_frontier_escape_with_target(
+                engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            )
+            if esc_res is not None and (
+                not has_explicit_probe_target
+                or not greedy_unvisited_progress
+                or engine.recent_positions.count(engine.avatar_pos) >= 2
+                or engine.probe_target_steps >= 2
+            ):
+                esc_act, esc_target = esc_res
+                commit_target = (
+                    esc_target
+                    if esc_target not in visited_cells
+                    else (new_probe_target or esc_target)
+                )
+                return EpistemicProbeProposal(
+                    action=esc_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=commit_target,
+                    new_probe_id=new_probe_id or f"frontier_{commit_target[0]}_{commit_target[1]}",
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="frontier_backtrack",
+                )
 
             # Free Energy Active Inference Action Selection
             inf_act = cls._probe_active_inference(
@@ -1087,21 +1172,18 @@ class EpistemicCuriosityExplorer:
                 )
 
             # Frontier Backtracking fallback if active inference was blocked
-            if has_explicit_probe_target:
-                esc_act = cls._probe_frontier_escape(
-                    engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            if esc_res is not None:
+                esc_act, esc_target = esc_res
+                return EpistemicProbeProposal(
+                    action=esc_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target or esc_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="frontier_backtrack",
                 )
-                if esc_act is not None:
-                    return EpistemicProbeProposal(
-                        action=esc_act,
-                        clear_active_probe=clear_active_probe,
-                        new_probe_target=new_probe_target,
-                        new_probe_id=new_probe_id,
-                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                        topological_doorway=doorway_reg,
-                        exploration_mode="frontier_backtrack",
-                    )
 
             if spatial_effector_actions:
                 eff_candidates = [
@@ -1124,7 +1206,10 @@ class EpistemicCuriosityExplorer:
                         )
             if discrete_transform_actions:
                 uninhibited_discrete = [
-                    a for a in discrete_transform_actions if engine.inhibited_actions.get(a, 0) == 0
+                    a
+                    for a in discrete_transform_actions
+                    if engine.inhibited_actions.get(a, 0) == 0
+                    and (a, engine.avatar_pos) not in engine.tested_action_positions
                 ]
                 if uninhibited_discrete:
                     disc_act = uninhibited_discrete[engine.step_counter % len(uninhibited_discrete)]
@@ -1135,6 +1220,7 @@ class EpistemicCuriosityExplorer:
                         new_probe_id=new_probe_id,
                         probed_entity_ids_to_add=tuple(probed_ids_to_add),
                         entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                        tested_action_position=(disc_act, engine.avatar_pos),
                         topological_doorway=doorway_reg,
                         exploration_mode="discrete_transform_round_robin",
                     )

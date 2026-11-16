@@ -270,24 +270,46 @@ class FigureGroundSegregator:
                     w: int(np.sum(grid == w)) for w in valid_walkables if np.any(grid == w)
                 }
                 if walk_counts:
-                    best_w = max(walk_counts.items(), key=lambda item: item[1])[0]
-                    if top_val not in valid_walkables:
+                    best_w, best_cnt = max(walk_counts.items(), key=lambda item: item[1])
+                    if top_val not in valid_walkables and (
+                        top_val in barriers
+                        or top_val != g_dominant
+                        or best_cnt >= max(3, int(0.15 * grid.size))
+                    ):
                         return best_w
 
         # 2. Gestalt Perimeter Enclosure vs Canvas Ground:
         # If the outer border is dominated by top_val (an enclosing bounding wall/frame),
-        # but the global grid is dominated by another feature (the interior canvas),
-        # verify if the interior canvas is the true ground.
-        if top_val != g_dominant and g_dominant not in av_feats and g_dominant not in barriers:
-            if H > 2 and W > 2:
-                interior = grid[1:-1, 1:-1]
-                int_vals, int_counts = np.unique(interior, return_counts=True)
-                int_dominant = int(int_vals[np.argmax(int_counts)])
-                if (
-                    int_dominant == g_dominant
-                    and np.sum(interior == g_dominant) > 0.40 * interior.size
-                ):
-                    return g_dominant
+        # verify if the interior canvas is dominated by a non-barrier/non-avatar floor feature.
+        if H > 2 and W > 2:
+            interior = grid[1:-1, 1:-1]
+            int_vals, int_counts = np.unique(interior, return_counts=True)
+            int_dominant = int(int_vals[np.argmax(int_counts)])
+            int_dom_frac = float(np.max(int_counts)) / max(1, interior.size)
+            if (
+                top_val != g_dominant
+                and g_dominant not in av_feats
+                and g_dominant not in barriers
+                and int_dominant == g_dominant
+                and int_dom_frac > 0.40
+            ):
+                return g_dominant
+            top_border_frac = float(np.max(counts)) / max(1, border_pixels.size)
+            top_interior_frac = float(np.sum(interior == top_val)) / max(1, interior.size)
+            int_border_frac = float(np.sum(border_pixels == int_dominant)) / max(
+                1, border_pixels.size
+            )
+            if (
+                int_dominant != top_val
+                and int_dominant not in av_feats
+                and int_dominant not in barriers
+                and top_border_frac >= 0.60
+                and top_interior_frac < 0.30
+                and int_dom_frac >= 0.65
+                and int_border_frac < 0.10
+                and int(np.sum(grid == int_dominant)) >= 0.50 * int(np.sum(grid == top_val))
+            ):
+                return int_dominant
 
         if top_val in barriers:
             if top_val == g_dominant and g_counts[np.argmax(g_counts)] > 0.35 * grid.size:
@@ -333,6 +355,7 @@ class SpatialRoleClassifier:
         receptacle_pos: set[tuple[int, int]] | None = None,
         avatar_pos: tuple[int, int] | None = None,
         cells: list[tuple[int, int]] | None = None,
+        bg: int = 0,
     ) -> EntityRole:
         min_r, max_r, min_c, max_c = bounding_box
         av_set = av_feats or set()
@@ -369,7 +392,7 @@ class SpatialRoleClassifier:
         )
         is_theory_walkable = val in symbolic_theory.walkable_features if symbolic_theory else False
         is_candidate_goal = (
-            val != 0
+            val != bg
             and symbolic_theory is not None
             and (
                 val in symbolic_theory.goal_features
@@ -1017,6 +1040,7 @@ class PerceptionEngine:
                 receptacle_pos=receptacle_pos,
                 avatar_pos=avatar_pos,
                 cells=cells_list,
+                bg=bg,
             )
 
             ent = SpatialEntity(

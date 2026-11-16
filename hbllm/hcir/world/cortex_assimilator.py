@@ -1807,7 +1807,7 @@ class EpistemicFeedbackAssimilator:
                             elif (
                                 not is_avatar
                                 and not is_confirmed_goal
-                                and val not in view.symbolic_theory.walkable_features
+                                and not view.symbolic_theory.has_verified_walkable(val)
                             ):
                                 # Multi-cell leading edge recording
                                 if step_c != 0:
@@ -1835,7 +1835,7 @@ class EpistemicFeedbackAssimilator:
                                     and int(np.count_nonzero(curr_grid == val)) <= 2
                                 )
 
-                                if val not in view.verified_safe_features:
+                                if not view.symbolic_theory.has_verified_walkable(val):
                                     view.symbolic_theory.retract_walkable(
                                         val, reason="collision_obstacle"
                                     )

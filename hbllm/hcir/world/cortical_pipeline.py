@@ -111,6 +111,7 @@ class CorticalPipeline:
                         preserve_current_context=False,
                         reason="structural_label_permutation",
                     )
+                    self.engine.active_arbitrated_goal = None
 
         for stage in self.stages:
             try:
