@@ -3005,6 +3005,13 @@ class AutonomousEpistemicEngine:
             self.budget_governor.record_step()
         if is_success or is_failure:
             self._prev_oriented_threats = []
+            if self.grounding_bridge is not None:
+                sync_fn = getattr(self.grounding_bridge, "sync_theory_roles", None)
+                if callable(sync_fn):
+                    sync_fn(
+                        self.symbolic_theory,
+                        hazard_features=self.hazard_tracker.known_lethal_features,
+                    )
             if self.tiered_workspace is not None:
                 try:
                     self.persist_to_workspace(author="episode_boundary")
@@ -3825,15 +3832,15 @@ class AutonomousEpistemicEngine:
                 grant = getattr(target, "_system_grant", None)
             elif isinstance(target, HCIRWorkspaceState):
                 dest_ws = target
-        elif hasattr(self, "services") and self.services is not None:
+        elif self.services is not None:
             if self.services.tiered_workspace is not None:
                 dest_ws = self.services.tiered_workspace.persistent
                 grant = getattr(self.services.tiered_workspace, "_system_grant", None)
             else:
                 dest_ws = self.services.workspace
 
-        if grant is None and hasattr(self, "services") and self.services is not None:
-            reg = getattr(self.services, "commit_authority_registry", None)
+        if grant is None and self.services is not None:
+            reg = self.services.commit_authority_registry
             if reg is not None and dest_ws is not None:
                 grant = reg.issue(author, {dest_ws.tier})
 
@@ -3862,7 +3869,7 @@ class AutonomousEpistemicEngine:
                 src_ws = source.persistent
             elif isinstance(source, HCIRWorkspaceState):
                 src_ws = source
-        elif hasattr(self, "services") and self.services is not None:
+        elif self.services is not None:
             if self.services.tiered_workspace is not None:
                 src_ws = self.services.tiered_workspace.persistent
             else:
@@ -3875,33 +3882,26 @@ class AutonomousEpistemicEngine:
         if not nodes:
             return 0
 
-        # Hydrate symbolic theory
-        if hasattr(self, "symbolic_theory") and self.symbolic_theory is not None:
-            self.symbolic_theory.hydrate_from_nodes(nodes)
+        self.symbolic_theory.hydrate_from_nodes(nodes)
 
         # Hydrate goal positions, barriers, concepts, homeostatic state, and telemetry if present
         for node in nodes:
             props = node.properties or {}
-            if node.id.startswith("learned_goal_"):
+            if node.id.startswith("learned_goal_") or node.id.startswith("learned_barrier_"):
                 pos = props.get("position")
                 if pos and isinstance(pos, (list, tuple)):
-                    pos_tuple = tuple(
+                    pt: Any = tuple(
                         int(x)
                         if isinstance(x, (int, float)) and float(x).is_integer()
                         else float(x)
                         for x in pos
                     )
-                    self.learned_goal_positions.add(pos_tuple)  # type: ignore[arg-type]
-            elif node.id.startswith("learned_barrier_"):
-                pos = props.get("position")
-                if pos and isinstance(pos, (list, tuple)):
-                    pos_tuple = tuple(
-                        int(x)
-                        if isinstance(x, (int, float)) and float(x).is_integer()
-                        else float(x)
-                        for x in pos
+                    target_set = (
+                        self.learned_goal_positions
+                        if node.id.startswith("learned_goal_")
+                        else self.learned_barriers
                     )
-                    self.learned_barriers.add(pos_tuple)  # type: ignore[arg-type]
+                    target_set.add(pt)
             elif node.id == "engine_telemetry":
                 avatar_feat = props.get("avatar_feature")
                 if avatar_feat is not None:
@@ -3927,11 +3927,10 @@ class AutonomousEpistemicEngine:
                 getattr(node, "node_type", None) == "concept"
                 or getattr(node, "category", None) == "memory"
             ):
-                if hasattr(self, "working_memory") and hasattr(
-                    self.working_memory, "concept_store"
-                ):
-                    if hasattr(self.working_memory.concept_store, "restore_concept"):
-                        self.working_memory.concept_store.restore_concept(node)
+                concept_store = getattr(self.working_memory, "concept_store", None)
+                restore_fn = getattr(concept_store, "restore_concept", None)
+                if callable(restore_fn):
+                    restore_fn(node)
 
         return len(nodes)
 

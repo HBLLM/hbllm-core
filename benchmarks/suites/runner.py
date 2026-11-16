@@ -52,6 +52,45 @@ def _is_death_outcome(success: bool, terminal_obs: Any, info: dict[str, Any]) ->
     return getattr(terminal_obs, "terminal", None) == TerminalSignal.FAILURE
 
 
+_EXPLORATORY_DEATH_BRANCHES = frozenset(
+    {"epistemic_probe", "affordance_choice", "explore", "exploration"}
+)
+
+
+def _is_exploration_death(
+    engine: Any | None,
+    pre_obs: Any,
+    action: Any,
+    meta: dict[str, Any] | None,
+    died: bool,
+    baseline: str,
+    *,
+    pre_uncalibrated: bool = False,
+) -> bool:
+    """True when a terminal death occurred during exploration rather than policy exploitation."""
+    if not died:
+        return False
+    if engine is None:
+        return baseline != "oracle"
+    branch = str((meta or {}).get("branch", "")).lower()
+    if branch in _EXPLORATORY_DEATH_BRANCHES or pre_uncalibrated:
+        return True
+    grid = getattr(pre_obs, "visual_lattice", None)
+    if grid is None:
+        grid = getattr(pre_obs, "grid", None)
+    dyn = engine.action_dynamics.get(action)
+    if grid is not None and dyn is not None and engine.avatar_pos is not None:
+        nr = int(engine.avatar_pos[0]) + int(dyn.delta_r)
+        nc = int(engine.avatar_pos[1]) + int(dyn.delta_c)
+        H, W = len(grid), len(grid[0]) if len(grid) > 0 else 0
+        if 0 <= nr < H and 0 <= nc < W:
+            cell_feat = int(grid[nr][nc])
+            if cell_feat in engine.hazard_tracker.known_lethal_features:
+                return False
+            return bool(engine.is_feature_unverified(cell_feat, engine.bg_feature))
+    return branch in {"macro_plan", "mental_plan", "mental_simulation"}
+
+
 def run_closed_loop_task(
     env_cls: type,
     task_def: dict[str, Any],
@@ -82,6 +121,9 @@ def run_closed_loop_task(
     zs_successes: list[bool] = []
     zs_steps: list[int] = []
     zs_deaths = 0
+    zs_exploration_deaths = 0
+    replay_deaths = 0
+    replay_exploration_deaths = 0
 
     def _make_system(tmp_dir: str, tag: str, grounding: bool):
         config = CognitiveSystemConfig(
@@ -94,7 +136,7 @@ def run_closed_loop_task(
 
     # 1. Same-layout replay over `episodes` on `seeds[0]` (ep 0 doubles as seed 0's zero-shot)
     def _run_primary_replay(use_engine: bool) -> None:
-        nonlocal zs_deaths
+        nonlocal zs_deaths, zs_exploration_deaths, replay_deaths, replay_exploration_deaths
         with tempfile.TemporaryDirectory() as tmp_dir:
             system = None
             engine = None
@@ -122,6 +164,7 @@ def run_closed_loop_task(
                             if baseline == "demonstration"
                             else baseline
                         )
+                        ep_death_info: dict[str, bool] = {}
                         succ, steps, lats, errs, died = _run_loop_with_info(
                             env_instance,
                             obs,
@@ -131,7 +174,9 @@ def run_closed_loop_task(
                             [],
                             ep_errors,
                             seed=primary_seed,
+                            death_info=ep_death_info,
                         )
+                        exp_died = bool(ep_death_info.get("exploration_death", died))
                 else:
                     if engine is not None and ep_idx > 0:
                         b_kind = (
@@ -158,7 +203,9 @@ def run_closed_loop_task(
                     )
                     if ep_errors:
                         succ, steps, lats, errs, died = False, 0, [], ep_errors, False
+                        exp_died = False
                     else:
+                        ep_death_info = {}
                         succ, steps, lats, errs, died = _run_loop_with_info(
                             env_instance,
                             obs,
@@ -168,7 +215,9 @@ def run_closed_loop_task(
                             [],
                             ep_errors,
                             seed=primary_seed,
+                            death_info=ep_death_info,
                         )
+                        exp_died = bool(ep_death_info.get("exploration_death", died))
 
                 if errs:
                     succ = False
@@ -177,6 +226,10 @@ def run_closed_loop_task(
                 all_latencies.extend(lats)
                 all_errors.extend(errs)
                 prev_succ = succ
+                if died:
+                    replay_deaths += 1
+                    if exp_died:
+                        replay_exploration_deaths += 1
 
                 if ep_idx == 0 and baseline != "demonstration":
                     zs_seeds.append(primary_seed)
@@ -184,6 +237,8 @@ def run_closed_loop_task(
                     zs_steps.append(steps)
                     if died:
                         zs_deaths += 1
+                        if exp_died:
+                            zs_exploration_deaths += 1
 
     _run_primary_replay(use_engine=(baseline in ("system", "no_grounding", "demonstration")))
 
@@ -191,19 +246,36 @@ def run_closed_loop_task(
     if baseline != "demonstration" and len(seeds) > 1:
         for s in seeds[1:]:
             seed_errs: list[str] = []
+            seed_death_info: dict[str, bool] = {}
             if baseline in ("system", "no_grounding"):
                 with tempfile.TemporaryDirectory() as s_dir:
                     s_sys = _make_system(s_dir, f"{baseline}_zs_s{s}", baseline == "system")
                     s_env = env_cls(max_steps=max_budget)
                     s_obs = s_env.reset(seed=s)
                     succ, steps, lats, errs, died = _run_loop_with_info(
-                        s_env, s_obs, s_sys.engine, baseline, max_budget, [], seed_errs, seed=s
+                        s_env,
+                        s_obs,
+                        s_sys.engine,
+                        baseline,
+                        max_budget,
+                        [],
+                        seed_errs,
+                        seed=s,
+                        death_info=seed_death_info,
                     )
             else:
                 s_env = env_cls(max_steps=max_budget)
                 s_obs = s_env.reset(seed=s)
                 succ, steps, lats, errs, died = _run_loop_with_info(
-                    s_env, s_obs, None, baseline, max_budget, [], seed_errs, seed=s
+                    s_env,
+                    s_obs,
+                    None,
+                    baseline,
+                    max_budget,
+                    [],
+                    seed_errs,
+                    seed=s,
+                    death_info=seed_death_info,
                 )
             if errs:
                 succ = False
@@ -212,6 +284,8 @@ def run_closed_loop_task(
             zs_steps.append(steps)
             if died:
                 zs_deaths += 1
+                if seed_death_info.get("exploration_death", died):
+                    zs_exploration_deaths += 1
             all_latencies.extend(lats)
             all_errors.extend(errs)
     elif baseline == "demonstration":
@@ -311,6 +385,7 @@ def run_closed_loop_task(
         xs_succ: list[bool] = []
         xs_steps: list[int] = []
         xs_deaths = 0
+        xs_exploration_deaths = 0
         with tempfile.TemporaryDirectory() as tmp_dir:
             xs_engine = _make_system(tmp_dir, f"xseed_{baseline}", baseline == "system").engine
             prev_ok = False
@@ -332,6 +407,7 @@ def run_closed_loop_task(
                         xs_errs.append(f"Cross-seed boundary error at seed {ep_seed}: {e}")
                 xs_env = env_cls(max_steps=max_budget)
                 xs_obs = xs_env.reset(seed=ep_seed)
+                xs_death_info: dict[str, bool] = {}
                 if xs_errs:
                     ok, st, died = False, max_budget, False
                 else:
@@ -344,11 +420,14 @@ def run_closed_loop_task(
                         [],
                         xs_errs,
                         seed=ep_seed,
+                        death_info=xs_death_info,
                     )
                     if xs_errs:
                         ok = False
                 if died:
                     xs_deaths += 1
+                    if xs_death_info.get("exploration_death", died):
+                        xs_exploration_deaths += 1
                 all_errors.extend(xs_errs)
                 xs_succ.append(ok)
                 xs_steps.append(st)
@@ -367,7 +446,8 @@ def run_closed_loop_task(
             "solve_rate_wilson_95_ci": list(wilson_ci(k_xs, n_xs)),
             "transfer_solve_rate": round(k_tr / max(1, n_tr), 4) if n_tr > 0 else 0.0,
             "transfer_wilson_95_ci": list(wilson_ci(k_tr, n_tr)) if n_tr > 0 else [0.0, 0.0],
-            "exploration_deaths": xs_deaths,
+            "total_deaths": xs_deaths,
+            "exploration_deaths": xs_exploration_deaths,
             "skills_consolidated": skills,
         }
 
@@ -385,11 +465,14 @@ def run_closed_loop_task(
         "successes": episode_successes,
         "steps": episode_steps,
         "steps_to_stable_policy": stable_idx,
+        "total_deaths": replay_deaths,
+        "exploration_deaths": replay_exploration_deaths,
     }
 
     extra = {
         "seed_count": len(seeds),
-        "exploration_deaths": zs_deaths,
+        "total_deaths": zs_deaths,
+        "exploration_deaths": zs_exploration_deaths,
         "episode_successes": episode_successes,
         "episode_steps": episode_steps,
         "steps_to_stable_policy": stable_idx,
@@ -401,8 +484,10 @@ def run_closed_loop_task(
             "steps_per_seed": zs_steps,
             "solve_rate": zs_solve_rate,
             "wilson_95_ci": zs_ci,
-            "exploration_deaths": zs_deaths,
-            "exploration_death_rate": round(zs_deaths / max(1, n_zs), 4),
+            "total_deaths": zs_deaths,
+            "death_rate": round(zs_deaths / max(1, n_zs), 4),
+            "exploration_deaths": zs_exploration_deaths,
+            "exploration_death_rate": round(zs_exploration_deaths / max(1, n_zs), 4),
             "success": zs_successes[0] if n_zs == 1 else (k_zs * 2 >= n_zs and k_zs > 0),
             "steps": zs_steps[0] if n_zs == 1 else zs_mean_steps,
         },
@@ -473,6 +558,7 @@ def _run_loop_with_info(
     latencies: list[float],
     errors: list[str],
     seed: int = 0,
+    death_info: dict[str, bool] | None = None,
 ) -> tuple[bool, int, list[float], list[str], bool]:
     success = False
     died = False
@@ -516,6 +602,8 @@ def _run_loop_with_info(
 
         step_journal.append({"step": step_count, "action": action, "meta": meta})
         latencies.append((time.perf_counter() - t0) * 1000.0)
+        pre_obs = obs
+        pre_uncalibrated = engine is not None and not engine.is_action_calibrated(action)
 
         try:
             obs, reward, done, info = env.step(action)
@@ -527,6 +615,17 @@ def _run_loop_with_info(
         if done:
             success = bool(info.get("success", False))
             died = _is_death_outcome(success, obs, info)
+            if death_info is not None:
+                death_info["died"] = died
+                death_info["exploration_death"] = _is_exploration_death(
+                    engine,
+                    pre_obs,
+                    action,
+                    meta,
+                    died,
+                    baseline,
+                    pre_uncalibrated=pre_uncalibrated,
+                )
             if engine is not None:
                 try:
                     engine.step(
@@ -658,6 +757,7 @@ def run_suite(
                     steps=b_st,
                     max_budget=t_budget,
                     seed_count=b_extra.get("seed_count", 1),
+                    total_deaths=b_extra.get("total_deaths", b_extra.get("exploration_deaths", 0)),
                     exploration_deaths=b_extra.get("exploration_deaths", 0),
                     success_at_budget=b_ok,
                     steps_to_first_success=b_extra.get("steps_to_first_success"),
@@ -719,6 +819,7 @@ def run_suite(
             tot_solved_lf = sum(1 for bt in b_tasks if bt.success_at_budget)
             zs_ci = list(wilson_ci(zs_tot_solved, zs_tot_trials))
             b_deaths = sum(bt.exploration_deaths for bt in b_tasks)
+            b_tot_deaths = sum(max(bt.total_deaths, bt.exploration_deaths) for bt in b_tasks)
 
             b_curves = [bt.episode_successes for bt in b_tasks if bt.episode_successes]
             avg_curve = (
@@ -748,6 +849,7 @@ def run_suite(
                 "zero_shot_n_trials": zs_tot_trials,
                 "zero_shot_solve_rate": round(zs_tot_solved / max(1, zs_tot_trials), 4),
                 "zero_shot_wilson_95_ci": zs_ci,
+                "total_deaths": b_tot_deaths,
                 "exploration_deaths": b_deaths,
                 "same_layout_replay_generality_score": b_gen,
                 "lifelong_generality_score": b_gen,
@@ -769,7 +871,7 @@ def run_suite(
     print(
         f"Headline 1 — Zero-shot (n={report.zero_shot.get('n_trials', 0)}): "
         f"generality={report.generality_score:.4f}, solve_rate={report.zero_shot.get('solve_rate', 0.0):.4f}, "
-        f"95%_CI={report.zero_shot.get('wilson_95_ci')}, deaths={report.exploration_deaths}"
+        f"95%_CI={report.zero_shot.get('wilson_95_ci')}, deaths={report.total_deaths} (exploration={report.exploration_deaths})"
     )
     if report.cross_seed_transfer:
         print(

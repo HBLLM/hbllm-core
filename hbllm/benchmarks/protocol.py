@@ -49,6 +49,7 @@ class TaskResult:
     steps_to_first_success: int | None = None
     steps_to_stable_policy: int | None = None
     success_at_budget: bool = False
+    total_deaths: int = 0
     exploration_deaths: int = 0
     p50_latency_ms: float = 0.0
     p95_latency_ms: float = 0.0
@@ -76,6 +77,7 @@ class EvaluationReport:
     generality_score: float = 0.0  # Zero-shot (all seeds) generality — primary headline
     cross_seed_transfer_score: float = 0.0  # Cross-seed transfer solve rate — secondary headline
     lifelong_generality_score: float = 0.0  # Same-layout replay after N episodes (legacy alias)
+    total_deaths: int = 0
     exploration_deaths: int = 0
     mean_p50_latency_ms: float = 0.0
     mean_p95_latency_ms: float = 0.0
@@ -253,6 +255,7 @@ class EvaluationProtocol:
             result.success_at_budget = bool(success) and not errors
             result.seed_count = int(extra.get("seed_count", 1))
             result.exploration_deaths = int(extra.get("exploration_deaths", 0))
+            result.total_deaths = int(extra.get("total_deaths", result.exploration_deaths))
             result.episode_successes = extra.get("episode_successes", [result.success_at_budget])
             result.episode_steps = extra.get("episode_steps", [steps])
             result.steps_to_first_success = extra.get(
@@ -452,6 +455,7 @@ class EvaluationProtocol:
             round(sum(stable_policies) / len(stable_policies), 2) if stable_policies else None
         )
         total_deaths = sum(int(t.exploration_deaths) for t in tasks)
+        total_all_deaths = sum(max(int(t.total_deaths), int(t.exploration_deaths)) for t in tasks)
 
         # One-shot imitation (demonstration mode)
         osi_fam_scores: dict[str, float] = {}
@@ -487,6 +491,8 @@ class EvaluationProtocol:
             "n_solved": total_zs_solved,
             "solve_rate": round(total_zs_solved / max(1, total_zs_trials), 4),
             "wilson_95_ci": list(wilson_ci(total_zs_solved, total_zs_trials)),
+            "total_deaths": total_all_deaths,
+            "death_rate": round(total_all_deaths / max(1, total_zs_trials), 4),
             "exploration_deaths": total_deaths,
             "exploration_death_rate": round(total_deaths / max(1, total_zs_trials), 4),
         }
@@ -532,6 +538,13 @@ class EvaluationProtocol:
                 "family_wilson_95_ci": {
                     f: list(wilson_ci(xs_fam_ok[f], xs_fam_tot[f])) for f in xs_fam_tot
                 },
+                "total_deaths": sum(
+                    max(
+                        int(t.cross_seed_transfer.get("total_deaths", 0)),
+                        int(t.cross_seed_transfer.get("exploration_deaths", 0)),
+                    )
+                    for t in xs_tasks
+                ),
                 "exploration_deaths": sum(
                     int(t.cross_seed_transfer.get("exploration_deaths", 0)) for t in xs_tasks
                 ),
@@ -557,6 +570,7 @@ class EvaluationProtocol:
             generality_score=zs_gen,
             cross_seed_transfer_score=xs_headline,
             lifelong_generality_score=lf_gen,
+            total_deaths=total_all_deaths,
             exploration_deaths=total_deaths,
             mean_p50_latency_ms=mean_p50,
             mean_p95_latency_ms=mean_p95,

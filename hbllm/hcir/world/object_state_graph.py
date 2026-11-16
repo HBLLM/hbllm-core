@@ -13,6 +13,7 @@ from low-level physical distance D (handled by deterministic BFS/A* path control
 
 from __future__ import annotations
 
+import heapq
 import logging
 import math
 from collections import deque
@@ -172,20 +173,28 @@ class ObjectStateLedger:
         self.interaction_counts: dict[str, int] = {}
         self.interacted_positions: set[tuple[int, int]] = set()
         self.interacted_features: set[int] = set()
+        self.effective_features: set[int] = set()
         self.observed_mutations: list[Any] = []
         self.unlocked_barriers: set[tuple[int, int]] = set()
         self.object_causal_effects: dict[str, list[str]] = {}
         self.unlocked_by_object: dict[str, set[tuple[int, int]]] = {}
+        self.initially_unreachable_cells: set[tuple[int, int]] = set()
+        self.newly_reachable_cells: set[tuple[int, int]] = set()
+        self._baseline_reach_initialized: bool = False
 
     def reset_context_epoch(self) -> None:
         """Reset transient context-specific interaction state."""
         self.interaction_counts.clear()
         self.interacted_positions.clear()
         self.interacted_features.clear()
+        self.effective_features.clear()
         self.observed_mutations.clear()
         self.unlocked_barriers.clear()
         self.object_causal_effects.clear()
         self.unlocked_by_object.clear()
+        self.initially_unreachable_cells.clear()
+        self.newly_reachable_cells.clear()
+        self._baseline_reach_initialized = False
 
     def reset_level(self) -> None:
         """Deprecated alias for ``reset_context_epoch``."""
@@ -212,12 +221,70 @@ class ObjectStateLedger:
         object_id: str,
         effect_type: str,
         affected_coords: set[tuple[int, int]] | None = None,
+        feature_id: int | None = None,
     ) -> None:
         """Record an empirical causal effect attributed to an object interaction."""
         self.object_causal_effects.setdefault(object_id, []).append(effect_type)
+        if feature_id is not None:
+            self.effective_features.add(int(feature_id))
         if affected_coords:
             self.unlocked_barriers.update(affected_coords)
             self.unlocked_by_object.setdefault(object_id, set()).update(affected_coords)
+
+    def observe_grid_connectivity(
+        self,
+        grid: np.ndarray | None,
+        avatar_pos: tuple[int, int] | None,
+        bg: int,
+        walkable_feats: set[int],
+        av_feats: set[int],
+    ) -> None:
+        """Track compartment connectivity so post-unlock reachable regions are flagged causally."""
+        if grid is None or avatar_pos is None or grid.ndim != 2:
+            return
+        H, W = grid.shape
+        ar, ac = avatar_pos
+        if not (0 <= ar < H and 0 <= ac < W):
+            return
+        passable_feats = set(walkable_feats) | set(av_feats) | {int(bg)}
+        reached: set[tuple[int, int]] = {(ar, ac)}
+        q: deque[tuple[int, int]] = deque([(ar, ac)])
+        while q:
+            r, c = q.popleft()
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in reached:
+                    val = int(grid[nr, nc])
+                    if val in passable_feats:
+                        reached.add((nr, nc))
+                        q.append((nr, nc))
+        adj_reached: set[tuple[int, int]] = set(reached)
+        for r, c in reached:
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    adj_reached.add((nr, nc))
+
+        if not self._baseline_reach_initialized:
+            self._baseline_reach_initialized = True
+            self.initially_unreachable_cells = {
+                (r, c)
+                for r in range(H)
+                for c in range(W)
+                if (r, c) not in adj_reached and int(grid[r, c]) != bg
+            }
+            return
+
+        if self.initially_unreachable_cells:
+            for pos in self.initially_unreachable_cells:
+                if pos in adj_reached:
+                    self.newly_reachable_cells.add(pos)
+
+    def is_in_newly_reachable(self, cells: set[tuple[int, int]]) -> bool:
+        """True if any cell belongs to a compartment that became reachable after an unlock."""
+        return bool(
+            self.newly_reachable_cells and any(c in self.newly_reachable_cells for c in cells)
+        )
 
     def get_interaction_count(self, object_id: str) -> int:
         """Return the number of times an object has been interacted with."""
@@ -239,6 +306,326 @@ class ObjectStateLedger:
         return set(self.unlocked_barriers)
 
 
+def _extract_structural_signature(
+    cells: set[tuple[int, int]],
+    feature_id: int,
+    curr_grid: np.ndarray | None,
+    bg: int,
+) -> dict[str, float]:
+    """Compute color-invariant topological/geometric signature for analogical risk matching."""
+    area = float(max(1, len(cells)))
+    if not cells:
+        return {
+            "aspect_ratio": 1.0,
+            "norm_size": math.log1p(1.0),
+            "open_deg4": 1.0,
+            "corner_pin_risk": 0.0,
+        }
+    rs = [r for r, _ in cells]
+    cs = [c for _, c in cells]
+    h_span = float(max(rs) - min(rs) + 1)
+    w_span = float(max(cs) - min(cs) + 1)
+    aspect_ratio = w_span / max(1.0, h_span)
+    open_deg4 = 1.0
+    corner_pin_risk = 0.0
+    high_freq_adj4 = 0.0
+    if curr_grid is not None and curr_grid.ndim == 2:
+        H, W = curr_grid.shape
+        r0 = int(round(sum(rs) / area))
+        c0 = int(round(sum(cs) / area))
+        if 0 <= r0 < H and 0 <= c0 < W:
+            vals, counts = np.unique(curr_grid, return_counts=True)
+            counts_map = {
+                int(v): int(cnt) for v, cnt in zip(vals.tolist(), counts.tolist(), strict=False)
+            }
+            high_thresh = max(H, W)
+            n_open = 0
+            n_hf = 0
+            barrier_adj = [False, False, False, False]
+            for idx, (dr, dc) in enumerate(((-1, 0), (1, 0), (0, -1), (0, 1))):
+                nr, nc = r0 + dr, c0 + dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    nv = int(curr_grid[nr, nc])
+                    if nv == bg:
+                        n_open += 1
+                    elif nv != feature_id and counts_map.get(nv, 1) >= high_thresh:
+                        n_hf += 1
+                        barrier_adj[idx] = True
+                else:
+                    n_hf += 1
+                    barrier_adj[idx] = True
+            open_deg4 = n_open / 4.0
+            high_freq_adj4 = n_hf / 4.0
+            if (barrier_adj[0] or barrier_adj[1]) and (barrier_adj[2] or barrier_adj[3]):
+                corner_pin_risk = 1.0
+    return {
+        "aspect_ratio": aspect_ratio,
+        "norm_size": math.log1p(area),
+        "open_deg4": open_deg4,
+        "high_freq_adj4": high_freq_adj4,
+        "corner_pin_risk": corner_pin_risk,
+    }
+
+
+def _analogous_concept_hazard_risk(
+    engine: Any,
+    feature_id: int,
+    cells: set[tuple[int, int]],
+    curr_grid: np.ndarray | None,
+    bg: int,
+) -> float:
+    """Estimate hazard risk via structural analogy to role-annotated GroundedConcepts."""
+    store = engine.working_concept_store
+    concepts = store.get_all_concepts()
+    if not concepts:
+        return 0.0
+    role_concepts = [
+        c
+        for c in concepts
+        if any(aff in ("role:hazard", "role:goal", "role:actuator") for aff in c.affordances)
+        and c.feature_distributions
+    ]
+    if not role_concepts:
+        return 0.0
+
+    sig = _extract_structural_signature(cells, feature_id, curr_grid, bg)
+    # Match structural indices corresponding to geometric/topological dimensions (dim_0..dim_9)
+    sig_dims = {
+        "dim_0": sig["aspect_ratio"],
+        "dim_3": sig["norm_size"],
+        "dim_4": sig["open_deg4"],
+        "dim_7": sig["corner_pin_risk"],
+        "dim_8": sig["high_freq_adj4"],
+    }
+    best_haz_sim = 0.0
+    best_safe_sim = 0.0
+    for concept in role_concepts:
+        sq_dist = 0.0
+        n_dims = 0
+        for dim_k, val in sig_dims.items():
+            stats = concept.feature_distributions.get(dim_k)
+            if stats and "mean" in stats:
+                mean = float(stats["mean"])
+                var = max(float(stats.get("var", 0.25)), 0.05)
+                sq_dist += ((val - mean) ** 2) / var
+                n_dims += 1
+        if n_dims == 0:
+            continue
+        sim = math.exp(-sq_dist / max(1.0, float(n_dims)))
+        if "role:hazard" in concept.affordances:
+            best_haz_sim = max(best_haz_sim, sim)
+        if "role:goal" in concept.affordances or "role:actuator" in concept.affordances:
+            best_safe_sim = max(best_safe_sim, sim)
+
+    if best_haz_sim > best_safe_sim and best_haz_sim >= 0.55:
+        return round(min(0.9, best_haz_sim * 0.85), 4)
+    return 0.0
+
+
+def estimate_entity_risk(
+    engine: Any,
+    feature_id: int,
+    cells: set[tuple[int, int]],
+    curr_grid: np.ndarray | None,
+    bg: int,
+    ledger: ObjectStateLedger | None = None,
+) -> float:
+    """Domain-general risk estimate in [0.0, 1.0] for an entity or cell feature.
+
+    Combines: (1) empirical lethal/threat evidence, (2) grounded concept role priors
+    and analogous hazard concepts, (3) in-context inert/quiescent sibling evidence,
+    and (4) baseline uncertainty for unverified features.
+    """
+    th = engine.symbolic_theory
+    hz = engine.hazard_tracker
+    if (
+        feature_id in hz.known_lethal_features
+        or feature_id in engine.mobile_threat_features
+        or feature_id in engine.episodic_cortex.discovered_lethal_features
+        or feature_id in th.context_verified_features("lethal")
+    ):
+        return 1.0
+    if any(c in engine.current_context_hazards for c in cells):
+        return 1.0
+
+    # Confirmed safe roles
+    if (
+        feature_id == bg
+        or th.is_walkable(feature_id)
+        or feature_id in th.goal_features
+        or th.is_avatar_feature(feature_id)
+        or any(c in engine.learned_goal_positions for c in cells)
+    ):
+        return 0.0
+
+    risk = 0.0
+    # 1. Explicit grounded concept role priors (color-agnostic learned/SNN or SGE bridge)
+    role_priors: dict[int, dict[str, float]] = engine.working_memory.concept_role_priors
+    rp = role_priors.get(int(feature_id))
+    if rp:
+        haz_p = float(rp.get("hazard", 0.0))
+        safe_p = max(
+            float(rp.get("goal", 0.0)),
+            float(rp.get("actuator", 0.0)),
+            float(rp.get("cargo", 0.0)),
+            float(rp.get("walkable", 0.0)),
+        )
+        if haz_p > safe_p:
+            risk = max(risk, min(0.95, haz_p))
+
+    # 2. Structural analogy against stored role-annotated GroundedConcepts
+    analog_risk = _analogous_concept_hazard_risk(engine, feature_id, cells, curr_grid, bg)
+    if analog_risk > 0.0:
+        risk = max(risk, analog_risk)
+
+    # 3. In-context sibling inert / quiescent evidence
+    if ledger is not None:
+        if feature_id in ledger.interacted_features and feature_id not in ledger.effective_features:
+            risk = max(risk, 0.45)
+    if feature_id in engine.working_memory.quiescent_features:
+        risk = max(risk, 0.55)
+
+    # 4. Baseline unverified uncertainty
+    if engine.is_feature_unverified(feature_id, bg):
+        risk = max(risk, 0.15)
+    if ledger is not None and ledger.is_in_newly_reachable(cells):
+        risk *= 0.35
+    return float(min(1.0, max(0.0, risk)))
+
+
+def compute_stance_priority(
+    engine: Any,
+    curr_grid: np.ndarray,
+    H: int,
+    W: int,
+    bg: int,
+    avatar_pos: tuple[int, int],
+    p: tuple[int, int],
+    satisfied_when: dict[tuple[int, int], dict[str, Any]],
+    newly_unlocked: set[tuple[int, int]],
+    role_scores_fn: Any,
+) -> tuple[int, float, int]:
+    """Compute epistemic priority tuple ``(tier, secondary_key, distance)`` for a goal stance.
+
+    Ensures unlocked compartment goals and confirmed goals rank ahead of exploration,
+    safe adjacent reversible probes rank ahead of unverified contact escalation, and
+    lower-risk entities always precede higher-risk analogous or inert candidates.
+    """
+    th = engine.symbolic_theory
+    ledger = engine.object_planner.ledger
+    dist = abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+    if p == avatar_pos and p in satisfied_when and "entity_pos" in satisfied_when[p]:
+        return (0, 0.0, 0)
+
+    p_feat_cell = int(curr_grid[p[0], p[1]])
+    meta = satisfied_when.get(p)
+    is_inert_unverified_contact = (
+        (meta is None or "entity_pos" not in meta)
+        and p_feat_cell != bg
+        and not th.is_barrier(p_feat_cell)
+        and p_feat_cell not in th.goal_features
+        and p not in engine.learned_goal_positions
+        and engine.is_feature_unverified(p_feat_cell, bg)
+        and any(
+            0 <= p[0] + dr < H
+            and 0 <= p[1] + dc < W
+            and th.is_locus_actuator_probed((p[0] + dr, p[1] + dc))
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+        )
+    )
+    if newly_unlocked and (
+        p in newly_unlocked
+        or any(
+            (p[0] + dr, p[1] + dc) in newly_unlocked
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+        )
+    ):
+        target_feat = (
+            int(meta["target_feature"])
+            if (meta and "target_feature" in meta)
+            else int(meta["feature"])
+            if (meta and "feature" in meta)
+            else p_feat_cell
+        )
+        cnt_t = int(np.count_nonzero(curr_grid == target_feat)) if target_feat != bg else 1
+        rarity_pen = 0.25 if cnt_t > 1 else 0.0
+        est_r = estimate_entity_risk(engine, target_feat, {p}, curr_grid, bg, ledger=ledger)
+        inert_bump = 0.05 if is_inert_unverified_contact else 0.0
+        return (1, round(rarity_pen + inert_bump + est_r * 0.25, 3), dist)
+
+    if meta and "entity_pos" in meta:
+        ep = meta["entity_pos"]
+        raw_ef = meta.get("feature")
+        ef = int(raw_ef) if raw_ef is not None else -1
+        pref_score, barrier_score, hazard_score = role_scores_fn(ef) if ef >= 0 else (0.0, 0.0, 0.0)
+        if ef >= 0:
+            est_r = estimate_entity_risk(engine, ef, {ep}, curr_grid, bg, ledger=ledger)
+            if (hazard_score >= 0.65 or est_r >= 0.60) and pref_score < 0.45:
+                return (8, max(hazard_score, est_r), dist)
+            if barrier_score >= 0.72 and pref_score < 0.40:
+                return (7, barrier_score, dist)
+            walk_n = sum(
+                1
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                if 0 <= ep[0] + dr < H
+                and 0 <= ep[1] + dc < W
+                and (
+                    curr_grid[ep[0] + dr, ep[1] + dc] == bg
+                    or th.is_walkable(int(curr_grid[ep[0] + dr, ep[1] + dc]))
+                    or (ep[0] + dr, ep[1] + dc) == avatar_pos
+                )
+            )
+            is_interior_switch = walk_n == 4
+            cnt = int(np.count_nonzero(curr_grid == ef))
+            if cnt == 2 and is_interior_switch:
+                locs = [(int(r), int(c)) for r, c in zip(*np.where(curr_grid == ef), strict=False)]
+                if hasattr(th, "induce_relational_cue_pair"):
+                    th.induce_relational_cue_pair(ef, locs)
+                return (2, -round(pref_score - est_r, 3), dist)
+            if is_interior_switch:
+                return (3, -round(pref_score - est_r, 3), dist)
+            if pref_score >= 0.55:
+                return (4, -round(pref_score - est_r, 3), dist)
+            return (5 if cnt == 1 else 6, -round(pref_score - est_r, 3), dist)
+
+    p_feat = int(curr_grid[p[0], p[1]])
+    target_feat = int(meta["target_feature"]) if (meta and "target_feature" in meta) else p_feat
+    pref_score, barrier_score, hazard_score = (
+        role_scores_fn(target_feat) if target_feat != bg else (0.0, 0.0, 0.0)
+    )
+    est_risk = (
+        estimate_entity_risk(engine, target_feat, {p}, curr_grid, bg, ledger=ledger)
+        if target_feat != bg
+        else 0.0
+    )
+    if (
+        (hazard_score >= 0.65 or est_risk >= 0.60)
+        and pref_score < 0.45
+        and target_feat not in th.goal_features
+    ):
+        return (8, max(hazard_score, est_risk), dist)
+    if barrier_score >= 0.72 and pref_score < 0.40 and target_feat not in th.goal_features:
+        return (7, barrier_score, dist)
+    p_cnt = int(np.count_nonzero(curr_grid == p_feat)) if p_feat != bg else 0
+    if p_feat in th.goal_features or p in engine.learned_goal_positions:
+        return (1, -round(pref_score, 3), dist)
+    if (
+        p_feat != bg
+        and not th.is_barrier(p_feat)
+        and engine.is_feature_unverified(p_feat, bg)
+        and any(
+            0 <= p[0] + dr < H
+            and 0 <= p[1] + dc < W
+            and th.is_locus_actuator_probed((p[0] + dr, p[1] + dc))
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        )
+    ):
+        return (7, round(est_risk, 3), dist)
+    if pref_score >= 0.55:
+        return (4, -round(pref_score - est_risk, 3), dist)
+    return (5 if p_cnt == 1 else 6, -round(pref_score - est_risk, 3), dist)
+
+
 class ObjectStateGraphPlanner:
     """Domain-general Object-Centric Macro-Action State Graph Planner.
 
@@ -253,6 +640,7 @@ class ObjectStateGraphPlanner:
         self.ledger: ObjectStateLedger = ObjectStateLedger()
         self.current_macro_option: MacroOption | None = None
         self.active_target_object_id: str | None = None
+        self.active_target_feature_id: int | None = None
         self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()
 
     def on_boundary(self, boundary) -> None:
@@ -285,6 +673,7 @@ class ObjectStateGraphPlanner:
                 self.ledger.interaction_counts[obj_id] = self.ledger.interaction_counts[obj_id] // 2
         self.current_macro_option = None
         self.active_target_object_id = None
+        self.active_target_feature_id = None
 
     def lift_salient_objects(
         self,
@@ -384,18 +773,28 @@ class ObjectStateGraphPlanner:
                 is_solid = e.role == EntityRole.OBSTACLE
 
             # Compute interaction stances using percept.is_passable
+            confirmed_goal = not is_barrier and (
+                e.feature_id in known_goal_features
+                or any(cp in engine.learned_goal_positions for cp in entity_cells)
+                or (
+                    is_goal
+                    and not engine.is_feature_unverified(e.feature_id or 0, engine.bg_feature)
+                )
+            )
             stances: set[tuple[int, int]] = set()
+            adj_stances: set[tuple[int, int]] = set()
             if category == ObjectCategory.EXIT or not is_solid:
                 for cr, cc in entity_cells:
                     if percept.is_passable(cr, cc):
                         stances.add((cr, cc))
 
+            for cr, cc in entity_cells:
+                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    ar, ac = cr + dr, cc + dc
+                    if percept.is_passable(ar, ac) and (ar, ac) not in entity_cells:
+                        adj_stances.add((ar, ac))
             if is_solid or not stances:
-                for cr, cc in entity_cells:
-                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        ar, ac = cr + dr, cc + dc
-                        if percept.is_passable(ar, ac) and (ar, ac) not in entity_cells:
-                            stances.add((ar, ac))
+                stances.update(adj_stances)
 
             if not stances:
                 stances = {e.grid_pos}
@@ -426,7 +825,12 @@ class ObjectStateGraphPlanner:
                 interaction_stances=sorted(list(stances)),
                 anchor_coord=anchor,
                 salience_score=salience,
-                properties={"role": str(e.role), **dict(e.properties)},
+                properties={
+                    "role": str(e.role),
+                    "adjacent_stances": sorted(adj_stances),
+                    "confirmed_goal": confirmed_goal,
+                    **dict(e.properties),
+                },
             )
             salient_objects.append(obj)
 
@@ -468,23 +872,34 @@ class ObjectStateGraphPlanner:
         percept: PerceptionFrame | None = None,
         engine: Any | None = None,
     ) -> list[Any] | None:
-        """Find the shortest deterministic path of primitive motor actions to any target stance."""
+        """Find the lowest-risk deterministic path of primitive actions to any target stance.
+
+        Strongly prefers routing around intermediate unverified or risky features whenever
+        a safe walkable/background detour exists, while retaining completeness if crossing
+        an unverified tile is unavoidable.
+        """
         if start_pos in target_stances:
             return []
 
         H, W = grid_shape
         from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
 
-        q: deque[tuple[tuple[int, int], list[MentalSimulationStep]]] = deque([(start_pos, [])])
-        visited: set[tuple[int, int]] = {start_pos}
+        bg_val = int(engine.bg_feature) if engine is not None else 0
+        seq = 0
+        heap: list[tuple[float, int, tuple[int, int], list[MentalSimulationStep]]] = [
+            (0.0, seq, start_pos, [])
+        ]
+        best_cost: dict[tuple[int, int], float] = {start_pos: 0.0}
 
         _budget = engine.compute_budget if engine is not None else None
-        while q:
+        while heap:
             if _budget is not None and not _budget.allows("cheap"):
                 return None  # anytime: expansion budget exhausted
             if _budget is not None:
                 _budget.charge(1)
-            cur_pos, path = q.popleft()
+            cur_cost, _, cur_pos, path = heapq.heappop(heap)
+            if cur_cost > best_cost.get(cur_pos, float("inf")):
+                continue
             if cur_pos in target_stances:
                 return list(path)
 
@@ -494,13 +909,12 @@ class ObjectStateGraphPlanner:
                 nr, nc = cur_pos[0] + dr, cur_pos[1] + dc
                 if not (0 <= nr < H and 0 <= nc < W):
                     continue
-                if (nr, nc) in visited:
-                    continue
 
                 step_r = int(np.sign(dr))
                 step_c = int(np.sign(dc))
                 dist = max(abs(dr), abs(dc))
                 blocked = False
+                step_cost = 1.0
 
                 for k in range(1, dist + 1):
                     kr = cur_pos[0] + step_r * k
@@ -509,25 +923,32 @@ class ObjectStateGraphPlanner:
                     if (kr, kc) in static_barriers and not is_target:
                         blocked = True
                         break
-                    if percept is not None:
-                        if not is_target and not percept.is_passable(kr, kc):
+                    if percept is not None and not is_target and not percept.is_passable(kr, kc):
+                        blocked = True
+                        break
+                    if 0 <= kr < H and 0 <= kc < W and curr_grid is not None:
+                        val = int(curr_grid[kr, kc])
+                        if val in lethal_features and not is_target:
                             blocked = True
                             break
-                    else:
-                        if 0 <= kr < H and 0 <= kc < W and curr_grid is not None:
-                            val = int(curr_grid[kr, kc])
-                            if val in lethal_features and not is_target:
-                                blocked = True
-                                break
+                        if not is_target and engine is not None:
+                            if engine.is_feature_unverified(val, bg_val):
+                                risk = estimate_entity_risk(
+                                    engine, val, {(kr, kc)}, curr_grid, bg_val, ledger=self.ledger
+                                )
+                                step_cost += engine.UNVERIFIED_FEATURE_COST * 4.0 + risk * 50.0
 
                 if blocked:
                     continue
                 if patroller_cells and (nr, nc) in patroller_cells:
                     continue
 
-                visited.add((nr, nc))
-                new_step = MentalSimulationStep(action=act, predicted_avatar_pos=(nr, nc))
-                q.append(((nr, nc), path + [new_step]))
+                next_cost = cur_cost + step_cost
+                if next_cost < best_cost.get((nr, nc), float("inf")):
+                    best_cost[(nr, nc)] = next_cost
+                    seq += 1
+                    new_step = MentalSimulationStep(action=act, predicted_avatar_pos=(nr, nc))
+                    heapq.heappush(heap, (next_cost, seq, (nr, nc), path + [new_step]))
 
         return None
 
@@ -567,6 +988,17 @@ class ObjectStateGraphPlanner:
 
         H, W = percept.shape
         av_pos = percept.avatar_pos or engine.avatar_pos
+
+        theory = engine.symbolic_theory
+        bg_val = int(engine.bg_feature)
+        self.ledger.observe_grid_connectivity(
+            grid_arr,
+            av_pos,
+            bg_val,
+            set(theory.walkable_features),
+            set(engine.avatar_features)
+            | ({engine.avatar_feature} if engine.avatar_feature is not None else set()),
+        )
 
         # Extract calibrated movable actions and spatial effector actions
         movable_actions: list[tuple[Any, int, int]] = []
@@ -619,19 +1051,58 @@ class ObjectStateGraphPlanner:
         # ── DIRECTIVE 1 & 2: Check if exit is open. If open, go through it. ───
         # Suppress bare-avatar exit walk when unconfirmed cargo must still be pushed onto a receptacle
         # (unless an exit feature is already confirmed in symbolic_theory.goal_features).
-        theory = getattr(engine, "symbolic_theory", None)
-        known_cargo = set(getattr(theory, "cargo_features", ()) or ()) | set(
-            getattr(engine, "learned_cargo_features", ()) or ()
-        )
-        known_goal_feats = set(getattr(theory, "goal_features", ()) or ())
+        known_cargo = set(theory.cargo_features) | set(engine.learned_cargo_features)
+        known_goal_feats = set(theory.goal_features)
         has_cargo_on_grid = bool(known_cargo) and any(
             e.feature_id in known_cargo for e in percept.entities
         )
+        has_real_play_history = bool(engine.tested_actions)
+        discrete_interact_act = next(
+            (
+                a
+                for a in available_actions
+                if not engine.is_displacement_action(a)
+                and not engine.is_spatial_effector(a)
+                and engine.inhibited_actions.get(a, 0) <= 5
+                and (
+                    a in engine.action_dynamics
+                    or a in engine.tested_actions
+                    or has_real_play_history
+                )
+            ),
+            None,
+        )
         exit_objects = [o for o in salient_objects if o.category == ObjectCategory.EXIT]
+        confirmed_exit_objects = [o for o in exit_objects if o.properties.get("confirmed_goal")]
+        tentative_exit_objects = [o for o in exit_objects if not o.properties.get("confirmed_goal")]
+        non_exit_base = [
+            o
+            for o in salient_objects
+            if o.category != ObjectCategory.EXIT
+            and o.category != ObjectCategory.BARRIER
+            and not theory.is_barrier(o.feature_id)
+            and o.feature_id not in barrier_features
+        ]
+        allow_unconfirmed_exit_shortcut = bool(confirmed_exit_objects) or (
+            discrete_interact_act is None and len(tentative_exit_objects) <= 1 and not non_exit_base
+        )
         has_confirmed_walk_exit = any(o.feature_id in known_goal_feats for o in exit_objects)
-        exit_stances: set[tuple[int, int]] = set(percept.candidate_goals)
-        for eo in exit_objects:
-            exit_stances.update(eo.interaction_stances)
+        exit_stances: set[tuple[int, int]] = set()
+        if confirmed_exit_objects:
+            for eo in confirmed_exit_objects:
+                exit_stances.update(eo.interaction_stances)
+        elif allow_unconfirmed_exit_shortcut:
+            exit_stances.update(percept.candidate_goals)
+            for eo in exit_objects:
+                exit_stances.update(eo.interaction_stances)
+        for cg in percept.candidate_goals:
+            if (
+                0 <= cg[0] < H
+                and 0 <= cg[1] < W
+                and grid_arr is not None
+                and not engine.is_feature_unverified(int(grid_arr[cg[0], cg[1]]), bg_val)
+            ):
+                exit_stances.add(cg)
 
         def _filter_reversible(
             candidate_cells: set[tuple[int, int]],
@@ -669,7 +1140,11 @@ class ObjectStateGraphPlanner:
                     entity_area=e_area,
                     has_cargo_context=has_cargo_on_grid,
                 )
-                if safe_stances:
+                if (
+                    safe_stances
+                    and any(not theory.is_locus_explored(sp) for sp in safe_stances)
+                    and not self.ledger.is_in_newly_reachable({ep})
+                ):
                     eff_stances.discard(ep)
                     for dr_x, dc_x in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                         adj_x = (ep[0] + dr_x, ep[1] + dc_x)
@@ -711,6 +1186,7 @@ class ObjectStateGraphPlanner:
                 self.active_target_object_id = (
                     exit_objects[0].object_id if exit_objects else "learned_exit"
                 )
+                self.active_target_feature_id = exit_objects[0].feature_id if exit_objects else None
                 return path_to_exit
 
         # 1B. Spatial Effector Interaction with Exit
@@ -740,14 +1216,11 @@ class ObjectStateGraphPlanner:
                 ]
 
         # ── DIRECTIVE 3: If not, explore other objects. ──────────────────────
-        non_exit_objects = [
-            o
-            for o in salient_objects
-            if o.category != ObjectCategory.EXIT
-            and o.category != ObjectCategory.BARRIER
-            and not engine.symbolic_theory.is_barrier(o.feature_id)
-            and o.feature_id not in barrier_features
-        ]
+        non_exit_objects = list(non_exit_base)
+        if not allow_unconfirmed_exit_shortcut:
+            for eo in tentative_exit_objects:
+                eo.properties["tentative_exit"] = True
+                non_exit_objects.append(eo)
 
         # ── DIRECTIVE 4B: Active Causal Actuator Contingency Pursuit ──────────
         if spatial_effector_actions:
@@ -785,6 +1258,9 @@ class ObjectStateGraphPlanner:
         # 2A. Displacement Navigation to Objects
         if movable_actions and av_pos is not None:
             reachable_objects: list[tuple[SalientObject, list[Any]]] = []
+            reversible_probe_ids: set[str] = set()
+            reversibly_probed_ids: set[str] = set()
+            obj_adj_map: dict[str, list[tuple[int, int]]] = {}
             for obj in non_exit_objects:
                 if not obj.interaction_stances:
                     continue
@@ -793,6 +1269,48 @@ class ObjectStateGraphPlanner:
                     set(obj.interaction_stances),
                     static_barriers,
                 )
+                adj_stances = [
+                    tuple(c)
+                    for c in obj.properties.get("adjacent_stances", ())
+                    if tuple(c) not in static_barriers
+                ]
+                obj_adj_map[obj.object_id] = adj_stances
+                is_reversibly_probed = self.ledger.is_interacted(obj.object_id) or any(
+                    theory.is_locus_actuator_probed(adj) for adj in adj_stances
+                )
+                if is_reversibly_probed and obj.object_id not in self.ledger.object_causal_effects:
+                    reversibly_probed_ids.add(obj.object_id)
+                is_known_contact_trigger = any(
+                    m.trigger_type == "CONTACT"
+                    and (m.trigger_pos in obj.cells or m.trigger_feature == obj.feature_id)
+                    for m in engine.state_mutations
+                )
+                is_unverified = engine.is_feature_unverified(obj.feature_id, bg_val)
+                prefer_reversible_phase = (
+                    discrete_interact_act is not None
+                    and is_unverified
+                    and not is_reversibly_probed
+                    and not is_known_contact_trigger
+                    and bool(adj_stances)
+                )
+                if prefer_reversible_phase:
+                    path = self.find_shortest_path(
+                        start_pos=av_pos,
+                        target_stances=set(adj_stances),
+                        static_barriers=set(obj_barriers) | set(obj.cells),
+                        lethal_features=lethal_features,
+                        movable_actions=movable_actions,
+                        grid_shape=(H, W),
+                        curr_grid=grid_arr,
+                        patroller_cells=patroller_cells,
+                        failed_transitions=failed_transitions,
+                        percept=percept,
+                        engine=engine,
+                    )
+                    if path is not None:
+                        reversible_probe_ids.add(obj.object_id)
+                        reachable_objects.append((obj, path))
+                        continue
                 path = self.find_shortest_path(
                     start_pos=av_pos,
                     target_stances=obj_stances,
@@ -804,6 +1322,7 @@ class ObjectStateGraphPlanner:
                     patroller_cells=patroller_cells,
                     failed_transitions=failed_transitions,
                     percept=percept,
+                    engine=engine,
                 )
                 if path is not None:
                     reachable_objects.append((obj, path))
@@ -835,6 +1354,7 @@ class ObjectStateGraphPlanner:
                         len(chosen_path),
                     )
                     self.active_target_object_id = chosen_obj.object_id
+                    self.active_target_feature_id = chosen_obj.feature_id
                     return self._finalize_option_path(
                         engine, chosen_obj, chosen_path, available_actions, movable_actions
                     )
@@ -885,16 +1405,35 @@ class ObjectStateGraphPlanner:
                     distance_penalty = float(path_len) * (2.0 if is_strict_budget else 0.5)
                     small_item_bonus = 25.0 if obj.category == ObjectCategory.KEY else 0.0
                     color_affinity_bonus = 80.0 if obj.feature_id in blocking_barrier_feats else 0.0
-                    inert_penalty = 120.0 if self.ledger.is_inert(obj.object_id) else 0.0
+                    adj_set = set(obj_adj_map.get(obj.object_id, ()))
+                    in_unlocked = self.ledger.is_in_newly_reachable(
+                        obj.cells
+                    ) or self.ledger.is_in_newly_reachable(adj_set)
+                    newly_unlocked_bonus = 250.0 if in_unlocked else 0.0
+                    reversible_probe_bonus = 180.0 if obj.object_id in reversible_probe_ids else 0.0
+                    tentative_exit_bonus = 35.0 if obj.properties.get("tentative_exit") else 0.0
+                    is_inert = (
+                        self.ledger.is_inert(obj.object_id)
+                        or obj.object_id in reversibly_probed_ids
+                    ) and not in_unlocked
+                    inert_penalty = 120.0 if is_inert else 0.0
+                    risk = estimate_entity_risk(
+                        engine, obj.feature_id, obj.cells, grid_arr, bg_val, ledger=self.ledger
+                    )
+                    risk_penalty = risk * 220.0
 
                     score = (
                         untouched_bonus
+                        + newly_unlocked_bonus
+                        + reversible_probe_bonus
+                        + tentative_exit_bonus
                         + small_item_bonus
                         + color_affinity_bonus
                         + obj.salience_score * 0.2
                         - recency_penalty
                         - distance_penalty
                         - inert_penalty
+                        - risk_penalty
                     )
                     scored_candidates.append((obj, path, score))
 
@@ -917,6 +1456,7 @@ class ObjectStateGraphPlanner:
                     best_score,
                 )
                 self.active_target_object_id = best_obj.object_id
+                self.active_target_feature_id = best_obj.feature_id
                 return self._finalize_option_path(
                     engine, best_obj, best_path, available_actions, movable_actions
                 )
@@ -924,18 +1464,34 @@ class ObjectStateGraphPlanner:
             elif non_exit_objects:
                 # ── TARGET-DIRECTED HEADING & MISSING AXIS DISCOVERY ──────────────
                 # When complete A* path cannot be computed (e.g. uncalibrated actions or obstacles),
-                # advance towards the nearest stance of the highest-saliency candidate object.
+                # advance towards the nearest safe stance of the lowest-risk highest-saliency object.
                 best_candidate_obj = max(
                     non_exit_objects,
                     key=lambda o: (
                         (100.0 if self.ledger.get_interaction_count(o.object_id) == 0 else 0.0)
+                        + (250.0 if self.ledger.is_in_newly_reachable(o.cells) else 0.0)
                         + (o.salience_score or 10.0)
                         - 15.0 * float(self.ledger.get_interaction_count(o.object_id))
+                        - 220.0
+                        * estimate_entity_risk(
+                            engine, o.feature_id, o.cells, grid_arr, bg_val, ledger=self.ledger
+                        )
                     ),
                 )
-                candidate_stances = (
-                    best_candidate_obj.interaction_stances or best_candidate_obj.cells
-                )
+                adj_fallback = [
+                    tuple(c) for c in best_candidate_obj.properties.get("adjacent_stances", ())
+                ]
+                if (
+                    discrete_interact_act is not None
+                    and engine.is_feature_unverified(best_candidate_obj.feature_id, bg_val)
+                    and not self.ledger.is_interacted(best_candidate_obj.object_id)
+                    and adj_fallback
+                ):
+                    candidate_stances = adj_fallback
+                else:
+                    candidate_stances = (
+                        best_candidate_obj.interaction_stances or best_candidate_obj.cells
+                    )
                 if candidate_stances:
                     target_stance = min(
                         candidate_stances,
@@ -1260,9 +1816,49 @@ class ObjectStateGraphPlanner:
             a
             for a in available_actions
             if engine.is_spatial_effector(a)
-            or (not engine.is_displacement_action(a) and engine.inhibited_actions.get(a, 0) == 0)
+            or (not engine.is_displacement_action(a) and engine.inhibited_actions.get(a, 0) <= 5)
         ]
         interact_act = interact_candidates[0] if interact_candidates else None
+        has_real_play_history = bool(engine.tested_actions)
+        confirmed_discrete_interact = next(
+            (
+                a
+                for a in available_actions
+                if not engine.is_displacement_action(a)
+                and not engine.is_spatial_effector(a)
+                and engine.inhibited_actions.get(a, 0) <= 5
+                and (
+                    a in engine.action_dynamics
+                    or a in engine.tested_actions
+                    or has_real_play_history
+                )
+            ),
+            None,
+        )
+        is_known_contact_trigger = any(
+            m.trigger_type == "CONTACT"
+            and (m.trigger_pos in obj.cells or m.trigger_feature == obj.feature_id)
+            for m in engine.state_mutations
+        )
+        bg_val = int(engine.bg_feature)
+        unverified_obj = (
+            engine.is_feature_unverified(obj.feature_id, bg_val)
+            and obj.feature_id not in engine.symbolic_theory.goal_features
+            and not obj.properties.get("confirmed_goal")
+        )
+
+        def _prefer_reversible_interact(stance: tuple[int, int] | None) -> bool:
+            if (
+                confirmed_discrete_interact is None
+                or not unverified_obj
+                or is_known_contact_trigger
+            ):
+                return False
+            if self.ledger.is_interacted(obj.object_id):
+                return False
+            if stance is not None and engine.symbolic_theory.is_locus_actuator_probed(stance):
+                return False
+            return True
 
         if not path:
             # Avatar is already at or adjacent to the object stance!
@@ -1270,6 +1866,18 @@ class ObjectStateGraphPlanner:
                 return [
                     MentalSimulationStep(
                         action=interact_act,
+                        predicted_avatar_pos=engine.avatar_pos,
+                        expected_mutation="INTERACT",
+                    )
+                ]
+            if (
+                engine.avatar_pos is not None
+                and engine.avatar_pos not in obj.cells
+                and _prefer_reversible_interact(engine.avatar_pos)
+            ):
+                return [
+                    MentalSimulationStep(
+                        action=confirmed_discrete_interact,
                         predicted_avatar_pos=engine.avatar_pos,
                         expected_mutation="INTERACT",
                     )
@@ -1301,9 +1909,16 @@ class ObjectStateGraphPlanner:
 
         # If target stance is adjacent to the object (not onto it), execute terminal interaction or bump
         if target_stance not in obj.cells:
-            if obj.is_solid and interact_act is not None:
+            if (obj.is_solid and interact_act is not None) or _prefer_reversible_interact(
+                target_stance
+            ):
+                chosen_interact = (
+                    confirmed_discrete_interact
+                    if _prefer_reversible_interact(target_stance)
+                    else interact_act
+                )
                 interact_step = MentalSimulationStep(
-                    action=interact_act,
+                    action=chosen_interact,
                     predicted_avatar_pos=target_stance,
                     expected_mutation="INTERACT",
                 )

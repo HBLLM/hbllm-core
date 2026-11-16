@@ -16,15 +16,15 @@ HBLLM_DIR = ROOT_DIR / "hbllm"
 WORLD_DIR = HBLLM_DIR / "hcir" / "world"
 HCIR_DIR = HBLLM_DIR / "hcir"
 
-# R6 ratchets (baseline measured after R6 subtraction; tighten monotonically downward)
-MAX_WORLD_HASATTR = 163
-MAX_WORLD_GETATTR3 = 398
+# R6/R7 ratchets (tightened monotonically downward after R7 risk-aware exploration)
+MAX_WORLD_HASATTR = 156
+MAX_WORLD_GETATTR3 = 396
 MAX_HCIR_BROAD_SILENT_EXCEPT = 0
 MAX_HBLLM_BROAD_SILENT_EXCEPT = 46
 MAX_SQLITE_CONNECT_CALLS = 21
 MAX_SQLITE_CONNECT_FILES = 7
-MAX_ENGINE_LOC = 4105
-MAX_PLANNER_LOC = 5105
+MAX_ENGINE_LOC = 4104
+MAX_PLANNER_LOC = 5046
 
 
 def _iter_python_files(base: Path) -> list[Path]:

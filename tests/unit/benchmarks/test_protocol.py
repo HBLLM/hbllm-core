@@ -180,3 +180,64 @@ def test_family_scores_match_zero_shot_headline(tmp_path: Path):
         sum(report.family_scores.values()) / len(report.family_scores), abs=1e-4
     )
     assert report.lifelong_generality_score > report.generality_score
+
+
+def test_exploration_deaths_separated_from_total_deaths(tmp_path: Path):
+    """Protocol and runner distinguish exploration deaths from non-exploratory/total deaths."""
+    import numpy as np
+
+    from benchmarks.suites.runner import _is_exploration_death
+    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    protocol = EvaluationProtocol(reports_dir=tmp_path, git_sha="test_deaths_split")
+    tasks = [
+        TaskResult(
+            task_id="nav_1",
+            family="grid",
+            split="dev",
+            steps=30,
+            max_budget=60,
+            success_at_budget=False,
+            total_deaths=3,
+            exploration_deaths=1,
+            zero_shot={"n": 10, "successes": [True] * 7 + [False] * 3},
+        )
+    ]
+    report = protocol.compute_report(split="dev", tasks=tasks)
+    assert report.total_deaths == 3
+    assert report.exploration_deaths == 1
+    assert report.zero_shot["total_deaths"] == 3
+    assert report.zero_shot["death_rate"] == pytest.approx(0.3, abs=1e-4)
+    assert report.zero_shot["exploration_deaths"] == 1
+    assert report.zero_shot["exploration_death_rate"] == pytest.approx(0.1, abs=1e-4)
+
+    class _DummyObs:
+        def __init__(self, g: np.ndarray) -> None:
+            self.visual_lattice = g
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    engine.avatar_pos = (2, 2)
+    engine.action_dynamics[4] = ActionDynamicsModel(
+        action_id=4, delta_r=0, delta_c=1, confidence=1.0
+    )
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 2] = 1
+    grid[2, 3] = 9
+
+    # Stepping onto an unverified tile (9) counts as an exploration death
+    assert _is_exploration_death(
+        engine, _DummyObs(grid), 4, {"branch": "mental_plan"}, died=True, baseline="system"
+    )
+    # Once feature 9 is already known lethal (or confirmed walkable goal), dying is not an exploration death
+    engine.hazard_tracker.known_lethal_features.add(9)
+    assert not _is_exploration_death(
+        engine, _DummyObs(grid), 4, {"branch": "skill"}, died=True, baseline="system"
+    )
+    engine.hazard_tracker.known_lethal_features.clear()
+    engine.symbolic_theory.induce_walkable(9, evidence="confirmed")
+    assert not _is_exploration_death(
+        engine, _DummyObs(grid), 4, {"branch": "skill"}, died=True, baseline="system"
+    )
+    assert not _is_exploration_death(None, _DummyObs(grid), 4, None, died=True, baseline="oracle")

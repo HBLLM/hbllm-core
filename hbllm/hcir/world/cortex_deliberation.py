@@ -2031,8 +2031,10 @@ class PrefrontalDeliberationEngine:
                     view.object_planner.ledger.record_interaction(
                         view.object_planner.active_target_object_id,
                         next_step.predicted_avatar_pos or view.avatar_pos or (0, 0),
+                        feature_id=view.object_planner.active_target_feature_id,
                     )
                     view.object_planner.active_target_object_id = None
+                    view.object_planner.active_target_feature_id = None
 
             plan_safe, should_wait, wait_steps = self.validate_plan_safety(
                 view, curr_grid, available_actions, next_step
@@ -2315,8 +2317,10 @@ class PrefrontalDeliberationEngine:
                             view.object_planner.ledger.record_interaction(
                                 view.object_planner.active_target_object_id,
                                 predicted_pos or view.avatar_pos or (0, 0),
+                                feature_id=view.object_planner.active_target_feature_id,
                             )
                             view.object_planner.active_target_object_id = None
+                            view.object_planner.active_target_feature_id = None
             if chosen_action is None:
                 if view.exploration_cooldown > 0:
                     view.exploration_cooldown -= 1

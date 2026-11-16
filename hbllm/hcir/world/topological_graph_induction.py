@@ -252,6 +252,7 @@ class GeodesicManifoldRouter:
         avatar_features: set[int],
         max_candidate_goals: int = 5,
         prune_cavities: bool = False,
+        preserve_goal_order: bool = False,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find deterministic action-space shortest path across the traversable manifold.
 
@@ -269,7 +270,7 @@ class GeodesicManifoldRouter:
             if 0 <= wr < H and 0 <= wc < W:
                 passable_mask[wr, wc] = False
         for ur, uc in unknown_entity_cells:
-            if 0 <= ur < H and 0 <= uc < W and (ur, uc) not in goals:
+            if 0 <= ur < H and 0 <= uc < W:
                 passable_mask[ur, uc] = False
 
         hazard_cells: set[tuple[int, int]] = set()
@@ -328,9 +329,13 @@ class GeodesicManifoldRouter:
                         for cr, cc in cavity:
                             passable_mask[cr, cc] = False
 
-        sorted_goals = sorted(
-            goals,
-            key=lambda g: abs(g[0] - start_pos[0]) + abs(g[1] - start_pos[1]),
+        candidate_goals = (
+            list(goals)
+            if preserve_goal_order
+            else sorted(
+                goals,
+                key=lambda g: abs(g[0] - start_pos[0]) + abs(g[1] - start_pos[1]),
+            )
         )
 
         effective_actions = list(movable_actions)
@@ -357,10 +362,11 @@ class GeodesicManifoldRouter:
 
         effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)
 
-        for cand_goal in sorted_goals[:max_candidate_goals]:
-            passable_mask[cand_goal[0], cand_goal[1]] = True
+        for cand_goal in candidate_goals[:max_candidate_goals]:
+            cand_mask = passable_mask.copy()
+            cand_mask[cand_goal[0], cand_goal[1]] = True
             action_plan = GridTopologyGraph.shortest_path_with_actions(
-                passable_mask=passable_mask,
+                passable_mask=cand_mask,
                 start_coord=start_pos,
                 goal_coord=cand_goal,
                 actions_with_deltas=effective_actions,

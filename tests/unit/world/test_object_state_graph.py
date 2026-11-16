@@ -447,3 +447,138 @@ def test_motor_effector_discrete_valid_targets_quiescence() -> None:
     coords2 = MotorCortexEffector.ground_effector_action(engine, grid, 6)
     assert coords2 is None
     assert engine.inhibited_actions.get(6, 0) > 0
+
+
+def test_risk_aware_shortest_path_avoids_unverified_intermediate_feature() -> None:
+    """find_shortest_path must detour around unverified non-background tiles when safe path exists."""
+    engine = AutonomousEpistemicEngine()
+    engine.action_dynamics[1] = ActionDynamicsModel(
+        action_id=1, delta_r=-1, delta_c=0, confidence=1.0
+    )
+    engine.action_dynamics[2] = ActionDynamicsModel(
+        action_id=2, delta_r=1, delta_c=0, confidence=1.0
+    )
+    engine.action_dynamics[3] = ActionDynamicsModel(
+        action_id=3, delta_r=0, delta_c=-1, confidence=1.0
+    )
+    engine.action_dynamics[4] = ActionDynamicsModel(
+        action_id=4, delta_r=0, delta_c=1, confidence=1.0
+    )
+    engine.avatar_feature = 2
+    engine.avatar_pos = (3, 2)
+
+    grid = np.zeros((8, 8), dtype=int)
+    grid[3, 2] = 2
+    grid[3, 4] = 9  # Untested non-background feature blocking direct straight line to (3, 6)
+    grid[3, 6] = 3
+    engine.symbolic_theory.induce_goal(3, evidence="goal")
+
+    plan = engine.object_planner.find_shortest_path(
+        start_pos=(3, 2),
+        target_stances={(3, 6)},
+        static_barriers=set(),
+        lethal_features=set(),
+        movable_actions=[(1, -1, 0), (2, 1, 0), (3, 0, -1), (4, 0, 1)],
+        grid_shape=(8, 8),
+        curr_grid=grid,
+        engine=engine,
+    )
+    assert plan is not None
+    assert plan[-1].predicted_avatar_pos == (3, 6)
+    assert all(step.predicted_avatar_pos != (3, 4) for step in plan)
+
+
+def test_reversible_interact_staged_before_contact_on_unverified_object() -> None:
+    """When calibrated discrete INTERACT exists, unverified entities probe adjacently before contact."""
+    engine = AutonomousEpistemicEngine()
+    engine.action_dynamics[1] = ActionDynamicsModel(
+        action_id=1, delta_r=-1, delta_c=0, confidence=1.0
+    )
+    engine.action_dynamics[2] = ActionDynamicsModel(
+        action_id=2, delta_r=1, delta_c=0, confidence=1.0
+    )
+    engine.action_dynamics[3] = ActionDynamicsModel(
+        action_id=3, delta_r=0, delta_c=-1, confidence=1.0
+    )
+    engine.action_dynamics[4] = ActionDynamicsModel(
+        action_id=4, delta_r=0, delta_c=1, confidence=1.0
+    )
+    engine.tested_actions = {1, 2, 3, 4, 7}
+    engine.avatar_feature = 1
+    engine.avatar_pos = (2, 2)
+
+    grid = np.zeros((8, 8), dtype=int)
+    grid[2, 2] = 1
+    grid[2, 5] = 9  # Unverified object
+
+    plan = engine.object_planner.plan_macro_option(engine, grid, [1, 2, 3, 4, 7])
+    assert plan is not None
+    assert plan[-1].action == 7
+    assert plan[-1].expected_mutation == "INTERACT"
+    assert all(step.predicted_avatar_pos != (2, 5) for step in plan)
+
+
+def test_analogous_hazard_concept_risk_guides_selection() -> None:
+    """Grounded hazard concepts in working_concept_store raise risk for structurally analogous entities."""
+    from hbllm.hcir.grounding.concepts.model import GroundedConcept
+    from hbllm.hcir.grounding.contracts.enums import ConceptLifecycle
+    from hbllm.hcir.grounding.contracts.references import GroundedConceptRef
+    from hbllm.hcir.world.object_state_graph import estimate_entity_risk
+
+    engine = AutonomousEpistemicEngine()
+    concept = GroundedConcept(
+        concept_ref=GroundedConceptRef(id="C-HAZ999"),
+        lifecycle_state=ConceptLifecycle.PROVISIONAL,
+        affordances={"role:hazard"},
+        feature_distributions={
+            "dim_0": {"mean": 1.0, "var": 0.1},
+            "dim_3": {"mean": 0.693, "var": 0.1},
+            "dim_4": {"mean": 0.5, "var": 0.1},
+            "dim_7": {"mean": 1.0, "var": 0.1},
+            "dim_8": {"mean": 0.5, "var": 0.1},
+        },
+    )
+    engine.working_concept_store.register_concept(concept)
+
+    grid = np.zeros((8, 8), dtype=int)
+    grid[0, :] = 5
+    grid[7, :] = 5
+    grid[:, 0] = 5
+    grid[:, 7] = 5
+    grid[1, 1] = 8  # Corner-adjacent singleton analogous to stored corner hazard
+    grid[4, 4] = 7  # Open interior singleton
+
+    corner_risk = estimate_entity_risk(
+        engine, 8, {(1, 1)}, grid, 0, ledger=engine.object_planner.ledger
+    )
+    open_risk = estimate_entity_risk(
+        engine, 7, {(4, 4)}, grid, 0, ledger=engine.object_planner.ledger
+    )
+    assert corner_risk > open_risk
+    assert corner_risk >= 0.5
+
+
+def test_topological_newly_reachable_priority_after_unlock() -> None:
+    """Entities in newly unlocked compartments beat remaining starting-room distractors."""
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 1
+    grid_locked = np.zeros((8, 8), dtype=int)
+    grid_locked[0, :] = 5
+    grid_locked[7, :] = 5
+    grid_locked[:, 0] = 5
+    grid_locked[:, 7] = 5
+    grid_locked[:, 4] = 5
+    grid_locked[3, 4] = 2  # Closed door
+    grid_locked[2, 2] = 1
+    grid_locked[5, 2] = 9  # Start-room distractor
+    grid_locked[3, 6] = 8  # Locked-room exit
+
+    ledger = engine.object_planner.ledger
+    ledger.observe_grid_connectivity(grid_locked, (2, 2), 0, set(), {1})
+    assert (3, 6) in ledger.initially_unreachable_cells
+
+    grid_open = grid_locked.copy()
+    grid_open[3, 4] = 0
+    ledger.observe_grid_connectivity(grid_open, (2, 2), 0, set(), {1})
+    assert (3, 6) in ledger.newly_reachable_cells
+    assert (5, 2) not in ledger.newly_reachable_cells
