@@ -13,6 +13,7 @@ from hbllm.benchmarks.substrate_profiler import (
     benchmark_astar_geodesic,
     benchmark_collision_cone_sweep,
     benchmark_connected_components,
+    benchmark_e2e_cognitive_step_32x32,
     benchmark_graph_snapshotting,
     run_substrate_profile,
 )
@@ -91,3 +92,19 @@ class TestSubstrateAccelerationAndHotPaths:
             assert fallback_path[0] == start
             assert fallback_path[-1] == goal
             assert len(fallback_path) == len(path)
+
+    def test_e2e_32x32_cognitive_step_per_stage_profile(self) -> None:
+        """Verify end-to-end 32x32 per-stage profile structure and stage breakdowns."""
+        report = benchmark_e2e_cognitive_step_32x32(steps=15, target_p95_budget_ms=500.0)
+        assert report.grid_shape == (32, 32)
+        assert report.budget_met is True
+        assert report.e2e_p50_ms > 0.0
+        assert report.e2e_p95_ms >= report.e2e_p50_ms
+        stage_names = {s.stage for s in report.stage_summaries}
+        assert {
+            "perception_stage",
+            "assimilation_stage",
+            "simulation_stage",
+            "deliberation_stage",
+            "motor_stage",
+        }.issubset(stage_names)

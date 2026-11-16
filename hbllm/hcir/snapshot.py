@@ -17,9 +17,78 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode
 from hbllm.hcir.stores import EventType, GraphEvent, IEventStore
+
+
+def _coerce_node(payload: Any) -> HCIRNode:
+    from hbllm.hcir.kernel.transaction_manager import TransactionManager
+
+    if isinstance(payload, HCIRNode):
+        return payload
+    return TransactionManager._deserialize_node(payload)
+
+
+def apply_event_to_graph(graph: CognitiveGraph, ev: GraphEvent) -> None:
+    """Apply a single event-log record (including compacted checkpoints) onto ``graph``."""
+    d = ev.data or {}
+    if ev.event_type == EventType.SNAPSHOT_CREATED:
+        for node_payload in d.get("nodes", ()) or ():
+            if node_payload is not None:
+                graph.upsert_node(_coerce_node(node_payload))
+        for edge_payload in d.get("edges", ()) or ():
+            if edge_payload is not None:
+                edge = (
+                    edge_payload
+                    if isinstance(edge_payload, HCIREdge)
+                    else HCIREdge.model_validate(edge_payload)
+                )
+                if not graph.has_edge(edge.id):
+                    graph.add_edge(edge)
+        return
+    if ev.event_type == EventType.NODE_ADDED:
+        node_payload = d.get("node") or d.get("node_data")
+        if node_payload is not None:
+            graph.add_node(_coerce_node(node_payload))
+    elif ev.event_type == EventType.NODE_MODIFIED:
+        node_payload = d.get("node") or d.get("node_data")
+        if node_payload is not None:
+            graph.upsert_node(_coerce_node(node_payload))
+        elif "node_id" in d and "changes" in d and graph.has_node(d["node_id"]):
+            curr = graph.get_node(d["node_id"])
+            if curr is not None:
+                for k, v in d["changes"].items():
+                    if k == "properties" and isinstance(v, dict):
+                        curr.properties.update(v)
+                    elif hasattr(curr, k):
+                        setattr(curr, k, v)
+    elif ev.event_type == EventType.NODE_REMOVED and "node_id" in d:
+        graph.remove_node(d["node_id"])
+    elif ev.event_type == EventType.EDGE_ADDED:
+        edge_payload = d.get("edge") or d.get("edge_data")
+        if edge_payload is not None:
+            graph.add_edge(
+                edge_payload
+                if isinstance(edge_payload, HCIREdge)
+                else HCIREdge.model_validate(edge_payload)
+            )
+    elif ev.event_type == EventType.EDGE_REMOVED and "edge_id" in d:
+        graph.remove_edge(d["edge_id"])
+
+
+def fold_events_to_snapshot_payload(
+    events: list[GraphEvent],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Fold a prefix event stream into materialized serialized nodes and edges."""
+    graph = CognitiveGraph(enable_native_substrate=False)
+    for ev in events:
+        apply_event_to_graph(graph, ev)
+    return (
+        [n.model_dump() for n in graph.all_nodes()],
+        [e.model_dump() for e in graph.all_edges()],
+    )
 
 
 @dataclass(frozen=True)
@@ -212,56 +281,25 @@ class SnapshotManager:
             hasher.update(edge.model_dump_json().encode())
         return hasher.hexdigest()
 
+    def compact_event_store(
+        self,
+        *,
+        keep_after_sequence: int | None = None,
+        max_events: int | None = 2000,
+        retain_tail: int | None = None,
+    ) -> int:
+        """Compact historical events in the bound store into a checkpoint event."""
+        return self._event_store.compact(
+            keep_after_sequence=keep_after_sequence,
+            max_events=max_events,
+            retain_tail=retain_tail,
+        )
+
     def replay(self, event_store: IEventStore, to_sequence: int | None = None) -> CognitiveGraph:
         """Replay events from the store up to a given sequence number to reconstruct a CognitiveGraph."""
-        from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode
-        from hbllm.hcir.kernel.transaction_manager import TransactionManager
-        from hbllm.hcir.stores import EventType
-
         graph = CognitiveGraph(enable_native_substrate=False)
-        events = event_store.get_events()
-        for ev in events:
+        for ev in event_store.get_events():
             if to_sequence is not None and ev.sequence > to_sequence:
                 break
-            d = ev.data or {}
-            if ev.event_type == EventType.NODE_ADDED:
-                node_payload = d.get("node") or d.get("node_data")
-                if node_payload is not None:
-                    node = (
-                        node_payload
-                        if isinstance(node_payload, HCIRNode)
-                        else TransactionManager._deserialize_node(node_payload)
-                    )
-                    graph.add_node(node)
-            elif ev.event_type == EventType.NODE_MODIFIED:
-                node_payload = d.get("node") or d.get("node_data")
-                if node_payload is not None:
-                    node = (
-                        node_payload
-                        if isinstance(node_payload, HCIRNode)
-                        else TransactionManager._deserialize_node(node_payload)
-                    )
-                    graph.upsert_node(node)
-                elif "node_id" in d and "changes" in d:
-                    if graph.has_node(d["node_id"]):
-                        curr = graph.get_node(d["node_id"])
-                        if curr is not None:
-                            for k, v in d["changes"].items():
-                                if k == "properties" and isinstance(v, dict):
-                                    curr.properties.update(v)
-                                elif hasattr(curr, k):
-                                    setattr(curr, k, v)
-            elif ev.event_type == EventType.NODE_REMOVED and "node_id" in d:
-                graph.remove_node(d["node_id"])
-            elif ev.event_type == EventType.EDGE_ADDED:
-                edge_payload = d.get("edge") or d.get("edge_data")
-                if edge_payload is not None:
-                    graph.add_edge(
-                        edge_payload
-                        if isinstance(edge_payload, HCIREdge)
-                        else HCIREdge.model_validate(edge_payload)
-                    )
-            elif ev.event_type == EventType.EDGE_REMOVED and "edge_id" in d:
-                graph.remove_edge(d["edge_id"])
-
+            apply_event_to_graph(graph, ev)
         return graph

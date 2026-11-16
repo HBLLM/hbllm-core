@@ -10,6 +10,7 @@ Executes the biological active inference loop from AGENTS.md §2:
 5. MOTOR DISPATCH & TRANSACTION EXECUTION (MotorStage)
 """
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -37,6 +38,8 @@ class PipelineResult:
     operations: list[Any] = field(default_factory=list)
     rejected: bool = False
     rejection_reason: str | None = None
+    stage_timings_ms: dict[str, float] = field(default_factory=dict)
+    total_duration_ms: float = 0.0
 
 
 class CorticalPipeline:
@@ -62,6 +65,8 @@ class CorticalPipeline:
         self.transaction_manager = transaction_manager
         self.engine = engine
         self.grounding_bridge = grounding_bridge
+        self.last_stage_timings_ms: dict[str, float] = {}
+        self.last_duration_ms: float = 0.0
         if self.engine is not None:
             for stage in self.stages:
                 if hasattr(stage, "bind_engine"):
@@ -75,6 +80,8 @@ class CorticalPipeline:
         Each stage observes the (immutable) context augmented with signals
         from upstream stages. Accumulates operations for atomic commit.
         """
+        t_run0 = time.perf_counter()
+        stage_timings_ms: dict[str, float] = {}
         current_ctx = ctx
         stage_results: list[StageResult] = []
         all_ops: list[Any] = []
@@ -113,7 +120,8 @@ class CorticalPipeline:
                     )
                     self.engine.active_arbitrated_goal = None
 
-        for stage in self.stages:
+        for idx, stage in enumerate(self.stages):
+            t_stage0 = time.perf_counter()
             try:
                 result = stage.observe(current_ctx)
             except Exception:
@@ -121,6 +129,9 @@ class CorticalPipeline:
                 if self.engine is not None and cur_journal is not None:
                     self.engine.rollback_faculty_journal(cur_journal)
                 raise
+            stage_name = getattr(stage, "name", "")
+            stage_key = stage_name or type(stage).__name__ or f"stage_{idx}"
+            stage_timings_ms[stage_key] = round((time.perf_counter() - t_stage0) * 1000.0, 4)
             stage_results.append(result)
             all_ops.extend(result.operations)
             if result.signals:
@@ -128,10 +139,9 @@ class CorticalPipeline:
             if result.proposed_action is not None:
                 final_action = result.proposed_action
 
-            stage_name = getattr(stage, "name", "")
-
             # Stage 1: SGE Perception Bridge + G8/G10/G11 Hooks
             if stage_name == "perception_stage":
+                t_hook0 = time.perf_counter()
                 extracted = current_ctx.signals.get(
                     "extracted_entities"
                 ) or current_ctx.signals.get("_objects")
@@ -152,10 +162,14 @@ class CorticalPipeline:
 
                 if self.engine is not None:
                     current_ctx = self._run_perception_faculty_hooks(current_ctx, extracted)
+                stage_timings_ms["perception_hooks"] = round(
+                    (time.perf_counter() - t_hook0) * 1000.0, 4
+                )
 
             # Stage 2: SGE Assimilation Bridge Hook & Goal Arbitration (WP10, Gap 5)
             elif stage_name == "assimilation_stage":
                 if bridge:
+                    t_ab0 = time.perf_counter()
                     states = current_ctx.signals.get("sge_entity_states", {})
                     a_signals = bridge.process_assimilation(
                         current_ctx,
@@ -177,10 +191,23 @@ class CorticalPipeline:
                             self.engine.symbolic_theory,
                             hazard_features=hz_feats,
                         )
+                    stage_timings_ms["assimilation_bridge"] = round(
+                        (time.perf_counter() - t_ab0) * 1000.0, 4
+                    )
 
             # WP1: each stage's journaled faculty writes commit before the next stage.
             if getattr(result, "journal", None) is not None and self.engine is not None:
-                if not self.engine.commit_faculty_journal(result.journal):
+                t_j0 = time.perf_counter()
+                committed = self.engine.commit_faculty_journal(result.journal)
+                stage_timings_ms["journal_commit_ms"] = round(
+                    stage_timings_ms.get("journal_commit_ms", 0.0)
+                    + (time.perf_counter() - t_j0) * 1000.0,
+                    4,
+                )
+                if not committed:
+                    total_ms = round((time.perf_counter() - t_run0) * 1000.0, 4)
+                    self.last_stage_timings_ms = stage_timings_ms
+                    self.last_duration_ms = total_ms
                     return PipelineResult(
                         final_action=None,
                         stage_results=stage_results,
@@ -188,6 +215,8 @@ class CorticalPipeline:
                         operations=all_ops,
                         rejected=True,
                         rejection_reason=f"{result.author}: journal commit rejected",
+                        stage_timings_ms=stage_timings_ms,
+                        total_duration_ms=total_ms,
                     )
 
         # Stage 5: SGE Motor Gateway Authorization Hook
@@ -204,6 +233,9 @@ class CorticalPipeline:
                 current_ctx, proposed_action=act, action_data=act_data
             )
             if rej_info and rej_info.get("action_rejected_by_gateway"):
+                total_ms = round((time.perf_counter() - t_run0) * 1000.0, 4)
+                self.last_stage_timings_ms = stage_timings_ms
+                self.last_duration_ms = total_ms
                 return PipelineResult(
                     final_action=None,
                     stage_results=stage_results,
@@ -211,14 +243,20 @@ class CorticalPipeline:
                     operations=all_ops,
                     rejected=True,
                     rejection_reason=f"ActionValidationGateway rejected: {rej_info.get('rejection_reasons')}",
+                    stage_timings_ms=stage_timings_ms,
+                    total_duration_ms=total_ms,
                 )
 
         # If a transaction manager is attached, batch-commit all operations
         if self.transaction_manager is not None and all_ops:
+            t_tx0 = time.perf_counter()
             tx = HCIRTransaction(author="cortical_pipeline", operations=all_ops)
             try:
                 self.transaction_manager.commit(tx)
             except Exception as exc:
+                total_ms = round((time.perf_counter() - t_run0) * 1000.0, 4)
+                self.last_stage_timings_ms = stage_timings_ms
+                self.last_duration_ms = total_ms
                 return PipelineResult(
                     final_action=None,
                     stage_results=stage_results,
@@ -226,13 +264,21 @@ class CorticalPipeline:
                     operations=all_ops,
                     rejected=True,
                     rejection_reason=str(exc),
+                    stage_timings_ms=stage_timings_ms,
+                    total_duration_ms=total_ms,
                 )
+            stage_timings_ms["tx_commit"] = round((time.perf_counter() - t_tx0) * 1000.0, 4)
 
+        total_ms = round((time.perf_counter() - t_run0) * 1000.0, 4)
+        self.last_stage_timings_ms = stage_timings_ms
+        self.last_duration_ms = total_ms
         return PipelineResult(
             final_action=final_action,
             stage_results=stage_results,
             signals=dict(current_ctx.signals),
             operations=all_ops,
+            stage_timings_ms=stage_timings_ms,
+            total_duration_ms=total_ms,
         )
 
     def _run_perception_faculty_hooks(
@@ -278,11 +324,19 @@ class CorticalPipeline:
         # G11: Topological Bottleneck & Option Discovery
         opt_eng = engine.option_discovery
         if opt_eng and has_2d_grid and grid_arr is not None and 4 <= grid_arr.size <= 256:
-            grid_sig = (int(grid_arr.shape[0]), int(grid_arr.shape[1]), grid_arr.tobytes())
-            if getattr(opt_eng, "last_scanned_grid_sig", None) != grid_sig:
+            bg_val = int(engine.estimate_background(grid_arr))
+            av_feats = set(engine.avatar_features or ())
+            if engine.avatar_feature is not None:
+                av_feats.add(engine.avatar_feature)
+            passable_mask = grid_arr == bg_val
+            if av_feats:
+                passable_mask = passable_mask | np.isin(grid_arr, list(av_feats))
+            grid_sig = (int(grid_arr.shape[0]), int(grid_arr.shape[1]), passable_mask.tobytes())
+            if opt_eng.last_scanned_grid_sig != grid_sig:
                 opt_eng.last_scanned_grid_sig = grid_sig
-                bg_val = int(engine.estimate_background(grid_arr))
-                bottlenecks = opt_eng.discover_bottlenecks_from_grid(grid_arr, walkable_val=bg_val)
+                # Treat avatar cells as traversable floor so static layout bottlenecks stay cached across steps
+                topo_grid = np.where(passable_mask, bg_val, grid_arr) if av_feats else grid_arr
+                bottlenecks = opt_eng.discover_bottlenecks_from_grid(topo_grid, walkable_val=bg_val)
                 for b in bottlenecks:
                     opt_eng.induce_option(bottleneck=b)
 

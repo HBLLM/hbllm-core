@@ -57,7 +57,7 @@ Rather than relying on ungrounded token statistics or hallucination-prone extern
    The grounding subsystem never directly mutates `CognitiveGraph` or `TieredWorkspace`. Every newly recognized entity, object position update, or induced concept is proposed as a `TransactionOperation` (`ADD_NODE`, `UPSERT_NODE`, `ADD_EDGE`, `REMOVE_NODE`) and committed through `TransactionManager` under `ConstitutionalVerifier`.
 
 2. **Zero LLM Dependency in Sensory-Motor Loop (Invariant 3):**
-   Perceptual feature extraction, coordinate lifting, tracking, and concept clustering execute 100% locally and deterministically with sub-millisecond to low-millisecond latencies ($p95 < 20\text{ms}$). External cloud API calls are strictly forbidden. Permitted encoders are deterministic, offline-trained feed-forward or spiking neural networks conforming to `FeatureExtractor`.
+   Perceptual feature extraction, coordinate lifting, tracking, and concept clustering execute 100% locally and deterministically without cloud APIs: native Rust spatial/graph kernels run sub-millisecond ($p95 < 1\text{ms}$), while the full 5-stage Python cognitive step at $32\times 32$ is budgeted at $p95 \le 45\text{ms}$ ($p50 \approx 10\text{–}15\text{ms}$). External cloud API calls are strictly forbidden. Permitted encoders are deterministic, offline-trained feed-forward or spiking neural networks conforming to `FeatureExtractor`.
 
 3. **Domain-Agnostic Symbol Formation (Invariant 7):**
    Grounding faculties operate on universal topological, geometric, and dynamic primitives (connectivity, bounding boxes, displacement vectors, velocity, collision manifolds) rather than task-specific or game-specific token names.

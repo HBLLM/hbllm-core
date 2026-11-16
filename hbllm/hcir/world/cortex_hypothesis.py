@@ -392,7 +392,9 @@ class TransitionObservationContext:
                     ),
                 )
             )
-        return tuple(deltas)
+        res = tuple(deltas)
+        object.__setattr__(self, "entity_deltas", res)
+        return res
 
     def get_diff_feature_sets(self) -> tuple[set[int], set[int]]:
         """Return sets of features before and after at changed loci."""

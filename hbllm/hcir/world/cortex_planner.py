@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from scipy.ndimage import label as _scipy_label
 
 from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
@@ -508,39 +509,37 @@ class EpistemicGoalScheduler:
                 visited.add(c_pos)
         visited.add(avatar_pos)
 
-        reachable_passable: set[tuple[int, int]] = {avatar_pos}
-        q_frontier: deque[tuple[int, int]] = deque([avatar_pos])
         theory = engine.symbolic_theory
         lethal = engine.hazard_tracker.known_lethal_features
-        while q_frontier:
-            curr_cell = q_frontier.popleft()
-            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                nr, nc = curr_cell[0] + dr, curr_cell[1] + dc
-                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in reachable_passable:
-                    c_val = int(curr_grid[nr, nc])
-                    if (
-                        (c_val == bg or theory.is_walkable(c_val))
-                        and not theory.is_barrier(c_val)
-                        and c_val not in lethal
-                        and c_val not in prior_hazard_feats
-                    ):
-                        reachable_passable.add((nr, nc))
-                        q_frontier.append((nr, nc))
+        allowed_feats = (set(theory.walkable_features) | {int(bg)}) - (
+            set(theory.barrier_features) | set(lethal) | prior_hazard_feats
+        )
+        passable_mask = np.isin(curr_grid, list(allowed_feats))
+        passable_mask[avatar_pos[0], avatar_pos[1]] = True
+        labeled_reach, _ = _scipy_label(passable_mask)
+        av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
+        reach_mask = labeled_reach == av_lbl
 
-        excl = set(interactive_cluster_loci)
-        frontier_candidates = [
-            cp
-            for cp in reachable_passable
-            if cp not in visited
-            and cp not in excl
-            and any(
-                (cp[0] + dr, cp[1] + dc) in visited for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
-            )
-        ]
-        if not frontier_candidates:
-            frontier_candidates = [
-                cp for cp in reachable_passable if cp not in visited and cp not in excl
-            ]
+        visited_mask = np.zeros((H, W), dtype=bool)
+        for vr, vc in visited:
+            if 0 <= vr < H and 0 <= vc < W:
+                visited_mask[vr, vc] = True
+        unvisited_mask = reach_mask & (~visited_mask)
+        for er, ec in interactive_cluster_loci:
+            if 0 <= er < H and 0 <= ec < W:
+                unvisited_mask[er, ec] = False
+
+        adj_visited = np.zeros((H, W), dtype=bool)
+        adj_visited[1:, :] |= visited_mask[:-1, :]
+        adj_visited[:-1, :] |= visited_mask[1:, :]
+        adj_visited[:, 1:] |= visited_mask[:, :-1]
+        adj_visited[:, :-1] |= visited_mask[:, 1:]
+
+        frontier_mask = unvisited_mask & adj_visited
+        if not np.any(frontier_mask):
+            frontier_mask = unvisited_mask
+        fr_r, fr_c = np.nonzero(frontier_mask)
+        frontier_candidates = list(zip(fr_r.tolist(), fr_c.tolist()))
 
         opt_eng = getattr(engine, "option_discovery", None)
         if opt_eng:
@@ -551,8 +550,8 @@ class EpistemicGoalScheduler:
             }
             bottleneck_frontiers = [
                 cp
-                for cp in reachable_passable
-                if cp in opt_bottlenecks and cp not in visited and cp not in excl
+                for cp in opt_bottlenecks
+                if 0 <= cp[0] < H and 0 <= cp[1] < W and bool(unvisited_mask[cp[0], cp[1]])
             ]
             if bottleneck_frontiers:
                 frontier_candidates = bottleneck_frontiers
@@ -575,6 +574,23 @@ class EpistemicGoalScheduler:
     ) -> EpistemicGoalProposal:
         H, W = curr_grid.shape
         avatar_pos = engine.avatar_pos
+        has_discrete_interact = any(
+            not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
+            for a in available_actions
+        )
+        prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
+        if curr_grid.size > 0 and np.issubdtype(curr_grid.dtype, np.integer):
+            _amin, _amax = int(curr_grid.min()), int(curr_grid.max())
+            if 0 <= _amin and _amax < 256:
+                _bc = np.bincount(curr_grid.ravel(), minlength=_amax + 1)
+                _nz = np.flatnonzero(_bc)
+                feat_counts = {int(f): int(_bc[f]) for f in _nz.tolist()}
+            else:
+                _uv, _uc = np.unique(curr_grid, return_counts=True)
+                feat_counts = {int(f): int(c) for f, c in zip(_uv.tolist(), _uc.tolist())}
+        else:
+            _uv, _uc = np.unique(curr_grid, return_counts=True)
+            feat_counts = {int(f): int(c) for f, c in zip(_uv.tolist(), _uc.tolist())}
         new_learned_positions: set[tuple[int, int]] = set()
         new_candidate_feats: set[int] = set()
         subgoal_to_pop = False
@@ -614,7 +630,7 @@ class EpistemicGoalScheduler:
                 continue
             # Causal Disambiguation: Pervasive walkable substrates (e.g. tracks, floors)
             # that recur in large quantities cannot be the singular exit/goal.
-            feat_total_cells = int(np.count_nonzero(curr_grid == e.feature_id))
+            feat_total_cells = feat_counts.get(int(e.feature_id), 0)
             feat_instance_count = sum(1 for ent in entities if ent.feature_id == e.feature_id)
             max_entity_area = max(64, int(H * W * 0.15))
             is_pervasive_substrate = (
@@ -624,17 +640,13 @@ class EpistemicGoalScheduler:
                 engine.symbolic_theory.retract_goal(e.feature_id, reason="pervasive_substrate")
                 continue
 
-            has_discrete_interact_cg = any(
-                not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
-                for a in available_actions
-            )
             is_goal_candidate = (
                 e.feature_id in engine.symbolic_theory.goal_features
                 and (
                     1 <= e.area <= max_entity_area
                     or not engine.symbolic_theory.is_walkable(e.feature_id)
                 )
-            ) or (e.role == EntityRole.GOAL and not has_discrete_interact_cg)
+            ) or (e.role == EntityRole.GOAL and not has_discrete_interact)
             if is_goal_candidate:
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
@@ -685,10 +697,6 @@ class EpistemicGoalScheduler:
                 )
                 is_tc_barrier = (
                     engine.symbolic_theory.is_barrier(tc_feat) or tc_feat in engine.learned_barriers
-                )
-                has_discrete_interact = any(
-                    not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
-                    for a in available_actions
                 )
                 is_extrinsic_arb = (
                     tc_feat in engine.symbolic_theory.goal_features
@@ -1024,11 +1032,6 @@ class EpistemicGoalScheduler:
                                 best_prereq_pos = prereq_coords[0]
 
                         if best_prereq_pos is not None:
-                            has_discrete_interact = any(
-                                not engine.is_displacement_action(a)
-                                and not engine.is_spatial_effector(a)
-                                for a in available_actions
-                            )
                             is_prereq_walkable = engine.symbolic_theory.is_walkable(prereq_feat)
                             is_adjacent_actuator = has_discrete_interact and not is_prereq_walkable
                             nav_target_pos = best_prereq_pos
@@ -1253,7 +1256,7 @@ class EpistemicGoalScheduler:
                 if (
                     e.feature_id in engine.hazard_tracker.known_lethal_features
                     or e.feature_id in engine.mobile_threat_features
-                    or cls._is_prior_hazard_feat(engine, int(e.feature_id))
+                    or int(e.feature_id) in prior_hazard_feats
                 ):
                     continue
                 if avatar_pos is not None and e.feature_id in av_feats:
@@ -1280,10 +1283,6 @@ class EpistemicGoalScheduler:
                         or not engine.symbolic_theory.is_walkable(e.feature_id)
                     )
                 ):
-                    has_discrete_interact = any(
-                        not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
-                        for a in available_actions
-                    )
                     is_walk = (
                         engine.symbolic_theory.is_walkable(e.feature_id)
                         or (
@@ -1329,10 +1328,6 @@ class EpistemicGoalScheduler:
                     or e.grid_pos in engine.learned_goal_positions
                     or e.grid_pos in engine.learned_receptacle_positions
                 ):
-                    has_discrete_interact = any(
-                        not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
-                        for a in available_actions
-                    )
                     is_walk = (
                         engine.symbolic_theory.is_walkable(e.feature_id)
                         or (
@@ -1376,10 +1371,6 @@ class EpistemicGoalScheduler:
                 goals = hypothesized_goals
 
         # (c) Real Unvisited Novel / Interactive Entities on the Grid (Epistemic Curiosity)
-        has_discrete_interact = any(
-            not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
-            for a in available_actions
-        )
         if not goals:
             novel_entity_goals: list[tuple[int, int]] = []
             for e in entities:
@@ -1404,7 +1395,7 @@ class EpistemicGoalScheduler:
                     or (e.role == EntityRole.OBSTACLE and not is_isolated_interior)
                     or e.feature_id in engine.hazard_tracker.known_lethal_features
                     or e.feature_id in engine.mobile_threat_features
-                    or cls._is_prior_hazard_feat(engine, int(e.feature_id))
+                    or int(e.feature_id) in prior_hazard_feats
                 ):
                     continue
                 is_cargo_entity = (
@@ -1420,7 +1411,7 @@ class EpistemicGoalScheduler:
                         or e.feature_id in engine.symbolic_theory.receptacle_features
                         or (
                             engine.symbolic_theory.is_walkable(e.feature_id)
-                            and int(np.count_nonzero(curr_grid == e.feature_id)) <= 4
+                            and feat_counts.get(int(e.feature_id), 0) <= 4
                         )
                     )
                     and e.grid_pos not in engine.learned_barriers
@@ -1662,13 +1653,12 @@ class EpistemicGoalScheduler:
                         return (1, -round(pref_g, 3), dist_g)
                     if pref_g >= 0.35:
                         return (2, -round(pref_g, 3), dist_g)
-                    cnt_g = int(np.count_nonzero(curr_grid == gf)) if gf != bg else 0
+                    cnt_g = feat_counts.get(gf, 0) if gf != bg else 0
                     return (3 if cnt_g == 1 else 4, -round(pref_g, 3), dist_g)
 
                 goals.sort(key=_structural_priority)
 
         # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
-        prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
         if not goals:
             frontier_candidates = cls.compute_frontier_candidates(
                 engine=engine,
@@ -1696,12 +1686,7 @@ class EpistemicGoalScheduler:
             th = engine.symbolic_theory
             verified_lethal = th.context_verified_features("lethal")
             unverified_lethals = set(engine.hazard_tracker.known_lethal_features) - verified_lethal
-            if unverified_lethals and any(
-                int(curr_grid[r, c]) in unverified_lethals
-                for r in range(H)
-                for c in range(W)
-                if (r, c) != avatar_pos
-            ):
+            if unverified_lethals and any(f in unverified_lethals for f in feat_counts):
                 from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
 
                 invalidate_stale_context_ontology(
@@ -1786,30 +1771,18 @@ class EpistemicGoalScheduler:
             if bad_feats:
                 blocked |= np.isin(curr_grid, list(bad_feats))
             passable = ~blocked
-            reach = np.zeros((H, W), dtype=bool)
-            reach[avatar_pos[0], avatar_pos[1]] = True
-            prev_count = -1
-            while True:
-                grown = reach.copy()
-                grown[1:, :] |= reach[:-1, :]
-                grown[:-1, :] |= reach[1:, :]
-                grown[:, 1:] |= reach[:, :-1]
-                grown[:, :-1] |= reach[:, 1:]
-                grown &= passable
-                grown[avatar_pos[0], avatar_pos[1]] = True
-                count = int(grown.sum())
-                if count == prev_count:
-                    break
-                reach = grown
-                prev_count = count
-            reachable_cells = {(int(r), int(c)) for r, c in np.argwhere(reach)}
+            passable[avatar_pos[0], avatar_pos[1]] = True
+            labeled_reach, _ = _scipy_label(passable)
+            av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
 
             reachable_goals = [
                 g
                 for g in goals
-                if g in reachable_cells
+                if int(labeled_reach[g[0], g[1]]) == av_lbl
                 or any(
-                    (g[0] + dr, g[1] + dc) in reachable_cells
+                    0 <= g[0] + dr < H
+                    and 0 <= g[1] + dc < W
+                    and int(labeled_reach[g[0] + dr, g[1] + dc]) == av_lbl
                     for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
                 )
             ]

@@ -547,13 +547,32 @@ class HCIRSymbolicWorldTheory:
         H, W = grid.shape
         total_cells = H * W
         av = avatar_features or set()
+        if np.issubdtype(grid.dtype, np.integer):
+            amin, amax = int(grid.min()), int(grid.max())
+            if 0 <= amin and amax < 256:
+                bc = np.bincount(grid.ravel(), minlength=amax + 1)
+                vals_arr = np.flatnonzero(bc)
+                counts_arr = bc[vals_arr]
+                if H >= 2 and W >= 2:
+                    border_1d = np.concatenate(
+                        [grid[0, :], grid[-1, :], grid[1:-1, 0], grid[1:-1, -1]]
+                    )
+                else:
+                    border_1d = grid.ravel()
+                b_bc = np.bincount(border_1d, minlength=amax + 1)
+                stats: dict[Any, tuple[int, float, int]] = {}
+                for v_int, cnt_int in zip(vals_arr.tolist(), counts_arr.tolist()):
+                    if v_int == bg_feature or v_int in av:
+                        continue
+                    stats[v_int] = (cnt_int, int(b_bc[v_int]) / max(1, cnt_int), total_cells)
+                return stats
         border_mask = np.zeros((H, W), dtype=bool)
         border_mask[0, :] = True
         border_mask[-1, :] = True
         border_mask[:, 0] = True
         border_mask[:, -1] = True
         vals, counts = np.unique(grid, return_counts=True)
-        stats: dict[Any, tuple[int, float, int]] = {}
+        stats = {}
         for v_np, cnt_np in zip(vals.tolist(), counts.tolist(), strict=False):
             if v_np == bg_feature or v_np in av:
                 continue

@@ -32,12 +32,38 @@ class WorkingConceptStore:
         self,
         lifecycle_manager: ConceptLifecycleManager | None = None,
         similarity_threshold: float = 1.5,
+        max_concepts: int = 512,
     ) -> None:
         self._lifecycle_manager = lifecycle_manager or ConceptLifecycleManager()
         self._similarity_threshold = similarity_threshold
+        self._max_concepts = max(1, int(max_concepts))
         self._concepts: dict[str, GroundedConcept] = {}
         self._promotion_proposals: dict[str, ConceptPromotionProposal] = {}
         self._lock = threading.RLock()
+
+    def _evict_if_over_capacity(self) -> None:
+        """Evict oldest emerging/low-quality concepts when exceeding ``_max_concepts``."""
+        if len(self._concepts) <= self._max_concepts:
+            return
+        candidates = sorted(
+            self._concepts.items(),
+            key=lambda kv: (
+                0 if kv[1].lifecycle_state == ConceptLifecycle.EMERGING else 1,
+                (
+                    kv[1].grounding_quality.perceptual_stability
+                    + kv[1].grounding_quality.temporal_persistence
+                    + kv[1].grounding_quality.relational_consistency
+                    + kv[1].grounding_quality.cross_modal_support
+                    + kv[1].grounding_quality.interaction_support
+                    + kv[1].grounding_quality.boundary_stability
+                )
+                / 6.0,
+                len(kv[1].exemplar_entity_ids),
+            ),
+        )
+        excess = len(self._concepts) - self._max_concepts
+        for cid, _ in candidates[:excess]:
+            self._concepts.pop(cid, None)
 
     @property
     def lifecycle_manager(self) -> ConceptLifecycleManager:
@@ -50,6 +76,7 @@ class WorkingConceptStore:
     def register_concept(self, concept: GroundedConcept) -> None:
         with self._lock:
             self._concepts[concept.concept_ref.id] = concept
+            self._evict_if_over_capacity()
 
     def get_all_concepts(self) -> list[GroundedConcept]:
         with self._lock:
@@ -98,6 +125,7 @@ class WorkingConceptStore:
                     new_concept.add_exemplar(exemplar_entity_id)
                 self._concepts[concept_ref.id] = new_concept
                 self._evaluate_and_update_lifecycle(new_concept)
+                self._evict_if_over_capacity()
                 return new_concept
 
     def update_concept_quality(

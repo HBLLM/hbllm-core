@@ -462,16 +462,18 @@ class HippocampalEpisodicCortex:
         max_trace_len: int = 512,
         replay_horizon: int = 12,
         discount_factor: float = 0.85,
+        max_episodes: int = 64,
     ) -> None:
         self.habenular_ior = habenular_ior or HabenularEpisodicIOR()
         self.max_trace_len = max_trace_len
         self.replay_horizon = replay_horizon
         self.discount_factor = discount_factor
+        self.max_episodes = max(1, int(max_episodes))
 
         # Active episode buffer (Hippocampus CA3 / CA1)
         self.current_episode: deque[EpisodicTransition] = deque(maxlen=max_trace_len)
 
-        # Multi-episode history archives
+        # Multi-episode history archives (bounded by max_episodes)
         self.past_episodes: list[list[EpisodicTransition]] = []
         self.successful_trajectories: list[list[EpisodicTransition]] = []
         self.consolidated_trajectory_count: int = 0
@@ -620,6 +622,12 @@ class HippocampalEpisodicCortex:
         if is_success:
             # Consolidate successful trajectory
             self.successful_trajectories.append(list(self.current_episode))
+            if len(self.successful_trajectories) > self.max_episodes:
+                drop = len(self.successful_trajectories) - self.max_episodes
+                del self.successful_trajectories[:drop]
+                self.consolidated_trajectory_count = max(
+                    0, self.consolidated_trajectory_count - drop
+                )
             if prev_grid is not None:
                 winning_actions = [
                     t.action_id for t in self.current_episode if t.action_id is not None
@@ -719,6 +727,8 @@ class HippocampalEpisodicCortex:
             confidence=1.0,
         )
         self.catastrophic_replays.append(assignment)
+        if len(self.catastrophic_replays) > self.max_episodes:
+            del self.catastrophic_replays[: len(self.catastrophic_replays) - self.max_episodes]
         self._archive_and_clear()
         return assignment
 
@@ -870,9 +880,11 @@ class HippocampalEpisodicCortex:
         )
 
     def _archive_and_clear(self) -> None:
-        """Archive current episode to long-term memory and clear active buffer."""
+        """Archive current episode to bounded long-term memory and clear active buffer."""
         if self.current_episode:
             self.past_episodes.append(list(self.current_episode))
+            if len(self.past_episodes) > self.max_episodes:
+                del self.past_episodes[: len(self.past_episodes) - self.max_episodes]
             self.current_episode.clear()
 
     def on_boundary(self, boundary) -> None:
@@ -1001,6 +1013,12 @@ class HippocampalEpisodicCortex:
         if self.current_episode and any(t.is_success for t in self.current_episode):
             winning_trajectory = list(self.current_episode)
             self.successful_trajectories.append(winning_trajectory)
+            if len(self.successful_trajectories) > self.max_episodes:
+                drop = len(self.successful_trajectories) - self.max_episodes
+                del self.successful_trajectories[:drop]
+                self.consolidated_trajectory_count = max(
+                    0, self.consolidated_trajectory_count - drop
+                )
 
             # ── Procedural Macro Compilation ────────────────────────────────
             # Extract the proven action sequence and compile into a replayable macro.
@@ -1108,6 +1126,8 @@ class HippocampalEpisodicCortex:
                         logger.debug("Could not register macro as procedural skill: %s", e)
         elif self.current_episode and any(t.is_failure for t in self.current_episode):
             self.failed_trajectories.append(list(self.current_episode))
+            if len(self.failed_trajectories) > self.max_episodes:
+                del self.failed_trajectories[: len(self.failed_trajectories) - self.max_episodes]
         self.current_episode.clear()
 
         if target_epoch is not None:

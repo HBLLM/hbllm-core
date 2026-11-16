@@ -396,6 +396,11 @@ class ExecutiveRuntime:
                     node_data=marker.model_dump(),
                 )
             )
+            stale_marker_idx = self._consolidation_count + 1 - 5
+            if stale_marker_idx >= 1:
+                stale_id = f"consolidation_marker_{stale_marker_idx}"
+                if dest_ws.get_node(stale_id) is not None:
+                    ops.append(TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=stale_id))
 
             filter_fn = getattr(self._engine, "_filter_unchanged_upserts", None)
             if callable(filter_fn):

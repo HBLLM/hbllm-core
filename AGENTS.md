@@ -4,10 +4,10 @@
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
 > [!WARNING]
-> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-16, R1–R5 complete).**  
-> R1–R5 established honest all-seed `dev` evaluation (`n=80`, `zero_shot=0.7547`, `solve_rate=0.8000`, CI `[0.6995, 0.8730]`, `cross_seed transfer_solve_rate=0.9211`, latency `p50=21.33ms / p95=60.24ms`, `reports/dev/dev_handcrafted_20261116_123256.json`), sealed held-out v2 with `eval-*` gate & `reports/heldout/LEDGER.md`, retired held-out v1, promoted `novelty.yaml` (`zero_shot=0.7770`), wired grounding into runtime decisions, deleted 28 zero-effect/dead faculties + unwired all dead pipeline hooks, and brought `hbllm/**/*.py` down to `242,638` LOC (`tests/unit/architecture/test_loc_budget.py` enforces `<= 250,000`).
+> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-16, R1–R8 complete).**  
+> R1–R8 established honest all-seed `dev` evaluation (`n=80`, `zero_shot=0.7791`, `solve_rate=0.8750`, CI `[0.7850, 0.9307]`, `cross_seed transfer_solve_rate=0.9342`, `exploration_deaths=3`, mean latency `p50=10.18ms / p95=28.12ms`, `reports/dev/dev_handcrafted_20261116_180441.json`), sealed held-out v2 with `eval-*` gate & `reports/heldout/LEDGER.md`, retired held-out v1, promoted `novelty.yaml` (`zero_shot=0.8365`, `solve_rate=0.9000`, `p50=11.09ms / p95=33.53ms`), wired grounding into runtime decisions, deleted 28 zero-effect/dead faculties + unwired dead hooks, enforced structural debt + `<= 250,000` LOC ratchets, added risk-aware exploration, implemented bounded event-store compaction + per-tier/world node budgets + per-stage latency profiling (`p50 ~ 10-16ms / p95 <= 45ms` at `32×32`, Rust kernels `< 0.2ms`).
 >
-> **Remaining issues from review §5:** Work the review's §5 in order: **R6** structural debt ratchets → **R7** risk-aware exploration + exploration deaths metric → **R8** compaction/retention + bounded memory/node budget + latency budget → **R9** widen task regimes. No new faculties or pipeline hooks; no held-out run while iterating; no headline from fewer than 20 seeds. Production gaps are listed in §6.
+> **Remaining issue from review §5:** Work **R9** next (widen task regimes: PO, stochastic transitions, other agents, long horizons, multi-step continuous control, language-specified goals; each as a dev family first with R1 before/after). No new faculties or pipeline hooks; no held-out run while iterating; no headline from fewer than 20 seeds. Production gaps are listed in §6.
 
 ---
 
@@ -27,7 +27,7 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
 
 3. **Zero LLM Dependency in Cognitive Core:**
    > The core reasoning runtime (`hbllm.brain.reasoning`, `hbllm.hcir.world`) is **100% LLM-independent**.  
-   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically with sub-millisecond execution without requiring external API calls.  
+   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically without requiring external API calls (native Rust spatial/graph kernels run sub-millisecond `< 0.2ms`; the full 5-stage Python `AutonomousEpistemicEngine.step()` loop runs in low tens of milliseconds — `p50 ~ 10-15ms / p95 <= 45ms` at `32×32`, profiled by `hbllm bench profile`).  
    *(Permitted: deterministic, offline-trained feed-forward neural or spiking neural feature encoders conforming to the `FeatureExtractor` protocol, with zero runtime LLM or cloud dependencies).*
 
 4. **Constitutional Governance:**

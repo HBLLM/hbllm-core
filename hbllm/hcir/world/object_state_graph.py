@@ -16,13 +16,13 @@ from __future__ import annotations
 import heapq
 import logging
 import math
-from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import label as _scipy_label
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.world.causal_discovery import CausalPredicate
@@ -181,6 +181,7 @@ class ObjectStateLedger:
         self.initially_unreachable_cells: set[tuple[int, int]] = set()
         self.newly_reachable_cells: set[tuple[int, int]] = set()
         self._baseline_reach_initialized: bool = False
+        self._last_connectivity_sig: tuple[tuple[int, int], tuple[int, int], bytes] | None = None
 
     def reset_context_epoch(self) -> None:
         """Reset transient context-specific interaction state."""
@@ -195,6 +196,7 @@ class ObjectStateLedger:
         self.initially_unreachable_cells.clear()
         self.newly_reachable_cells.clear()
         self._baseline_reach_initialized = False
+        self._last_connectivity_sig = None
 
     def reset_level(self) -> None:
         """Deprecated alias for ``reset_context_epoch``."""
@@ -242,42 +244,42 @@ class ObjectStateLedger:
         """Track compartment connectivity so post-unlock reachable regions are flagged causally."""
         if grid is None or avatar_pos is None or grid.ndim != 2:
             return
+        if self._baseline_reach_initialized and not self.initially_unreachable_cells:
+            return
         H, W = grid.shape
         ar, ac = avatar_pos
         if not (0 <= ar < H and 0 <= ac < W):
             return
         passable_feats = set(walkable_feats) | set(av_feats) | {int(bg)}
-        reached: set[tuple[int, int]] = {(ar, ac)}
-        q: deque[tuple[int, int]] = deque([(ar, ac)])
-        while q:
-            r, c = q.popleft()
-            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                nr, nc = r + dr, c + dc
-                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in reached:
-                    val = int(grid[nr, nc])
-                    if val in passable_feats:
-                        reached.add((nr, nc))
-                        q.append((nr, nc))
-        adj_reached: set[tuple[int, int]] = set(reached)
-        for r, c in reached:
-            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                nr, nc = r + dr, c + dc
-                if 0 <= nr < H and 0 <= nc < W:
-                    adj_reached.add((nr, nc))
+        passable_mask = np.isin(grid, list(passable_feats))
+        passable_mask[ar, ac] = True
+        sig = ((H, W), (ar, ac), passable_mask.tobytes())
+        if self._baseline_reach_initialized and self._last_connectivity_sig == sig:
+            return
+        self._last_connectivity_sig = sig
+
+        labeled_cc, _ = _scipy_label(passable_mask)
+        av_cc = int(labeled_cc[ar, ac])
+        reached_mask = labeled_cc == av_cc
+        adj_mask = reached_mask.copy()
+        adj_mask[1:, :] |= reached_mask[:-1, :]
+        adj_mask[:-1, :] |= reached_mask[1:, :]
+        adj_mask[:, 1:] |= reached_mask[:, :-1]
+        adj_mask[:, :-1] |= reached_mask[:, 1:]
 
         if not self._baseline_reach_initialized:
             self._baseline_reach_initialized = True
-            self.initially_unreachable_cells = {
-                (r, c)
-                for r in range(H)
-                for c in range(W)
-                if (r, c) not in adj_reached and int(grid[r, c]) != bg
-            }
+            unreach = (~adj_mask) & (grid != int(bg))
+            if np.any(unreach):
+                rs, cs = np.nonzero(unreach)
+                self.initially_unreachable_cells = set(zip(rs.tolist(), cs.tolist()))
+            else:
+                self.initially_unreachable_cells = set()
             return
 
         if self.initially_unreachable_cells:
             for pos in self.initially_unreachable_cells:
-                if pos in adj_reached:
+                if adj_mask[pos[0], pos[1]]:
                     self.newly_reachable_cells.add(pos)
 
     def is_in_newly_reachable(self, cells: set[tuple[int, int]]) -> bool:
@@ -885,11 +887,18 @@ class ObjectStateGraphPlanner:
         from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
 
         bg_val = int(engine.bg_feature) if engine is not None else 0
+        max_step_span = max((abs(dr) + abs(dc) for _, dr, dc in movable_actions), default=1) or 1
+        target_list = list(target_stances)
         seq = 0
-        heap: list[tuple[float, int, tuple[int, int], list[MentalSimulationStep]]] = [
-            (0.0, seq, start_pos, [])
-        ]
+        h0 = (
+            min(abs(start_pos[0] - tr) + abs(start_pos[1] - tc) for tr, tc in target_list)
+            / max_step_span
+        )
+        heap: list[tuple[float, float, int, tuple[int, int]]] = [(h0, 0.0, seq, start_pos)]
         best_cost: dict[tuple[int, int], float] = {start_pos: 0.0}
+        came_from: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+        verified_cache: dict[int, bool] = {bg_val: True}
+        unverified_penalty_cache: dict[int, float] = {}
 
         _budget = engine.compute_budget if engine is not None else None
         while heap:
@@ -897,58 +906,83 @@ class ObjectStateGraphPlanner:
                 return None  # anytime: expansion budget exhausted
             if _budget is not None:
                 _budget.charge(1)
-            cur_cost, _, cur_pos, path = heapq.heappop(heap)
+            _, cur_cost, _, cur_pos = heapq.heappop(heap)
             if cur_cost > best_cost.get(cur_pos, float("inf")):
                 continue
             if cur_pos in target_stances:
-                return list(path)
+                win_path: list[MentalSimulationStep] = []
+                node_cur = cur_pos
+                while node_cur in came_from:
+                    prev_p, prev_act = came_from[node_cur]
+                    win_path.append(
+                        MentalSimulationStep(action=prev_act, predicted_avatar_pos=node_cur)
+                    )
+                    node_cur = prev_p
+                win_path.reverse()
+                return win_path
 
+            cr, cc = cur_pos
             for act, dr, dc in movable_actions:
                 if failed_transitions and (cur_pos, act) in failed_transitions:
                     continue
-                nr, nc = cur_pos[0] + dr, cur_pos[1] + dc
+                nr, nc = cr + dr, cc + dc
                 if not (0 <= nr < H and 0 <= nc < W):
                     continue
 
-                step_r = int(np.sign(dr))
-                step_c = int(np.sign(dc))
+                step_r = 1 if dr > 0 else (-1 if dr < 0 else 0)
+                step_c = 1 if dc > 0 else (-1 if dc < 0 else 0)
                 dist = max(abs(dr), abs(dc))
                 blocked = False
                 step_cost = 1.0
 
                 for k in range(1, dist + 1):
-                    kr = cur_pos[0] + step_r * k
-                    kc = cur_pos[1] + step_c * k
-                    is_target = k == dist and (kr, kc) in target_stances
-                    if (kr, kc) in static_barriers and not is_target:
-                        blocked = True
-                        break
-                    if percept is not None and not is_target and not percept.is_passable(kr, kc):
-                        blocked = True
-                        break
-                    if 0 <= kr < H and 0 <= kc < W and curr_grid is not None:
+                    kr = cr + step_r * k
+                    kc = cc + step_c * k
+                    k_pos = (kr, kc)
+                    is_target = k == dist and k_pos in target_stances
+                    if not is_target:
+                        if k_pos in static_barriers:
+                            blocked = True
+                            break
+                        if percept is not None and not percept.is_passable(kr, kc):
+                            blocked = True
+                            break
+                    if curr_grid is not None:
                         val = int(curr_grid[kr, kc])
-                        if val in lethal_features and not is_target:
+                        if not is_target and val in lethal_features:
                             blocked = True
                             break
                         if not is_target and engine is not None:
-                            if engine.is_feature_unverified(val, bg_val):
-                                risk = estimate_entity_risk(
-                                    engine, val, {(kr, kc)}, curr_grid, bg_val, ledger=self.ledger
-                                )
-                                step_cost += engine.UNVERIFIED_FEATURE_COST * 4.0 + risk * 50.0
+                            is_ver = verified_cache.get(val)
+                            if is_ver is None:
+                                is_ver = not engine.is_feature_unverified(val, bg_val)
+                                verified_cache[val] = is_ver
+                            if not is_ver:
+                                cached_pen = unverified_penalty_cache.get(val)
+                                if cached_pen is None:
+                                    risk = estimate_entity_risk(
+                                        engine, val, {k_pos}, curr_grid, bg_val, ledger=self.ledger
+                                    )
+                                    cached_pen = engine.UNVERIFIED_FEATURE_COST * 4.0 + risk * 50.0
+                                    if len(self.ledger.object_causal_effects) == 0:
+                                        unverified_penalty_cache[val] = cached_pen
+                                step_cost += cached_pen
 
                 if blocked:
                     continue
-                if patroller_cells and (nr, nc) in patroller_cells:
+                nxt = (nr, nc)
+                if patroller_cells and nxt in patroller_cells:
                     continue
 
                 next_cost = cur_cost + step_cost
-                if next_cost < best_cost.get((nr, nc), float("inf")):
-                    best_cost[(nr, nc)] = next_cost
+                if next_cost < best_cost.get(nxt, float("inf")):
+                    best_cost[nxt] = next_cost
+                    came_from[nxt] = (cur_pos, act)
+                    h_nxt = (
+                        min(abs(nr - tr) + abs(nc - tc) for tr, tc in target_list) / max_step_span
+                    )
                     seq += 1
-                    new_step = MentalSimulationStep(action=act, predicted_avatar_pos=(nr, nc))
-                    heapq.heappush(heap, (next_cost, seq, (nr, nc), path + [new_step]))
+                    heapq.heappush(heap, (next_cost + h_nxt, next_cost, seq, nxt))
 
         return None
 

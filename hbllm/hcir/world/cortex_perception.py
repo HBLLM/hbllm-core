@@ -35,6 +35,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_STRUCT_4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+
+def _fast_unique_counts(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """O(N) bincount-based unique value & frequency extractor for bounded integer lattices."""
+    if arr.size > 0 and np.issubdtype(arr.dtype, np.integer):
+        amin, amax = int(arr.min()), int(arr.max())
+        if 0 <= amin and amax < 256:
+            bc = np.bincount(arr.ravel(), minlength=amax + 1)
+            nz = np.flatnonzero(bc)
+            return nz, bc[nz]
+    return np.unique(arr, return_counts=True)
+
 
 class FrameDiffType(StrEnum):
     """Categorization of visual changes resulting from an action."""
@@ -239,6 +252,9 @@ class SensoryThalamus:
 class FigureGroundSegregator:
     """Domain-agnostic background color estimation based on border dominance and frequency."""
 
+    _BG_CACHE: OrderedDict[tuple[Any, ...], int] = OrderedDict()
+    _BG_CACHE_MAX = 64
+
     @staticmethod
     def estimate_background(
         grid: np.ndarray,
@@ -248,16 +264,43 @@ class FigureGroundSegregator:
         walkable_features: set[int] | None = None,
     ) -> int:
         grid = SensoryThalamus.normalize(grid)
-        H, W = grid.shape
-        border_pixels = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
-        vals, counts = np.unique(border_pixels, return_counts=True)
-        top_val = int(vals[np.argmax(counts)])
-
         barriers = barrier_features or set()
         av_feats = avatar_features or set()
         walkables = walkable_features or set()
+        cache_key = (
+            grid.shape,
+            str(grid.dtype),
+            frozenset(barriers),
+            frozenset(av_feats),
+            frozenset(walkables),
+            grid.tobytes(),
+        )
+        cached = FigureGroundSegregator._BG_CACHE.get(cache_key)
+        if cached is not None:
+            FigureGroundSegregator._BG_CACHE.move_to_end(cache_key)
+            return cached
+        res = FigureGroundSegregator._estimate_background_uncached(
+            grid, barriers, av_feats, bg_feature, walkables
+        )
+        FigureGroundSegregator._BG_CACHE[cache_key] = res
+        if len(FigureGroundSegregator._BG_CACHE) > FigureGroundSegregator._BG_CACHE_MAX:
+            FigureGroundSegregator._BG_CACHE.popitem(last=False)
+        return res
 
-        g_vals, g_counts = np.unique(grid, return_counts=True)
+    @staticmethod
+    def _estimate_background_uncached(
+        grid: np.ndarray,
+        barriers: set[int],
+        av_feats: set[int],
+        bg_feature: int,
+        walkables: set[int],
+    ) -> int:
+        H, W = grid.shape
+        border_pixels = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
+        vals, counts = _fast_unique_counts(border_pixels)
+        top_val = int(vals[np.argmax(counts)])
+
+        g_vals, g_counts = _fast_unique_counts(grid)
         g_dominant = int(g_vals[np.argmax(g_counts)])
 
         # 1. Empirically Verified Walkable Ground:
@@ -283,7 +326,7 @@ class FigureGroundSegregator:
         # verify if the interior canvas is dominated by a non-barrier/non-avatar floor feature.
         if H > 2 and W > 2:
             interior = grid[1:-1, 1:-1]
-            int_vals, int_counts = np.unique(interior, return_counts=True)
+            int_vals, int_counts = _fast_unique_counts(interior)
             int_dominant = int(int_vals[np.argmax(int_counts)])
             int_dom_frac = float(np.max(int_counts)) / max(1, interior.size)
             if (
@@ -375,21 +418,7 @@ class SpatialRoleClassifier:
 
         is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
         is_theory_actuator = val in symbolic_theory.actuator_features if symbolic_theory else False
-        is_theory_cargo = (
-            symbolic_theory.is_cargo(
-                SpatialEntity(
-                    id="",
-                    role=EntityRole.UNKNOWN,
-                    centroid=(float(grid_pos[0]), float(grid_pos[1])),
-                    grid_pos=grid_pos,
-                    area=area,
-                    bounding_box=bounding_box,
-                    feature_id=val,
-                )
-            )
-            if symbolic_theory
-            else False
-        )
+        is_theory_cargo = symbolic_theory.is_cargo(val) if symbolic_theory else False
         is_theory_walkable = val in symbolic_theory.walkable_features if symbolic_theory else False
         is_candidate_goal = (
             val != bg
@@ -449,6 +478,9 @@ class SpatialRoleClassifier:
 class GestaltAffordanceDetector:
     """Extracts structural goals, affordance panels, and oriented threats using Gestalt principles."""
 
+    _STRUCTURAL_GOAL_CACHE: OrderedDict[tuple[Any, ...], list[dict[str, Any]]] = OrderedDict()
+    _STRUCTURAL_GOAL_CACHE_MAX = 64
+
     @staticmethod
     def detect_structural_goals(
         grid: np.ndarray,
@@ -462,26 +494,44 @@ class GestaltAffordanceDetector:
     ) -> list[dict[str, Any]]:
         grid = SensoryThalamus.normalize(grid)
         H, W = grid.shape
-        goals: list[dict[str, Any]] = []
         av_feats = set(avatar_features) if avatar_features else set()
         if avatar_feature is not None:
             av_feats.add(avatar_feature)
 
-        unique_feats = np.unique(grid)
+        cache_key: tuple[Any, ...] | None = None
+        if not kwargs:
+            cache_key = (
+                (H, W),
+                str(grid.dtype),
+                int(bg),
+                frozenset(av_feats),
+                frozenset(barrier_features or ()),
+                frozenset(known_lethal_features or ()),
+                avatar_pos,
+                grid.tobytes(),
+            )
+            cached = GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE.get(cache_key)
+            if cached is not None:
+                GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE.move_to_end(cache_key)
+                return list(cached)
+
+        goals: list[dict[str, Any]] = []
+        unique_feats, feat_counts = _fast_unique_counts(grid)
+        max_pts = int(H * W * 0.3)
 
         # 1. Detect target zones and salient interior constellations
-        for feat in unique_feats:
+        for feat, fcount in zip(unique_feats.tolist(), feat_counts.tolist()):
             feat_int = int(feat)
             if (
                 feat_int == bg
                 or feat_int in av_feats
                 or (barrier_features and feat_int in barrier_features)
                 or (known_lethal_features and feat_int in known_lethal_features)
+                or fcount < 1
+                or fcount > max_pts
             ):
                 continue
             pts = np.argwhere(grid == feat_int)
-            if len(pts) < 1 or len(pts) > H * W * 0.3:
-                continue
 
             min_r, min_c = pts.min(axis=0)
             max_r, max_c = pts.max(axis=0)
@@ -497,10 +547,10 @@ class GestaltAffordanceDetector:
 
             if is_interior and (is_target_zone or is_constellation):
                 centroid = (
-                    int(round(float(np.mean(pts[:, 0])))),
-                    int(round(float(np.mean(pts[:, 1])))),
+                    int(round(float(pts[:, 0].mean()))),
+                    int(round(float(pts[:, 1].mean()))),
                 )
-                target_cells = [(int(r), int(c)) for r, c in pts]
+                target_cells = list(zip(pts[:, 0].tolist(), pts[:, 1].tolist()))
                 if avatar_pos is not None:
                     target_cells = [
                         c
@@ -527,7 +577,7 @@ class GestaltAffordanceDetector:
                 )
 
         # 2. Detect edge and near-edge exit markers
-        for feat in unique_feats:
+        for feat, fcount in zip(unique_feats.tolist(), feat_counts.tolist()):
             feat_int = int(feat)
             if (
                 feat_int == bg
@@ -537,8 +587,27 @@ class GestaltAffordanceDetector:
             ):
                 continue
 
+            if fcount == 1:
+                rs1, cs1 = np.nonzero(grid == feat_int)
+                if rs1.size == 0:
+                    continue
+                r0, c0 = int(rs1[0]), int(cs1[0])
+                if r0 == 0 or r0 == H - 1 or c0 == 0 or c0 == W - 1:
+                    if not (min(H, W) <= 3):
+                        goals.append(
+                            {
+                                "type": "exit_marker",
+                                "position": (r0, c0),
+                                "cells": [(r0, c0)],
+                                "feature": feat_int,
+                                "size": 1,
+                                "confidence": 0.75,
+                            }
+                        )
+                continue
+
             feat_mask = grid == feat_int
-            labeled_feat, num_comp = label(feat_mask)
+            labeled_feat, num_comp = label(feat_mask, structure=_STRUCT_4)
             for c_id in range(1, num_comp + 1):
                 pts = np.argwhere(labeled_feat == c_id)
                 max_strip_len = max(16, max(H, W) * 2)
@@ -560,17 +629,17 @@ class GestaltAffordanceDetector:
                     and len(pts) >= 2 * (H + W) - 8
                 )
                 spans_full_edge = (
-                    (int(np.max(r_coords)) - int(np.min(r_coords)) >= H - 2)
-                    or (int(np.max(c_coords)) - int(np.min(c_coords)) >= W - 2)
+                    (int(r_coords.max()) - int(r_coords.min()) >= H - 2)
+                    or (int(c_coords.max()) - int(c_coords.min()) >= W - 2)
                     or len(pts) >= min(H, W) - 2
                 )
                 if covers_all_4 or spans_full_edge:
                     continue
 
-                cells = [(int(r), int(c)) for r, c in pts]
+                cells = list(zip(r_coords.tolist(), c_coords.tolist()))
                 centroid = (
-                    int(round(float(np.mean(pts[:, 0])))),
-                    int(round(float(np.mean(pts[:, 1])))),
+                    int(round(float(r_coords.mean()))),
+                    int(round(float(c_coords.mean()))),
                 )
                 goals.append(
                     {
@@ -653,35 +722,38 @@ class GestaltAffordanceDetector:
         # 4. Gestalt Relational Affordances: Symmetry completion and collinear alignment
         if 0.50 <= sym_score:
             salient_clusters: list[tuple[int, tuple[int, int], np.ndarray]] = []
-            struct_4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
-            for feat in np.unique(grid):
+            max_rel_area = max(48, int(H * W * 0.08))
+            for feat, fcount in zip(unique_feats.tolist(), feat_counts.tolist()):
                 feat_int = int(feat)
                 if (
                     feat_int == bg
                     or feat_int in av_feats
                     or (barrier_features and feat_int in barrier_features)
                     or (known_lethal_features and feat_int in known_lethal_features)
+                    or fcount > max_rel_area
                 ):
                     continue
                 mask = grid == feat_int
-                labeled_mask, num_clusters = label(mask, structure=struct_4)
+                labeled_mask, num_clusters = label(mask, structure=_STRUCT_4)
                 # Pervasive substrates, lattices, or maze partitions (>4 clusters or >8% screen area)
                 # cannot be isolated salient relational endpoints
-                if num_clusters > 4 or np.sum(mask) > max(48, int(H * W * 0.08)):
+                if num_clusters > 4:
                     continue
                 for c_idx in range(1, num_clusters + 1):
                     c_pts = np.argwhere(labeled_mask == c_idx)
                     if 1 <= len(c_pts) <= 36:
-                        min_cr, min_cc = c_pts.min(axis=0)
-                        max_cr, max_cc = c_pts.max(axis=0)
+                        c_rs = c_pts[:, 0]
+                        c_cs = c_pts[:, 1]
+                        min_cr, max_cr = int(c_rs.min()), int(c_rs.max())
+                        min_cc, max_cc = int(c_cs.min()), int(c_cs.max())
                         # Filter outer enclosing boundary edges
                         if min_cr <= 0 or max_cr >= H - 1 or min_cc <= 0 or max_cc >= W - 1:
                             continue
                         if (max_cr - min_cr >= H - 4) or (max_cc - min_cc >= W - 4):
                             continue
                         c_centroid = (
-                            int(round(float(np.mean(c_pts[:, 0])))),
-                            int(round(float(np.mean(c_pts[:, 1])))),
+                            int(round(float(c_rs.mean()))),
+                            int(round(float(c_cs.mean()))),
                         )
                         salient_clusters.append((feat_int, c_centroid, c_pts))
 
@@ -740,6 +812,13 @@ class GestaltAffordanceDetector:
                                 }
                             )
 
+        if cache_key is not None:
+            GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE[cache_key] = list(goals)
+            if (
+                len(GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE)
+                > GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE_MAX
+            ):
+                GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE.popitem(last=False)
         return goals
 
     @staticmethod
@@ -942,7 +1021,6 @@ class PerceptionEngine:
             return cached
 
         H, W = grid.shape
-        struct = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
         components: list[
             tuple[
                 int,
@@ -955,7 +1033,18 @@ class PerceptionEngine:
         ] = []
         for val in unique_vals:
             mask = grid == val
-            labeled_mask, num_components = label(mask, structure=struct)
+            nz_r, nz_c = np.nonzero(mask)
+            n_px = int(nz_r.size)
+            if n_px == 0:
+                continue
+            if n_px == 1:
+                r0 = int(nz_r[0])
+                c0 = int(nz_c[0])
+                components.append(
+                    (val, 1, (r0, r0, c0, c0), (float(r0), float(c0)), (r0, c0), ((r0, c0),))
+                )
+                continue
+            labeled_mask, num_components = label(mask, structure=_STRUCT_4)
             _flat_labels = labeled_mask.ravel()
             _nz = np.nonzero(_flat_labels)[0]
             _order = np.argsort(_flat_labels[_nz], kind="stable")
@@ -965,17 +1054,18 @@ class PerceptionEngine:
             _groups = np.split(_nz, _splits)
             for comp_idx in range(1, num_components + 1):
                 flat = _groups[comp_idx - 1]
-                coords = np.stack((flat // W, flat % W), axis=1)
-                area = int(len(coords))
+                rows_arr = flat // W
+                cols_arr = flat % W
+                area = int(flat.size)
                 if area == 0:
                     continue
-                cells = tuple((int(r), int(c)) for r, c in coords)
-                min_r = int(np.min(coords[:, 0]))
-                max_r = int(np.max(coords[:, 0]))
-                min_c = int(np.min(coords[:, 1]))
-                max_c = int(np.max(coords[:, 1]))
-                mean_r = float(np.mean(coords[:, 0]))
-                mean_c = float(np.mean(coords[:, 1]))
+                cells = tuple(zip(rows_arr.tolist(), cols_arr.tolist()))
+                min_r = int(rows_arr.min())
+                max_r = int(rows_arr.max())
+                min_c = int(cols_arr.min())
+                max_c = int(cols_arr.max())
+                mean_r = float(rows_arr.mean())
+                mean_c = float(cols_arr.mean())
                 centroid = (mean_r, mean_c)
                 grid_pos = (int(round(mean_r)), int(round(mean_c)))
                 components.append(
@@ -1009,7 +1099,7 @@ class PerceptionEngine:
         receptacle_pos = learned_receptacle_positions or set()
         entities: list[SpatialEntity] = []
 
-        unique_vals = [int(v) for v in np.unique(grid) if int(v) != bg]
+        unique_vals = [int(v) for v in _fast_unique_counts(grid)[0].tolist() if int(v) != bg]
         geom_comps = PerceptionEngine._get_cached_component_geometry(grid, bg, unique_vals)
         for val, area, bbox, centroid, grid_pos, cells in geom_comps:
             cells_list = list(cells)
@@ -1131,15 +1221,19 @@ class PerceptionEngine:
         for r, c in zip(rows, cols):
             mutated.append((int(r), int(c), int(prev_grid[r, c]), int(curr_grid[r, c])))
 
-        prev_features = set(int(v) for v in np.unique(prev_grid))
-        curr_features = set(int(v) for v in np.unique(curr_grid))
+        prev_vals, prev_counts = _fast_unique_counts(prev_grid)
+        curr_vals, _ = _fast_unique_counts(curr_grid)
+        prev_features = set(int(v) for v in prev_vals.tolist())
+        curr_features = set(int(v) for v in curr_vals.tolist())
 
-        bg = int(np.bincount(prev_grid.flatten()).argmax())
+        bg = int(prev_vals[np.argmax(prev_counts)]) if prev_vals.size else 0
         translation_candidates: list[tuple[int, int, int, int]] = []
+        changed_feats = {old_v for _, _, old_v, _ in mutated} | {
+            new_v for _, _, _, new_v in mutated
+        }
 
-        for feat in np.unique(prev_grid):
-            feat_int = int(feat)
-            if feat_int == bg:
+        for feat_int in changed_feats:
+            if feat_int == bg or feat_int not in prev_features:
                 continue
             prev_pts = np.where(prev_grid == feat_int)
             curr_pts = np.where(curr_grid == feat_int)

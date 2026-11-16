@@ -35,6 +35,7 @@ from hbllm.hcir.stores import (
     EventType,
     GraphEvent,
     IEventStore,
+    _resolve_compaction_split,
 )
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ class SQLiteEventStore(IEventStore):
         ))
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, max_events: int | None = None) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._db_path))
@@ -152,6 +153,7 @@ class SQLiteEventStore(IEventStore):
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA busy_timeout=5000")
+        self._max_events: int | None = max_events
         self._last_hash: str = ""
         self._sequence: int = 0
         self._batch_depth: int = 0
@@ -199,6 +201,9 @@ class SQLiteEventStore(IEventStore):
                 self._batch_saved_state = None
         finally:
             self._batch_depth -= 1
+            if self._batch_depth == 0 and self._max_events is not None:
+                if self.event_count > self._max_events:
+                    self.compact(max_events=self._max_events)
 
     def append(self, event: GraphEvent) -> None:
         """Append an event with hash chaining."""
@@ -228,6 +233,104 @@ class SQLiteEventStore(IEventStore):
             self._conn.commit()
         self._last_hash = content_hash
         self._sequence = max(self._sequence, event.sequence)
+        if (
+            self._batch_depth == 0
+            and self._max_events is not None
+            and self.event_count > self._max_events
+        ):
+            self.compact(max_events=self._max_events)
+
+    def compact(
+        self,
+        *,
+        keep_after_sequence: int | None = None,
+        max_events: int | None = None,
+        retain_tail: int | None = None,
+    ) -> int:
+        """Compact prefix events into one SNAPSHOT_CREATED checkpoint row with intact hash chain."""
+        rows = self._conn.execute(
+            "SELECT * FROM hcir_events ORDER BY sequence ASC, id ASC"
+        ).fetchall()
+        events = [
+            GraphEvent(
+                sequence=r["sequence"],
+                event_type=r["event_type"],
+                timestamp=r["timestamp"],
+                author=r["author"],
+                data=json.loads(r["data_json"]),
+            )
+            for r in rows
+        ]
+        prefix, _suffix = _resolve_compaction_split(
+            events,
+            keep_after_sequence=keep_after_sequence,
+            max_events=max_events,
+            retain_tail=retain_tail,
+        )
+        if not prefix:
+            return 0
+        from hbllm.hcir.snapshot import fold_events_to_snapshot_payload
+
+        cut = len(prefix)
+        suffix_rows = rows[cut:]
+        anchor_seq = prefix[-1].sequence
+        pre_hash = rows[cut - 1]["content_hash"]
+        nodes_data, edges_data = fold_events_to_snapshot_payload(prefix)
+        ckpt_data = {
+            "compacted_events": len(prefix),
+            "compacted_through": anchor_seq,
+            "pre_compaction_hash": pre_hash,
+            "nodes": nodes_data,
+            "edges": edges_data,
+        }
+        ckpt_json = json.dumps(ckpt_data, default=str)
+        now = time.time()
+        ckpt_hash = _compute_event_hash(anchor_seq, EventType.SNAPSHOT_CREATED, ckpt_json, "")
+        rebuilt_rows: list[tuple[Any, ...]] = [
+            (
+                anchor_seq,
+                str(EventType.SNAPSHOT_CREATED),
+                "event_compactor",
+                "default",
+                now,
+                ckpt_json,
+                ckpt_hash,
+                "",
+            )
+        ]
+        prev_hash = ckpt_hash
+        for r in suffix_rows:
+            row_hash = _compute_event_hash(
+                r["sequence"], r["event_type"], r["data_json"], prev_hash
+            )
+            rebuilt_rows.append(
+                (
+                    r["sequence"],
+                    r["event_type"],
+                    r["author"],
+                    r["tenant_id"],
+                    r["timestamp"],
+                    r["data_json"],
+                    row_hash,
+                    prev_hash,
+                )
+            )
+            prev_hash = row_hash
+
+        self._conn.execute("DELETE FROM hcir_events")
+        self._conn.executemany(
+            """
+            INSERT INTO hcir_events
+                (sequence, event_type, author, tenant_id, timestamp,
+                 data_json, content_hash, previous_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rebuilt_rows,
+        )
+        if self._batch_depth == 0:
+            self._conn.commit()
+        self._last_hash = prev_hash
+        return len(rows) - len(rebuilt_rows)
 
     def get_events(
         self,

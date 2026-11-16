@@ -39,6 +39,7 @@ class CognitiveSystemConfig:
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
     custom_verification_stages: list[Any] | None = None
+    max_events_per_store: int | None = 2000
 
 
 @dataclass
@@ -99,7 +100,10 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         from hbllm.hcir.stores.sqlite_event_store import SQLiteEventStore
 
         resolved_mem_dir.mkdir(parents=True, exist_ok=True)
-        persistent_store = SQLiteEventStore(resolved_mem_dir / "persistent.db")
+        persistent_store = SQLiteEventStore(
+            resolved_mem_dir / "persistent.db",
+            max_events=cfg.max_events_per_store,
+        )
 
     tiered_workspace = TieredWorkspace(persistent_store=persistent_store)
     # Unify workspace: services.workspace IS tiered_workspace.working_state

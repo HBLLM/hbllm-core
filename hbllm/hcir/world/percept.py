@@ -521,8 +521,18 @@ class ExogenousSignalTracker:
             return self._cached_partition_rows
 
         flags = np.zeros(H, dtype=bool)
-        if arr.min() >= 0:
-            n_vals = int(arr.max()) + 1
+        max_val = int(arr.max())
+        fast_hist = int(arr.min()) >= 0 and max_val < 256
+        if fast_hist:
+            n_vals = max_val + 1
+            counts = np.stack([np.bincount(row.astype(np.int64), minlength=n_vals) for row in arr])
+            dom_vals = np.argmax(counts, axis=1)
+            dom_counts = counts[np.arange(H), dom_vals]
+            div_rows = (dom_vals != bg_val) & (dom_counts >= int(W * 0.85))
+            cum_counts = np.cumsum(counts, axis=0)
+            total_counts = cum_counts[-1]
+        elif int(arr.min()) >= 0:
+            n_vals = max_val + 1
             counts = np.stack([np.bincount(row.astype(np.int64), minlength=n_vals) for row in arr])
             dom_vals = np.argmax(counts, axis=1)
             dom_counts = counts[np.arange(H), dom_vals]
@@ -540,12 +550,30 @@ class ExogenousSignalTracker:
             for rr in range(min(band_depth + 1, H)):
                 if div_rows[rr + 1 : min(band_depth + 1, H)].any():
                     flags[rr] = True
+        thresh_85 = int(W * 0.85)
         for div_r in range(band_depth, 2, -1):
+            if fast_hist:
+                line_idx = int(dom_vals[div_r])
+                line_cnt = int(dom_counts[div_r])
+                if line_cnt >= thresh_85:
+                    banner_c = cum_counts[div_r - 1]
+                    field_c = total_counts - cum_counts[div_r]
+                    b_max_cnt = int(banner_c.max())
+                    banner_dom = int(np.argmax(banner_c))
+                    field_dom = int(np.argmax(field_c))
+                    has_distinct_bg = (banner_dom != field_dom) and (
+                        (b_max_cnt / (div_r * W)) >= 0.85
+                    )
+                    has_divider_line = (line_idx != field_dom) and (line_cnt >= thresh_85)
+                    if has_distinct_bg or has_divider_line:
+                        flags[: div_r + 1] = True
+                        break
+                continue
             line = arr[div_r, :]
             vals, cnts = np.unique(line, return_counts=True)
             if len(cnts) > 0:
                 idx = int(np.argmax(cnts))
-                if int(cnts[idx]) >= int(W * 0.85):
+                if int(cnts[idx]) >= thresh_85:
                     line_color = int(vals[idx])
                     banner_region = arr[:div_r, :]
                     field_region = arr[div_r + 1 :, :]
@@ -559,7 +587,7 @@ class ExogenousSignalTracker:
                             (b_cnts[b_max] / banner_region.size) >= 0.85
                         )
                         has_divider_line = (line_color != field_dom) and (
-                            int(cnts[idx]) >= int(W * 0.85)
+                            int(cnts[idx]) >= thresh_85
                         )
                         if has_distinct_bg or has_divider_line:
                             flags[: div_r + 1] = True
@@ -573,11 +601,28 @@ class ExogenousSignalTracker:
         for div_r in range(H - 4, max(H - band_depth - 2, H - H // 3), -1):
             if not (0 <= div_r < H):
                 continue
+            if fast_hist:
+                line_idx = int(dom_vals[div_r])
+                line_cnt = int(dom_counts[div_r])
+                if line_cnt >= thresh_85:
+                    banner_c = total_counts - cum_counts[div_r]
+                    field_c = cum_counts[div_r - 1]
+                    b_max_cnt = int(banner_c.max())
+                    banner_dom = int(np.argmax(banner_c))
+                    field_dom = int(np.argmax(field_c))
+                    has_distinct_bg = (banner_dom != field_dom) and (
+                        (b_max_cnt / ((H - div_r - 1) * W)) >= 0.85
+                    )
+                    has_divider_line = (line_idx != field_dom) and (line_cnt >= thresh_85)
+                    if has_distinct_bg or has_divider_line:
+                        flags[div_r:] = True
+                        break
+                continue
             line = arr[div_r, :]
             vals, cnts = np.unique(line, return_counts=True)
             if len(cnts) > 0:
                 idx = int(np.argmax(cnts))
-                if int(cnts[idx]) >= int(W * 0.85):
+                if int(cnts[idx]) >= thresh_85:
                     line_color = int(vals[idx])
                     banner_region = arr[div_r + 1 :, :]
                     field_region = arr[:div_r, :]
@@ -591,7 +636,7 @@ class ExogenousSignalTracker:
                             (b_cnts[b_max] / banner_region.size) >= 0.85
                         )
                         has_divider_line = (line_color != field_dom) and (
-                            int(cnts[idx]) >= int(W * 0.85)
+                            int(cnts[idx]) >= thresh_85
                         )
                         if has_distinct_bg or has_divider_line:
                             flags[div_r:] = True

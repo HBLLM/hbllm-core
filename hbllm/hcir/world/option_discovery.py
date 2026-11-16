@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -124,12 +124,14 @@ class OptionDiscoveryEngine:
         self.total_episode_steps: int = 0
         self.option_executed_steps: int = 0
         self.last_scanned_grid_sig: tuple[int, int, bytes] | None = None
+        self._topology_cache: dict[tuple[int, int, int, bytes], list[tuple[int, int]]] = {}
 
     def on_boundary(self, boundary: Any) -> None:
         """Reset layout-local bottleneck cache on cross-context episode boundaries."""
         if not getattr(boundary, "is_same_context", getattr(boundary, "same_level", False)):
             self.discovered_options.clear()
             self.last_scanned_grid_sig = None
+            self._topology_cache.clear()
 
     def find_articulation_points(
         self,
@@ -180,36 +182,51 @@ class OptionDiscoveryEngine:
     def compute_betweenness_centrality(
         self,
         adjacency: dict[tuple[int, int], set[tuple[int, int]]],
+        max_landmarks: int = 128,
     ) -> dict[tuple[int, int], float]:
-        """Compute Brandes betweenness centrality over spatial connectivity manifold."""
+        """Compute integer-indexed Brandes betweenness centrality (exact for <= 128 nodes)."""
         nodes = list(adjacency.keys())
         n = len(nodes)
         if n <= 2:
             return {node: 0.0 for node in nodes}
 
-        cb: dict[tuple[int, int], float] = defaultdict(float)
+        idx_of = {u: i for i, u in enumerate(nodes)}
+        adj_idx: list[list[int]] = [[idx_of[w] for w in adjacency[u] if w in idx_of] for u in nodes]
+        cb = [0.0] * n
 
-        for s in nodes:
-            stack: list[tuple[int, int]] = []
-            pred: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-            sigma: dict[tuple[int, int], float] = defaultdict(float)
+        if n <= max_landmarks:
+            sources = range(n)
+        else:
+            stride = n / max_landmarks
+            sources = [int(i * stride) for i in range(max_landmarks)]
+
+        for s in sources:
+            stack: list[int] = []
+            pred: list[list[int]] = [[] for _ in range(n)]
+            sigma = [0.0] * n
             sigma[s] = 1.0
-            dist: dict[tuple[int, int], int] = {s: 0}
-            queue: deque[tuple[int, int]] = deque([s])
+            dist = [-1] * n
+            dist[s] = 0
+            queue: deque[int] = deque([s])
 
             while queue:
                 v = queue.popleft()
                 stack.append(v)
                 dv = dist[v]
-                for w in adjacency.get(v, set()):
-                    if w not in dist:
-                        dist[w] = dv + 1
+                nd = dv + 1
+                sv = sigma[v]
+                for w in adj_idx[v]:
+                    dw = dist[w]
+                    if dw < 0:
+                        dist[w] = nd
                         queue.append(w)
-                    if dist[w] == dv + 1:
-                        sigma[w] += sigma[v]
+                        sigma[w] += sv
+                        pred[w].append(v)
+                    elif dw == nd:
+                        sigma[w] += sv
                         pred[w].append(v)
 
-            delta: dict[tuple[int, int], float] = defaultdict(float)
+            delta = [0.0] * n
             while stack:
                 w = stack.pop()
                 coeff = (1.0 + delta[w]) / sigma[w]
@@ -218,9 +235,9 @@ class OptionDiscoveryEngine:
                 if w != s:
                     cb[w] += delta[w]
 
-        # Normalization for undirected graph: 2 / ((n-1)(n-2))
-        scale = 2.0 / ((n - 1) * (n - 2)) if n > 2 else 1.0
-        return {node: cb[node] * scale for node in nodes}
+        source_cnt = len(sources)
+        scale = (2.0 * n) / (source_cnt * (n - 1) * (n - 2))
+        return {node: cb[i] * scale for i, node in enumerate(nodes)}
 
     def grid_to_adjacency(
         self,
@@ -229,16 +246,22 @@ class OptionDiscoveryEngine:
     ) -> dict[tuple[int, int], set[tuple[int, int]]]:
         """Convert 2D lattice into an undirected 4-connected spatial adjacency graph."""
         H, W = grid.shape
-        adjacency: dict[tuple[int, int], set[tuple[int, int]]] = defaultdict(set)
-        for r in range(H):
-            for c in range(W):
-                if grid[r, c] != walkable_val:
-                    continue
-                u = (r, c)
-                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    nr, nc = r + dr, c + dc
-                    if 0 <= nr < H and 0 <= nc < W and grid[nr, nc] == walkable_val:
-                        adjacency[u].add((nr, nc))
+        mask = grid == walkable_val
+        rows, cols = np.nonzero(mask)
+        adjacency: dict[tuple[int, int], set[tuple[int, int]]] = {}
+        for r_raw, c_raw in zip(rows.tolist(), cols.tolist()):
+            u = (r_raw, c_raw)
+            nbs: set[tuple[int, int]] = set()
+            if r_raw > 0 and mask[r_raw - 1, c_raw]:
+                nbs.add((r_raw - 1, c_raw))
+            if r_raw + 1 < H and mask[r_raw + 1, c_raw]:
+                nbs.add((r_raw + 1, c_raw))
+            if c_raw > 0 and mask[r_raw, c_raw - 1]:
+                nbs.add((r_raw, c_raw - 1))
+            if c_raw + 1 < W and mask[r_raw, c_raw + 1]:
+                nbs.add((r_raw, c_raw + 1))
+            if nbs:
+                adjacency[u] = nbs
         return adjacency
 
     def discover_bottlenecks_from_grid(
@@ -247,6 +270,12 @@ class OptionDiscoveryEngine:
         walkable_val: int = 0,
     ) -> list[tuple[int, int]]:
         """Discover spatial bottleneck states in grid using articulation cuts and centrality."""
+        mask = grid == walkable_val
+        key = (int(grid.shape[0]), int(grid.shape[1]), int(walkable_val), mask.tobytes())
+        cached = self._topology_cache.get(key)
+        if cached is not None:
+            return list(cached)
+
         adjacency = self.grid_to_adjacency(grid, walkable_val=walkable_val)
         cuts = set(self.find_articulation_points(adjacency))
         centralities = self.compute_betweenness_centrality(adjacency)
@@ -255,8 +284,11 @@ class OptionDiscoveryEngine:
             pos for pos, score in centralities.items() if score >= self.betweenness_threshold
         }
 
-        bottlenecks = cuts.union(high_centrality)
-        return sorted(list(bottlenecks))
+        bottlenecks = sorted(cuts.union(high_centrality))
+        if len(self._topology_cache) >= 32:
+            self._topology_cache.pop(next(iter(self._topology_cache)))
+        self._topology_cache[key] = list(bottlenecks)
+        return bottlenecks
 
     def induce_option(
         self,

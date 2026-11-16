@@ -1038,7 +1038,9 @@ class JournaledEngineView:
         if route == 0:
             return object.__getattribute__(self, "_state_proxy")
         val = getattr(object.__getattribute__(self, "_wrapped_engine"), name)
-        if route != 2:
+        if route == 1:
+            if name in _OWNED_SUBSYSTEMS and name != "prev_grid_cache":
+                object.__setattr__(self, name, val)
             return val
         if not isinstance(val, (dict, set, list, deque)):
             return val

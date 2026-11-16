@@ -321,15 +321,19 @@ def bench_ablation() -> None:
 
 @bench_app.command("profile")
 def bench_profile() -> None:
-    """Profile decide() hot paths across Python and native Rust substrates (sub-10ms budget)."""
+    """Profile decide() hot paths and full 32x32 5-stage cognitive step latency."""
     from hbllm.benchmarks.substrate_profiler import (
+        benchmark_e2e_cognitive_step_32x32,
+        print_cognitive_step_profile_report,
         print_substrate_profile_report,
         run_substrate_profile,
     )
 
     report = run_substrate_profile()
     print_substrate_profile_report(report)
-    if not report.budget_met:
+    e2e_report = benchmark_e2e_cognitive_step_32x32()
+    print_cognitive_step_profile_report(e2e_report)
+    if not report.budget_met or not e2e_report.budget_met:
         raise typer.Exit(code=1)
 
 

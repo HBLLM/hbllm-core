@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -55,6 +56,54 @@ logger = logging.getLogger(__name__)
 from hbllm.hcir.tier_types import WorkspaceTier
 
 __all_tier__ = WorkspaceTier  # re-export (canonical home: hbllm.hcir.tier_types)
+
+
+@dataclass(frozen=True)
+class TierRetentionPolicy:
+    """Declarative retention, decay, node-budget, and compaction policy for a tier."""
+
+    tier: WorkspaceTier
+    max_nodes: int
+    max_nodes_per_world: int
+    half_life_seconds: float
+    max_events: int
+    retention_scope: Literal["episode_local", "context_local", "lifelong"] = "context_local"
+
+
+DEFAULT_TIER_POLICIES: dict[WorkspaceTier, TierRetentionPolicy] = {
+    WorkspaceTier.WORKING: TierRetentionPolicy(
+        tier=WorkspaceTier.WORKING,
+        max_nodes=512,
+        max_nodes_per_world=256,
+        half_life_seconds=900.0,
+        max_events=1000,
+        retention_scope="episode_local",
+    ),
+    WorkspaceTier.BRAIN: TierRetentionPolicy(
+        tier=WorkspaceTier.BRAIN,
+        max_nodes=2000,
+        max_nodes_per_world=512,
+        half_life_seconds=3600.0,
+        max_events=2000,
+        retention_scope="context_local",
+    ),
+    WorkspaceTier.PERSISTENT: TierRetentionPolicy(
+        tier=WorkspaceTier.PERSISTENT,
+        max_nodes=5000,
+        max_nodes_per_world=1000,
+        half_life_seconds=36000.0,
+        max_events=2000,
+        retention_scope="lifelong",
+    ),
+    WorkspaceTier.META: TierRetentionPolicy(
+        tier=WorkspaceTier.META,
+        max_nodes=1000,
+        max_nodes_per_world=500,
+        half_life_seconds=36000.0,
+        max_events=1000,
+        retention_scope="lifelong",
+    ),
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -392,28 +441,47 @@ class TieredWorkspace:
         self,
         persistent_store: IEventStore | None = None,
         snapshot_interval: int = 1000,
+        tier_policies: dict[WorkspaceTier, TierRetentionPolicy] | None = None,
     ) -> None:
+        self._tier_policies: dict[WorkspaceTier, TierRetentionPolicy] = {
+            **DEFAULT_TIER_POLICIES,
+            **(tier_policies or {}),
+        }
         self.working = WorkingWorkspace()
         self.brain = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="brain",
             tier=WorkspaceTier.BRAIN,
+            max_nodes=self._tier_policies[WorkspaceTier.BRAIN].max_nodes,
         )
         self.persistent = HCIRWorkspaceState(
             event_store=persistent_store or InMemoryEventStore(),
             branch_mode=BranchMode.LIVE,
             branch_name="persistent",
             tier=WorkspaceTier.PERSISTENT,
+            max_nodes=self._tier_policies[WorkspaceTier.PERSISTENT].max_nodes,
         )
         self.meta = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="meta",
             tier=WorkspaceTier.META,
+            max_nodes=self._tier_policies[WorkspaceTier.META].max_nodes,
         )
 
         self._snapshot_interval = snapshot_interval
         self._commits_since_snapshot: int = 0
         self._default_working_frame: TaskFrame | None = None
+
+    def get_retention_policy(self, tier: WorkspaceTier) -> TierRetentionPolicy:
+        """Return the active retention and capacity policy for ``tier``."""
+        return self._tier_policies[tier]
+
+    def set_retention_policy(self, policy: TierRetentionPolicy) -> None:
+        """Update retention and budget limits for a tier dynamically."""
+        self._tier_policies[policy.tier] = policy
+        ws = self.get_tier(policy.tier)
+        if ws is not None:
+            ws.max_nodes = policy.max_nodes
 
     # ── Task Frame & Interruption Management ─────────────────────────
 
@@ -903,15 +971,99 @@ class TieredWorkspace:
 
         return pruned_ids
 
+    def enforce_node_budgets(
+        self,
+        *,
+        max_nodes_per_world: int | None = None,
+    ) -> dict[str, int]:
+        """Enforce per-world and per-tier node caps via low-salience consolidation."""
+        grant = getattr(self, "_system_grant", None)
+        evicted: dict[str, int] = {}
+        for tier in (WorkspaceTier.BRAIN, WorkspaceTier.PERSISTENT, WorkspaceTier.META):
+            ws = self.get_tier(tier)
+            if ws is None:
+                continue
+            policy = self._tier_policies[tier]
+            world_cap = (
+                max_nodes_per_world
+                if max_nodes_per_world is not None
+                else policy.max_nodes_per_world
+            )
+            count = 0
+            if world_cap > 0 and ws.graph.node_count > world_cap:
+                world_ids = {
+                    wid
+                    for n in ws.graph.all_nodes()
+                    if (wid := ws._node_world_scope(n)) is not None
+                }
+                for wid in sorted(world_ids):
+                    count += len(
+                        ws.consolidate_node_budget(
+                            max_nodes=world_cap,
+                            world_id=wid,
+                            grant=grant,
+                        )
+                    )
+            tier_cap = policy.max_nodes
+            if tier_cap > 0 and ws.graph.node_count > tier_cap:
+                count += len(ws.consolidate_node_budget(max_nodes=tier_cap, grant=grant))
+            evicted[tier.value] = count
+
+        working_cap = self._tier_policies[WorkspaceTier.WORKING].max_nodes
+        working_evicted = 0
+        if working_cap > 0:
+            for frame in self.working.active_frames:
+                if frame.workspace.graph.node_count > working_cap:
+                    working_evicted += len(
+                        frame.workspace.consolidate_node_budget(max_nodes=working_cap, grant=grant)
+                    )
+        evicted[WorkspaceTier.WORKING.value] = working_evicted
+        return evicted
+
+    def compact_event_stores(self, *, max_events: int | None = None) -> dict[str, int]:
+        """Compact historical events across tier stores exceeding retention limits."""
+        compacted: dict[str, int] = {}
+        for tier in (WorkspaceTier.BRAIN, WorkspaceTier.PERSISTENT, WorkspaceTier.META):
+            ws = self.get_tier(tier)
+            if ws is None:
+                continue
+            limit = max_events if max_events is not None else self._tier_policies[tier].max_events
+            compacted[tier.value] = (
+                ws.event_store.compact(max_events=limit)
+                if ws.event_store.event_count > limit
+                else 0
+            )
+        w_limit = (
+            max_events
+            if max_events is not None
+            else self._tier_policies[WorkspaceTier.WORKING].max_events
+        )
+        w_compacted = 0
+        for frame in self.working.active_frames:
+            if frame.workspace.event_store.event_count > w_limit:
+                w_compacted += frame.workspace.event_store.compact(max_events=w_limit)
+        compacted[WorkspaceTier.WORKING.value] = w_compacted
+        return compacted
+
     def run_memory_hygiene_cycle(
         self,
-        half_life_seconds: float = 3600.0,
+        half_life_seconds: float | None = None,
         similarity_threshold: float = 0.85,
     ) -> dict[str, Any]:
         """Execute complete memory hygiene across working, brain, and persistent tiers."""
+        brain_hl = (
+            half_life_seconds
+            if half_life_seconds is not None
+            else self._tier_policies[WorkspaceTier.BRAIN].half_life_seconds
+        )
+        persist_hl = (
+            half_life_seconds * 10.0
+            if half_life_seconds is not None
+            else self._tier_policies[WorkspaceTier.PERSISTENT].half_life_seconds
+        )
         decayed_brain = self.apply_exponential_decay(
             tier=WorkspaceTier.BRAIN,
-            half_life_seconds=half_life_seconds,
+            half_life_seconds=brain_hl,
         )
         pruned_brain = self.prune_interfering_memories(
             tier=WorkspaceTier.BRAIN,
@@ -919,14 +1071,21 @@ class TieredWorkspace:
         )
         decayed_persistent = self.apply_exponential_decay(
             tier=WorkspaceTier.PERSISTENT,
-            half_life_seconds=half_life_seconds * 10.0,
+            half_life_seconds=persist_hl,
         )
+        budget_evictions = self.enforce_node_budgets()
+        compacted_events = self.compact_event_stores()
+        budget_total = sum(budget_evictions.values())
 
         return {
             "decayed_brain_nodes": len(decayed_brain),
             "pruned_brain_nodes": len(pruned_brain),
             "decayed_persistent_nodes": len(decayed_persistent),
-            "total_pruned": len(decayed_brain) + len(pruned_brain) + len(decayed_persistent),
+            "budget_evicted_nodes": budget_total,
+            "compacted_events": sum(compacted_events.values()),
+            "total_pruned": (
+                len(decayed_brain) + len(pruned_brain) + len(decayed_persistent) + budget_total
+            ),
         }
 
     def snapshot(self, tier: WorkspaceTier) -> Snapshot | None:
@@ -943,16 +1102,23 @@ class TieredWorkspace:
     def notify_commit(self) -> None:
         """Notify the workspace that a transaction was committed.
 
-        Triggers periodic snapshotting of the persistent tier.
+        Triggers periodic snapshotting, event compaction, and node-budget enforcement.
         """
         self._commits_since_snapshot += 1
+        p_policy = self._tier_policies[WorkspaceTier.PERSISTENT]
         if self._commits_since_snapshot >= self._snapshot_interval:
             self.snapshot(WorkspaceTier.PERSISTENT)
             self._commits_since_snapshot = 0
+            if self.persistent.event_store.event_count > p_policy.max_events:
+                self.compact_event_stores(max_events=p_policy.max_events)
             logger.info(
                 "Auto-snapshot persistent workspace (every %d commits)",
                 self._snapshot_interval,
             )
+        if self.persistent.graph.node_count > p_policy.max_nodes:
+            self.enforce_node_budgets()
+        if self.persistent.event_store.event_count > p_policy.max_events * 2:
+            self.compact_event_stores(max_events=p_policy.max_events)
 
     def populate_meta_stats(self) -> dict[str, int | float | dict[str, int]]:
         """Populate the Meta workspace with cognitive performance statistics.

@@ -50,6 +50,34 @@ class SubstrateProfileReport:
     native_available: bool
 
 
+@dataclass
+class StageLatencySummary:
+    """Per-stage latency statistics (ms) collected from CorticalPipeline."""
+
+    stage: str
+    p50_ms: float
+    p95_ms: float
+    max_ms: float
+    mean_ms: float
+
+
+@dataclass
+class CognitiveStepProfileReport:
+    """End-to-end 32x32 5-stage cognitive cycle latency profile."""
+
+    grid_shape: tuple[int, int]
+    steps: int
+    e2e_p50_ms: float
+    e2e_p95_ms: float
+    e2e_max_ms: float
+    target_p95_budget_ms: float
+    budget_met: bool
+    stage_summaries: list[StageLatencySummary]
+
+
+DEFAULT_E2E_32X32_P95_BUDGET_MS = 45.0
+
+
 def benchmark_graph_snapshotting(
     node_count: int = 500, iterations: int = 20
 ) -> HotPathBenchmarkResult:
@@ -357,3 +385,113 @@ def print_substrate_profile_report(report: SubstrateProfileReport) -> None:
     budget_str = "✓ PASSED (<= 10.0 ms)" if report.budget_met else "✗ FAILED (> 10.0 ms)"
     print(f"  Combined Decisional Cycle p50: {report.total_native_p50_ms:.3f} ms")
     print(f"  Combined Decisional Cycle p95: {report.total_native_p95_ms:.3f} ms -> {budget_str}\n")
+
+
+def benchmark_e2e_cognitive_step_32x32(
+    steps: int = 40,
+    target_p95_budget_ms: float = DEFAULT_E2E_32X32_P95_BUDGET_MS,
+    warmup_steps: int = 2,
+) -> CognitiveStepProfileReport:
+    """Profile end-to-end AutonomousEpistemicEngine.step() per cortical stage at 32x32."""
+    import gc
+
+    import numpy as np
+
+    from hbllm.hcir.world.percept import EmbodiedObservation
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    base_grid = np.zeros((32, 32), dtype=np.int32)
+    base_grid[0, :] = 1
+    base_grid[-1, :] = 1
+    base_grid[:, 0] = 1
+    base_grid[:, -1] = 1
+    base_grid[8, 1:24] = 1
+    base_grid[16, 8:31] = 1
+    base_grid[24, 1:20] = 1
+    base_grid[28, 28] = 5
+
+    cfg = CognitiveSystemConfig(world_id="profile_32x32", memory_dir=None)
+    warmup_engine = build_cognitive_system(cfg).engine
+    deltas = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+
+    for _ in range(max(0, warmup_steps)):
+        gw = base_grid.copy()
+        gw[2, 2] = 4
+        warmup_engine.step(
+            EmbodiedObservation(
+                lattice=gw,
+                available_actions=[1, 2, 3, 4],
+                context_id="warmup_32x32",
+                episode_id="0",
+            )
+        )
+
+    gc.collect()
+    engine = build_cognitive_system(cfg).engine
+    e2e_ms: list[float] = []
+    stage_samples: dict[str, list[float]] = {}
+    av = [2, 2]
+
+    for _ in range(max(1, steps)):
+        g = base_grid.copy()
+        g[av[0], av[1]] = 4
+        obs = EmbodiedObservation(
+            lattice=g,
+            available_actions=[1, 2, 3, 4],
+            context_id="profile_32x32",
+            episode_id="0",
+        )
+        t0 = time.perf_counter()
+        action, _ = engine.step(obs)
+        e2e_ms.append((time.perf_counter() - t0) * 1000.0)
+        for st_name, st_ms in engine.cortical_pipeline.last_stage_timings_ms.items():
+            stage_samples.setdefault(st_name, []).append(st_ms)
+        if action is not None:
+            dr, dc = deltas.get(int(action), (0, 0))
+            nr, nc = av[0] + dr, av[1] + dc
+            if 0 <= nr < 32 and 0 <= nc < 32 and base_grid[nr, nc] != 1:
+                av = [nr, nc]
+
+    e2e_arr = np.asarray(e2e_ms, dtype=float)
+    summaries = [
+        StageLatencySummary(
+            stage=name,
+            p50_ms=round(float(np.percentile(va, 50)), 3),
+            p95_ms=round(float(np.percentile(va, 95)), 3),
+            max_ms=round(float(np.max(va)), 3),
+            mean_ms=round(float(np.mean(va)), 3),
+        )
+        for name, vals in stage_samples.items()
+        for va in (np.asarray(vals, dtype=float),)
+    ]
+    p50_val = round(float(np.percentile(e2e_arr, 50)), 3)
+    p95_val = round(float(np.percentile(e2e_arr, 95)), 3)
+    max_val = round(float(np.max(e2e_arr)), 3)
+    return CognitiveStepProfileReport(
+        grid_shape=(32, 32),
+        steps=len(e2e_ms),
+        e2e_p50_ms=p50_val,
+        e2e_p95_ms=p95_val,
+        e2e_max_ms=max_val,
+        target_p95_budget_ms=target_p95_budget_ms,
+        budget_met=p95_val <= target_p95_budget_ms,
+        stage_summaries=summaries,
+    )
+
+
+def print_cognitive_step_profile_report(report: CognitiveStepProfileReport) -> None:
+    """Format and print the per-stage 32x32 cognitive step latency breakdown."""
+    print(
+        f"  End-to-End {report.grid_shape[0]}x{report.grid_shape[1]} Cognitive Cycle "
+        f"(steps={report.steps}, target p95 <= {report.target_p95_budget_ms:.1f} ms):\n"
+    )
+    print(f"  {'Stage / Component':<24} | {'p50 (ms)':<9} | {'p95 (ms)':<9} | {'max (ms)':<9}")
+    print("  " + "─" * 58)
+    for st in report.stage_summaries:
+        print(f"  {st.stage:<24} | {st.p50_ms:<9.3f} | {st.p95_ms:<9.3f} | {st.max_ms:<9.3f}")
+    print("  " + "─" * 58)
+    status = "✓ PASSED" if report.budget_met else "✗ EXCEEDED"
+    print(
+        f"  Total E2E engine.step(): p50={report.e2e_p50_ms:.2f}ms, "
+        f"p95={report.e2e_p95_ms:.2f}ms, max={report.e2e_max_ms:.2f}ms -> {status}\n"
+    )
