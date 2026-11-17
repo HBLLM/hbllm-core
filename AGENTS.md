@@ -13,7 +13,8 @@
 > - `exploration_deaths` reduced from 54 to 33 (−38.9%).  
 > - Regimes: `language_goals` 100% zero-shot (20/20, 0 deaths); `multi_agent` 100% transfer solve rate (up from 0%); `continuous_control` 80% zero-shot; `partial_observability` 68.4% transfer solve rate (up from 15.8%); `long_horizon` 89.5% transfer solve rate with transactional chunking preventing constitutional rejection.  
 > - Dev suite maintained without regression (`reports/dev/dev_handcrafted_20261117_041629.json`: `cross_seed transfer_solve_rate=0.9868`, 75/76 solved). Rust kernels `< 0.2ms`; 32×32 E2E `p50=9.65ms / p95=25.98ms`.  
-> - Zero held-out execution during iteration. Production gaps are listed in §6.
+> - **Official Sealed Held-Out v2 Milestone (`eval-phase2-r9` on `f0587fc1`, n=120, 20 seeds/task, `reports/heldout/LEDGER.md`):** `zero_shot` solve rate = **0.6083** (73/120 solved, CI `[0.5189, 0.6910]`, generality = **0.6472**) vs random baseline 0.0583 (7/120); `cross_seed transfer_solve_rate` = **0.6930** (CI `[0.6032, 0.7702]`); `same_layout_replay` solve rate = **0.8333** (generality = **0.6987**). Partial obs held-out zero-shot = **0.9500** (19/20 solved, 0 deaths); continuous reach zero-shot = **0.7000** (100% transfer); symbolic rules zero-shot = **0.4500** (100% transfer).
+> - Production gaps are listed in §6.
 
 ---
 
