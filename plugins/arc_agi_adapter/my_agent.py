@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -1018,7 +1018,7 @@ class CognitiveAgentAdapter:
         if hasattr(game_act, "value"):
             act_id = int(game_act.value)
         else:
-            act_id = int(game_act)
+            act_id = int(cast(Any, game_act))
 
         params: dict[str, Any] = {}
         data = getattr(game_act, "data", None)

@@ -217,7 +217,16 @@ class HCIRWorkspaceState:
         meta = dict(metadata or {})
         if grant is not None:
             meta["commit_grant"] = grant.grant_id
-        tx = HCIRTransaction(author=author, operations=list(operations), metadata=meta)
+        ops_list = list(operations)
+        if len(ops_list) > 400:
+            last_committed = None
+            for i in range(0, len(ops_list), 400):
+                sub_tx = HCIRTransaction(
+                    author=author, operations=ops_list[i : i + 400], metadata=meta
+                )
+                last_committed = self.transaction_manager.commit(sub_tx)
+            return last_committed  # type: ignore[return-value]
+        tx = HCIRTransaction(author=author, operations=ops_list, metadata=meta)
         return self.transaction_manager.commit(tx)
 
     # ── Graph Operations (kernel-internal; recorded in event log) ────

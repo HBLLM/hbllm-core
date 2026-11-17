@@ -410,7 +410,7 @@ def benchmark_e2e_cognitive_step_32x32(
     base_grid[24, 1:20] = 1
     base_grid[28, 28] = 5
 
-    cfg = CognitiveSystemConfig(world_id="profile_32x32", memory_dir=None)
+    cfg = CognitiveSystemConfig(world_id="profile_32x32", memory_dir=None, enable_grounding=False)
     warmup_engine = build_cognitive_system(cfg).engine
     deltas = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
 

@@ -41,15 +41,17 @@ def test_composition_root_workspace_unification():
 
 def test_persistent_memory_defaults_and_overrides():
     """Verify default persistent memory directory conforms to ~/.hbllm/worlds/<world_id>."""
-    # 1. Default configuration
+    # 1. Default configuration (grounding enabled by default per R4a)
     default_cfg = CognitiveSystemConfig(world_id="default_world")
     expected_default_dir = Path.home() / ".hbllm" / "worlds" / "default_world"
     assert str(expected_default_dir).endswith(".hbllm/worlds/default_world")
     assert default_cfg.world_id == "default_world"
-    assert default_cfg.enable_grounding is False
+    assert default_cfg.enable_grounding is True
 
-    # 2. In-memory override via memory_dir=None
-    in_mem_cfg = CognitiveSystemConfig(world_id="in_memory_test", memory_dir=None)
+    # 2. In-memory override via memory_dir=None + explicit grounding opt-out
+    in_mem_cfg = CognitiveSystemConfig(
+        world_id="in_memory_test", memory_dir=None, enable_grounding=False
+    )
     in_mem_system = build_cognitive_system(in_mem_cfg)
     assert in_mem_system.bridge is None
     assert in_mem_system.engine.grounding_bridge is None

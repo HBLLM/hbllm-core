@@ -184,6 +184,7 @@ class SpatiotemporalHazardTracker:
                     "grid_history": RetentionPolicy.EPISODE_LOCAL,
                     "step_history": RetentionPolicy.EPISODE_LOCAL,
                     "periodic_cells": RetentionPolicy.EPISODE_LOCAL,
+                    "mobile_entities": RetentionPolicy.EPISODE_LOCAL,
                     "environmental_period": RetentionPolicy.EPISODE_LOCAL,
                     "known_lethal_features": RetentionPolicy.CONTEXT_LOCAL,
                     "static_lethal_positions": RetentionPolicy.CONTEXT_LOCAL,
@@ -194,6 +195,7 @@ class SpatiotemporalHazardTracker:
         self.grid_history: deque[np.ndarray] = deque(maxlen=history_len)
         self.step_history: deque[int] = deque(maxlen=history_len)
         self.periodic_cells: dict[tuple[int, int], DynamicCellPhase] = {}
+        self.mobile_entities: dict[int, list[tuple[tuple[int, int], tuple[int, int]]]] = {}
         self.environmental_period: int = 1
         self.known_lethal_features: set[int] = set()
         self.static_lethal_positions: set[tuple[int, int]] = set()
@@ -221,6 +223,7 @@ class SpatiotemporalHazardTracker:
         self.grid_history.clear()
         self.step_history.clear()
         self.periodic_cells.clear()
+        self.mobile_entities.clear()
         self.environmental_period = 1
 
     def register_lethal_position(self, pos: tuple[int, int]) -> None:
@@ -245,6 +248,7 @@ class SpatiotemporalHazardTracker:
         background_feature: int = 0,
         avatar_features: set[int] | None = None,
         walkable_features: set[int] | None = None,
+        cargo_features: set[int] | None = None,
     ) -> None:
         """Record an environmental observation frame and update periodic hazard models."""
         if not isinstance(grid, np.ndarray):
@@ -260,6 +264,34 @@ class SpatiotemporalHazardTracker:
             self.step_history.clear()
         self.grid_history.append(grid.copy())
         self.step_history.append(step)
+
+        if len(self.grid_history) >= 2:
+            prev_g = self.grid_history[-2]
+            curr_g = self.grid_history[-1]
+            av_ignore = set(avatar_features or ()) | {int(background_feature)}
+            if walkable_features:
+                av_ignore.update(int(w) for w in walkable_features)
+            if cargo_features:
+                av_ignore.update(int(c) for c in cargo_features)
+            u_vals, u_cnts = np.unique(curr_g, return_counts=True)
+            for v_np, c_np in zip(u_vals.tolist(), u_cnts.tolist(), strict=False):
+                f_id = int(v_np)
+                if f_id in av_ignore or not (1 <= int(c_np) <= 4):
+                    continue
+                curr_mask = curr_g == f_id
+                prev_mask = prev_g == f_id
+                if np.array_equal(curr_mask, prev_mask) or not np.any(prev_mask):
+                    continue
+                c_pts = [(int(r), int(c)) for r, c in np.argwhere(curr_mask)]
+                p_pts = [(int(r), int(c)) for r, c in np.argwhere(prev_mask)]
+                tracked: list[tuple[tuple[int, int], tuple[int, int]]] = []
+                for cr, cc in c_pts:
+                    best_p = min(p_pts, key=lambda pp: abs(cr - pp[0]) + abs(cc - pp[1]))
+                    dist_m = abs(cr - best_p[0]) + abs(cc - best_p[1])
+                    if 1 <= dist_m <= 2:
+                        tracked.append(((cr, cc), (cr - best_p[0], cc - best_p[1])))
+                if tracked:
+                    self.mobile_entities[f_id] = tracked
 
         if len(self.grid_history) < 4:
             return
@@ -357,6 +389,38 @@ class SpatiotemporalHazardTracker:
         if walkable_features and predicted_val in walkable_features:
             return False
         return predicted_val in cell_phase.hazardous_values
+
+    def get_mobile_avoidance_cells(
+        self,
+        grid: np.ndarray,
+        barrier_features: set[int],
+        background_feature: int = 0,
+    ) -> set[tuple[int, int]]:
+        """Return current and 1-step predicted cells occupied by autonomous non-self mobile entities."""
+        avoid: set[tuple[int, int]] = set()
+        if not self.mobile_entities:
+            return avoid
+        H, W = grid.shape
+        for f_id, tracks in list(self.mobile_entities.items()):
+            live_pts = [(int(r), int(c)) for r, c in np.argwhere(grid == f_id)]
+            if not live_pts:
+                continue
+            vel_map = {pos: vel for pos, vel in tracks}
+            is_lethal_mob = f_id in self.known_lethal_features
+            for cr, cc in live_pts:
+                avoid.add((cr, cc))
+                dr, dc = vel_map.get((cr, cc), tracks[0][1])
+                nr, nc = cr + dr, cc + dc
+                if not (0 <= nr < H and 0 <= nc < W) or int(grid[nr, nc]) in barrier_features:
+                    nr, nc = cr - dr, cc - dc
+                if 0 <= nr < H and 0 <= nc < W:
+                    avoid.add((nr, nc))
+                if is_lethal_mob:
+                    for dr4, dc4 in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                        ar4, ac4 = cr + dr4, cc + dc4
+                        if 0 <= ar4 < H and 0 <= ac4 < W:
+                            avoid.add((ar4, ac4))
+        return avoid
 
     def get_hazard_schedule(
         self,

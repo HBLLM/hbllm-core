@@ -35,7 +35,7 @@ class CognitiveSystemConfig:
     enable_logging: bool = True
     instructions: Sequence[str] | str | None = None
     memory_dir: Path | str | None = _DEFAULT_DIR_MARKER  # type: ignore[assignment]
-    enable_grounding: bool = False
+    enable_grounding: bool = True
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
     custom_verification_stages: list[Any] | None = None

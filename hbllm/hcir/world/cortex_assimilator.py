@@ -319,12 +319,14 @@ class EpistemicFeedbackAssimilator:
 
         if not is_success:
             walkable_feats = view.symbolic_theory.walkable_features
+            cargo_feats = view.symbolic_theory.cargo_features | view.learned_cargo_features
             view.hazard_tracker.record_frame(
                 view.step_counter,
                 curr_grid,
                 background_feature=view.bg_feature,
                 avatar_features=view.avatar_features,
                 walkable_features=walkable_feats,
+                cargo_features=cargo_feats,
             )
 
         diff = view.compute_frame_diff(view.prev_grid, curr_grid)
@@ -1555,10 +1557,13 @@ class EpistemicFeedbackAssimilator:
                                         reason=f"prior_goal_blocked_on_collision:{val}",
                                     )
                                     view.symbolic_theory.induce_barrier(val, evidence="collision")
+                                if val not in view.symbolic_theory.goal_features:
+                                    view.learned_goal_positions.discard((adj_r, adj_c))
                                 view.record_learned_barrier((adj_r, adj_c))
                             elif (
                                 not is_avatar
                                 and not is_confirmed_goal
+                                and val != view.working_memory.shroud_feature
                                 and not view.symbolic_theory.has_verified_walkable(val)
                             ):
                                 # Multi-cell leading edge recording
@@ -1580,6 +1585,7 @@ class EpistemicFeedbackAssimilator:
                                     and not view.is_spatial_effector(a)
                                     for a in (available_actions or [])
                                 )
+                                view.learned_goal_positions.discard((adj_r, adj_c))
                                 is_isolated_interior = (
                                     has_discrete_non_disp
                                     and 1 <= adj_r < H - 1
@@ -1713,11 +1719,7 @@ class EpistemicFeedbackAssimilator:
                 elif (
                     view.last_predicted_pos is not None
                     and view.avatar_pos is not None
-                    and max(
-                        abs(view.avatar_pos[0] - view.last_predicted_pos[0]),
-                        abs(view.avatar_pos[1] - view.last_predicted_pos[1]),
-                    )
-                    > 1
+                    and view.avatar_pos != view.last_predicted_pos
                 ):
                     discrepancy = True
 
@@ -1725,8 +1727,19 @@ class EpistemicFeedbackAssimilator:
                 did_displace_correctly = (expected_dr != 0 and actual_dr * expected_dr > 0) or (
                     expected_dc != 0 and actual_dc * expected_dc > 0
                 )
+                pred_open = False
+                if view.last_predicted_pos is not None:
+                    pr_p, pc_p = view.last_predicted_pos
+                    if 0 <= pr_p < H and 0 <= pc_p < W:
+                        pv_p = int(curr_grid[pr_p, pc_p])
+                        pred_open = pv_p == bg or view.symbolic_theory.is_walkable(pv_p)
+                is_orthogonal_slip = bool(avatar_moved and not did_displace_correctly) or bool(
+                    not avatar_moved
+                    and pred_open
+                    and any(d.slip_rate > 0.05 for d in view.action_dynamics.values())
+                )
                 if continuous_moved:
-                    cd = getattr(view.working_memory, "continuous_delta", (0.0, 0.0))
+                    cd = view.working_memory.continuous_delta
                     c_dr = -cd[1]
                     c_dc = cd[0]
                     if (
@@ -1745,26 +1758,21 @@ class EpistemicFeedbackAssimilator:
                         view.last_action is not None
                         and prev_avatar_pos is not None
                         and not did_displace_correctly
+                        and not is_orthogonal_slip
                     ):
                         view.failed_transitions.add((prev_avatar_pos, view.last_action))
                         prev_inh = view.inhibited_actions.get(view.last_action, 0)
                         view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
                     if view.mental_plan:
-                        logger.debug(
-                            "AutonomousEpistemicEngine: Sensory discrepancy/surprise detected (pred=%s, actual=%s, surprise=%.3f). Invalidating %d-step mental plan.",
-                            view.last_predicted_pos,
-                            view.avatar_pos,
-                            0.0,
-                            len(view.mental_plan),
-                        )
                         view.mental_plan.clear()
-                        if hasattr(view, "working_memory"):
-                            view.working_memory.active_plan_step = None
+                        view.working_memory.active_plan_step = None
                         view.transition_to_phase(
                             EpistemicPhase.REPLANNING,
                             reason="motor_surprise_plan_divergence",
                         )
-                        if not did_displace_correctly:
+                        if is_orthogonal_slip:
+                            view.working_memory.simulation_cooldown = 0
+                        elif not did_displace_correctly:
                             view.consecutive_plan_failures += 1
                             if view.consecutive_plan_failures >= 2:
                                 view.apply_wm_delta(WorkingMemoryDelta("exploration_cooldown", 2))
@@ -1982,10 +1990,52 @@ class EpistemicFeedbackAssimilator:
                         len(distant_mutations),
                     )
 
-        # ── C. Win / Loss Feedback Assimilation ──────────────────────────────
+        # ── B2. Inventory / Contact-Item Pickup -> Re-evaluate Singleton Gates ──
         av_feats = view.avatar_features or (
             {view.avatar_feature} if view.avatar_feature is not None else set()
         )
+        if (
+            not is_failure
+            and not is_success
+            and view.avatar_pos is not None
+            and _prev_grid is not None
+            and _prev_grid.shape == curr_grid.shape
+        ):
+            ar_now, ac_now = view.avatar_pos
+            if 0 <= ar_now < H and 0 <= ac_now < W:
+                stepped_val = int(_prev_grid[ar_now, ac_now])
+                if (
+                    stepped_val != bg
+                    and stepped_val != _bg_feature
+                    and stepped_val not in av_feats
+                    and stepped_val != view.working_memory.shroud_feature
+                    and not _sym_theory.is_barrier(stepped_val)
+                    and int(np.count_nonzero(curr_grid == stepped_val))
+                    < int(np.count_nonzero(_prev_grid == stepped_val))
+                ):
+                    view.working_memory.collected_inventory_features.add(stepped_val)
+                    view.working_memory.pending_gate_check = True
+                    for b_feat in list(_sym_theory.barrier_features):
+                        b_pts = np.argwhere(curr_grid == b_feat)
+                        if 1 <= len(b_pts) <= 2:
+                            _sym_theory.retract_barrier(b_feat, reason="inventory_state_change")
+                            _sym_theory._explored_features.discard(b_feat)
+                            for br_i, bc_i in b_pts:
+                                b_pt = (int(br_i), int(bc_i))
+                                view.learned_barriers.discard(b_pt)
+                                view.exhausted_candidate_goals.discard(b_pt)
+                                _sym_theory.unmark_locus_explored(b_pt)
+                                for dr_g, dc_g in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                                    adj_g = (b_pt[0] + dr_g, b_pt[1] + dc_g)
+                                    view.exhausted_candidate_goals.discard(adj_g)
+                                    _sym_theory.unmark_locus_explored(adj_g)
+                                    for fp in [
+                                        fp for fp in view.failed_transitions if fp[0] == adj_g
+                                    ]:
+                                        view.failed_transitions.discard(fp)
+                            view.mental_plan.clear()
+
+        # ── C. Win / Loss Feedback Assimilation ──────────────────────────────
 
         if is_success:
             win_target = None

@@ -12,15 +12,18 @@ from plugins.arc_agi_adapter.my_agent import MyAgent
 
 
 def test_bootstrap_creates_unified_system_with_verified_governance():
-    """Verify default boot omits grounding bridge while opt-in grounding shares KernelServices."""
-    default_sys = build_cognitive_system(
-        CognitiveSystemConfig(world_id="test_default_world", memory_dir=None, seed=123)
+    """Verify default boot wires grounding bridge with shared KernelServices and opt-out omits it."""
+    no_ground_sys = build_cognitive_system(
+        CognitiveSystemConfig(
+            world_id="test_ungrounded_world", memory_dir=None, seed=123, enable_grounding=False
+        )
     )
-    assert default_sys.config.enable_grounding is False
-    assert default_sys.bridge is None
-    assert default_sys.engine.grounding_bridge is None
+    assert no_ground_sys.config.enable_grounding is False
+    assert no_ground_sys.bridge is None
+    assert no_ground_sys.engine.grounding_bridge is None
 
-    config = CognitiveSystemConfig(world_id="test_world", seed=123, enable_grounding=True)
+    config = CognitiveSystemConfig(world_id="test_world", memory_dir=None, seed=123)
+    assert config.enable_grounding is True
     system = build_cognitive_system(config)
 
     assert system.services is not None

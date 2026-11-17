@@ -165,6 +165,17 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 avatar_pos=view.avatar_pos,
                 avatar_features=av_feats,
             )
+            mob_avoid = view.hazard_tracker.get_mobile_avoidance_cells(
+                curr_grid, set(view.symbolic_theory.barrier_features), bg
+            )
+            if (
+                next_step.predicted_avatar_pos is not None
+                and next_step.predicted_avatar_pos in mob_avoid
+            ):
+                return SafetyGateResult(
+                    is_safe=False,
+                    reason=f"Mobile entity collision zone at {next_step.predicted_avatar_pos}",
+                )
             if not live_threats and not view.mobile_threat_features:
                 return SafetyGateResult(is_safe=True)
 

@@ -587,8 +587,23 @@ class HCIRCompiler:
         return [subj_name] if subj_name else []
 
     def _resolve_feature_for_label(self, label: str, theory: Any) -> Any | None:
-        """Resolve a textual entity label to a physical feature ID via theory or concept store."""
+        """Resolve a textual entity label to a physical feature ID via concept store or theory."""
+        import re
+
         lbl = label.lower().strip()
+        if self._concept_store is not None:
+            for concept in self._concept_store.get_all():
+                c_labels = {k.lower() for k in concept.linguistic_aliases}
+                for cl in c_labels:
+                    if cl and cl in lbl:
+                        m_num = re.search(r"\b(?:feature|target|symbol|object|tile)\s+(\d+)\b", cl)
+                        if m_num:
+                            return int(m_num.group(1))
+
+        m_sym = re.search(r"\b(?:feature|target|symbol|object|tile|value|id|color)\s+(\d+)\b", lbl)
+        if m_sym:
+            return int(m_sym.group(1))
+
         color_map = {
             "black": 0,
             "blue": 1,

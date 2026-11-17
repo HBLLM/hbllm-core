@@ -151,14 +151,46 @@ class CorticalPipeline:
                         extracted_entities=extracted if isinstance(extracted, list) else None,
                     )
                     current_ctx = current_ctx.with_signals(p_signals)
-                    if (
-                        self.engine is not None
-                        and getattr(self.engine, "working_memory", None) is not None
-                        and "sge_role_priors" in p_signals
-                    ):
-                        self.engine.working_memory.concept_role_priors = dict(
-                            p_signals["sge_role_priors"]
+                    if self.engine is not None and self.engine.working_memory is not None:
+                        wm_ref = self.engine.working_memory
+                        merged_priors: dict[int, dict[str, float]] = dict(
+                            p_signals.get("sge_role_priors", {})
                         )
+                        obs_meta = wm_ref.last_observation_metadata
+                        if isinstance(obs_meta, dict):
+                            hint = (
+                                obs_meta.get("rule_hint")
+                                or obs_meta.get("instruction")
+                                or obs_meta.get("mission")
+                            )
+                            if isinstance(hint, str) and hint.strip():
+                                clean_hint = hint.strip()
+                                av_s = set(self.engine.avatar_features or ())
+                                if self.engine.avatar_feature is not None:
+                                    av_s.add(self.engine.avatar_feature)
+                                if clean_hint not in wm_ref.compiled_linguistic_hints:
+                                    bg_f = (
+                                        int(self.engine.bg_feature)
+                                        if self.engine.bg_feature is not None
+                                        else 0
+                                    )
+                                    d_priors = bridge.ground_mission_instruction(
+                                        clean_hint,
+                                        current_ctx.curr_grid,
+                                        bg_f,
+                                        av_s,
+                                        self.engine.symbolic_theory,
+                                    )
+                                    wm_ref.compiled_linguistic_hints.add(clean_hint)
+                                else:
+                                    d_priors = bridge.state.dialogue_role_priors
+                                for av_f in av_s:
+                                    d_priors.pop(av_f, None)
+                                    merged_priors.pop(av_f, None)
+                                for rc_d, rp_d in d_priors.items():
+                                    dst_d = merged_priors.setdefault(rc_d, {})
+                                    dst_d.update(rp_d)
+                        wm_ref.concept_role_priors = merged_priors
 
                 if self.engine is not None:
                     current_ctx = self._run_perception_faculty_hooks(current_ctx, extracted)
@@ -247,26 +279,29 @@ class CorticalPipeline:
                     total_duration_ms=total_ms,
                 )
 
-        # If a transaction manager is attached, batch-commit all operations
+        # If a transaction manager is attached, batch-commit all operations in bounded chunks
         if self.transaction_manager is not None and all_ops:
             t_tx0 = time.perf_counter()
-            tx = HCIRTransaction(author="cortical_pipeline", operations=all_ops)
-            try:
-                self.transaction_manager.commit(tx)
-            except Exception as exc:
-                total_ms = round((time.perf_counter() - t_run0) * 1000.0, 4)
-                self.last_stage_timings_ms = stage_timings_ms
-                self.last_duration_ms = total_ms
-                return PipelineResult(
-                    final_action=None,
-                    stage_results=stage_results,
-                    signals=dict(current_ctx.signals),
-                    operations=all_ops,
-                    rejected=True,
-                    rejection_reason=str(exc),
-                    stage_timings_ms=stage_timings_ms,
-                    total_duration_ms=total_ms,
-                )
+            max_batch = 250
+            for i in range(0, len(all_ops), max_batch):
+                batch_ops = all_ops[i : i + max_batch]
+                tx = HCIRTransaction(author="cortical_pipeline", operations=batch_ops)
+                try:
+                    self.transaction_manager.commit(tx)
+                except Exception as exc:
+                    total_ms = round((time.perf_counter() - t_run0) * 1000.0, 4)
+                    self.last_stage_timings_ms = stage_timings_ms
+                    self.last_duration_ms = total_ms
+                    return PipelineResult(
+                        final_action=None,
+                        stage_results=stage_results,
+                        signals=dict(current_ctx.signals),
+                        operations=all_ops,
+                        rejected=True,
+                        rejection_reason=str(exc),
+                        stage_timings_ms=stage_timings_ms,
+                        total_duration_ms=total_ms,
+                    )
             stage_timings_ms["tx_commit"] = round((time.perf_counter() - t_tx0) * 1000.0, 4)
 
         total_ms = round((time.perf_counter() - t_run0) * 1000.0, 4)
@@ -296,22 +331,17 @@ class CorticalPipeline:
         theory = engine.symbolic_theory
         wm = engine.working_memory
 
-        # G8: Compile any natural-language hint metadata into CausalPredicates
+        # G8: Compile natural-language rule hints into CausalPredicates
         obs_meta = wm.last_observation_metadata
         if isinstance(obs_meta, dict):
-            hint = (
-                obs_meta.get("rule_hint") or obs_meta.get("instruction") or obs_meta.get("mission")
-            )
-            if isinstance(hint, str) and hint.strip():
-                clean_hint = hint.strip()
-                compiled_set = getattr(wm, "compiled_linguistic_hints", None)
-                if not isinstance(compiled_set, set) or clean_hint not in compiled_set:
+            rule_hint = obs_meta.get("rule_hint")
+            if isinstance(rule_hint, str) and rule_hint.strip():
+                clean_rule = rule_hint.strip()
+                if clean_rule not in wm.compiled_linguistic_hints:
                     from hbllm.hcir.compiler import HCIRCompiler
 
-                    compiler = HCIRCompiler(concept_store=engine.working_concept_store)
-                    compiler.compile_utterance_to_causal_hypothesis(clean_hint, theory=theory)
-                    if isinstance(compiled_set, set):
-                        compiled_set.add(clean_hint)
+                    HCIRCompiler().compile_utterance_to_causal_hypothesis(clean_rule, theory=theory)
+                    wm.compiled_linguistic_hints.add(clean_rule)
 
         raw_grid = (
             current_ctx.curr_grid

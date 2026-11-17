@@ -596,6 +596,11 @@ class PrefrontalWorkingMemory:
         self.last_observation_metadata: dict[str, Any] = {}
         self.compiled_linguistic_hints: set[str] = set()
         self.active_plan_step: Any | None = None
+        self.shroud_feature: int | None = None
+        self.allocentric_belief_grid: np.ndarray | None = None
+        self.prev_raw_sensory_grid: np.ndarray | None = None
+        self.collected_inventory_features: set[int] = set()
+        self.pending_gate_check: bool = False
 
         # Exploration & Curiosity Tracking (Single Source of Truth)
         self.active_probe_target: tuple[int, int] | None = None
@@ -801,6 +806,88 @@ class PrefrontalWorkingMemory:
         self.executive_directives = lines
         logger.info("PrefrontalWorkingMemory: Loaded %d executive directives.", len(lines))
 
+    def integrate_sensory_observation(
+        self,
+        raw_grid: Any,
+        avatar_features: set[int],
+        bg_hint: Any = None,
+    ) -> Any:
+        """Integrate partially observable egocentric frames into a persistent allocentric belief map."""
+        if raw_grid is None:
+            return None
+        arr = np.asarray(raw_grid)
+        if arr.ndim != 2 or arr.size < 25:
+            return raw_grid
+        H, W = arr.shape
+        if self.allocentric_belief_grid is not None and self.allocentric_belief_grid.shape != (
+            H,
+            W,
+        ):
+            self.shroud_feature = None
+            self.allocentric_belief_grid = None
+            self.prev_raw_sensory_grid = None
+
+        prev = self.prev_raw_sensory_grid
+        if self.shroud_feature is None:
+            if prev is not None and prev.shape == (H, W):
+                diff_mask = prev != arr
+                if int(np.count_nonzero(diff_mask)) >= 6:
+                    corners = {
+                        int(arr[0, 0]),
+                        int(arr[0, W - 1]),
+                        int(arr[H - 1, 0]),
+                        int(arr[H - 1, W - 1]),
+                    } | {
+                        int(prev[0, 0]),
+                        int(prev[0, W - 1]),
+                        int(prev[H - 1, 0]),
+                        int(prev[H - 1, W - 1]),
+                    }
+                    for cand_s in corners:
+                        newly_hidden = int(np.count_nonzero((prev != cand_s) & (arr == cand_s)))
+                        newly_revealed = int(np.count_nonzero((prev == cand_s) & (arr != cand_s)))
+                        if newly_hidden >= 3 and newly_revealed >= 3:
+                            self.shroud_feature = cand_s
+                            self.allocentric_belief_grid = prev.copy()
+                            break
+            elif H >= 7 and W >= 7:
+                c0 = int(arr[0, 0])
+                outer_uniform = (
+                    bool(np.all(arr[0, :] == c0))
+                    and bool(np.all(arr[H - 1, :] == c0))
+                    and bool(np.all(arr[:, 0] == c0))
+                    and bool(np.all(arr[:, W - 1] == c0))
+                )
+                if outer_uniform:
+                    inner_rings = sum(
+                        [
+                            bool(np.all(arr[1, :] == c0)),
+                            bool(np.all(arr[H - 2, :] == c0)),
+                            bool(np.all(arr[:, 1] == c0)),
+                            bool(np.all(arr[:, W - 2] == c0)),
+                        ]
+                    )
+                    non_s = arr[arr != c0]
+                    if inner_rings >= 2 and non_s.size >= 9 and len(np.unique(non_s)) >= 2:
+                        self.shroud_feature = c0
+                        self.allocentric_belief_grid = arr.copy()
+
+        self.prev_raw_sensory_grid = arr.copy()
+        if self.shroud_feature is None:
+            return raw_grid
+
+        s_val = self.shroud_feature
+        if self.allocentric_belief_grid is None:
+            self.allocentric_belief_grid = arr.copy()
+        vis_mask = arr != s_val
+        if avatar_features:
+            floor_fill = int(bg_hint) if (bg_hint is not None and int(bg_hint) != s_val) else 0
+            stale_av = (~vis_mask) & np.isin(self.allocentric_belief_grid, list(avatar_features))
+            if np.any(stale_av):
+                self.allocentric_belief_grid[stale_av] = floor_fill
+        self.allocentric_belief_grid[vis_mask] = arr[vis_mask]
+        return self.allocentric_belief_grid.copy()
+
     def reset_episode(
         self, retain_long_term: bool = True, retain_inhibitions: bool = False
     ) -> None:
@@ -844,6 +931,11 @@ class PrefrontalWorkingMemory:
         self.reference_frame = None
         self.last_observation_metadata.clear()
         self.compiled_linguistic_hints.clear()
+        self.shroud_feature = None
+        self.allocentric_belief_grid = None
+        self.prev_raw_sensory_grid = None
+        self.collected_inventory_features.clear()
+        self.pending_gate_check = False
         self.recent_positions.clear()
         self.recent_actions.clear()
         self.visited_cells.clear()

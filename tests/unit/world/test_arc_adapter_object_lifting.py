@@ -10,6 +10,7 @@ Validates:
    to synthesize and execute neuro-symbolic macro plans without hardcoded rules in the core.
 """
 
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -185,7 +186,7 @@ def test_my_agent_choose_action_wires_objects_to_core() -> None:
             self.game_id = "test_game"
 
     frame = MockFrameData()
-    action = agent.choose_action([], frame)
+    action = agent.choose_action([], cast(Any, frame))
 
     # Chosen action should move RIGHT towards (2, 6)
     assert action.value == 4

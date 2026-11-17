@@ -2964,10 +2964,7 @@ class AutonomousEpistemicEngine:
             # nothing about dynamics, so skip binding it (WP0.4).
             return
         is_success = is_success or terminal == TerminalSignal.SUCCESS
-        is_failure = is_failure or terminal in (
-            TerminalSignal.FAILURE,
-            TerminalSignal.TIMEOUT,
-        )
+        is_failure = is_failure or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
         curr_grid = self.normalize_sensory_input(curr_grid)
         if action is None:
             action = self.last_action
@@ -3444,15 +3441,13 @@ class AutonomousEpistemicEngine:
                             if rf
                             else "bottom_left_metric"
                         )
-                        y_max = (
-                            float(rf.bounds[1][1])
-                            if (rf and hasattr(rf, "bounds") and rf.bounds and len(rf.bounds) >= 2)
-                            else float(H)
+                        y_b = getattr(rf, "bounds", None)
+                        y_max = float(y_b[1][1]) if (y_b and len(y_b) >= 2) else float(H)
+                        cont_y = (
+                            y_max - 0.5 - float(gr)
+                            if "bottom_left" in origin_desc
+                            else float(gr) + 0.5
                         )
-                        if "bottom_left" in origin_desc:
-                            cont_y = y_max - 0.5 - float(gr)
-                        else:
-                            cont_y = float(gr) + 0.5
                         cont_x = float(gc) + 0.5
                         self.working_memory.continuous_goal_pos = np.array(
                             [cont_x, cont_y], dtype=float
@@ -3514,17 +3509,19 @@ class AutonomousEpistemicEngine:
 
         self.compute_budget = ComputeBudget.for_step(
             self.step_work_units,
-            remaining_actions=self.get_remaining_step_budget()
-            if hasattr(self, "get_remaining_step_budget")
-            else None,
+            remaining_actions=self.get_remaining_step_budget(),
             deterministic=self.deterministic_budget,
             step_budget_ms=None if self.deterministic_budget else self.step_budget_ms,
         )
+        if curr_grid is not None and terminal is None:
+            av_set = set(self.avatar_features or ()) | (
+                {self.avatar_feature} if self.avatar_feature is not None else set()
+            )
+            curr_grid = self.working_memory.integrate_sensory_observation(
+                curr_grid, av_set, self.bg_feature
+            )
         is_success = is_success or terminal == TerminalSignal.SUCCESS
-        is_failure = is_failure or terminal in (
-            TerminalSignal.FAILURE,
-            TerminalSignal.TIMEOUT,
-        )
+        is_failure = is_failure or terminal in (TerminalSignal.FAILURE, TerminalSignal.TIMEOUT)
         from hbllm.hcir.world.engine_state import CognitiveContext
 
         self._pipeline_runs += 1
@@ -3550,9 +3547,10 @@ class AutonomousEpistemicEngine:
         result = self.cortical_pipeline.run(ctx)
         self._last_decision_branch = result.signals.get("branch")
         if result.rejected:
+            r_msg = result.rejection_reason
             return None, {
                 "pipeline_rejected": True,
-                "reason": result.rejection_reason,
+                "reason": r_msg,
                 "goal_target": None,
                 "goal_source": "none",
                 "subgoal_stack": [],
@@ -3560,7 +3558,7 @@ class AutonomousEpistemicEngine:
                 "plan_source": "arbitration",
                 "candidates": {},
                 "chosen_action": None,
-                "veto_reasons": [result.rejection_reason or "rejected"],
+                "veto_reasons": [r_msg or "rejected"],
                 "phase": str(self._phase),
                 "branch": "rejected",
                 "action_data": None,
@@ -3578,20 +3576,20 @@ class AutonomousEpistemicEngine:
             and isinstance(result.final_action[1], dict)
             else dict(result.signals.get("meta", {}))
         )
-        meta.setdefault("goal_target", None)
-        meta.setdefault("goal_source", "none")
-        meta.setdefault("subgoal_stack", [])
-        meta.setdefault("plan", None)
-        meta.setdefault("plan_source", "arbitration")
-        meta.setdefault(
-            "candidates",
-            {int(a): (1.0 if a == act else 0.0) for a in available_actions},
-        )
-        meta.setdefault("chosen_action", act)
-        meta.setdefault("veto_reasons", [])
-        meta.setdefault("phase", str(self._phase))
-        meta.setdefault("branch", result.signals.get("branch", "unknown"))
-        meta.setdefault("action_data", None)
+        for k_def, v_def in (
+            ("goal_target", None),
+            ("goal_source", "none"),
+            ("subgoal_stack", []),
+            ("plan", None),
+            ("plan_source", "arbitration"),
+            ("candidates", {int(a): (1.0 if a == act else 0.0) for a in available_actions}),
+            ("chosen_action", act),
+            ("veto_reasons", []),
+            ("phase", str(self._phase)),
+            ("branch", result.signals.get("branch", "unknown")),
+            ("action_data", None),
+        ):
+            meta.setdefault(k_def, v_def)
 
         if terminal is not None or is_success or is_failure:
             from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind

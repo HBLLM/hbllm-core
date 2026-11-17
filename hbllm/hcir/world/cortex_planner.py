@@ -497,69 +497,15 @@ class EpistemicGoalScheduler:
         interactive_cluster_loci: set[tuple[int, int]] | tuple[tuple[int, int], ...] = (),
     ) -> list[tuple[int, int]]:
         """Return reachable unvisited frontier cells ordered by Manhattan distance from avatar."""
-        H, W = curr_grid.shape
-        avatar_pos = engine.avatar_pos
-        if avatar_pos is None or not (0 <= avatar_pos[0] < H and 0 <= avatar_pos[1] < W):
-            return []
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
-        wm = engine.working_memory
-        visited: set[tuple[int, int]] = set(wm.visited_cells)
-        for c_pos, cnt in engine.position_visit_counts.items():
-            if cnt > 0:
-                visited.add(c_pos)
-        visited.add(avatar_pos)
-
-        theory = engine.symbolic_theory
-        lethal = engine.hazard_tracker.known_lethal_features
-        allowed_feats = (set(theory.walkable_features) | {int(bg)}) - (
-            set(theory.barrier_features) | set(lethal) | prior_hazard_feats
+        return GeodesicManifoldRouter.compute_reachable_frontiers(
+            engine=engine,
+            curr_grid=curr_grid,
+            bg=bg,
+            prior_hazard_feats=prior_hazard_feats,
+            interactive_cluster_loci=interactive_cluster_loci,
+            scipy_label_fn=_scipy_label,
         )
-        passable_mask = np.isin(curr_grid, list(allowed_feats))
-        passable_mask[avatar_pos[0], avatar_pos[1]] = True
-        labeled_reach, _ = _scipy_label(passable_mask)
-        av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
-        reach_mask = labeled_reach == av_lbl
-
-        visited_mask = np.zeros((H, W), dtype=bool)
-        for vr, vc in visited:
-            if 0 <= vr < H and 0 <= vc < W:
-                visited_mask[vr, vc] = True
-        unvisited_mask = reach_mask & (~visited_mask)
-        for er, ec in interactive_cluster_loci:
-            if 0 <= er < H and 0 <= ec < W:
-                unvisited_mask[er, ec] = False
-
-        adj_visited = np.zeros((H, W), dtype=bool)
-        adj_visited[1:, :] |= visited_mask[:-1, :]
-        adj_visited[:-1, :] |= visited_mask[1:, :]
-        adj_visited[:, 1:] |= visited_mask[:, :-1]
-        adj_visited[:, :-1] |= visited_mask[:, 1:]
-
-        frontier_mask = unvisited_mask & adj_visited
-        if not np.any(frontier_mask):
-            frontier_mask = unvisited_mask
-        fr_r, fr_c = np.nonzero(frontier_mask)
-        frontier_candidates = list(zip(fr_r.tolist(), fr_c.tolist()))
-
-        opt_eng = getattr(engine, "option_discovery", None)
-        if opt_eng:
-            opt_bottlenecks = {
-                opt.bottleneck_state
-                for opt in getattr(opt_eng, "discovered_options", {}).values()
-                if getattr(opt, "bottleneck_state", None) is not None
-            }
-            bottleneck_frontiers = [
-                cp
-                for cp in opt_bottlenecks
-                if 0 <= cp[0] < H and 0 <= cp[1] < W and bool(unvisited_mask[cp[0], cp[1]])
-            ]
-            if bottleneck_frontiers:
-                frontier_candidates = bottleneck_frontiers
-
-        frontier_candidates.sort(
-            key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
-        )
-        return frontier_candidates
 
     @classmethod
     def schedule_goals(
@@ -1378,9 +1324,16 @@ class EpistemicGoalScheduler:
                     continue
                 if e.feature_id == bg:
                     continue
-                if e.feature_id in av_feats:
-                    continue
-                if e.grid_pos in interactive_cluster_loci:
+                is_cargo_cand = (
+                    e.feature_id in engine.symbolic_theory.cargo_features
+                    or e.feature_id in engine.learned_cargo_features
+                )
+                if (
+                    e.feature_id in av_feats
+                    or e.feature_id == engine.working_memory.shroud_feature
+                    or (e.feature_id in engine.hazard_tracker.mobile_entities and not is_cargo_cand)
+                    or e.grid_pos in interactive_cluster_loci
+                ):
                     continue
                 is_isolated_interior = (
                     1 <= e.area <= 2
@@ -2809,6 +2762,9 @@ class MentalSimulationPlanner:
             and start_pos is not None
         ):
             geodesic_movable_actions = list(movable_actions)
+            soft_avoid = GeodesicManifoldRouter.compute_soft_avoidance_and_shroud(
+                engine, curr_grid, set(_barrier_feats), bg, unknown_entity_cells, _grid_walls
+            )
             action_plan = (
                 GeodesicManifoldRouter.route_geodesic(
                     curr_grid=curr_grid,
@@ -2824,6 +2780,7 @@ class MentalSimulationPlanner:
                     avatar_features=av_feats,
                     max_candidate_goals=5,
                     preserve_goal_order=True,
+                    soft_avoid_cells=soft_avoid or None,
                 )
                 if geodesic_movable_actions
                 else None
@@ -2843,7 +2800,9 @@ class MentalSimulationPlanner:
                             or next_p in goals
                         )
                     )
-                    is_failed = (curr_p, act) in engine.failed_transitions and not next_is_open
+                    is_failed = (curr_p, act) in engine.failed_transitions and (
+                        not next_is_open or engine.working_memory.reference_frame is not None
+                    )
                     if is_failed or engine.working_memory.habenular_ior.is_action_inhibited(
                         curr_p, act
                     ):

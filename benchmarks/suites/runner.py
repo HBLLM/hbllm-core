@@ -129,7 +129,7 @@ def run_closed_loop_task(
         config = CognitiveSystemConfig(
             world_id=f"bench_{task_id}_{tag}",
             memory_dir=tmp_dir,
-            enable_grounding=grounding and perception_mode != "handcrafted",
+            enable_grounding=grounding,
             perception_mode=perception_mode,
         )
         return build_cognitive_system(config)
@@ -522,7 +522,7 @@ def run_closed_loop_episode(
             config = CognitiveSystemConfig(
                 world_id=f"bench_{seed}",
                 memory_dir=tmp_dir,
-                enable_grounding=(baseline == "system" and perception_mode != "handcrafted"),
+                enable_grounding=(baseline == "system"),
                 perception_mode=perception_mode,
             )
             system = build_cognitive_system(config)

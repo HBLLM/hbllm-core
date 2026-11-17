@@ -442,16 +442,37 @@ class SpatialGridFeatureExtractor:
         features: list[PerceptualFeatureVector] = []
         entities = envelope.metadata.get("entities", [])
         palette_scale = _extract_palette_scale(envelope, entities)
+        has_grid = "grid" in envelope.metadata and envelope.metadata["grid"] is not None
+        grid, bg_val, counts = _extract_grid_context(envelope) if has_grid else (None, 0, {})
 
         for ent in entities:
             ent_id = str(ent.get("id", _gen_id("seg")))
-            embedding, _, spatial, raw_color = _compute_entity_morphology_and_topology(
-                ent, palette_scale=palette_scale
+            base_4, full_14, spatial, raw_color = _compute_entity_morphology_and_topology(
+                ent,
+                palette_scale=palette_scale,
+                grid=grid,
+                bg_feature=bg_val,
+                feature_counts=counts if has_grid else None,
             )
+            if has_grid:
+                # Palette-invariant 13D structural + topological + census + kinematic vector
+                embedding = (base_4[0], base_4[1], base_4[3]) + full_14[4:]
+                meta_extra = {
+                    "entity_id": ent_id,
+                    "raw_color": raw_color,
+                    "topology_10": full_14[4:],
+                    "feature_count": counts.get(raw_color, 1),
+                }
+            else:
+                embedding = base_4
+                meta_extra = {"entity_id": ent_id, "raw_color": raw_color}
 
             labels: dict[str, float] = {}
             if "label" in ent:
                 labels[str(ent["label"])] = float(ent.get("label_confidence", 1.0))
+            labels.setdefault(f"feature {raw_color}", 1.0)
+            labels.setdefault(f"target {raw_color}", 0.95)
+            labels.setdefault(f"symbol {raw_color}", 0.95)
             if raw_color in COLOR_NAMES:
                 cname = COLOR_NAMES[raw_color]
                 labels.setdefault(cname, 1.0)
@@ -467,7 +488,7 @@ class SpatialGridFeatureExtractor:
                     embedding=embedding,
                     spatial_extent=spatial,
                     semantic_labels=labels,
-                    feature_metadata={"entity_id": ent_id, "raw_color": raw_color},
+                    feature_metadata=meta_extra,
                     provenance_hash=envelope.payload_hash,
                     timestamp=envelope.wall_timestamp,
                 )

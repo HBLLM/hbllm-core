@@ -238,6 +238,129 @@ class GeodesicManifoldRouter:
     """Substrate routing engine computing deterministic action-space geodesics over traversable 2D manifolds."""
 
     @staticmethod
+    def compute_soft_avoidance_and_shroud(
+        engine: Any,
+        curr_grid: np.ndarray,
+        barrier_feats: set[int],
+        bg: int,
+        unknown_entity_cells: set[tuple[int, int]],
+        grid_walls: set[tuple[int, int]],
+    ) -> set[tuple[int, int]]:
+        """Compute dynamic mobile-agent and stochastic-slip soft avoidance zones + shroud walls."""
+        soft_avoid = set(
+            engine.hazard_tracker.get_mobile_avoidance_cells(curr_grid, barrier_feats, bg)
+        )
+        hz_seeds = set(engine.hazard_tracker.static_lethal_positions)
+        if any(d.slip_rate > 0.05 for d in engine.action_dynamics.values()):
+            hz_seeds |= set(unknown_entity_cells)
+        hz_feats = set(engine.hazard_tracker.known_lethal_features)
+        rp_map = engine.working_memory.concept_role_priors
+        if rp_map:
+            for rc_k, rp_v in rp_map.items():
+                if rp_v.get("hazard", 0.0) >= 0.65 and rp_v.get("goal", 0.0) < 0.50:
+                    hz_feats.add(int(rc_k))
+        for l_f in hz_feats:
+            for lr_i, lc_i in np.argwhere(curr_grid == l_f):
+                pt_h = (int(lr_i), int(lc_i))
+                hz_seeds.add(pt_h)
+                soft_avoid.add(pt_h)
+        for hr_s, hc_s in hz_seeds:
+            for dr_s, dc_s in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                soft_avoid.add((hr_s + dr_s, hc_s + dc_s))
+        shroud_f = engine.working_memory.shroud_feature
+        if shroud_f is not None:
+            for sr_i, sc_i in np.argwhere(curr_grid == shroud_f):
+                grid_walls.add((int(sr_i), int(sc_i)))
+        return soft_avoid
+
+    @staticmethod
+    def compute_reachable_frontiers(
+        engine: Any,
+        curr_grid: np.ndarray,
+        bg: int,
+        prior_hazard_feats: set[int],
+        interactive_cluster_loci: set[tuple[int, int]] | tuple[tuple[int, int], ...],
+        scipy_label_fn: Any,
+    ) -> list[tuple[int, int]]:
+        """Compute reachable unvisited frontier cells prioritizing shroud-revealing boundaries."""
+        H, W = curr_grid.shape
+        avatar_pos = engine.avatar_pos
+        if avatar_pos is None or not (0 <= avatar_pos[0] < H and 0 <= avatar_pos[1] < W):
+            return []
+        wm = engine.working_memory
+        visited: set[tuple[int, int]] = set(wm.visited_cells)
+        for c_pos, cnt in engine.position_visit_counts.items():
+            if cnt > 0:
+                visited.add(c_pos)
+        visited.add(avatar_pos)
+
+        theory = engine.symbolic_theory
+        lethal = engine.hazard_tracker.known_lethal_features
+        shroud_f = wm.shroud_feature
+        allowed_feats = (set(theory.walkable_features) | {int(bg)}) - (
+            set(theory.barrier_features) | set(lethal) | prior_hazard_feats
+        )
+        if shroud_f is not None:
+            allowed_feats.discard(int(shroud_f))
+        passable_mask = np.isin(curr_grid, list(allowed_feats))
+        passable_mask[avatar_pos[0], avatar_pos[1]] = True
+        labeled_reach, _ = scipy_label_fn(passable_mask)
+        av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
+        reach_mask = labeled_reach == av_lbl
+
+        visited_mask = np.zeros((H, W), dtype=bool)
+        for vr, vc in visited:
+            if 0 <= vr < H and 0 <= vc < W:
+                visited_mask[vr, vc] = True
+        unvisited_mask = reach_mask & (~visited_mask)
+        for er, ec in interactive_cluster_loci:
+            if 0 <= er < H and 0 <= ec < W:
+                unvisited_mask[er, ec] = False
+
+        if shroud_f is not None:
+            shroud_mask = curr_grid == int(shroud_f)
+            adj_shroud = np.zeros((H, W), dtype=bool)
+            adj_shroud[1:, :] |= shroud_mask[:-1, :]
+            adj_shroud[:-1, :] |= shroud_mask[1:, :]
+            adj_shroud[:, 1:] |= shroud_mask[:, :-1]
+            adj_shroud[:, :-1] |= shroud_mask[:, 1:]
+            shroud_front = reach_mask & adj_shroud & (~visited_mask)
+            if np.any(shroud_front):
+                sr_r, sr_c = np.nonzero(shroud_front)
+                cands = list(zip(sr_r.tolist(), sr_c.tolist()))
+                cands.sort(key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1]))
+                return cands
+
+        adj_visited = np.zeros((H, W), dtype=bool)
+        adj_visited[1:, :] |= visited_mask[:-1, :]
+        adj_visited[:-1, :] |= visited_mask[1:, :]
+        adj_visited[:, 1:] |= visited_mask[:, :-1]
+        adj_visited[:, :-1] |= visited_mask[:, 1:]
+        frontier_mask = unvisited_mask & adj_visited
+        if not np.any(frontier_mask):
+            frontier_mask = unvisited_mask
+        fr_r, fr_c = np.nonzero(frontier_mask)
+        frontier_candidates = list(zip(fr_r.tolist(), fr_c.tolist()))
+
+        opt_eng = engine.option_discovery
+        if opt_eng is not None and opt_eng.discovered_options:
+            bottleneck_frontiers = [
+                opt.bottleneck_state
+                for opt in opt_eng.discovered_options.values()
+                if opt.bottleneck_state is not None
+                and 0 <= opt.bottleneck_state[0] < H
+                and 0 <= opt.bottleneck_state[1] < W
+                and bool(unvisited_mask[opt.bottleneck_state[0], opt.bottleneck_state[1]])
+            ]
+            if bottleneck_frontiers:
+                frontier_candidates = bottleneck_frontiers
+
+        frontier_candidates.sort(
+            key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+        )
+        return frontier_candidates
+
+    @staticmethod
     def route_geodesic(
         curr_grid: np.ndarray,
         start_pos: tuple[int, int],
@@ -253,6 +376,7 @@ class GeodesicManifoldRouter:
         max_candidate_goals: int = 5,
         prune_cavities: bool = False,
         preserve_goal_order: bool = False,
+        soft_avoid_cells: set[tuple[int, int]] | None = None,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find deterministic action-space shortest path across the traversable manifold.
 
@@ -361,6 +485,23 @@ class GeodesicManifoldRouter:
             effective_actions = harmonized_actions
 
         effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)
+
+        if soft_avoid_cells:
+            for cand_goal in candidate_goals[:max_candidate_goals]:
+                buf_mask = passable_mask.copy()
+                for sr, sc in soft_avoid_cells:
+                    if 0 <= sr < H and 0 <= sc < W and (sr, sc) != start_pos:
+                        buf_mask[sr, sc] = False
+                buf_mask[cand_goal[0], cand_goal[1]] = True
+                buf_plan = GridTopologyGraph.shortest_path_with_actions(
+                    passable_mask=buf_mask,
+                    start_coord=start_pos,
+                    goal_coord=cand_goal,
+                    actions_with_deltas=effective_actions,
+                    goal_radius=effective_goal_radius,
+                )
+                if buf_plan:
+                    return buf_plan
 
         for cand_goal in candidate_goals[:max_candidate_goals]:
             cand_mask = passable_mask.copy()

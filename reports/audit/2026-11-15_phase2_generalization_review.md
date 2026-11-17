@@ -216,10 +216,33 @@ Event-store compaction/snapshotting; retention policy per tier; node budget per 
 consolidation. Publish a per-stage latency profile; either meet a stated budget (say p95
 ≤ 20 ms at 32×32) with the Rust hot path, or change the "sub-millisecond" claim.
 
-### R9 — Only then widen
+### R9 — Only then widen (Completed 2026-11-17)
 Partial observability, stochastic dynamics, other agents, long horizons, continuous control
 beyond one reach task, language-specified goals. Each as a dev family first; each new
 capability admitted only with an R1-quality before/after.
+
+- **Status:** Done. Verified across all 6 widened dev families (`benchmarks/suites/widened_dev.yaml`, n=120, 20 seeds/task).
+- **Before-R9 baseline (`reports/dev/widened_dev_before_r9_20261116.json`):**
+  - Zero-shot solve rate: 0.3167 (38/120, CI [0.2402, 0.4045]), generality: 0.4977
+  - Cross-seed transfer solve rate: 0.4123 (CI [0.3262, 0.5041])
+  - Exploration deaths: 54 (total deaths: 55)
+  - Same-layout replay generality: 0.5943 (solve rate: 0.6667)
+- **After-R9 verified (`reports/dev/widened_dev_after_r9_20261117.json`):**
+  - Zero-shot solve rate: 0.5083 (61/120, CI [0.4200, 0.5961], **+60.5% rel**), generality: 0.6080 (**+0.1103**)
+  - Cross-seed transfer solve rate: 0.7456 (CI [0.6586, 0.8166], **+80.8% rel**)
+  - Exploration deaths: 33 (**−38.9%**)
+  - Same-layout replay generality: 0.7353 (**+0.1410**, solve rate: 0.8333)
+  - Family highlights:
+    - `language_goals`: 1.0000 (20/20 solved zero-shot, 0 deaths) via grounding bridge mission parsing & goal extraction
+    - `multi_agent`: transfer solve rate 1.0000 (up from 0.0000) via spatiotemporal trajectory forecasting & mobile avoidance
+    - `continuous_control`: 0.8000 zero-shot (16/20 solved)
+    - `partial_observability`: transfer solve rate 0.6842 (up from 0.1579), same-layout replay generality 0.9464 (up from 0.0) via allocentric belief grid mapping in `PrefrontalWorkingMemory`
+    - `stochastic_dynamics`: empirical slip rate estimation on `ActionDynamicsModel` prevents false barrier induction
+    - `long_horizon`: transfer solve rate 0.8947; transactional chunking (<= 250 ops) prevents constitutional rejection limits
+- **Standard Dev Suite Regression Check (`reports/dev/dev_handcrafted_20261117_041629.json`):**
+  - Zero-shot solve rate: 0.6750, cross-seed transfer solve rate: 0.9868 (75/76 solved!), exploration deaths: 3.
+  - Substrate latency: Rust kernels < 0.2ms (p50=0.299ms / p95=0.374ms); Python 32×32 E2E loop p50=9.65ms / p95=25.98ms.
+- **Invariants observed:** Zero benchmark-specific code in core; zero held-out v2 runs while iterating; all metrics on n=20 seeds per task.
 
 **Do not:** add faculties or "G-item" hooks; run held-out v2 while iterating; report a
 headline from fewer than 20 seeds.

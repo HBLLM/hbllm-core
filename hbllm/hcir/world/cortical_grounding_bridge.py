@@ -91,6 +91,8 @@ class CorticalGroundingState:
     last_concept_assignments: list[ConceptAssignment] = field(default_factory=list)
     last_feature_concept_ids: dict[int, str] = field(default_factory=dict)
     last_role_priors: dict[int, dict[str, float]] = field(default_factory=dict)
+    dialogue_role_priors: dict[int, dict[str, float]] = field(default_factory=dict)
+    last_scene_sig: tuple[Any, ...] | None = None
     episode_feature_memory: dict[int, PerceptualFeatureVector] = field(default_factory=dict)
     adapted_role_pairs: set[tuple[int, str]] = field(default_factory=set)
     verified_outcomes_count: int = 0
@@ -108,15 +110,6 @@ class CorticalGroundingBridge:
     3. Cortical Motor -> ActionValidationGateway: Intercepts all proposed actions, enforces
        precondition & safety authorization, dispatches, and verifies real environmental outcomes.
     4. General Intelligence: Task-agnostic, LLM-independent, and transactionally governed.
-
-    Note on handcrafted mode identity:
-        In ``handcrafted`` perception mode, the bridge is a parallel observer — not in
-        the engine's decision loop. The engine's ``PerceptionStage`` performs its own
-        entity lifting from the raw integer lattice (0=floor, 1=avatar, 2=door, 3=key,
-        etc.), making SGE outputs redundant: handcrafted feature IDs *are* the ground
-        truth the bridge would compute. This means **SGE changes nothing in handcrafted
-        mode by design**. The bridge matters for ``learned`` and ``snn`` perception
-        modes, where raw pixels must be grounded into entity concepts.
     """
 
     FIELD_RETENTION = {
@@ -160,17 +153,12 @@ class CorticalGroundingBridge:
         )
         self.tracker = ThreeTierEntityTracker(spatial_distance_threshold=1.5)
         self.concept_store = WorkingConceptStore()
-        if perception_mode in ("learned", "snn"):
-            # Bounded neural embeddings (LayerNorm+tanh) accommodate minor neighbor jitter
-            # around moving objects while keeping distinct structural archetypes separated.
-            self.concept_learner = ConceptLearner(
-                concept_store=self.concept_store,
-                assignment_threshold=0.30,
-                split_dispersion_threshold=0.48,
-                merge_distance_threshold=0.14,
-            )
-        else:
-            self.concept_learner = ConceptLearner(concept_store=self.concept_store)
+        self.concept_learner = ConceptLearner(
+            concept_store=self.concept_store,
+            assignment_threshold=0.32,
+            split_dispersion_threshold=0.48,
+            merge_distance_threshold=0.14,
+        )
         self.feature_registry = FeatureExtractorRegistry.default(perception_mode=perception_mode)
         self.relation_learner = RelationLearner(proximity_threshold=3.0)
         self.evaluator = EpistemicEvaluator(acceptance_threshold=acceptance_threshold)
@@ -191,6 +179,8 @@ class CorticalGroundingBridge:
         """Apply boundary retention to grounding state on episode transitions."""
         apply_boundary_retention(self.state, boundary)
         self.state.last_role_priors.clear()
+        self.state.dialogue_role_priors.clear()
+        self.state.last_scene_sig = None
         self.state.episode_feature_memory.clear()
         self.state.adapted_role_pairs.clear()
         for ext in self.feature_registry.extractors:
@@ -385,6 +375,41 @@ class CorticalGroundingBridge:
                 "role": role,
             }
 
+        scene_sig = tuple(
+            (
+                int(round(st["position"][0])),
+                int(round(st["position"][1])),
+                int(st["color"]),
+                int(st["size"]),
+            )
+            for _, st in sorted(entity_states.items())
+        )
+        if scene_sig == self.state.last_scene_sig and self.state.last_feature_vectors:
+            merged_cached: dict[int, dict[str, float]] = {
+                rc: dict(rp) for rc, rp in self.state.last_role_priors.items()
+            }
+            for rc, drp in self.state.dialogue_role_priors.items():
+                dst = merged_cached.setdefault(rc, {})
+                for k_r, v_r in drp.items():
+                    if v_r > dst.get(k_r, 0.0):
+                        dst[k_r] = v_r
+            active_cands_cached = self.tracker.get_active_candidates()
+            return {
+                "sge_observation_id": obs_id,
+                "sge_active_candidates": [c.candidate_ref.id for c in active_cands_cached],
+                "sge_entity_states": entity_states,
+                "sge_proposed_claims_count": 0,
+                "sge_committed_claims_count": 0,
+                "sge_feature_vectors_count": len(self.state.last_feature_vectors),
+                "sge_role_priors": merged_cached,
+                "sge_composite_matches": [],
+                "sge_concept_assignments": [],
+                "sge_concept_splits": 0,
+                "sge_concept_merges": 0,
+                "sge_outcome_verified": False,
+            }
+        self.state.last_scene_sig = scene_sig
+
         # 3. Dynamic Relation Induction
         self.relation_learner.observe_entity_states(entity_states, timestamp=now)
         claims, ev_records = self.relation_learner.propose_claims(
@@ -438,17 +463,16 @@ class CorticalGroundingBridge:
         except Exception as exc:
             logger.debug("FeatureExtractorRegistry.extract_all failed: %s", exc)
 
-        # 6. Concept Learning & Role Prior Inference via ConceptLearner
+        # 6. Concept Learning & Role Prior Inference via ConceptLearner (active across all modes)
         concept_assignments: list[ConceptAssignment] = []
         feature_concept_ids: dict[int, str] = {}
         role_priors: dict[int, dict[str, float]] = {}
-        infer_priors = self.perception_mode in ("learned", "snn")
         for fv in feature_vectors:
             try:
                 entity_id: str | None = fv.feature_metadata.get("entity_id")
                 if not entity_id and active_cands:
                     entity_id = active_cands[0].candidate_ref.id
-                if infer_priors and "raw_color" in fv.feature_metadata:
+                if "raw_color" in fv.feature_metadata:
                     priors = self.concept_learner.infer_role_priors(
                         fv, max_distance=0.65, distance_scale=0.42
                     )
@@ -466,6 +490,43 @@ class CorticalGroundingBridge:
                     self.state.episode_feature_memory[rc_feat] = fv
             except Exception as exc:
                 logger.debug("ConceptLearner.learn failed for %s: %s", fv.feature_id, exc)
+
+        # Structural cardinality / topology epistemic priors when unverified singletons & scattered clusters coexist
+        th_ref = self.symbolic_theory
+        singleton_interior_exists = False
+        scattered_candidates: set[int] = set()
+        singleton_candidates: set[int] = set()
+        for fv in feature_vectors:
+            meta_fv = fv.feature_metadata
+            if "raw_color" not in meta_fv or "topology_10" not in meta_fv:
+                continue
+            rc_c = int(meta_fv["raw_color"])
+            if th_ref is not None and (
+                th_ref.is_avatar_feature(rc_c)
+                or th_ref.is_barrier(rc_c)
+                or th_ref.is_walkable(rc_c)
+                or rc_c in th_ref.goal_features
+            ):
+                continue
+            topo = meta_fv["topology_10"]
+            f_cnt = int(meta_fv.get("feature_count", 1))
+            open_deg4 = float(topo[0])
+            same_deg4 = float(topo[1])
+            hf_adj4 = float(topo[4])
+            if f_cnt == 1 and open_deg4 >= 0.25 and hf_adj4 < 0.75:
+                singleton_interior_exists = True
+                singleton_candidates.add(rc_c)
+            elif 2 <= f_cnt <= 5 and same_deg4 == 0.0 and open_deg4 >= 0.25:
+                scattered_candidates.add(rc_c)
+        if singleton_interior_exists and scattered_candidates:
+            for sc_f in scattered_candidates:
+                rp_sc = role_priors.setdefault(sc_f, {})
+                if rp_sc.get("goal", 0.0) < 0.65 and rp_sc.get("cargo", 0.0) < 0.65:
+                    rp_sc["hazard"] = max(rp_sc.get("hazard", 0.0), 0.68)
+            for sg_f in singleton_candidates:
+                rp_sg = role_priors.setdefault(sg_f, {})
+                if rp_sg.get("hazard", 0.0) < 0.50 and rp_sg.get("goal", 0.0) < 0.58:
+                    rp_sg.setdefault("actuator", 0.58)
 
         # Run concept maintenance (split/merge detection) periodically
         split_count = 0
@@ -501,7 +562,9 @@ class CorticalGroundingBridge:
 
         has_composite = any(c.is_composite for c in self.concept_store.get_all_concepts())
         composite_matches: list[dict[str, Any]] = []
-        if (infer_priors or has_composite) and self.state.episode_feature_memory:
+        if self.state.episode_feature_memory and (
+            has_composite or len(self.state.episode_feature_memory) >= 2
+        ):
             composite_matches = self.concept_learner.infer_composite_role_priors(
                 self.state.episode_feature_memory
             )
@@ -515,7 +578,12 @@ class CorticalGroundingBridge:
                         if boost > existing_rp.get(part_role, 0.0):
                             existing_rp[part_role] = boost
 
-        self.state.last_role_priors = role_priors
+        self.state.last_role_priors = {rc: dict(rp) for rc, rp in role_priors.items()}
+        for rc, drp in self.state.dialogue_role_priors.items():
+            dst = role_priors.setdefault(rc, {})
+            for k_r, v_r in drp.items():
+                if v_r > dst.get(k_r, 0.0):
+                    dst[k_r] = v_r
 
         # 7. Post-Action Outcome Verification (from previous cycle)
         outcome_verified = False
@@ -615,8 +683,6 @@ class CorticalGroundingBridge:
                     roles.append("actuator")
                 if (theory.is_barrier(feat) or feat in affinity_barriers) and feat not in haz_set:
                     roles.append("barrier")
-                if theory.is_avatar_feature(feat):
-                    roles.append("avatar")
             for r_name in roles:
                 if (feat, r_name) in seen_pairs:
                     continue
@@ -941,3 +1007,59 @@ class CorticalGroundingBridge:
             self.state.pending_epistemic_goals.append(goal)
 
         return res
+
+    def ground_mission_instruction(
+        self,
+        instruction: str,
+        curr_grid: Any,
+        bg_feature: int,
+        avatar_features: set[int],
+        theory: Any,
+    ) -> dict[int, dict[str, float]]:
+        """Ground a natural-language mission or rule hint against active concepts and scene grid."""
+        import numpy as np
+
+        from hbllm.hcir.compiler import HCIRCompiler
+
+        clean = instruction.strip()
+        if not clean:
+            return self.state.dialogue_role_priors
+
+        self.process_dialogue(clean)
+        compiler = HCIRCompiler(concept_store=self.concept_store)
+        lower = clean.lower()
+        goal_verbs = (
+            "go ",
+            "reach ",
+            "navigate ",
+            "move ",
+            "find ",
+            "touch ",
+            "select ",
+            "collect ",
+        )
+        is_goal_cmd = lower.startswith(goal_verbs) or any(f" {v}" in lower for v in goal_verbs)
+        target_feat = compiler._resolve_feature_for_label(clean, theory) if is_goal_cmd else None
+
+        if isinstance(target_feat, int):
+            self.state.dialogue_role_priors[target_feat] = {"goal": 0.96}
+            if theory is not None:
+                theory.induce_candidate_goal(target_feat, evidence="grounded_dialogue")
+            if curr_grid is not None:
+                arr = np.asarray(curr_grid)
+                if arr.ndim == 2:
+                    vals, cnts = np.unique(arr, return_counts=True)
+                    for v_np, c_np in zip(vals.tolist(), cnts.tolist(), strict=False):
+                        v_int = int(v_np)
+                        if (
+                            v_int != target_feat
+                            and v_int != bg_feature
+                            and v_int not in avatar_features
+                            and int(c_np) <= 4
+                            and (theory is None or not theory.is_barrier(v_int))
+                        ):
+                            self.state.dialogue_role_priors[v_int] = {"hazard": 0.78}
+        elif theory is not None:
+            compiler.compile_utterance_to_causal_hypothesis(clean, theory=theory)
+
+        return self.state.dialogue_role_priors

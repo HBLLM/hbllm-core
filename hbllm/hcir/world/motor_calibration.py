@@ -60,8 +60,18 @@ class ActionDynamicsModel:
     probes_tested: int = 0
     displacement: tuple[float, ...] = ()
     continuous_deltas: list[tuple[float, float]] = field(default_factory=list)
+    delta_counts: dict[tuple[int, int], int] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     conditional_branches: dict[str, ActionDynamicsModel] = field(default_factory=dict)
+
+    @property
+    def slip_rate(self) -> float:
+        """Empirical fraction of displacement trials deviating from the modal direction."""
+        tot = sum(self.delta_counts.values())
+        if tot < 3 or not self.delta_counts:
+            return 0.0
+        best = max(self.delta_counts.values())
+        return max(0.0, 1.0 - (best / float(tot)))
 
     def __post_init__(self) -> None:
         if not self.displacement:
@@ -226,6 +236,20 @@ class ActionDynamicsModel:
                                 observed_delta, success=True, learning_rate=learning_rate
                             )
                         return
+
+                if (target_r != 0 or target_c != 0) and max(abs(target_r), abs(target_c)) == 1:
+                    self.delta_counts[(target_r, target_c)] = (
+                        self.delta_counts.get((target_r, target_c), 0) + 1
+                    )
+                    modal_d, modal_cnt = max(self.delta_counts.items(), key=lambda kv: kv[1])
+                    self.delta_r, self.delta_c = modal_d[0], modal_d[1]
+                    self.displacement = (float(self.delta_r), float(self.delta_c))
+                    tot_obs = sum(self.delta_counts.values())
+                    if modal_cnt >= 2 and modal_cnt / max(1, tot_obs) >= 0.5:
+                        self.confidence = min(1.0, max(self.confidence, 0.75) + 0.05)
+                    else:
+                        self.confidence = min(1.0, self.confidence + 0.1)
+                    return
 
                 if (target_r != 0 or target_c != 0) and self.delta_r == 0 and self.delta_c == 0:
                     # Transition from ungrounded/obstructed prior to verified empirical displacement

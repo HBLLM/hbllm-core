@@ -4,10 +4,16 @@
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
 > [!WARNING]
-> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-16, R1–R8 complete).**  
+> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-17, R1–R9 complete).**  
 > R1–R8 established honest all-seed `dev` evaluation (`n=80`, `zero_shot=0.7791`, `solve_rate=0.8750`, CI `[0.7850, 0.9307]`, `cross_seed transfer_solve_rate=0.9342`, `exploration_deaths=3`, mean latency `p50=10.18ms / p95=28.12ms`, `reports/dev/dev_handcrafted_20261116_180441.json`), sealed held-out v2 with `eval-*` gate & `reports/heldout/LEDGER.md`, retired held-out v1, promoted `novelty.yaml` (`zero_shot=0.8365`, `solve_rate=0.9000`, `p50=11.09ms / p95=33.53ms`), wired grounding into runtime decisions, deleted 28 zero-effect/dead faculties + unwired dead hooks, enforced structural debt + `<= 250,000` LOC ratchets, added risk-aware exploration, implemented bounded event-store compaction + per-tier/world node budgets + per-stage latency profiling (`p50 ~ 10-16ms / p95 <= 45ms` at `32×32`, Rust kernels `< 0.2ms`).
 >
-> **Remaining issue from review §5:** Work **R9** next (widen task regimes: PO, stochastic transitions, other agents, long horizons, multi-step continuous control, language-specified goals; each as a dev family first with R1 before/after). No new faculties or pipeline hooks; no held-out run while iterating; no headline from fewer than 20 seeds. Production gaps are listed in §6.
+> **R9 verified across 6 widened task regimes (PO, stochastic dynamics, other agents, long horizons, continuous control, language goals; n=120, 20 seeds/task; before: `reports/dev/widened_dev_before_r9_20261116.json`, after: `reports/dev/widened_dev_after_r9_20261117.json`):**  
+> - `zero_shot` solve rate rose from 0.3167 (38/120) to 0.5083 (61/120, +60.5% rel, CI `[0.4200, 0.5961]`), `generality_score` rose from 0.4977 to 0.6080 (+0.1103).  
+> - `cross_seed transfer_solve_rate` rose from 0.4123 to 0.7456 (+80.8% rel, CI `[0.6586, 0.8166]`), `solve_rate` rose from 0.4083 to 0.7417.  
+> - `exploration_deaths` reduced from 54 to 33 (−38.9%).  
+> - Regimes: `language_goals` 100% zero-shot (20/20, 0 deaths); `multi_agent` 100% transfer solve rate (up from 0%); `continuous_control` 80% zero-shot; `partial_observability` 68.4% transfer solve rate (up from 15.8%); `long_horizon` 89.5% transfer solve rate with transactional chunking preventing constitutional rejection.  
+> - Dev suite maintained without regression (`reports/dev/dev_handcrafted_20261117_041629.json`: `cross_seed transfer_solve_rate=0.9868`, 75/76 solved). Rust kernels `< 0.2ms`; 32×32 E2E `p50=9.65ms / p95=25.98ms`.  
+> - Zero held-out execution during iteration. Production gaps are listed in §6.
 
 ---
 

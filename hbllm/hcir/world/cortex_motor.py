@@ -700,6 +700,10 @@ class EpistemicCuriosityExplorer:
                 continue
 
             cell_feat = int(curr_grid[nr, nc])
+            rp_map = engine.working_memory.concept_role_priors
+            hz_prior = rp_map.get(cell_feat, {}).get("hazard", 0.0) if rp_map else 0.0
+            if hz_prior >= 0.65 and (nr, nc) != (tr, tc):
+                continue
 
             # OFC Deadlock Pruning
             if cell_feat in engine.learned_cargo_features:
@@ -737,8 +741,26 @@ class EpistemicCuriosityExplorer:
             repulsion_penalty = engine.working_memory.habenular_ior.get_repulsion_penalty(
                 engine.avatar_pos, act
             )
+            mob_avoid = engine.hazard_tracker.get_mobile_avoidance_cells(
+                curr_grid, set(engine.symbolic_theory.barrier_features), bg
+            )
+            dyn_risk_pen = 120.0 if (nr, nc) in mob_avoid else 0.0
+            if any(d.slip_rate > 0.05 for d in engine.action_dynamics.values()):
+                for dr_s, dc_s in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    sr_s, sc_s = nr + dr_s, nc + dc_s
+                    if 0 <= sr_s < H and 0 <= sc_s < W:
+                        sv_s = int(curr_grid[sr_s, sc_s])
+                        if (
+                            sv_s in engine.hazard_tracker.known_lethal_features
+                            or (sr_s, sc_s) in engine.hazard_tracker.static_lethal_positions
+                            or (
+                                rp_map.get(sv_s, {}).get("hazard", 0.0) >= 0.65 if rp_map else False
+                            )
+                        ):
+                            dyn_risk_pen += 80.0
+                            break
             dist_to_target = abs(nr - tr) + abs(nc - tc)
-            estimated_cost = float(dist_to_target) + cycle_pen + repulsion_penalty
+            estimated_cost = float(dist_to_target) + cycle_pen + repulsion_penalty + dyn_risk_pen
 
             act_id = f"act_{act}_{nr}_{nc}"
             node = ActionNode(
@@ -959,6 +981,12 @@ class EpistemicCuriosityExplorer:
                 if e.id not in engine.probed_entity_ids
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
                 and e.feature_id not in engine.hazard_tracker.known_lethal_features
+                and (
+                    e.feature_id not in engine.hazard_tracker.mobile_entities
+                    or e.feature_id in engine.symbolic_theory.cargo_features
+                    or e.feature_id in engine.learned_cargo_features
+                )
+                and e.feature_id != engine.working_memory.shroud_feature
                 and (
                     abs(e.grid_pos[0] - engine.avatar_pos[0])
                     + abs(e.grid_pos[1] - engine.avatar_pos[1])
