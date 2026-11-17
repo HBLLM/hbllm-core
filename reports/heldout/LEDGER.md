@@ -24,3 +24,4 @@ Append-only audit log of official held-out evaluations.
 
 | Timestamp (UTC) | Git SHA | Eval Tag | Config Hash | Env Hash | Mode | Zero-Shot (Solve Rate, 95% CI) | Cross-Seed Transfer (95% CI) | Report |
 |---|---|---|---|---|---|---|---|---|
+| 20261117_054729 | `f0587fc1` | `eval-phase2-r9` | `b14d80e89bc8cc3e` | `fc495a2dba8a1a49` | handcrafted | 0.6472 (sr=0.6083, CI=[0.5189, 0.691]) | 0.6930 (CI=[0.6032, 0.7702]) | `f0587fc183b07a732fb7886d4b4bb3473f79c730_handcrafted_20261117_054729.json` |
