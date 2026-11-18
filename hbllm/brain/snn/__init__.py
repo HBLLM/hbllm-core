@@ -1,56 +1,5 @@
-"""
-Spiking Neural Network (SNN) modules for cognitive modeling.
-"""
+"""Backward-compatible re-export — canonical implementation moved to ``hbllm.hcir.snn``."""
 
-from hbllm.brain.emotion.neuromodulation import NeuromodulationEngine, NeuromodulatorState
-from hbllm.brain.snn import comprehension
-from hbllm.brain.snn.dendrite import DendriticConfig, DendriticNeuron
-from hbllm.brain.snn.lif import LIFConfig, LIFNeuron, SpikeEvent, SpikingAccumulator
-from hbllm.brain.snn.network import LayerProjection, NeuronLayer, ProjectionType, SpikingNetwork
-from hbllm.brain.snn.neurons import (
-    BaseNeuron,
-    IzhikevichConfig,
-    IzhikevichNeuron,
-    create_neuron_from_dict,
-    register_neuron_type,
-)
-from hbllm.brain.snn.oscillations import OscillationBand, OscillationManager
-from hbllm.brain.snn.plasticity import PlasticWeightMatrix, STDPRule, SynapticConnection
-from hbllm.brain.snn.population import CognitiveStateEncoder, PopulationEncoder
+from __future__ import annotations
 
-__all__ = [
-    "comprehension",
-    # Base neuron interface
-    "BaseNeuron",
-    "create_neuron_from_dict",
-    "register_neuron_type",
-    # LIF model (original)
-    "LIFConfig",
-    "LIFNeuron",
-    "SpikeEvent",
-    "SpikingAccumulator",
-    # Izhikevich model (v4)
-    "IzhikevichConfig",
-    "IzhikevichNeuron",
-    # Dendritic model (M3 — predictive coding)
-    "DendriticConfig",
-    "DendriticNeuron",
-    # Multi-layer network framework
-    "NeuronLayer",
-    "LayerProjection",
-    "ProjectionType",
-    "SpikingNetwork",
-    # Plasticity (STDP)
-    "SynapticConnection",
-    "STDPRule",
-    "PlasticWeightMatrix",
-    # Neuromodulation
-    "NeuromodulationEngine",
-    "NeuromodulatorState",
-    # Population coding (M3)
-    "PopulationEncoder",
-    "CognitiveStateEncoder",
-    # Neural oscillations (M5)
-    "OscillationManager",
-    "OscillationBand",
-]
+from hbllm.hcir.snn import *  # noqa: F401, F403
