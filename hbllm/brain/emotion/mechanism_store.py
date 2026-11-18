@@ -25,12 +25,13 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ class MechanismStore:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS mechanisms (
                     id TEXT PRIMARY KEY,
@@ -127,7 +128,7 @@ class MechanismStore:
 
     def store(self, mechanism: Mechanism) -> None:
         """Store or update a mechanism."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO mechanisms
@@ -191,7 +192,7 @@ class MechanismStore:
 
     def get(self, mechanism_id: str) -> Mechanism | None:
         """Retrieve a mechanism by ID."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute("SELECT * FROM mechanisms WHERE id = ?", (mechanism_id,)).fetchone()
         return self._row_to_mechanism(row) if row else None
 
@@ -199,7 +200,7 @@ class MechanismStore:
         self, domain: str, min_confidence: float = 0.0, limit: int = 50
     ) -> list[Mechanism]:
         """Find mechanisms in a specific domain."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT * FROM mechanisms WHERE domain = ? AND confidence >= ? "
                 "ORDER BY confidence DESC, usage_count DESC LIMIT ?",
@@ -222,7 +223,7 @@ class MechanismStore:
             params.append(domain)
         query += " ORDER BY confidence DESC, usage_count DESC LIMIT 200"
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(query, params).fetchall()
 
         if not rows:
@@ -246,7 +247,7 @@ class MechanismStore:
 
     def get_core_mechanisms(self) -> list[Mechanism]:
         """Get all promoted core mechanisms (cognitive primitives)."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT * FROM mechanisms WHERE is_core = 1 ORDER BY usage_count DESC"
             ).fetchall()
@@ -254,7 +255,7 @@ class MechanismStore:
 
     def list_all(self, limit: int = 500) -> list[Mechanism]:
         """Get all mechanisms, ordered by confidence descending."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT * FROM mechanisms ORDER BY confidence DESC LIMIT ?",
                 (limit,),
@@ -266,7 +267,7 @@ class MechanismStore:
     def record_usage(self, mechanism_id: str, success: bool) -> None:
         """Record a mechanism usage for tracking."""
         now = time.time()
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             if success:
                 conn.execute(
                     "UPDATE mechanisms SET usage_count = usage_count + 1, "
@@ -286,7 +287,7 @@ class MechanismStore:
 
     def reinforce(self, mechanism_id: str, confidence_boost: float = 0.05) -> None:
         """Reinforce a mechanism's confidence (e.g. after evidence confirms it)."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "UPDATE mechanisms SET confidence = MIN(1.0, confidence + ?) WHERE id = ?",
                 (confidence_boost, mechanism_id),
@@ -294,7 +295,7 @@ class MechanismStore:
 
     def decay_confidence(self, rate: float = 0.01) -> int:
         """Decay all non-core mechanism confidence. Returns count affected."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE mechanisms SET confidence = MAX(0.0, confidence - ?) "
                 "WHERE is_core = 0 AND confidence > 0.0",
@@ -304,7 +305,7 @@ class MechanismStore:
 
     def promote_to_core(self, mechanism_id: str) -> bool:
         """Promote a mechanism to core status (cognitive primitive)."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE mechanisms SET is_core = 1 WHERE id = ?",
                 (mechanism_id,),
@@ -325,7 +326,7 @@ class MechanismStore:
         - Not already core
         - Confidence >= 0.8
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT * FROM mechanisms WHERE is_core = 0 "
                 "AND usage_count >= ? AND confidence >= 0.8 "
@@ -338,7 +339,7 @@ class MechanismStore:
 
     def prune_weak(self, max_confidence: float = 0.1) -> int:
         """Remove mechanisms with very low confidence (failed beliefs)."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "DELETE FROM mechanisms WHERE confidence <= ? AND is_core = 0",
                 (max_confidence,),
@@ -350,7 +351,7 @@ class MechanismStore:
 
     def get_weak(self, threshold: float = 0.3) -> list[Mechanism]:
         """Find low-confidence mechanisms for review."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT * FROM mechanisms WHERE confidence <= ? AND is_core = 0 "
                 "ORDER BY confidence ASC LIMIT 50",
@@ -362,7 +363,7 @@ class MechanismStore:
 
     def stats(self) -> dict[str, Any]:
         """Get summary statistics."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM mechanisms").fetchone()[0]
             core = conn.execute("SELECT COUNT(*) FROM mechanisms WHERE is_core = 1").fetchone()[0]
             avg_conf = conn.execute("SELECT AVG(confidence) FROM mechanisms").fetchone()[0]

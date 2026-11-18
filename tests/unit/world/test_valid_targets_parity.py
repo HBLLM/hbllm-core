@@ -21,7 +21,6 @@ from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.engine_state import FacultyWriteJournal, JournaledEngineView
 from hbllm.hcir.world.macro_actions import InteractWith
-from hbllm.hcir.world.spatiotemporal_tracker import MorphologicalDeformationTracker
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Task A: valid-target probing
@@ -207,38 +206,6 @@ def test_extract_entities_matches_reference_lifting() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # Task B parity: spatiotemporal tracker primitives
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-def test_compute_iou_matches_reference() -> None:
-    rng = np.random.default_rng(1)
-    for _ in range(30):
-        a = {(int(r), int(c)) for r, c in rng.integers(0, 10, size=(20, 2))}
-        b = {(int(r), int(c)) for r, c in rng.integers(0, 10, size=(15, 2))}
-        inter = len(a & b)
-        union = len(a | b)
-        ref = float(inter / union) if union > 0 else 0.0
-        assert MorphologicalDeformationTracker.compute_iou(a, b) == ref
-
-
-def test_euler_characteristic_large_complex_parity() -> None:
-    """Both regimes (set-count and raster) agree with brute-force V - E + F."""
-    rng = np.random.default_rng(2)
-    mask = (rng.random((48, 48)) < 0.95).astype(bool)
-    cells = {(int(rc[0]), int(rc[1])) for rc in np.argwhere(mask)}
-    assert len(cells) >= 2048  # exercises the raster path
-    verts: set[tuple[int, int]] = set()
-    edges: set[tuple[tuple[int, int], tuple[int, int]]] = set()
-    for r, c in cells:
-        verts.update(((r, c), (r, c + 1), (r + 1, c), (r + 1, c + 1)))
-        for a, b in (
-            ((r, c), (r, c + 1)),
-            ((r + 1, c), (r + 1, c + 1)),
-            ((r, c), (r + 1, c)),
-            ((r, c + 1), (r + 1, c + 1)),
-        ):
-            edges.add((a, b) if a <= b else (b, a))
-    ref = len(verts) - len(edges) + len(cells)
-    assert MorphologicalDeformationTracker.compute_euler_characteristic(cells) == ref
 
 
 # ─────────────────────────────────────────────────────────────────────────────

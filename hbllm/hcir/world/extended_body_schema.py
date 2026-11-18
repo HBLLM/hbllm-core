@@ -97,10 +97,10 @@ class ExtendedBodySchema:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset currently held tools while optionally preserving cross-trial tool affinities."""

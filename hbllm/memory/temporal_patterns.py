@@ -36,6 +36,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -87,7 +89,7 @@ class TemporalPatternDetector:
     async def init_db(self) -> None:
         """Create tables for interaction tracking and pattern storage."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS interactions (
@@ -140,7 +142,7 @@ class TemporalPatternDetector:
         ts = timestamp or time.time()
         dt = datetime.fromtimestamp(ts, tz=timezone.utc)
 
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             conn.execute(
                 "INSERT INTO interactions (tenant_id, domain, timestamp_unix, "
@@ -172,7 +174,7 @@ class TemporalPatternDetector:
         Returns:
             List of detected patterns above confidence threshold.
         """
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             # Get all domains for tenant
             if domain:
@@ -228,7 +230,7 @@ class TemporalPatternDetector:
 
     def get_stored_patterns(self, tenant_id: str) -> list[TemporalPattern]:
         """Retrieve previously detected patterns for a tenant."""
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             cursor = conn.execute(
                 "SELECT * FROM detected_patterns WHERE tenant_id = ? ORDER BY confidence DESC",
@@ -443,7 +445,7 @@ class TemporalPatternDetector:
 
     def stats(self) -> dict[str, Any]:
         """Detector statistics."""
-        conn = sqlite3.connect(self.db_path)
+        conn = open_connection(self.db_path)
         try:
             interactions = conn.execute("SELECT COUNT(*) FROM interactions").fetchone()[0]
             patterns = conn.execute("SELECT COUNT(*) FROM detected_patterns").fetchone()[0]

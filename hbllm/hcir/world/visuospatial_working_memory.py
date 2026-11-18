@@ -72,37 +72,80 @@ class VisuospatialWorkingMemory:
         self.matching_evidence: int = 0
         self.is_pair_matching_task: bool = False
 
-        # Spatial Layout Facts (Preserved per-level across attempts)
-        self.current_level: int = 0
-        self.level_learned_barriers: dict[int, set[tuple[int, int]]] = {}
-        self.level_lethal_positions: dict[int, set[tuple[int, int]]] = {}
-        self.level_learned_goals: dict[int, set[tuple[int, int]]] = {}
+        # Spatial Layout Facts (Preserved per-context across attempts)
+        self.context_epoch: int = 0
+        self.context_barriers: dict[int, set[tuple[int, int]]] = {}
+        self.context_hazards: dict[int, set[tuple[int, int]]] = {}
+        self.context_goals: dict[int, set[tuple[int, int]]] = {}
         self.learned_goal_positions: set[tuple[int, int]] = set()
         self.learned_receptacle_positions: set[tuple[int, int]] = set()
 
     @property
+    def current_level(self) -> int:
+        """Deprecated alias for ``context_epoch``."""
+        return self.context_epoch
+
+    @current_level.setter
+    def current_level(self, val: int) -> None:
+        self.context_epoch = val
+
+    @property
+    def level_learned_barriers(self) -> dict[int, set[tuple[int, int]]]:
+        """Deprecated alias for ``context_barriers``."""
+        return self.context_barriers
+
+    @level_learned_barriers.setter
+    def level_learned_barriers(self, val: dict[int, set[tuple[int, int]]]) -> None:
+        self.context_barriers = val
+
+    @property
+    def level_lethal_positions(self) -> dict[int, set[tuple[int, int]]]:
+        """Deprecated alias for ``context_hazards``."""
+        return self.context_hazards
+
+    @level_lethal_positions.setter
+    def level_lethal_positions(self, val: dict[int, set[tuple[int, int]]]) -> None:
+        self.context_hazards = val
+
+    @property
+    def level_learned_goals(self) -> dict[int, set[tuple[int, int]]]:
+        """Deprecated alias for ``context_goals``."""
+        return self.context_goals
+
+    @level_learned_goals.setter
+    def level_learned_goals(self, val: dict[int, set[tuple[int, int]]]) -> None:
+        self.context_goals = val
+
+    @property
     def learned_barriers(self) -> set[tuple[int, int]]:
-        """Barrier coordinates discovered on the currently active level."""
-        return self.level_learned_barriers.setdefault(self.current_level, set())
+        """Barrier coordinates discovered in the currently active context epoch."""
+        return self.context_barriers.setdefault(self.context_epoch, set())
 
     @learned_barriers.setter
     def learned_barriers(self, val: set[tuple[int, int]]) -> None:
-        self.level_learned_barriers[self.current_level] = val
+        self.context_barriers[self.context_epoch] = val
 
     def on_boundary(self, boundary) -> None:
         """Episode lifecycle boundary handler (WP0.5). Delegates to the
         deprecated reset_episode for backward-compatible semantics."""
-        self.reset_episode()
+        from hbllm.hcir.world.percept import EpisodeBoundaryKind
+
+        kind = getattr(boundary, "kind", boundary)
+        is_context_reset = kind in (
+            EpisodeBoundaryKind.CONTEXT_RESET,
+            "context_reset",
+        )
+        self.reset_episode(retain_long_term=not is_context_reset)
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
-    def reset_episode(self, retain_long_term: bool = False) -> None:
-        """Reset transient slot bindings while optionally preserving task-level stencil theories."""
+    def reset_episode(self, retain_long_term: bool = True) -> None:
+        """Reset transient slot bindings while optionally preserving context-local stencil theories."""
         self.bound_slots.clear()
         self.feature_to_coords.clear()
         self.resolved_coords.clear()
@@ -112,9 +155,9 @@ class VisuospatialWorkingMemory:
             self.discovered_stencils.clear()
             self.matching_evidence = 0
             self.is_pair_matching_task = False
-            self.level_learned_barriers.clear()
-            self.level_lethal_positions.clear()
-            self.level_learned_goals.clear()
+            self.context_barriers.clear()
+            self.context_hazards.clear()
+            self.context_goals.clear()
             self.learned_goal_positions.clear()
             self.learned_receptacle_positions.clear()
 

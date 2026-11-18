@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,7 +85,7 @@ class OpportunityHistory:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS opportunity_history (
@@ -126,7 +128,7 @@ class OpportunityHistory:
             opp: The Opportunity to log.
             status: Status of the opportunity ("created", "dismissed", "executed", "expired").
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO opportunity_history
@@ -159,7 +161,7 @@ class OpportunityHistory:
 
     def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
         """Fetch history of opportunities."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM opportunity_history ORDER BY updated_at DESC LIMIT ?", (limit,)

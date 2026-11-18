@@ -10,6 +10,7 @@ from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 
@@ -33,19 +34,35 @@ async def test_multi_step_counterfactual_planner_accumulates_discounted_utility(
     """Verify that horizon=2 evaluates higher cumulative utility than horizon=1 on a clear path."""
     ws, services = hcir_setup
 
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [4, 4], "is_avatar": True, "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="goal",
-            entity_name="goal",
-            properties={"position": [1, 4], "is_goal": True, "movable": False, "passable": True},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [4, 4],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="goal",
+                    entity_name="goal",
+                    properties={
+                        "position": [1, 4],
+                        "is_goal": True,
+                        "movable": False,
+                        "passable": True,
+                    },
+                ),
+            ),
+        ]
     )
 
     planner = CounterfactualPlanner(ws, services)
@@ -85,19 +102,35 @@ async def test_multi_step_counterfactual_planner_horizon_3(
     """Verify that horizon=3 runs multi-step mental simulation cleanly."""
     ws, services = hcir_setup
 
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [5, 5], "is_avatar": True, "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="goal",
-            entity_name="goal",
-            properties={"position": [2, 5], "is_goal": True, "movable": False, "passable": True},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [5, 5],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="goal",
+                    entity_name="goal",
+                    properties={
+                        "position": [2, 5],
+                        "is_goal": True,
+                        "movable": False,
+                        "passable": True,
+                    },
+                ),
+            ),
+        ]
     )
 
     planner = CounterfactualPlanner(ws, services)

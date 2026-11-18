@@ -21,16 +21,23 @@ Popperian counterexample refutation, and causal rule abstraction:
 """
 
 import logging
+import math
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from hbllm.hcir.world.causal_discovery import BeliefTransitionType, CausalPredicate
+from hbllm.hcir.world.causal_discovery import (
+    BeliefTransitionType,
+    CausalPredicate,
+    LogicOperator,
+)
+from hbllm.hcir.world.percept import PlaceLocus
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
@@ -45,6 +52,7 @@ class HypothesisType(StrEnum):
     ACTION_MUTATION = "ACTION_MUTATION"
     REMOTE_MECHANISM = "REMOTE_MECHANISM"
     HAZARD_CONTACT = "HAZARD_CONTACT"
+    COMPOSITIONAL_PROGRAM = "COMPOSITIONAL_PROGRAM"
 
 
 class HypothesisStatus(StrEnum):
@@ -143,6 +151,21 @@ class RelationalRuleHypothesis:
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Compile this hypothesis into a formal first-order CausalPredicate."""
+        if self.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM:
+            ast_obj = self.metadata.get("ast")
+            if isinstance(ast_obj, SynthesizedRuleAST):
+                return CausalPredicate(
+                    variable=f"inductive_program:{self.rule_id}",
+                    operator="==",
+                    value=ast_obj.effect_operator,
+                    relation="synthesized_transition_rule",
+                    target_entity=ast_obj.precondition.describe(),
+                    logic_op=ast_obj.precondition.logic_op,
+                    children=list(ast_obj.precondition.children),
+                    causal_status=self.status.value,
+                    confidence=self.confidence,
+                    metadata={"effect_params": dict(ast_obj.effect_params)},
+                )
         if self.rule_type == HypothesisType.REMOTE_MECHANISM:
             return CausalPredicate(
                 variable=f"inductive_rule:{self.rule_id}",
@@ -186,27 +209,360 @@ class RelationalRuleHypothesis:
 
 
 @dataclass(frozen=True)
-class TransitionObservationContext:
-    """Immutable snapshot of an embodied state transition."""
+class EntityStateDelta:
+    """Domain-agnostic summary of a single entity or locus transition."""
 
-    prev_grid: np.ndarray
-    action: Any
-    curr_grid: np.ndarray
-    prev_avatar_pos: tuple[int, int] | None = None
-    curr_avatar_pos: tuple[int, int] | None = None
+    locus: PlaceLocus
+    prev_feature: int
+    curr_feature: int
+    within_prev_avatar: bool = False
+    within_curr_avatar: bool = False
+    adjacent_to_curr_avatar: bool = False
+
+
+def _shift_numeric_locus(locus: PlaceLocus, delta: tuple[int | float, ...]) -> PlaceLocus | None:
+    """Translate a coordinate PlaceLocus by a numeric displacement vector."""
+    if not isinstance(locus, tuple) or len(locus) != len(delta):
+        return None
+    shifted: list[int | float] = []
+    for coord, step in zip(locus, delta):
+        if not isinstance(coord, (int, float)) or not isinstance(step, (int, float)):
+            return None
+        val = coord + step
+        shifted.append(int(val) if isinstance(coord, int) and isinstance(step, int) else float(val))
+    return tuple(shifted)
+
+
+@dataclass(frozen=True)
+class TransitionObservationContext:
+    """Immutable snapshot of an embodied state transition.
+
+    Supports both discrete lattice snapshots (``prev_grid``/``curr_grid``) and
+    substrate-agnostic lifted sensory/delta summaries (``entity_deltas``,
+    ``contact_feature``, adjacent features, and feature counts) over ``PlaceLocus``.
+    """
+
+    prev_grid: np.ndarray | None = None
+    action: Any = None
+    curr_grid: np.ndarray | None = None
+    prev_avatar_pos: PlaceLocus | None = None
+    curr_avatar_pos: PlaceLocus | None = None
     avatar_h: int = 1
     avatar_w: int = 1
     is_dead: bool = False
     is_won: bool = False
     background_feature: int = 0
+    entity_deltas: tuple[EntityStateDelta, ...] | None = None
+    contact_feature: int | None = None
+    avatar_feature: int | None = None
+    prev_adjacent_features: tuple[int, ...] | None = None
+    curr_adjacent_features: tuple[int, ...] | None = None
+    curr_static_adjacent_features: tuple[int, ...] | None = None
+    paired_features: frozenset[int] | None = None
+    prev_feature_counts: dict[int, int] | None = None
+    curr_feature_counts: dict[int, int] | None = None
 
     @property
     def diff_mask(self) -> np.ndarray:
+        if (
+            self.prev_grid is None
+            or self.curr_grid is None
+            or self.prev_grid.shape != self.curr_grid.shape
+        ):
+            return np.zeros((0,), dtype=bool)
         return self.prev_grid != self.curr_grid
 
     @property
     def changed_count(self) -> int:
-        return int(np.count_nonzero(self.diff_mask))
+        if self.entity_deltas is not None:
+            return len(self.entity_deltas)
+        if (
+            self.prev_grid is not None
+            and self.curr_grid is not None
+            and self.prev_grid.shape == self.curr_grid.shape
+        ):
+            return int(np.count_nonzero(self.diff_mask))
+        return 0
+
+    def is_valid_curr_locus(self) -> bool:
+        """Verify ``curr_avatar_pos`` is present and within lattice bounds when grid-backed."""
+        if self.curr_avatar_pos is None:
+            return False
+        if self.prev_grid is None:
+            return True
+        if (
+            not isinstance(self.curr_avatar_pos, tuple)
+            or len(self.curr_avatar_pos) != self.prev_grid.ndim
+        ):
+            return False
+        return all(
+            isinstance(c, (int, float)) and 0 <= int(c) < size
+            for c, size in zip(self.curr_avatar_pos, self.prev_grid.shape)
+        )
+
+    def _within_avatar_radius(self, locus: PlaceLocus, avatar_pos: PlaceLocus | None) -> bool:
+        if avatar_pos is None:
+            return False
+        if locus == avatar_pos:
+            return True
+        if (
+            not isinstance(locus, tuple)
+            or not isinstance(avatar_pos, tuple)
+            or len(locus) != len(avatar_pos)
+        ):
+            return False
+        for axis, (coord, av_coord) in enumerate(zip(locus, avatar_pos)):
+            if not isinstance(coord, (int, float)) or not isinstance(av_coord, (int, float)):
+                return False
+            radius = (
+                max(1, self.avatar_h // 2)
+                if axis == 0
+                else max(1, self.avatar_w // 2)
+                if axis == 1
+                else 1
+            )
+            if abs(coord - av_coord) > radius:
+                return False
+        return True
+
+    def is_within_avatar_footprint(self, delta: EntityStateDelta) -> bool:
+        """Return True if ``delta.locus`` falls within pre- or post-step avatar footprint."""
+        if delta.within_prev_avatar or delta.within_curr_avatar:
+            return True
+        return self._within_avatar_radius(
+            delta.locus, self.prev_avatar_pos
+        ) or self._within_avatar_radius(delta.locus, self.curr_avatar_pos)
+
+    def _is_cardinally_adjacent(self, locus: PlaceLocus, target: PlaceLocus | None) -> bool:
+        if (
+            not isinstance(locus, tuple)
+            or not isinstance(target, tuple)
+            or len(locus) != len(target)
+        ):
+            return False
+        dist = 0.0
+        for coord, t_coord in zip(locus, target):
+            if not isinstance(coord, (int, float)) or not isinstance(t_coord, (int, float)):
+                return False
+            dist += abs(float(coord) - float(t_coord))
+        return abs(dist - 1.0) < 1e-6
+
+    def _cardinal_neighbors_in_grid(
+        self, grid: np.ndarray, pos: PlaceLocus | None
+    ) -> list[tuple[tuple[int, ...], int]]:
+        if not isinstance(pos, tuple) or len(pos) != grid.ndim:
+            return []
+        if not all(isinstance(c, (int, float)) for c in pos):
+            return []
+        base = tuple(int(c) for c in pos)
+        shape = grid.shape
+        neighbors: list[tuple[tuple[int, ...], int]] = []
+        for axis, size in enumerate(shape):
+            for step in (-1, 1):
+                nxt_val = base[axis] + step
+                if 0 <= nxt_val < size:
+                    nxt = base[:axis] + (nxt_val,) + base[axis + 1 :]
+                    if all(0 <= nxt[i] < shape[i] for i in range(len(shape))):
+                        neighbors.append((nxt, int(grid[nxt])))
+        return neighbors
+
+    def get_entity_deltas(self) -> tuple[EntityStateDelta, ...]:
+        """Return lifted entity deltas, deriving them from lattice diffs when omitted."""
+        if self.entity_deltas is not None:
+            return self.entity_deltas
+        if (
+            self.prev_grid is None
+            or self.curr_grid is None
+            or self.prev_grid.shape != self.curr_grid.shape
+        ):
+            return ()
+        coords = np.argwhere(self.diff_mask)
+        deltas: list[EntityStateDelta] = []
+        for coord_arr in coords:
+            locus = tuple(int(v) for v in coord_arr)
+            deltas.append(
+                EntityStateDelta(
+                    locus=locus,
+                    prev_feature=int(self.prev_grid[locus]),
+                    curr_feature=int(self.curr_grid[locus]),
+                    within_prev_avatar=self._within_avatar_radius(locus, self.prev_avatar_pos),
+                    within_curr_avatar=self._within_avatar_radius(locus, self.curr_avatar_pos),
+                    adjacent_to_curr_avatar=self._is_cardinally_adjacent(
+                        locus, self.curr_avatar_pos
+                    ),
+                )
+            )
+        res = tuple(deltas)
+        object.__setattr__(self, "entity_deltas", res)
+        return res
+
+    def get_diff_feature_sets(self) -> tuple[set[int], set[int]]:
+        """Return sets of features before and after at changed loci."""
+        if self.entity_deltas is not None:
+            return (
+                {d.prev_feature for d in self.entity_deltas},
+                {d.curr_feature for d in self.entity_deltas},
+            )
+        if (
+            self.prev_grid is not None
+            and self.curr_grid is not None
+            and self.prev_grid.shape == self.curr_grid.shape
+        ):
+            dm = self.diff_mask
+            return set(self.prev_grid[dm].tolist()), set(self.curr_grid[dm].tolist())
+        return set(), set()
+
+    def get_contact_feature(self) -> int | None:
+        """Return feature at ``curr_avatar_pos`` in pre-transition state."""
+        if self.contact_feature is not None:
+            return self.contact_feature
+        return self.get_prev_feature_at(self.curr_avatar_pos)
+
+    def get_avatar_feature(self) -> int | None:
+        """Return feature at ``prev_avatar_pos`` in pre-transition state."""
+        if self.avatar_feature is not None:
+            return self.avatar_feature
+        return self.get_prev_feature_at(self.prev_avatar_pos)
+
+    def get_prev_feature_at(self, locus: PlaceLocus | None) -> int | None:
+        """Look up pre-transition feature at ``locus`` across grid or delta substrate."""
+        if locus is None:
+            return None
+        if (
+            self.prev_grid is not None
+            and isinstance(locus, tuple)
+            and len(locus) == self.prev_grid.ndim
+            and all(isinstance(c, (int, float)) for c in locus)
+        ):
+            idx = tuple(int(c) for c in locus)
+            if all(0 <= idx[i] < self.prev_grid.shape[i] for i in range(self.prev_grid.ndim)):
+                return int(self.prev_grid[idx])
+            return None
+        for d in self.get_entity_deltas():
+            if d.locus == locus:
+                return d.prev_feature
+        return None
+
+    def get_curr_feature_at(self, locus: PlaceLocus | None) -> int | None:
+        """Look up post-transition feature at ``locus`` across grid or delta substrate."""
+        if locus is None:
+            return None
+        if (
+            self.curr_grid is not None
+            and isinstance(locus, tuple)
+            and len(locus) == self.curr_grid.ndim
+            and all(isinstance(c, (int, float)) for c in locus)
+        ):
+            idx = tuple(int(c) for c in locus)
+            if all(0 <= idx[i] < self.curr_grid.shape[i] for i in range(self.curr_grid.ndim)):
+                return int(self.curr_grid[idx])
+            return None
+        for d in self.get_entity_deltas():
+            if d.locus == locus:
+                return d.curr_feature
+        return None
+
+    def get_prev_adjacent_features(self) -> tuple[int, ...]:
+        """Return non-background features adjacent to ``prev_avatar_pos`` in pre-state."""
+        if self.prev_adjacent_features is not None:
+            return self.prev_adjacent_features
+        if self.prev_grid is not None:
+            seen: list[int] = []
+            for _, feat in self._cardinal_neighbors_in_grid(self.prev_grid, self.prev_avatar_pos):
+                if feat != self.background_feature and feat not in seen:
+                    seen.append(feat)
+            return tuple(seen)
+        return ()
+
+    def get_prev_contact_and_adjacent_features(self) -> tuple[int, ...]:
+        """Return non-background features overlapping or adjacent to ``prev_avatar_pos``."""
+        if self.prev_grid is not None and isinstance(self.prev_avatar_pos, tuple):
+            feats: list[int] = []
+            self_feat = self.get_prev_feature_at(self.prev_avatar_pos)
+            if self_feat is not None and self_feat != self.background_feature:
+                feats.append(self_feat)
+            for _, feat in self._cardinal_neighbors_in_grid(self.prev_grid, self.prev_avatar_pos):
+                if feat != self.background_feature:
+                    feats.append(feat)
+            return tuple(feats)
+        lifted: list[int] = []
+        if self.avatar_feature is not None and self.avatar_feature != self.background_feature:
+            lifted.append(self.avatar_feature)
+        if self.prev_adjacent_features is not None:
+            for feat in self.prev_adjacent_features:
+                if feat != self.background_feature:
+                    lifted.append(feat)
+        elif self.contact_feature is not None and self.contact_feature != self.background_feature:
+            lifted.append(self.contact_feature)
+        return tuple(lifted)
+
+    def get_curr_adjacent_features(self) -> tuple[int, ...]:
+        """Return pre-transition features adjacent to ``curr_avatar_pos``."""
+        if self.curr_adjacent_features is not None:
+            return self.curr_adjacent_features
+        if self.prev_grid is not None:
+            return tuple(
+                feat
+                for _, feat in self._cardinal_neighbors_in_grid(
+                    self.prev_grid, self.curr_avatar_pos
+                )
+            )
+        return ()
+
+    def get_curr_changed_and_static_adjacent(
+        self, avatar_feat: int | None
+    ) -> tuple[list[int], list[int]]:
+        """Partition non-background/non-avatar features adjacent to ``curr_avatar_pos``."""
+        bg = self.background_feature
+        if self.prev_grid is not None:
+            dm = self.diff_mask
+            changed_adj: list[int] = []
+            static_adj: list[int] = []
+            for loc, cand_f in self._cardinal_neighbors_in_grid(
+                self.prev_grid, self.curr_avatar_pos
+            ):
+                if cand_f != bg and cand_f != avatar_feat:
+                    if dm.size > 0 and bool(dm[loc]):
+                        changed_adj.append(cand_f)
+                    else:
+                        static_adj.append(cand_f)
+            return changed_adj, static_adj
+        changed_adj = [
+            d.prev_feature
+            for d in self.get_entity_deltas()
+            if d.adjacent_to_curr_avatar and d.prev_feature != bg and d.prev_feature != avatar_feat
+        ]
+        if self.curr_static_adjacent_features is not None:
+            static_adj = [
+                f for f in self.curr_static_adjacent_features if f != bg and f != avatar_feat
+            ]
+        elif not changed_adj and self.curr_adjacent_features is not None:
+            static_adj = [f for f in self.curr_adjacent_features if f != bg and f != avatar_feat]
+        else:
+            static_adj = []
+        return changed_adj, static_adj
+
+    def get_prev_feature_count(self, feature: int) -> int:
+        """Return occurrence count of ``feature`` before transition."""
+        if self.prev_feature_counts is not None:
+            return self.prev_feature_counts.get(feature, 0)
+        if self.prev_grid is not None:
+            return int(np.count_nonzero(self.prev_grid == feature))
+        return 0
+
+    def get_curr_feature_count(self, feature: int) -> int:
+        """Return occurrence count of ``feature`` after transition."""
+        if self.curr_feature_counts is not None:
+            return self.curr_feature_counts.get(feature, 0)
+        if self.curr_grid is not None:
+            return int(np.count_nonzero(self.curr_grid == feature))
+        return 0
+
+    def has_feature_count_summary(self) -> bool:
+        """Return True if global feature counts are available via arrays or lifted maps."""
+        return (self.prev_grid is not None and self.curr_grid is not None) or (
+            self.prev_feature_counts is not None and self.curr_feature_counts is not None
+        )
 
 
 class HypothesisObserver(ABC):
@@ -235,39 +591,33 @@ class HazardContactObserver(HypothesisObserver):
         if not context.is_dead or context.prev_avatar_pos is None:
             return []
 
-        H, W = context.curr_grid.shape
-        pr, pc = context.prev_avatar_pos
         results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
-
-        for dr, dc in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]:
-            nr, nc = pr + dr, pc + dc
-            if 0 <= nr < H and 0 <= nc < W:
-                feat = int(context.prev_grid[nr, nc])
-                if feat != context.background_feature:
-                    hid = f"hazard_contact_{feat}"
-                    if hid in hypotheses:
-                        hyp = hypotheses[hid]
-                        event = hyp.record_support(min_support=min_support_to_confirm)
-                        results.append((hyp, event))
-                    else:
-                        hyp = RelationalRuleHypothesis(
-                            rule_id=hid,
-                            rule_type=HypothesisType.HAZARD_CONTACT,
-                            premise_feature=feat,
-                            positive_support=1,
-                            confidence=0.7,
-                            description=f"Feature {feat} contact causes death",
-                        )
-                        event = HypothesisTransitionEvent(
-                            event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
-                            rule_id=hid,
-                            rule_type=hyp.rule_type,
-                            timestamp=time.time(),
-                            confidence_before=0.0,
-                            confidence_after=hyp.confidence,
-                            reason="Mortality correlation near feature",
-                        )
-                        results.append((hyp, event))
+        for feat in context.get_prev_contact_and_adjacent_features():
+            if feat != context.background_feature:
+                hid = f"hazard_contact_{feat}"
+                if hid in hypotheses:
+                    hyp = hypotheses[hid]
+                    event = hyp.record_support(min_support=min_support_to_confirm)
+                    results.append((hyp, event))
+                else:
+                    hyp = RelationalRuleHypothesis(
+                        rule_id=hid,
+                        rule_type=HypothesisType.HAZARD_CONTACT,
+                        premise_feature=feat,
+                        positive_support=1,
+                        confidence=0.7,
+                        description=f"Feature {feat} contact causes death",
+                    )
+                    event = HypothesisTransitionEvent(
+                        event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
+                        rule_id=hid,
+                        rule_type=hyp.rule_type,
+                        timestamp=time.time(),
+                        confidence_before=0.0,
+                        confidence_after=hyp.confidence,
+                        reason="Mortality correlation near feature",
+                    )
+                    results.append((hyp, event))
 
         return results
 
@@ -281,26 +631,46 @@ class RemoteMechanismObserver(HypothesisObserver):
         hypotheses: dict[str, RelationalRuleHypothesis],
         min_support_to_confirm: int,
     ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
-        if context.curr_avatar_pos is None or context.prev_avatar_pos is None:
+        if (
+            context.is_dead
+            or context.changed_count == 0
+            or context.curr_avatar_pos is None
+            or context.prev_avatar_pos is None
+        ):
             return []
 
-        H, W = context.prev_grid.shape
-        cr, cc = context.curr_avatar_pos
-        if not (0 <= cr < H and 0 <= cc < W):
+        if not context.is_valid_curr_locus():
             return []
 
-        contact_feat = int(context.prev_grid[cr, cc])
-        if contact_feat == context.background_feature:
+        contact_feat: int | None = context.get_contact_feature()
+        av_feat = context.get_avatar_feature()
+        if (
+            contact_feat is None
+            or contact_feat == av_feat
+            or contact_feat == context.background_feature
+        ):
+            contact_feat = None
+            # Only attribute an adjacent contact when performing an in-place
+            # interaction (standing still); walking onto empty floor is not contact.
+            if context.curr_avatar_pos == context.prev_avatar_pos:
+                changed_adj, static_adj = context.get_curr_changed_and_static_adjacent(av_feat)
+                if len(set(changed_adj)) == 1:
+                    contact_feat = changed_adj[0]
+                elif not changed_adj and len(set(static_adj)) == 1:
+                    contact_feat = static_adj[0]
+        if contact_feat is None or contact_feat == context.background_feature:
             return []
 
-        diff_mask = context.diff_mask
-        old_diff_feats = set(context.prev_grid[diff_mask].tolist())
-        new_diff_feats = set(context.curr_grid[diff_mask].tolist())
+        old_diff_feats, new_diff_feats = context.get_diff_feature_sets()
         cleared_feats = old_diff_feats - new_diff_feats
 
         results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
         for cleared in cleared_feats:
-            if cleared != contact_feat and cleared != context.background_feature:
+            if (
+                cleared != contact_feat
+                and cleared != context.background_feature
+                and cleared != av_feat
+            ):
                 hid = f"remote_mech_{contact_feat}_clears_{cleared}"
                 if hid in hypotheses:
                     hyp = hypotheses[hid]
@@ -342,28 +712,15 @@ class ActionMutationObserver(HypothesisObserver):
         if not (1 <= context.changed_count <= 16) or context.action is None:
             return []
 
-        changed_coords = np.argwhere(context.diff_mask)
         results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
 
-        radius_r = max(1, context.avatar_h // 2)
-        radius_c = max(1, context.avatar_w // 2)
-        for r, c in changed_coords:
-            # Skip cells within avatar bounding areas during movement
-            if context.prev_avatar_pos is not None:
-                if (
-                    abs(r - context.prev_avatar_pos[0]) <= radius_r
-                    and abs(c - context.prev_avatar_pos[1]) <= radius_c
-                ):
-                    continue
-            if context.curr_avatar_pos is not None:
-                if (
-                    abs(r - context.curr_avatar_pos[0]) <= radius_r
-                    and abs(c - context.curr_avatar_pos[1]) <= radius_c
-                ):
-                    continue
+        for delta in context.get_entity_deltas():
+            # Skip loci within avatar footprint during movement
+            if context.is_within_avatar_footprint(delta):
+                continue
 
-            old_f = int(context.prev_grid[r, c])
-            new_f = int(context.curr_grid[r, c])
+            old_f = int(delta.prev_feature)
+            new_f = int(delta.curr_feature)
             if old_f != new_f:
                 hid = f"action_{context.action}_mutates_{old_f}_to_{new_f}"
                 if hid in hypotheses:
@@ -395,6 +752,426 @@ class ActionMutationObserver(HypothesisObserver):
         return results
 
 
+class RelationalCueObserver(HypothesisObserver):
+    """Observes relational contextual cue pairs where interacting adjacent to a paired feature clears a distal barrier."""
+
+    def observe(
+        self,
+        context: TransitionObservationContext,
+        hypotheses: dict[str, RelationalRuleHypothesis],
+        min_support_to_confirm: int,
+    ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
+        if (
+            context.curr_avatar_pos is None
+            or context.prev_avatar_pos != context.curr_avatar_pos
+            or not (1 <= context.changed_count <= 8)
+        ):
+            return []
+
+        bg = context.background_feature
+        results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
+
+        if context.paired_features is not None:
+            adj_paired_feats = {
+                f
+                for f in context.get_curr_adjacent_features()
+                if f != bg and f in context.paired_features
+            }
+        else:
+            adj_paired_feats = {
+                f
+                for f in context.get_curr_adjacent_features()
+                if f != bg and context.get_prev_feature_count(f) == 2
+            }
+
+        if not adj_paired_feats:
+            return []
+
+        for delta in context.get_entity_deltas():
+            if delta.locus == context.curr_avatar_pos or delta.adjacent_to_curr_avatar:
+                continue
+            old_f = int(delta.prev_feature)
+            new_f = int(delta.curr_feature)
+            if old_f != bg and new_f == bg:
+                for pf in adj_paired_feats:
+                    hid = f"relational_cue_{pf}_clears_{old_f}"
+                    if hid in hypotheses:
+                        hyp = hypotheses[hid]
+                        event = hyp.record_support(min_support=min_support_to_confirm)
+                        results.append((hyp, event))
+                    else:
+                        hyp = RelationalRuleHypothesis(
+                            rule_id=hid,
+                            rule_type=HypothesisType.REMOTE_MECHANISM,
+                            premise_feature=pf,
+                            target_feature=old_f,
+                            action_id=context.action,
+                            positive_support=1,
+                            confidence=0.85,
+                            description=f"Relational cue-paired feature {pf} clears distal barrier {old_f}",
+                        )
+                        event = HypothesisTransitionEvent(
+                            event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
+                            rule_id=hid,
+                            rule_type=hyp.rule_type,
+                            timestamp=time.time(),
+                            confidence_before=0.0,
+                            confidence_after=hyp.confidence,
+                            reason="Relational contextual cue pair remote clearance",
+                        )
+                        results.append((hyp, event))
+
+        return results
+
+
+@dataclass(frozen=True)
+class SynthesizedRuleAST:
+    """Open-ended symbolic transition rule T(s, a) -> delta_s represented as a program AST."""
+
+    precondition: CausalPredicate
+    effect_operator: str
+    effect_params: dict[str, Any] = field(default_factory=dict)
+    ast_depth: int = 1
+    productions_used: tuple[str, ...] = ()
+
+    @staticmethod
+    def extract_transition_features(context: TransitionObservationContext) -> dict[str, Any]:
+        """Extract observable transition features without environment-specific labels."""
+        contact_feat = context.get_contact_feature()
+        adj_feats = list(context.get_prev_adjacent_features())
+        moved = (
+            context.prev_avatar_pos is not None
+            and context.curr_avatar_pos is not None
+            and context.prev_avatar_pos != context.curr_avatar_pos
+        )
+        return {
+            "action_id": context.action,
+            "contact_feature": contact_feat,
+            "adjacent_features": adj_feats,
+            "changed_count": context.changed_count,
+            "avatar_moved": moved,
+            "is_dead": context.is_dead,
+            "is_won": context.is_won,
+        }
+
+    def evaluate_precondition(self, context: TransitionObservationContext) -> bool:
+        """Evaluate whether this AST precondition matches the current transition."""
+        feats = self.extract_transition_features(context)
+        return bool(self.precondition.evaluate(feats))
+
+    def evaluate_effect(self, context: TransitionObservationContext) -> bool:
+        """Evaluate whether the transition delta conforms to this AST effect operator."""
+        if self.effect_operator == "modulate_terminal":
+            target = str(self.effect_params.get("terminal", ""))
+            if target == "dead":
+                return bool(context.is_dead)
+            if target == "won":
+                return bool(context.is_won)
+            return False
+        if context.changed_count == 0:
+            return False
+        if self.effect_operator == "clear_distal_feature":
+            tf = self.effect_params.get("target_feature")
+            if tf is None:
+                return False
+            tf_int = int(tf)
+            if context.has_feature_count_summary():
+                return context.get_curr_feature_count(tf_int) < context.get_prev_feature_count(
+                    tf_int
+                )
+            deltas = context.get_entity_deltas()
+            net_delta = sum(1 for d in deltas if d.curr_feature == tf_int) - sum(
+                1 for d in deltas if d.prev_feature == tf_int
+            )
+            return net_delta < 0
+        if self.effect_operator == "transform_feature":
+            src = self.effect_params.get("src_feature")
+            dst = self.effect_params.get("dst_feature")
+            if src is None or dst is None:
+                return False
+            return any(
+                int(d.prev_feature) == src and int(d.curr_feature) == dst
+                for d in context.get_entity_deltas()
+            )
+        if self.effect_operator == "translate_entity":
+            feat = self.effect_params.get("feature")
+            delta = self.effect_params.get("delta")
+            if feat is None or not isinstance(delta, tuple) or not delta:
+                return False
+            for d in context.get_entity_deltas():
+                if d.prev_feature == feat and d.curr_feature != feat:
+                    target_locus = _shift_numeric_locus(d.locus, delta)
+                    if (
+                        target_locus is not None
+                        and context.get_curr_feature_at(target_locus) == feat
+                    ):
+                        return True
+            return False
+        if self.effect_operator == "spawn_feature":
+            dst = self.effect_params.get("dst_feature")
+            if dst is None:
+                return False
+            _, new_diff_feats = context.get_diff_feature_sets()
+            return int(dst) in new_diff_feats
+        return False
+
+
+class RulePCFGPrior:
+    """Learned Dirichlet-Laplace production prior over open-ended transition rule ASTs."""
+
+    def __init__(self, complexity_penalty: float = 0.25, alpha: float = 1.0) -> None:
+        self.complexity_penalty = complexity_penalty
+        self.alpha = alpha
+        self.production_counts: dict[str, float] = {
+            "precondition:AND": 2.0,
+            "precondition:OR": 1.0,
+            "precondition:NOT": 1.0,
+            "precondition:contact_feature": 3.0,
+            "precondition:adjacent_features": 2.0,
+            "precondition:action_id": 2.0,
+            "precondition:avatar_moved": 1.5,
+            "effect:transform_feature": 2.0,
+            "effect:clear_distal_feature": 2.0,
+            "effect:translate_entity": 2.0,
+            "effect:spawn_feature": 1.5,
+            "effect:modulate_terminal": 1.5,
+        }
+
+    def prior_probability(self, ast: SynthesizedRuleAST) -> float:
+        """Compute MDL-regularized PCFG prior probability P(AST) in (0, 1]."""
+        prods = ast.productions_used or (
+            "precondition:contact_feature",
+            f"effect:{ast.effect_operator}",
+        )
+        vocab_size = max(1, len(self.production_counts))
+        total = sum(self.production_counts.values()) + self.alpha * vocab_size
+        log_p = -self.complexity_penalty * max(0, ast.ast_depth - 1)
+        for p in prods:
+            count = self.production_counts.get(p, 0.5)
+            prob = (count + self.alpha) / max(1e-9, total)
+            log_p += math.log(max(1e-9, prob))
+        return float(min(1.0, math.exp(max(-30.0, log_p))))
+
+    def update_from_outcome(self, ast: SynthesizedRuleAST, confirmed: bool) -> None:
+        """Update production weights via Bayesian reinforcement or falsification decay."""
+        prods = ast.productions_used or (
+            "precondition:contact_feature",
+            f"effect:{ast.effect_operator}",
+        )
+        for p in prods:
+            cur = self.production_counts.get(p, 1.0)
+            if confirmed:
+                self.production_counts[p] = min(1000.0, cur + 1.0)
+            else:
+                self.production_counts[p] = max(0.1, cur * 0.85)
+
+    def sample_or_rank_proposals(
+        self,
+        candidates: Sequence[SynthesizedRuleAST],
+    ) -> list[tuple[SynthesizedRuleAST, float]]:
+        """Rank candidate AST programs by PCFG prior * structural simplicity."""
+        scored = [(cand, self.prior_probability(cand)) for cand in candidates]
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return scored
+
+
+class CompositionalProgramObserver(HypothesisObserver):
+    """Synthesizes open-ended compositional AST transition rules ranked by a learned PCFG prior."""
+
+    def __init__(self, pcfg_prior: RulePCFGPrior | None = None) -> None:
+        self.pcfg_prior = pcfg_prior or RulePCFGPrior()
+
+    def observe(
+        self,
+        context: TransitionObservationContext,
+        hypotheses: dict[str, RelationalRuleHypothesis],
+        min_support_to_confirm: int,
+    ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
+        if context.changed_count == 0 and not context.is_dead and not context.is_won:
+            return []
+
+        feats = SynthesizedRuleAST.extract_transition_features(context)
+        candidates: list[SynthesizedRuleAST] = []
+        bg = context.background_feature
+        contact_f = feats.get("contact_feature")
+        adj_feats: list[int] = list(feats.get("adjacent_features", []))
+
+        # Candidate ASTs for entity translation (e.g., pushing cargo along movement delta)
+        if (
+            0 < context.changed_count <= 8
+            and isinstance(context.prev_avatar_pos, tuple)
+            and isinstance(context.curr_avatar_pos, tuple)
+            and len(context.prev_avatar_pos) == len(context.curr_avatar_pos)
+            and all(
+                isinstance(p, (int, float)) and isinstance(c, (int, float))
+                for p, c in zip(context.prev_avatar_pos, context.curr_avatar_pos)
+            )
+        ):
+            displacement = tuple(
+                int(c - p) if isinstance(p, int) and isinstance(c, int) else float(c - p)
+                for p, c in zip(context.prev_avatar_pos, context.curr_avatar_pos)
+            )
+            if any(d != 0 for d in displacement) and sum(abs(d) for d in displacement) <= 2:
+                for delta in context.get_entity_deltas()[:16]:
+                    old_f = int(delta.prev_feature)
+                    new_f = int(delta.curr_feature)
+                    if (
+                        old_f != bg
+                        and new_f != old_f
+                        and delta.locus == context.curr_avatar_pos
+                        and contact_f == old_f
+                    ):
+                        target_locus = _shift_numeric_locus(delta.locus, displacement)
+                        if (
+                            target_locus is not None
+                            and context.get_curr_feature_at(target_locus) == old_f
+                            and context.get_prev_feature_at(target_locus) != old_f
+                        ):
+                            pre = CausalPredicate(
+                                logic_op=LogicOperator.AND,
+                                children=[
+                                    CausalPredicate(
+                                        variable="action_id",
+                                        operator="==",
+                                        value=context.action,
+                                    ),
+                                    CausalPredicate(
+                                        variable="contact_feature",
+                                        operator="==",
+                                        value=old_f,
+                                    ),
+                                ],
+                            )
+                            candidates.append(
+                                SynthesizedRuleAST(
+                                    precondition=pre,
+                                    effect_operator="translate_entity",
+                                    effect_params={"feature": old_f, "delta": displacement},
+                                    ast_depth=2,
+                                    productions_used=(
+                                        "precondition:AND",
+                                        "precondition:action_id",
+                                        "precondition:contact_feature",
+                                        "effect:translate_entity",
+                                    ),
+                                )
+                            )
+                            break
+
+        # Candidate AST for distal clearing / feature transform
+        if (
+            not context.is_dead
+            and 1 <= context.changed_count <= 16
+            and (contact_f is not None and contact_f != bg or adj_feats)
+        ):
+            premise_var = (
+                "contact_feature"
+                if (contact_f is not None and contact_f != bg)
+                else "adjacent_features"
+            )
+            premise_val: Any = contact_f if premise_var == "contact_feature" else adj_feats[0]
+            op_name = "==" if premise_var == "contact_feature" else "contains"
+            for delta in context.get_entity_deltas()[:16]:
+                if context.prev_avatar_pos == delta.locus or context.curr_avatar_pos == delta.locus:
+                    continue
+                old_f = int(delta.prev_feature)
+                new_f = int(delta.curr_feature)
+                if old_f != bg and new_f == bg and old_f != premise_val:
+                    pre = CausalPredicate(
+                        logic_op=LogicOperator.AND,
+                        children=[
+                            CausalPredicate(
+                                variable=premise_var,
+                                operator=op_name,
+                                value=premise_val,
+                            ),
+                            CausalPredicate(
+                                variable="action_id",
+                                operator="==",
+                                value=context.action,
+                            ),
+                        ],
+                    )
+                    candidates.append(
+                        SynthesizedRuleAST(
+                            precondition=pre,
+                            effect_operator="clear_distal_feature",
+                            effect_params={"premise_feature": premise_val, "target_feature": old_f},
+                            ast_depth=2,
+                            productions_used=(
+                                "precondition:AND",
+                                f"precondition:{premise_var}",
+                                "precondition:action_id",
+                                "effect:clear_distal_feature",
+                            ),
+                        )
+                    )
+                    break
+                if old_f != new_f:
+                    pre = CausalPredicate(
+                        variable="action_id",
+                        operator="==",
+                        value=context.action,
+                    )
+                    candidates.append(
+                        SynthesizedRuleAST(
+                            precondition=pre,
+                            effect_operator="transform_feature",
+                            effect_params={"src_feature": old_f, "dst_feature": new_f},
+                            ast_depth=1,
+                            productions_used=("precondition:action_id", "effect:transform_feature"),
+                        )
+                    )
+                    break
+
+        if not candidates:
+            return []
+
+        ranked = self.pcfg_prior.sample_or_rank_proposals(candidates)
+        best_ast, prior_score = ranked[0]
+        eff_params = best_ast.effect_params
+        prem_f = (
+            eff_params.get("premise_feature")
+            or eff_params.get("feature")
+            or eff_params.get("src_feature")
+        )
+        tgt_f = eff_params.get("target_feature")
+        res_f = eff_params.get("dst_feature")
+        hid = f"prog_{best_ast.effect_operator}_{prem_f}_{tgt_f or res_f}_{context.action}"
+        results: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
+        if hid in hypotheses:
+            hyp = hypotheses[hid]
+            hyp.metadata["prior_score"] = prior_score
+            event = hyp.record_support(min_support=min_support_to_confirm)
+            if hyp.status == HypothesisStatus.CONFIRMED:
+                self.pcfg_prior.update_from_outcome(best_ast, confirmed=True)
+            results.append((hyp, event))
+        else:
+            hyp = RelationalRuleHypothesis(
+                rule_id=hid,
+                rule_type=HypothesisType.COMPOSITIONAL_PROGRAM,
+                premise_feature=int(prem_f) if isinstance(prem_f, int) else None,
+                target_feature=int(tgt_f) if isinstance(tgt_f, int) else None,
+                result_feature=int(res_f) if isinstance(res_f, int) else None,
+                action_id=context.action,
+                positive_support=1,
+                confidence=round(min(0.85, 0.45 + 0.4 * prior_score), 4),
+                description=f"Synthesized AST: IF {best_ast.precondition.describe()} THEN {best_ast.effect_operator}({eff_params})",
+                metadata={"ast": best_ast, "prior_score": prior_score},
+            )
+            event = HypothesisTransitionEvent(
+                event_type=BeliefTransitionType.HYPOTHESIS_CREATED,
+                rule_id=hid,
+                rule_type=hyp.rule_type,
+                timestamp=time.time(),
+                confidence_before=0.0,
+                confidence_after=hyp.confidence,
+                reason=f"Synthesized open-ended AST under PCFG prior={prior_score:.4f}",
+            )
+            results.append((hyp, event))
+        return results
+
+
 class PopperianFalsifier:
     """Evaluates active hypotheses against counterexamples to immediately falsify refutations."""
 
@@ -402,28 +1179,36 @@ class PopperianFalsifier:
     def falsify(
         context: TransitionObservationContext,
         hypotheses: dict[str, RelationalRuleHypothesis],
+        pcfg_prior: RulePCFGPrior | None = None,
     ) -> list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]]:
-        if context.curr_avatar_pos is None or context.is_dead:
+        if not context.is_valid_curr_locus() or context.is_dead:
             return []
 
-        H, W = context.prev_grid.shape
-        cr, cc = context.curr_avatar_pos
-        if not (0 <= cr < H and 0 <= cc < W):
+        c_feat = context.get_contact_feature()
+        if c_feat is None:
             return []
-
-        c_feat = int(context.prev_grid[cr, cc])
         falsified: list[tuple[RelationalRuleHypothesis, HypothesisTransitionEvent]] = []
 
         for hyp in list(hypotheses.values()):
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                 if hyp.premise_feature == c_feat:
                     target_f = hyp.target_feature
-                    if target_f is not None and target_f in context.curr_grid:
-                        prev_target_count = int(np.count_nonzero(context.prev_grid == target_f))
-                        curr_target_count = int(np.count_nonzero(context.curr_grid == target_f))
-                        if curr_target_count >= prev_target_count:
+                    if target_f is not None and context.has_feature_count_summary():
+                        curr_target_count = context.get_curr_feature_count(target_f)
+                        prev_target_count = context.get_prev_feature_count(target_f)
+                        if curr_target_count > 0 and curr_target_count >= prev_target_count:
                             event = hyp.record_counterexample()
                             falsified.append((hyp, event))
+            elif hyp.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM:
+                ast_obj = hyp.metadata.get("ast")
+                if isinstance(ast_obj, SynthesizedRuleAST):
+                    if ast_obj.evaluate_precondition(context) and not ast_obj.evaluate_effect(
+                        context
+                    ):
+                        event = hyp.record_counterexample()
+                        if pcfg_prior is not None:
+                            pcfg_prior.update_from_outcome(ast_obj, confirmed=False)
+                        falsified.append((hyp, event))
 
         return falsified
 
@@ -435,8 +1220,10 @@ class InductiveHypothesisEngine:
         self,
         min_support_to_confirm: int = 2,
         observers: list[HypothesisObserver] | None = None,
+        pcfg_prior: RulePCFGPrior | None = None,
     ) -> None:
         self.min_support_to_confirm = min_support_to_confirm
+        self.pcfg_prior: RulePCFGPrior = pcfg_prior or RulePCFGPrior()
         self.hypotheses: dict[str, RelationalRuleHypothesis] = {}
         self.event_log: list[HypothesisTransitionEvent] = []
         self.observers: list[HypothesisObserver] = (
@@ -446,6 +1233,8 @@ class InductiveHypothesisEngine:
                 HazardContactObserver(),
                 RemoteMechanismObserver(),
                 ActionMutationObserver(),
+                RelationalCueObserver(),
+                CompositionalProgramObserver(self.pcfg_prior),
             ]
         )
         self.falsifier: PopperianFalsifier = PopperianFalsifier()
@@ -475,37 +1264,72 @@ class InductiveHypothesisEngine:
 
     def observe_transition(
         self,
-        prev_grid: np.ndarray,
-        action: Any,
-        curr_grid: np.ndarray,
-        prev_avatar_pos: tuple[int, int] | None = None,
-        curr_avatar_pos: tuple[int, int] | None = None,
+        prev_grid: np.ndarray | None = None,
+        action: Any = None,
+        curr_grid: np.ndarray | None = None,
+        prev_avatar_pos: PlaceLocus | None = None,
+        curr_avatar_pos: PlaceLocus | None = None,
         avatar_h: int = 1,
         avatar_w: int = 1,
         is_dead: bool = False,
         is_won: bool = False,
         background_feature: int = 0,
+        *,
+        entity_deltas: tuple[EntityStateDelta, ...] | list[EntityStateDelta] | None = None,
+        contact_feature: int | None = None,
+        avatar_feature: int | None = None,
+        prev_adjacent_features: tuple[int, ...] | list[int] | None = None,
+        curr_adjacent_features: tuple[int, ...] | list[int] | None = None,
+        curr_static_adjacent_features: tuple[int, ...] | list[int] | None = None,
+        paired_features: frozenset[int] | set[int] | None = None,
+        prev_feature_counts: dict[int, int] | None = None,
+        curr_feature_counts: dict[int, int] | None = None,
+        context: TransitionObservationContext | None = None,
     ) -> list[RelationalRuleHypothesis]:
         """Observe state transition, formulate new hypotheses, and test active ones.
 
         Returns:
             List of hypotheses updated or created during this transition.
         """
-        if prev_grid.shape != curr_grid.shape:
-            return []
+        if context is None:
+            if (
+                prev_grid is not None
+                and curr_grid is not None
+                and prev_grid.shape != curr_grid.shape
+            ):
+                return []
+            if prev_grid is None and entity_deltas is None and not is_dead and not is_won:
+                return []
 
-        context = TransitionObservationContext(
-            prev_grid=prev_grid,
-            action=action,
-            curr_grid=curr_grid,
-            prev_avatar_pos=prev_avatar_pos,
-            curr_avatar_pos=curr_avatar_pos,
-            avatar_h=avatar_h,
-            avatar_w=avatar_w,
-            is_dead=is_dead,
-            is_won=is_won,
-            background_feature=background_feature,
-        )
+            context = TransitionObservationContext(
+                prev_grid=prev_grid,
+                action=action,
+                curr_grid=curr_grid,
+                prev_avatar_pos=prev_avatar_pos,
+                curr_avatar_pos=curr_avatar_pos,
+                avatar_h=avatar_h,
+                avatar_w=avatar_w,
+                is_dead=is_dead,
+                is_won=is_won,
+                background_feature=background_feature,
+                entity_deltas=tuple(entity_deltas) if entity_deltas is not None else None,
+                contact_feature=contact_feature,
+                avatar_feature=avatar_feature,
+                prev_adjacent_features=(
+                    tuple(prev_adjacent_features) if prev_adjacent_features is not None else None
+                ),
+                curr_adjacent_features=(
+                    tuple(curr_adjacent_features) if curr_adjacent_features is not None else None
+                ),
+                curr_static_adjacent_features=(
+                    tuple(curr_static_adjacent_features)
+                    if curr_static_adjacent_features is not None
+                    else None
+                ),
+                paired_features=frozenset(paired_features) if paired_features is not None else None,
+                prev_feature_counts=prev_feature_counts,
+                curr_feature_counts=curr_feature_counts,
+            )
 
         updated_rules: list[RelationalRuleHypothesis] = []
 
@@ -525,10 +1349,21 @@ class InductiveHypothesisEngine:
         falsified_results = self.falsifier.falsify(
             context=context,
             hypotheses=self.hypotheses,
+            pcfg_prior=self.pcfg_prior,
         )
         for hyp, event in falsified_results:
             self.event_log.append(event)
             updated_rules.append(hyp)
+
+        # 3. Solved solution induction: rules active during winning trajectories are confirmed
+        if context.is_won:
+            for h in self.hypotheses.values():
+                if h.positive_support >= 1 and h.counterexamples == 0:
+                    if h.status != HypothesisStatus.CONFIRMED:
+                        h.status = HypothesisStatus.CONFIRMED
+                        ast_obj = h.metadata.get("ast")
+                        if isinstance(ast_obj, SynthesizedRuleAST):
+                            self.pcfg_prior.update_from_outcome(ast_obj, confirmed=True)
 
         return updated_rules
 
@@ -537,7 +1372,15 @@ class InductiveHypothesisEngine:
         return [
             h
             for h in self.hypotheses.values()
-            if h.status == HypothesisStatus.CONFIRMED and h.is_valid
+            if (
+                h.status == HypothesisStatus.CONFIRMED
+                or (
+                    h.positive_support >= 1
+                    and h.counterexamples == 0
+                    and h.rule_type == HypothesisType.REMOTE_MECHANISM
+                )
+            )
+            and h.is_valid
         ]
 
     def get_rule_for_barrier(self, barrier_feat: int) -> RelationalRuleHypothesis | None:
@@ -562,12 +1405,43 @@ class InductiveHypothesisEngine:
 
     def export_to_world_theory(self, theory: HCIRSymbolicWorldTheory) -> None:
         """Ground confirmed inductive rules into first-order HCIR CausalPredicates."""
-        for hyp in self.get_confirmed_rules():
+        av_feats = getattr(theory, "avatar_features", set())
+        confirmed = sorted(
+            self.get_confirmed_rules(),
+            key=lambda h: (
+                h.status == HypothesisStatus.CONFIRMED,
+                h.positive_support,
+                h.confidence,
+            ),
+        )
+        for hyp in confirmed:
             pred = hyp.to_causal_predicate()
             theory.record_causal_predicate(pred)
             if hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
-                if hyp.target_feature is not None:
-                    theory.induce_barrier(hyp.target_feature)
+                if (
+                    hyp.target_feature is not None
+                    and hyp.premise_feature is not None
+                    and hyp.premise_feature != hyp.target_feature
+                    and hyp.premise_feature not in av_feats
+                    and hyp.target_feature not in av_feats
+                    and self.get_hazard_rule(hyp.premise_feature) is None
+                ):
+                    is_rel_cue = hyp.rule_id.startswith("relational_cue_")
+                    theory.induce_conditional_affordance(
+                        feature=hyp.target_feature,
+                        condition=CausalPredicate(
+                            variable="relational_cue" if is_rel_cue else "inventory",
+                            operator="==" if is_rel_cue else "contains",
+                            value=hyp.premise_feature,
+                            relation="cue_actuator_resonance" if is_rel_cue else "",
+                        ),
+                        evidence=(
+                            f"relational_cue:{hyp.premise_feature}_clears_{hyp.target_feature}"
+                            if is_rel_cue
+                            else f"remote_mech:{hyp.premise_feature}_clears_{hyp.target_feature}"
+                        ),
+                        prerequisite_feature=hyp.premise_feature,
+                    )
                     theory.barrier_predicates.append(
                         CausalPredicate(
                             variable="feature_id",
@@ -577,20 +1451,48 @@ class InductiveHypothesisEngine:
                             target_entity=str(hyp.premise_feature),
                         )
                     )
+                    theory.induce_barrier(hyp.target_feature, evidence="remote_mechanism")
                 if (
                     hyp.premise_feature is not None
-                    and hyp.premise_feature not in getattr(theory, "avatar_features", set())
+                    and hyp.premise_feature not in av_feats
                     and hyp.premise_feature not in getattr(theory, "walkable_features", set())
+                    and self.get_hazard_rule(hyp.premise_feature) is None
                 ):
-                    theory.actuator_features.add(hyp.premise_feature)
+                    theory.induce_actuator(hyp.premise_feature, evidence="remote_mechanism")
             elif hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                 theory.barrier_predicates.append(pred)
                 if hyp.premise_feature is not None:
-                    theory.induce_barrier(hyp.premise_feature)
+                    theory.induce_barrier(hyp.premise_feature, evidence="hazard_contact")
             elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
                 # Direct action mutations represent in-place terrain/entity transformations,
                 # NOT distal actuators (switches/buttons). The causal predicate already records this.
                 pass
+            elif hyp.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM:
+                ast_obj = hyp.metadata.get("ast")
+                if isinstance(ast_obj, SynthesizedRuleAST):
+                    if (
+                        ast_obj.effect_operator == "clear_distal_feature"
+                        and hyp.premise_feature is not None
+                        and hyp.target_feature is not None
+                        and hyp.premise_feature != hyp.target_feature
+                        and hyp.premise_feature not in av_feats
+                        and hyp.target_feature not in av_feats
+                        and self.get_hazard_rule(hyp.premise_feature) is None
+                    ):
+                        theory.induce_conditional_affordance(
+                            feature=hyp.target_feature,
+                            condition=ast_obj.precondition,
+                            evidence=f"program:{hyp.rule_id}",
+                            prerequisite_feature=hyp.premise_feature,
+                        )
+                        if hyp.premise_feature not in getattr(theory, "walkable_features", set()):
+                            theory.induce_actuator(hyp.premise_feature, evidence="program")
+                    elif (
+                        ast_obj.effect_operator == "translate_entity"
+                        and hyp.premise_feature is not None
+                        and hyp.premise_feature not in av_feats
+                    ):
+                        theory.induce_cargo(hyp.premise_feature, evidence="program_translate")
 
     def retract_refuted_rules(self, theory: HCIRSymbolicWorldTheory) -> list[str]:
         """Remove refuted hypotheses from active symbolic world theory predicates."""
@@ -600,19 +1502,41 @@ class InductiveHypothesisEngine:
                 retracted_ids.append(hyp.rule_id)
                 if hyp.rule_type == HypothesisType.HAZARD_CONTACT:
                     if hyp.premise_feature is not None:
-                        theory.barrier_features.discard(hyp.premise_feature)
+                        theory.retract_barrier(hyp.premise_feature, reason="refuted_rule")
                 elif hyp.rule_type == HypothesisType.REMOTE_MECHANISM:
                     if hyp.target_feature is not None:
-                        theory.barrier_features.discard(hyp.target_feature)
+                        theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
+                        existing_aff = theory.get_conditional_affordance(hyp.target_feature)
+                        if (
+                            existing_aff is not None
+                            and existing_aff.prerequisite_feature == hyp.premise_feature
+                        ):
+                            theory.retract_conditional_affordance(
+                                hyp.target_feature, reason="refuted_rule"
+                            )
                     if hyp.premise_feature is not None:
-                        theory.actuator_features.discard(hyp.premise_feature)
-                elif hyp.rule_type == HypothesisType.ACTION_MUTATION:
-                    pass
+                        theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
+                elif hyp.rule_type in (
+                    HypothesisType.ACTION_MUTATION,
+                    HypothesisType.COMPOSITIONAL_PROGRAM,
+                ):
+                    if (
+                        hyp.rule_type == HypothesisType.COMPOSITIONAL_PROGRAM
+                        and hyp.target_feature is not None
+                    ):
+                        existing_aff = theory.get_conditional_affordance(hyp.target_feature)
+                        if (
+                            existing_aff is not None
+                            and existing_aff.prerequisite_feature == hyp.premise_feature
+                        ):
+                            theory.retract_conditional_affordance(
+                                hyp.target_feature, reason="refuted_rule"
+                            )
                 else:
                     if hyp.target_feature is not None:
-                        theory.barrier_features.discard(hyp.target_feature)
+                        theory.retract_barrier(hyp.target_feature, reason="refuted_rule")
                     if hyp.premise_feature is not None:
-                        theory.actuator_features.discard(hyp.premise_feature)
+                        theory.retract_actuator(hyp.premise_feature, reason="refuted_rule")
                 theory.domain_predicates = [
                     p
                     for p in theory.domain_predicates
@@ -632,10 +1556,10 @@ class InductiveHypothesisEngine:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self, retain_confirmed: bool = True) -> None:
         """Reset episodic hypotheses between levels or attempts."""
@@ -643,7 +1567,8 @@ class InductiveHypothesisEngine:
             self.hypotheses = {
                 k: h
                 for k, h in self.hypotheses.items()
-                if h.status == HypothesisStatus.CONFIRMED and h.is_valid
+                if (h.status == HypothesisStatus.CONFIRMED or h.positive_support >= 1)
+                and h.is_valid
             }
         else:
             self.hypotheses.clear()

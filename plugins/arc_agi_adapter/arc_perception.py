@@ -178,7 +178,11 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             or kwargs.get("learned_goal_positions", set())
         )
         known_lethals = set(
-            getattr(context, "current_level_lethal_positions", set())
+            getattr(
+                context,
+                "current_context_hazards",
+                getattr(context, "current_level_lethal_positions", set()),
+            )
             or kwargs.get("lethal_cells", set())
         )
         if hasattr(context, "hazard_tracker") and hasattr(
@@ -989,14 +993,6 @@ def extract_arc_objects(
                 and feat in goal_feats
             ):
                 role = "goal"
-            elif feat in candidate_goal_feats or (
-                frame is not None and pos in frame.candidate_goals
-            ):
-                role = "candidate_goal"
-            elif pos in frame.static_barriers or feat in barrier_feats:
-                role = "barrier"
-            elif pos in frame.lethal_cells:
-                role = "hazard"
             elif ent.role == EntityRole.GOAL:
                 role = "goal"
             elif ent.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE):
@@ -1008,6 +1004,14 @@ def extract_arc_objects(
             elif ent.role == EntityRole.OBSTACLE:
                 role = "barrier"
             elif ent.role == EntityRole.DYNAMIC_HAZARD:
+                role = "hazard"
+            elif feat in candidate_goal_feats or (
+                frame is not None and pos in frame.candidate_goals
+            ):
+                role = "candidate_goal"
+            elif pos in frame.static_barriers or feat in barrier_feats:
+                role = "barrier"
+            elif pos in frame.lethal_cells:
                 role = "hazard"
             else:
                 role = str(ent.role.value if hasattr(ent.role, "value") else ent.role).lower()

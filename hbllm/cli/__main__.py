@@ -1,3 +1,6 @@
-from hbllm.cli.train import main
+from __future__ import annotations
 
-main()
+from hbllm.cli.main import main
+
+if __name__ == "__main__":
+    main()

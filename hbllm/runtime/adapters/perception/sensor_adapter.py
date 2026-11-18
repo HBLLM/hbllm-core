@@ -85,7 +85,7 @@ class TelemetrySensorAdapter:
             )
 
             # 2. CPU load average (if supported)
-            if hasattr(os, "getloadavg"):
+            try:
                 load1, load5, load15 = os.getloadavg()
                 readings.append(
                     {
@@ -97,6 +97,8 @@ class TelemetrySensorAdapter:
                         "observed_at": now,
                     }
                 )
+            except (AttributeError, OSError):
+                pass
 
             return readings
         except Exception as e:

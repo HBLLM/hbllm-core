@@ -16,11 +16,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class SkillRegistry:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS skills (
                     skill_id TEXT PRIMARY KEY,
@@ -186,7 +187,7 @@ class SkillRegistry:
 
     def _store(self, skill: Skill) -> None:
         now = time.time()
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO skills
@@ -239,7 +240,7 @@ class SkillRegistry:
         self, query: str, category: str | None = None, top_k: int = 5, tenant_id: str = "global"
     ) -> list[Skill]:
         """Find skills matching a query by keyword similarity."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             if category:
                 rows = conn.execute(
                     f"SELECT {self._SELECT_COLS} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY confidence_score DESC, success_rate DESC, invocations DESC LIMIT ?",
@@ -266,7 +267,7 @@ class SkillRegistry:
         return [s for _, s in scored[:top_k]]
 
     def get_skill(self, skill_id: str) -> Skill | None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute(
                 f"SELECT {self._SELECT_COLS} FROM skills WHERE skill_id = ?", (skill_id,)
             ).fetchone()
@@ -283,7 +284,7 @@ class SkillRegistry:
         failure_type: str | None = None,
     ) -> None:
         """Record a skill execution for performance tracking."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute(
                 "SELECT invocations, success_rate, avg_latency_ms, tokens_used, confidence_score, failure_types FROM skills WHERE skill_id = ?",
                 (skill_id,),
@@ -329,7 +330,7 @@ class SkillRegistry:
 
     def promote_skill(self, skill_id: str) -> None:
         """Promote a high-confidence skill to the global tier."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "UPDATE skills SET tenant_id = 'global', updated_at = ? WHERE skill_id = ?",
                 (time.time(), skill_id),
@@ -410,7 +411,7 @@ class SkillRegistry:
 
     def find_skill_by_mechanism(self, mechanism_id: str, tenant_id: str = "global") -> list[Skill]:
         """Find all skills that rely on a specific mechanism."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 f"SELECT {self._SELECT_COLS} FROM skills "
                 f"WHERE mechanism_ids LIKE ? AND tenant_id IN (?, 'global') "
@@ -423,7 +424,7 @@ class SkillRegistry:
         self, skill_id: str, mechanism_id: str, causal_model_id: str | None = None
     ) -> None:
         """Link a mechanism to an existing skill."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             row = conn.execute(
                 "SELECT mechanism_ids FROM skills WHERE skill_id = ?", (skill_id,)
             ).fetchone()
@@ -445,7 +446,7 @@ class SkillRegistry:
     def list_skills(
         self, category: str | None = None, limit: int = 50, tenant_id: str = "global"
     ) -> list[Skill]:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             if category:
                 rows = conn.execute(
                     f"SELECT {self._SELECT_COLS} FROM skills WHERE category = ? AND tenant_id IN (?, 'global') ORDER BY invocations DESC LIMIT ?",
@@ -462,7 +463,7 @@ class SkillRegistry:
 
     def remove_skill(self, skill_id: str) -> bool:
         """Remove a skill by ID. Returns True if deleted."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute("DELETE FROM skills WHERE skill_id = ?", (skill_id,))
             deleted = cursor.rowcount > 0
         if deleted:
@@ -479,7 +480,7 @@ class SkillRegistry:
         Returns:
             Number of skills removed.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute("DELETE FROM skills WHERE source = ?", (source,))
             count = cursor.rowcount
         if count:
@@ -488,7 +489,7 @@ class SkillRegistry:
 
     def find_by_source(self, source: str) -> list[Skill]:
         """Find all skills from a specific source."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 f"SELECT {self._SELECT_COLS} FROM skills WHERE source = ? ORDER BY invocations DESC",
                 (source,),
@@ -509,7 +510,7 @@ class SkillRegistry:
         Returns:
             True if the skill was graduated.
         """
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE skills SET source = 'graduated', updated_at = ? WHERE skill_id = ?",
                 (time.time(), skill_id),
@@ -534,7 +535,7 @@ class SkillRegistry:
             List of graduated skill IDs.
         """
         graduated_ids: list[str] = []
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT skill_id FROM skills WHERE source = ? AND invocations >= ?",
                 (source, min_invocations),
@@ -559,7 +560,7 @@ class SkillRegistry:
     # ─── Stats ───────────────────────────────────────────────────────
 
     def stats(self) -> dict[str, Any]:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             total = conn.execute("SELECT COUNT(*) FROM skills").fetchone()[0]
             cats = conn.execute("SELECT COUNT(DISTINCT category) FROM skills").fetchone()[0]
             avg_sr = conn.execute("SELECT AVG(success_rate) FROM skills").fetchone()[0]

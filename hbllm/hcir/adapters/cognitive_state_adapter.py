@@ -15,7 +15,7 @@ Direction:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from hbllm.hcir.graph import (
     NodeLifecycle,
@@ -31,11 +31,22 @@ from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
 
-# Import existing cognitive state types
-from hbllm.brain.core.cognitive_state import (
-    CognitiveStateDelta,
-    CognitiveStateSnapshot,
-)
+
+@runtime_checkable
+class CognitiveStateSnapshot(Protocol):
+    """Protocol for immutable cognitive state snapshots."""
+
+    version: int
+    focus_target: str | None
+
+
+@runtime_checkable
+class CognitiveStateDelta(Protocol):
+    """Protocol for cognitive state deltas."""
+
+    source_node: str
+    changes: dict[str, Any]
+
 
 # Stable ID prefix for cognitive state observation nodes
 _CS_NODE_PREFIX = "cs_"

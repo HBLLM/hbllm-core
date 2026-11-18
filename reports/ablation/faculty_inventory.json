@@ -1,0 +1,16 @@
+{
+  "faculties": {
+    "subgoal_stack": "FrontopolarSubgoalStack",
+    "body_schema": "ExtendedBodySchema",
+    "habenular_ior": "HabenularEpisodicIOR",
+    "remote_causal": "RemoteCausalAttributor",
+    "hazard_tracker": "SpatiotemporalHazardTracker",
+    "acc_conflict_monitor": "AnteriorCingulateConflictMonitor",
+    "object_planner": "ObjectStateGraphPlanner",
+    "prediction_budget": "PredictionBudget",
+    "option_discovery": "OptionDiscoveryEngine",
+    "budget_governor": "ActionBudgetGovernor",
+    "world_kernel": "WorldKernel"
+  },
+  "count": 11
+}

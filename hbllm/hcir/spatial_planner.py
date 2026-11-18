@@ -14,6 +14,7 @@ import heapq
 import logging
 import math
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -78,12 +79,16 @@ EXIT = EntityRole.GOAL
 
 @dataclass
 class SpatialEntity:
-    """A lifted entity in the cognitive spatial graph."""
+    """A lifted entity in the cognitive spatial graph.
+
+    Supports arbitrary N-dimensional coordinate representations (discrete 2D/3D grids
+    or continuous metric/joint spaces) with reference frame attachment and Euclidean distance metrics.
+    """
 
     id: str = ""
     role: EntityRole = EntityRole.UNKNOWN
-    centroid: tuple[float, float] = (0.0, 0.0)
-    grid_pos: tuple[int, int] = (0, 0)
+    centroid: Any = (0.0, 0.0)
+    grid_pos: Any = (0, 0)
     area: int = 1
     bounding_box: tuple[int, int, int, int] = (0, 0, 0, 0)  # (min_r, max_r, min_c, max_c)
     component_id: int = -1
@@ -96,8 +101,8 @@ class SpatialEntity:
         self,
         id: str = "",
         role: EntityRole = EntityRole.UNKNOWN,
-        centroid: tuple[float, float] | None = None,
-        grid_pos: tuple[int, int] = (0, 0),
+        centroid: tuple[float, ...] | Sequence[float] | None = None,
+        grid_pos: tuple[int, ...] | Sequence[int] = (0, 0),
         area: int = 1,
         bounding_box: tuple[int, int, int, int] | None = None,
         feature_id: Any | None = None,
@@ -107,20 +112,58 @@ class SpatialEntity:
         is_delivered: bool = False,
         shape_archetype: Any = None,
         properties: dict[str, Any] | None = None,
+        position: tuple[float, ...] | Sequence[float] | None = None,
+        coordinates: tuple[float, ...] | Sequence[float] | None = None,
+        bounds_nd: tuple[tuple[float, float], ...] | Sequence[tuple[float, float]] | None = None,
+        reference_frame: Any | None = None,
         **kwargs: Any,
     ) -> None:
-        self.id = id or f"ent_{grid_pos[0]}_{grid_pos[1]}"
+        effective_grid_pos = tuple(int(round(p)) for p in grid_pos)
+
+        if centroid is not None:
+            eff_centroid = tuple(float(x) for x in centroid)
+        elif position is not None:
+            eff_centroid = tuple(float(x) for x in position)
+        elif coordinates is not None:
+            eff_centroid = tuple(float(x) for x in coordinates)
+        elif effective_grid_pos:
+            eff_centroid = tuple(float(p) for p in effective_grid_pos)
+        else:
+            eff_centroid = (0.0, 0.0)
+
+        # If position/centroid was supplied with higher dimension than default grid_pos (0, 0)
+        if (
+            (position is not None or coordinates is not None or centroid is not None)
+            and effective_grid_pos == (0, 0)
+            and len(eff_centroid) != 2
+        ):
+            effective_grid_pos = tuple(int(round(x)) for x in eff_centroid)
+
+        if id:
+            self.id = id
+        elif len(effective_grid_pos) == 2:
+            self.id = f"ent_{effective_grid_pos[0]}_{effective_grid_pos[1]}"
+        elif effective_grid_pos:
+            self.id = f"ent_{'_'.join(str(p) for p in effective_grid_pos)}"
+        else:
+            self.id = f"ent_{uuid.uuid4().hex[:6]}"
+
         self.role = role
-        self.grid_pos = grid_pos
-        self.centroid = (
-            centroid if centroid is not None else (float(grid_pos[0]), float(grid_pos[1]))
-        )
+        self.grid_pos = effective_grid_pos
+        self.centroid = eff_centroid
         self.area = area
-        self.bounding_box = (
-            bounding_box
-            if bounding_box is not None
-            else (grid_pos[0], grid_pos[0], grid_pos[1], grid_pos[1])
-        )
+        if bounding_box is not None:
+            self.bounding_box = bounding_box
+        elif len(self.grid_pos) == 2:
+            self.bounding_box = (
+                self.grid_pos[0],
+                self.grid_pos[0],
+                self.grid_pos[1],
+                self.grid_pos[1],
+            )
+        else:
+            self.bounding_box = (0, 0, 0, 0)
+
         self.component_id = component_id
         self.is_deliverable = is_deliverable
         self.is_delivered = is_delivered
@@ -132,7 +175,95 @@ class SpatialEntity:
             self.properties["visual_id"] = feat
         if shape_archetype is not None:
             self.properties["shape_archetype"] = shape_archetype
+        if bounds_nd is not None:
+            self.properties["bounds_nd"] = tuple(bounds_nd)
+        if reference_frame is not None:
+            self.properties["reference_frame"] = reference_frame
         self.properties.update(kwargs)
+
+    def __copy__(self) -> SpatialEntity:
+        """Fast shallow copy avoiding redundant coordinate coercion in __init__."""
+        clone = object.__new__(type(self))
+        clone.id = self.id
+        clone.role = self.role
+        clone.grid_pos = self.grid_pos
+        clone.centroid = self.centroid
+        clone.area = self.area
+        clone.bounding_box = self.bounding_box
+        clone.component_id = self.component_id
+        clone.is_deliverable = self.is_deliverable
+        clone.is_delivered = self.is_delivered
+        clone.shape_archetype = self.shape_archetype
+        clone.properties = dict(self.properties)
+        return clone
+
+    @property
+    def dimensionality(self) -> int:
+        """Dimensionality of the entity's spatial coordinates."""
+        if self.centroid:
+            return len(self.centroid)
+        if self.grid_pos:
+            return len(self.grid_pos)
+        return 2
+
+    @property
+    def position(self) -> tuple[float, ...]:
+        """Continuous or discrete coordinates as a float tuple."""
+        return self.centroid
+
+    @position.setter
+    def position(self, val: tuple[float, ...] | Sequence[float]) -> None:
+        self.centroid = tuple(float(x) for x in val)
+
+    @property
+    def coordinates(self) -> tuple[float, ...]:
+        """Alias for position."""
+        return self.centroid
+
+    @coordinates.setter
+    def coordinates(self, val: tuple[float, ...] | Sequence[float]) -> None:
+        self.centroid = tuple(float(x) for x in val)
+
+    @property
+    def reference_frame(self) -> Any:
+        """ReferenceFrame defining the entity's coordinate space."""
+        return self.properties.get("reference_frame")
+
+    @reference_frame.setter
+    def reference_frame(self, val: Any) -> None:
+        self.properties["reference_frame"] = val
+
+    @property
+    def bounds_nd(self) -> tuple[tuple[float, float], ...]:
+        """N-dimensional extents ((min_0, max_0), (min_1, max_1), ...)."""
+        if "bounds_nd" in self.properties:
+            return tuple(self.properties["bounds_nd"])
+        if len(self.bounding_box) == 4 and self.bounding_box != (0, 0, 0, 0):
+            return (
+                (float(self.bounding_box[0]), float(self.bounding_box[1])),
+                (float(self.bounding_box[2]), float(self.bounding_box[3])),
+            )
+        return tuple((float(c), float(c)) for c in self.centroid)
+
+    @bounds_nd.setter
+    def bounds_nd(
+        self, val: tuple[tuple[float, float], ...] | Sequence[tuple[float, float]]
+    ) -> None:
+        self.properties["bounds_nd"] = tuple(val)
+
+    def distance_to(self, other: SpatialEntity | tuple[float, ...] | Sequence[float]) -> float:
+        """Compute Euclidean distance to another entity or coordinate point across N dimensions."""
+        if isinstance(other, SpatialEntity):
+            other_pt = other.centroid
+        else:
+            other_pt = tuple(float(x) for x in other)
+
+        if len(self.centroid) != len(other_pt):
+            raise ValueError(
+                f"Dimension mismatch in distance_to: {len(self.centroid)}D entity vs {len(other_pt)}D point"
+            )
+
+        return math.sqrt(sum((a - b) ** 2 for a, b in zip(self.centroid, other_pt)))
 
     @property
     def feature_id(self) -> Any:
@@ -1419,7 +1550,7 @@ class HCIRSpatialEntityPlanner:
         for node in workspace.graph.nodes_by_type(HCIRNodeType.BELIEF):
             if isinstance(node, BeliefNode) and node.properties.get("negative_constraint"):
                 pos = node.properties.get("position")
-                if pos and isinstance(pos, (list, tuple)) and len(pos) == 2:
+                if pos and isinstance(pos, (list, tuple)) and len(pos) >= 2:
                     impassable_cells.add((int(pos[0]), int(pos[1])))
 
         for node in workspace.graph.nodes_by_type(HCIRNodeType.EPISODE):

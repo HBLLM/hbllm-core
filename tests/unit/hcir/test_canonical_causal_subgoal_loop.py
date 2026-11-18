@@ -64,9 +64,7 @@ def test_spatial_effector_causal_binding_and_remote_attribution():
     )
 
     # Verify vmPFC distal causal link was formed between (2, 8) and (6, 5)
-    affordance = engine.causal_cortex.causal_attributor.get_trigger_for_barrier(
-        (6, 5), barrier_feature=4
-    )
+    affordance = engine.remote_causal.get_trigger_for_barrier((6, 5), barrier_feature=4)
     assert affordance is not None, (
         "Remote causal attributor failed to discover trigger-barrier link"
     )
@@ -178,7 +176,7 @@ def test_hierarchical_subgoal_decomposition_with_causal_prerequisite():
     }
 
     # Feed causal knowledge that switch at (1, 5) clears door at (3, 3)
-    engine.causal_cortex.causal_attributor.co_occurrence_evidence[((1, 5), (3, 3))] = 2
+    engine.remote_causal.co_occurrence_evidence[((1, 5), (3, 3))] = 2
     aff = RemoteCausalAffordance(
         trigger_pos=(1, 5),
         trigger_feature=9,
@@ -188,8 +186,8 @@ def test_hierarchical_subgoal_decomposition_with_causal_prerequisite():
         activation_count=2,
         confidence=0.98,
     )
-    engine.causal_cortex.causal_attributor.remote_actuators[(3, 3)].append(aff)
-    engine.causal_cortex.causal_attributor.trigger_registry[(1, 5)].append(aff)
+    engine.remote_causal.remote_actuators[(3, 3)].append(aff)
+    engine.remote_causal.trigger_registry[(1, 5)].append(aff)
 
     # 1. Forward simulation should find complete plan through trigger
     plan = MentalSimulationPlanner.simulate_in_mind(

@@ -24,13 +24,12 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import FrameDiffType, PerceptionEngine
-from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.cortical_stage import StageResult, WorkingMemoryDelta
 from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
 )
-from hbllm.hcir.world.spatiotemporal_tracker import MorphologicalEntity
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.engine_state import CognitiveContext
@@ -50,6 +49,8 @@ class EpistemicFeedbackAssimilator:
         delta: tuple[int, int],
         H: int,
         W: int,
+        *,
+        is_success: bool = False,
     ) -> None:
         """Mark features on the swept trajectory of a survived displacement as safe.
 
@@ -66,6 +67,9 @@ class EpistemicFeedbackAssimilator:
         av = view.avatar_features or (
             {view.avatar_feature} if view.avatar_feature is not None else set()
         )
+        bg_val = view.bg_feature
+        th = view.symbolic_theory
+        wm = view.working_memory
         lethal = view.hazard_tracker.known_lethal_features
         for cr, cc in landing_cells:
             for k in range(0, max(steps, 1)):
@@ -73,29 +77,121 @@ class EpistemicFeedbackAssimilator:
                 if not (0 <= r < H and 0 <= c < W):
                     continue
                 wf = int(view.prev_grid[r, c])
-                if wf in av or wf in lethal:
+                if wf in av:
                     continue
-                view.symbolic_theory.induce_walkable(wf)
-                view.verified_safe_features.add(wf)
+                # Detect cross-context label contradiction when safely traversing prior beliefs
+                if th.has_prior_context_transition and wf != bg_val:
+                    prior_lethal_falsified = wf in lethal and not th.is_verified_in_context(
+                        "lethal", wf
+                    )
+                    prior_goal_falsified = (
+                        not is_success
+                        and wf in th.goal_features
+                        and not th.is_verified_in_context("goal", wf)
+                        and not th.cargo_features
+                        and not th.receptacle_features
+                        and not view.learned_cargo_features
+                    )
+                    prior_barrier_falsified = (
+                        wf in th.barrier_features
+                        and not th.is_verified_in_context("barrier", wf)
+                        and wf not in th.conditional_affordances
+                    )
+                    if prior_lethal_falsified or prior_goal_falsified or prior_barrier_falsified:
+                        from hbllm.hcir.world.cortex_causal import (
+                            invalidate_stale_context_ontology,
+                        )
+
+                        reason = (
+                            f"safe_traversal_over_prior_lethal:{wf}"
+                            if prior_lethal_falsified
+                            else f"non_terminal_traversal_over_prior_goal:{wf}"
+                            if prior_goal_falsified
+                            else f"safe_traversal_over_prior_barrier:{wf}"
+                        )
+                        invalidate_stale_context_ontology(
+                            th,
+                            hazard_tracker=view.hazard_tracker,
+                            episodic_cortex=view.episodic_cortex,
+                            working_memory=wm,
+                            engine_or_view=view,
+                            bg_feature=bg_val,
+                            preserve_current_context=True,
+                            reason=reason,
+                        )
+                        lethal = view.hazard_tracker.known_lethal_features
+                if (
+                    wf in lethal
+                    or wf in view.mobile_threat_features
+                    or wf in view.hazard_tracker.mobile_entities
+                ):
+                    continue
+                th.induce_walkable(wf, evidence="traversal")
 
     @staticmethod
     def _synchronize_lattice_stride(view: Any, stride: int) -> None:
         """Propagate discovered lattice quantum to uncalibrated cardinal action priors."""
-        if stride <= 1 or not hasattr(view, "action_dynamics"):
+        if stride <= 1:
             return
         view.state.spatial_lattice_stride = stride
         for other_act, other_dyn in view.action_dynamics.items():
-            if getattr(other_dyn, "probes_tested", 0) == 0:
+            if other_dyn.probes_tested == 0:
                 if abs(other_dyn.delta_r) == 1 and other_dyn.delta_c == 0:
                     other_dyn.delta_r *= stride
                     other_dyn.displacement = (float(other_dyn.delta_r), 0.0)
-                    if hasattr(view, "action_affordances") and other_act in view.action_affordances:
+                    if other_act in view.action_affordances:
                         view.action_affordances[other_act].delta = (other_dyn.delta_r, 0)
                 elif abs(other_dyn.delta_c) == 1 and other_dyn.delta_r == 0:
                     other_dyn.delta_c *= stride
                     other_dyn.displacement = (0.0, float(other_dyn.delta_c))
-                    if hasattr(view, "action_affordances") and other_act in view.action_affordances:
+                    if other_act in view.action_affordances:
                         view.action_affordances[other_act].delta = (0, other_dyn.delta_c)
+
+    @staticmethod
+    def _assimilate_cargo_pushing(
+        view: Any,
+        moved_entities: list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]],
+        prev_avatar_pos: tuple[int, int] | None,
+        dr: int,
+        dc: int,
+        is_success: bool,
+    ) -> None:
+        """Induce pushable cargo affordance when avatar displacement moves an adjacent entity."""
+        if is_success or prev_avatar_pos is None or (dr == 0 and dc == 0):
+            return
+        known_av_feats = view.avatar_features or (
+            {view.avatar_feature} if view.avatar_feature is not None else set()
+        )
+        av_r, av_c = prev_avatar_pos
+        for pe, ce, delta in moved_entities:
+            if ce.feature_id in known_av_feats:
+                continue
+            pe_r, pe_c = pe.grid_pos
+            # Pushing requires direct physical contact at the avatar's leading step target
+            pe_cells = pe.properties.get("cells") if pe.properties else None
+            lead_pos = (av_r + dr, av_c + dc)
+            is_contact = (
+                lead_pos in pe_cells if pe_cells else (pe_r == lead_pos[0] and pe_c == lead_pos[1])
+            )
+            is_pushed = is_contact and (delta == (dr, dc))
+            if is_pushed:
+                view.symbolic_theory.induce_cargo(ce.feature_id, evidence="contact_displacement")
+                active_arb = view.active_arbitrated_goal
+                if active_arb is not None:
+                    arb_meta = active_arb.metadata or {}
+                    if (
+                        arb_meta.get("feature_id") == ce.feature_id
+                        or active_arb.goal_type == "epistemic_exploration"
+                    ):
+                        view.apply_wm_delta(WorkingMemoryDelta("active_arbitrated_goal", None))
+                logger.info(
+                    "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
+                    ce.feature_id,
+                    ce.area,
+                )
+            elif delta != (0, 0):
+                view.symbolic_theory.retract_cargo(ce.feature_id, reason="autonomous_dynamic")
+                view.learned_cargo_features.discard(ce.feature_id)
 
     @staticmethod
     def _commit_avatar_identity(
@@ -106,6 +202,8 @@ class EpistemicFeedbackAssimilator:
         H: int,
         W: int,
         calibrate_dynamics: bool = True,
+        is_failure: bool = False,
+        is_success: bool = False,
     ) -> None:
         """Commit an avatar identity from entity pairs sharing a displacement delta.
 
@@ -119,14 +217,18 @@ class EpistemicFeedbackAssimilator:
             dc = 0
 
         def _adjacent(a: SpatialEntity, b: SpatialEntity) -> bool:
+            if a.area == 1 and b.area == 1:
+                return abs(a.grid_pos[0] - b.grid_pos[0]) + abs(a.grid_pos[1] - b.grid_pos[1]) == 1
             b1, b2 = a.bounding_box, b.bounding_box
             r_gap = max(0, b1[0] - b2[1] - 1, b2[0] - b1[1] - 1)
             c_gap = max(0, b1[2] - b2[3] - 1, b2[2] - b1[3] - 1)
-            return r_gap <= 1 and c_gap <= 1
+            return (b1[0] <= b2[1] and b2[0] <= b1[1] and c_gap == 0) or (
+                b1[2] <= b2[3] and b2[2] <= b1[3] and r_gap == 0
+            )
 
         comp_pairs: list[tuple[SpatialEntity, SpatialEntity]] = [pairs[0]]
         for pe, ce in pairs[1:]:
-            if any(_adjacent(ce, c_ce) for _, c_ce in comp_pairs):
+            if any(_adjacent(pe, c_pe) and _adjacent(ce, c_ce) for c_pe, c_ce in comp_pairs):
                 comp_pairs.append((pe, ce))
 
         view.state.avatar_features = {ce.feature_id for _, ce in comp_pairs}
@@ -147,8 +249,11 @@ class EpistemicFeedbackAssimilator:
             )
             view.state.avatar_h = max(c[0] for c in all_cells) - min(c[0] for c in all_cells) + 1
             view.state.avatar_w = max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
-        # Features the avatar just traversed are verified safe
-        EpistemicFeedbackAssimilator._record_safe_traversal(view, all_cells, delta, H, W)
+        # Features the avatar just traversed are verified safe (only on non-fatal steps)
+        if not is_failure:
+            EpistemicFeedbackAssimilator._record_safe_traversal(
+                view, all_cells, delta, H, W, is_success=is_success
+            )
         view.entity_action_failed_positions.clear()
         view.immobile_entity_actions.clear()
 
@@ -217,34 +322,107 @@ class EpistemicFeedbackAssimilator:
 
         curr_grid = view.normalize_sensory_input(curr_grid)
         if view.prev_grid is not None and view.prev_grid.shape != curr_grid.shape:
-            # Lattice extent changed (new level/episode): prior-lattice
+            # Lattice extent changed (new context/episode): prior-lattice
             # diffs are incomparable — start the episode's diff chain fresh.
-            view.prev_grid = None
+            view.apply_wm_delta(WorkingMemoryDelta("prev_grid", None))
             return
         H, W = curr_grid.shape
 
         if not is_success:
             walkable_feats = view.symbolic_theory.walkable_features
+            cargo_feats = view.symbolic_theory.cargo_features | view.learned_cargo_features
+            av_feats_frame = set(view.avatar_features or ())
+            if view.avatar_feature is not None:
+                av_feats_frame.add(view.avatar_feature)
             view.hazard_tracker.record_frame(
                 view.step_counter,
                 curr_grid,
                 background_feature=view.bg_feature,
-                avatar_features=view.avatar_features,
+                avatar_features=av_feats_frame,
                 walkable_features=walkable_feats,
+                cargo_features=cargo_feats,
             )
-            # Faculty E: Basal Ganglia & Cerebellar Predictive Phase Entrainment
-            view.cerebellar_clock.record_step(view.step_counter, curr_grid, is_reset=is_failure)
-            if view.cerebellar_clock.detected_macro_period is not None:
-                view.hazard_tracker.environmental_period = max(
-                    view.hazard_tracker.environmental_period,
-                    view.cerebellar_clock.detected_macro_period,
-                )
+            for mob_f in view.hazard_tracker.mobile_entities:
+                if mob_f != view.bg_feature and mob_f not in cargo_feats:
+                    view.symbolic_theory.retract_walkable(mob_f, reason="autonomous_mobile")
+                    view.symbolic_theory.retract_candidate_goal(mob_f, reason="autonomous_mobile")
+                    if mob_f != view.avatar_feature:
+                        view.avatar_features.discard(mob_f)
 
         diff = view.compute_frame_diff(view.prev_grid, curr_grid)
         action = view.last_action
         action_data = view.last_action_data
 
-        # WP0.3: classify the observed effect kind for the motor posterior.
+        # Track visited cells in PrefrontalWorkingMemory (P2-9)
+        if view.avatar_pos is not None:
+            view.working_memory.visited_cells.add(view.avatar_pos)
+
+        # Epistemic Goal Lifecycle Evaluation (P2-8):
+        # A curiosity goal is satisfied when:
+        # 1. Target feature is absent at target coordinate (consumed / collected / changed)
+        # 2. Or target coordinate was visited without surprise >= max_visits
+        satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
+        goals_to_retire: set[tuple[int, int]] = set()
+        for target_pos, cond in list(satisfied_when_map.items()):
+            tr, tc = cond.get("entity_pos", target_pos)
+            expected_feat = cond.get("feature")
+            max_visits = cond.get("max_visits", 2)
+
+            # Condition 1: Target feature absent at target coordinate
+            if expected_feat is not None and 0 <= tr < H and 0 <= tc < W:
+                curr_cell_val = int(curr_grid[tr, tc])
+                if curr_cell_val != expected_feat:
+                    view.symbolic_theory.mark_feature_explored(
+                        expected_feat, reason="target_absent_or_consumed"
+                    )
+                    view.symbolic_theory.mark_locus_explored(target_pos, reason="feature_consumed")
+                    goals_to_retire.add(target_pos)
+                    logger.info(
+                        "AutonomousEpistemicEngine: Epistemic goal satisfied — feature %s absent at %s (now %s)",
+                        expected_feat,
+                        target_pos,
+                        curr_cell_val,
+                    )
+
+            # Condition 2: Avatar reached target coordinate
+            if view.avatar_pos == target_pos:
+                visits = cond.get("visits", 0) + 1
+                cond["visits"] = visits
+                if visits >= max_visits:
+                    entity_pos_cond = cond.get("entity_pos")
+                    is_adjacent_stance = (
+                        entity_pos_cond is not None and entity_pos_cond != target_pos
+                    )
+                    if expected_feat is not None and not is_adjacent_stance:
+                        view.symbolic_theory.mark_feature_explored(
+                            expected_feat, reason="visited_without_surprise"
+                        )
+                    view.symbolic_theory.mark_locus_explored(target_pos, reason="visited_target")
+                    if is_adjacent_stance:
+                        view.exhausted_candidate_goals.add(target_pos)
+                    goals_to_retire.add(target_pos)
+                    logger.info(
+                        "AutonomousEpistemicEngine: Epistemic goal satisfied — reached %s %d times",
+                        target_pos,
+                        visits,
+                    )
+
+        for gp in goals_to_retire:
+            cond = satisfied_when_map.pop(gp, None)
+            view.exhausted_candidate_goals.add(gp)
+            if hasattr(view, "goals") and gp in view.goals:
+                view.goals.remove(gp)
+            active_arb = getattr(view, "active_arbitrated_goal", None)
+            if active_arb is not None:
+                arb_tgt = active_arb.target
+                if arb_tgt == gp or (cond and cond.get("entity_pos") == arb_tgt):
+                    setattr(view, "active_arbitrated_goal", None)
+            if view.mental_plan:
+                last_step = view.mental_plan[-1]
+                if getattr(last_step, "predicted_avatar_pos", None) == gp:
+                    view.mental_plan.clear()
+
+        # Classify the observed effect kind for the motor posterior.
         if action is not None and hasattr(view, "record_action_effect"):
             _is_eff = bool(
                 (
@@ -318,8 +496,10 @@ class EpistemicFeedbackAssimilator:
             if tc is not None and tr is not None:
                 try:
                     target_coord = (int(tr), int(tc))
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(
+                        "Non-integer action target coord ignored (%r, %r): %s", tr, tc, exc
+                    )
 
         # Active Manipulandum Effector Binding (Modal Select-Then-Direct):
         if target_coord is not None:
@@ -343,28 +523,71 @@ class EpistemicFeedbackAssimilator:
                         step=view.step_counter,
                     )
 
-        # Empirical State-Reversion / Undo Action Discovery:
-        # If executing this action restored the grid to the previous-previous state,
-        # ground this action as an UNDO/REVERT affordance and inhibit it during forward progress.
+        # Empirical State-Reversion / Undo Action Discovery (P2-7):
+        # An action is an undo candidate ONLY if it reverts a non-locomotion state change
+        # (e.g. object transform, switch, paint, or cargo state), never reversible locomotion.
         if (
             action is not None
-            and hasattr(view, "grid_history")
             and len(view.grid_history) >= 2
             and not is_effector_action
             and not view.is_displacement_action(action)
+            and action not in getattr(view, "action_deltas", {})
         ):
-            if np.array_equal(curr_grid, view.grid_history[-2]):
+            prev_prev_grid = view.grid_history[-2]
+            prev_grid = view.prev_grid
+            av_feats = set(view.avatar_features)
+            if view.avatar_feature is not None:
+                av_feats.add(view.avatar_feature)
+
+            # Check if avatar moved in current transition
+            av_mask_curr = (
+                np.isin(curr_grid, list(av_feats))
+                if av_feats
+                else np.zeros_like(curr_grid, dtype=bool)
+            )
+            av_mask_prev = (
+                np.isin(prev_grid, list(av_feats))
+                if av_feats
+                else np.zeros_like(prev_grid, dtype=bool)
+            )
+            avatar_displaced = bool(
+                np.any((curr_grid != prev_grid) & (av_mask_curr | av_mask_prev))
+            )
+
+            # Check if non-avatar cells changed in prior step and were reverted in this step
+            prior_diff = prev_grid != prev_prev_grid
+            prior_coords = np.argwhere(prior_diff)
+            non_av_changed_prior = any(
+                int(prev_grid[r, c]) not in av_feats and int(prev_prev_grid[r, c]) not in av_feats
+                for r, c in prior_coords
+            )
+            curr_diff = curr_grid != prev_grid
+            curr_coords = np.argwhere(curr_diff)
+            non_av_changed_curr = any(
+                int(curr_grid[r, c]) not in av_feats and int(prev_grid[r, c]) not in av_feats
+                for r, c in curr_coords
+            )
+
+            if (
+                not avatar_displaced
+                and non_av_changed_prior
+                and non_av_changed_curr
+                and np.array_equal(curr_grid, prev_prev_grid)
+            ):
                 view.symbolic_theory.induce_undo_action(action)
                 view.undo_actions.add(action)
                 if action in view.action_affordances:
                     view.action_affordances[action].is_undo = True
-                view.inhibited_actions[action] = 999999
+                view.apply_wm_delta(WorkingMemoryDelta("inhibit_action", (action, 4)))
                 logger.info(
                     "AutonomousEpistemicEngine: Grounded empirical UNDO / STATE_REVERSION affordance for action %s",
                     action,
                 )
 
-        if diff.changed_pixel_count == 0:
+        continuous_moved = bool(getattr(view.working_memory, "last_continuous_moved", False))
+        if continuous_moved:
+            view.state.consecutive_quiescent_actions = 0
+        elif diff.changed_pixel_count == 0:
             view.consecutive_quiescent_actions += 1
             view.state.consecutive_effective_actuations = 0
             view.state.last_effective_actuation_coord = None
@@ -407,13 +630,8 @@ class EpistemicFeedbackAssimilator:
 
             if is_effector_action and target_coord is not None:
                 view.quiescent_actuation_targets.add(target_coord)
-                if hasattr(view, "working_memory") and hasattr(
-                    view.working_memory, "habenular_ior"
-                ):
-                    tok = (action, target_coord[0], target_coord[1])
-                    view.working_memory.habenular_ior.active_inhibitions[(view.avatar_pos, tok)] = (
-                        20
-                    )
+                tok = (action, target_coord[0], target_coord[1])
+                view.working_memory.habenular_ior.active_inhibitions[(view.avatar_pos, tok)] = 20
 
             if is_effector_action and not is_success and not is_failure:
                 return
@@ -463,7 +681,8 @@ class EpistemicFeedbackAssimilator:
                     )
 
                 if is_effector_action and diff.changed_pixel_count > 0:
-                    if not view.has_displacement_capabilities():
+                    has_known_avatar = view.avatar_feature is not None or bool(view.avatar_features)
+                    if not view.has_displacement_capabilities() and not has_known_avatar:
                         view.state.avatar_pos = target_coord
 
                     # Active Inference: Discover effector kinetics mode (attraction/pull vs repulsion/push)
@@ -484,7 +703,7 @@ class EpistemicFeedbackAssimilator:
                             elif dot < -0.5:
                                 view.state.effector_kinetics_mode = -1
 
-                    if not view.has_displacement_capabilities():
+                    if not view.has_displacement_capabilities() and not has_known_avatar:
                         actuated_feats = {
                             int(f)
                             for f in np.unique(
@@ -514,43 +733,52 @@ class EpistemicFeedbackAssimilator:
                             reason="avatar_relocation_assimilated",
                         )
 
-                # Numerical / neighborhood cardinality constraint discovery:
-                if get_sub_attr(view.working_memory, "has_cardinality_hypothesis", False):
-                    tr, tc = target_coord
-                    if 0 <= tr < curr_grid.shape[0] and 0 <= tc < curr_grid.shape[1]:
-                        new_feat = int(curr_grid[tr, tc])
-                        if 0 <= new_feat <= 8 and new_feat != view.bg_feature:
-                            new_safe, new_hazards = (
-                                view.working_memory.register_cardinality_constraint(
-                                    center=target_coord,
-                                    count=new_feat,
-                                    grid_shape=curr_grid.shape,
-                                    radius=1,
-                                )
-                            )
-                            for hz in new_hazards:
-                                view.hazard_tracker.register_lethal_feature(
-                                    int(curr_grid[hz[0], hz[1]])
-                                )
-                                view.record_learned_barrier(hz)
-
             # Faculty: Ventromedial Prefrontal Cortex (vmPFC) Remote Causal Attribution
             loci: list[tuple[int, int]] = []
             if target_coord is not None:
                 loci.append(target_coord)
-            if view.avatar_pos is not None:
-                loci.append(view.avatar_pos)
-            if prev_avatar_pos is not None and prev_avatar_pos != view.avatar_pos:
-                loci.append(prev_avatar_pos)
+            else:
+                if view.avatar_pos is not None:
+                    loci.append(view.avatar_pos)
+                if prev_avatar_pos is not None and prev_avatar_pos != view.avatar_pos:
+                    loci.append(prev_avatar_pos)
+
+                agent_ref = prev_avatar_pos or view.avatar_pos
+                if agent_ref is not None and view.prev_grid is not None:
+                    ar, ac = agent_ref
+                    H_p, W_p = view.prev_grid.shape
+                    mutated_adj: list[tuple[int, int]] = []
+                    nonbarrier_adj: list[tuple[int, int]] = []
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = ar + dr, ac + dc
+                        if 0 <= nr < H_p and 0 <= nc < W_p:
+                            f_adj = int(view.prev_grid[nr, nc])
+                            if (
+                                f_adj != view.bg_feature
+                                and (
+                                    view.avatar_features is None
+                                    or f_adj not in view.avatar_features
+                                )
+                                and f_adj != view.avatar_feature
+                                and not view.symbolic_theory.is_walkable(f_adj)
+                            ):
+                                if int(curr_grid[nr, nc]) != f_adj:
+                                    mutated_adj.append((nr, nc))
+                                elif not view.symbolic_theory.is_barrier(f_adj):
+                                    nonbarrier_adj.append((nr, nc))
+                    loci.extend(mutated_adj if mutated_adj else nonbarrier_adj)
 
             if view.prev_grid is not None:
-                for locus in set(loci):
+                av_rc = set(view.avatar_features or ())
+                if view.avatar_feature is not None:
+                    av_rc.add(view.avatar_feature)
+                for locus in dict.fromkeys(loci):
                     confirmed_affs = view.working_memory.remote_causal.record_transition(
                         prev_grid=view.prev_grid,
                         curr_grid=curr_grid,
                         action_pos=locus,
                         background_feature=view.bg_feature,
-                        avatar_features=view.avatar_features,
+                        avatar_features=av_rc,
                     )
                     for aff in confirmed_affs:
                         if (
@@ -558,7 +786,62 @@ class EpistemicFeedbackAssimilator:
                             or view.symbolic_theory.is_walkable(aff.mutated_remote_feature)
                         ):
                             view.learned_barriers.discard(aff.remote_pos)
+                            view.failed_transitions.clear()
+                            view.recent_positions.clear()
+                            if (
+                                hasattr(view, "acc_conflict_monitor")
+                                and view.acc_conflict_monitor is not None
+                            ):
+                                if hasattr(view.acc_conflict_monitor, "action_history"):
+                                    view.acc_conflict_monitor.action_history.clear()
+                                if hasattr(view.acc_conflict_monitor, "position_history"):
+                                    view.acc_conflict_monitor.position_history.clear()
+                            view.mental_plan.clear()
+                            for dr_u, dc_u in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                                nr_u, nc_u = aff.remote_pos[0] + dr_u, aff.remote_pos[1] + dc_u
+                                if 0 <= nr_u < H and 0 <= nc_u < W:
+                                    nf_u = int(curr_grid[nr_u, nc_u])
+                                    if (
+                                        nf_u != view.bg_feature
+                                        and (
+                                            view.avatar_features is None
+                                            or nf_u not in view.avatar_features
+                                        )
+                                        and nf_u != view.avatar_feature
+                                        and int(np.count_nonzero(curr_grid == nf_u)) <= 2
+                                    ):
+                                        view.learned_barriers.discard((nr_u, nc_u))
+                                        view.symbolic_theory.retract_barrier(
+                                            nf_u, reason="unlocked_by_remote_door"
+                                        )
+                                        view.symbolic_theory.unmark_locus_explored((nr_u, nc_u))
+                                        view.exhausted_candidate_goals.discard((nr_u, nc_u))
+                                        view.record_learned_goal((nr_u, nc_u))
+                                        view.symbolic_theory.induce_candidate_goal(
+                                            nf_u, evidence="adjacent_to_opened_door"
+                                        )
+                            if view.subgoal_stack.has_pending_goals:
+                                view.subgoal_stack.pop_subgoal()
                         view.working_memory.activated_triggers.add(aff.trigger_pos)
+                        if (
+                            aff.trigger_feature is not None
+                            and (
+                                view.avatar_features is None
+                                or aff.trigger_feature not in view.avatar_features
+                            )
+                            and aff.original_remote_feature != view.bg_feature
+                            and not view.symbolic_theory.is_walkable(aff.original_remote_feature)
+                        ):
+                            view.symbolic_theory.induce_conditional_affordance(
+                                feature=aff.original_remote_feature,
+                                condition=CausalPredicate(
+                                    variable="trigger",
+                                    operator="==",
+                                    value=aff.trigger_feature,
+                                ),
+                                evidence=f"remote_causal:{aff.trigger_pos}->{aff.remote_pos}",
+                                prerequisite_feature=aff.trigger_feature,
+                            )
 
             # Dorsal Visual Stream (V4/MT): Object motion tracking & Teleological Distance Gradient
             if diff.changed_mask is not None and view.prev_grid is not None:
@@ -601,14 +884,6 @@ class EpistemicFeedbackAssimilator:
                                     )
                                     + 5
                                 )
-
-        # ── Intuitive Physics Transition Tracking ────────────────────────────
-        view.physics_engine.record_transition(
-            prev_pos=prev_avatar_pos,
-            curr_pos=view.avatar_pos,
-            is_displacement_action=is_known_displacement,
-            commanded_delta=act_dyn.get_displacement() if act_dyn else (0, 0),
-        )
 
         # ── A. Motor Calibration & Proprioception ────────────────────────────
         H, W = curr_grid.shape
@@ -730,85 +1005,7 @@ class EpistemicFeedbackAssimilator:
                 if action in view.action_affordances:
                     view.action_affordances[action].is_value_mutator = True
 
-        # Faculty: Spatiotemporal Lifecycle & Directed Causal Lineage DAG (W014, W059)
-        # WP0: run only when the frame diff intersects tracked entity masks —
-        # Euler/fission/fusion can only fire on cells that actually moved.
-        _tracked_cells: set[tuple[int, int]] = set()
-        for _e in prev_entities:
-            _tracked_cells.update(_e.properties.get("cells", [_e.grid_pos]))
-        for _e in curr_entities:
-            _tracked_cells.update(_e.properties.get("cells", [_e.grid_pos]))
-        _diff_cells: set[tuple[int, int]] = set(_tracked_cells)
-        if view.prev_grid is not None and view.prev_grid.shape == curr_grid.shape:
-            _diff_cells = {
-                (int(r), int(c))
-                for r, c in np.argwhere(np.asarray(view.prev_grid) != np.asarray(curr_grid))
-            }
-        if view.deformation_tracker is not None and (
-            not _tracked_cells or (_diff_cells & _tracked_cells)
-        ):
-            morph_prev = [
-                MorphologicalEntity(
-                    entity_id=pe.id or f"prev_{pe.feature_id}_{pe.grid_pos[0]}_{pe.grid_pos[1]}",
-                    feature_id=pe.feature_id,
-                    cells=set(pe.properties.get("cells", [pe.grid_pos])),
-                    centroid=pe.centroid,
-                    bounding_box=pe.bounding_box,
-                )
-                for pe in prev_entities
-            ]
-            morph_curr = [
-                MorphologicalEntity(
-                    entity_id=ce.id or f"curr_{ce.feature_id}_{ce.grid_pos[0]}_{ce.grid_pos[1]}",
-                    feature_id=ce.feature_id,
-                    cells=set(ce.properties.get("cells", [ce.grid_pos])),
-                    centroid=ce.centroid,
-                    bounding_box=ce.bounding_box,
-                )
-                for ce in curr_entities
-            ]
-            lifecycle_res = view.deformation_tracker.track_lifecycle(
-                morph_prev, morph_curr, conservation_required=False
-            )
-            view.state.latest_lifecycle_result = lifecycle_res
-            if view.entity_lineage_graph is not None:
-                view.entity_lineage_graph.update(lifecycle_res.lineage_graph)
-
         # Faculty D: Bilateral Convergent Coordinate Frames (Split-Hemisphere / Dual-Agent Mirroring)
-        # Only evaluate bilateral pairing if entities belong to controllable agent features,
-        # never autonomous mobile threats, lethal hazards, or background void.
-        if view.bilateral_state is None and len(moved_entities) >= 2:
-            av_feats = view.avatar_features or (
-                {view.avatar_feature} if view.avatar_feature is not None else set()
-            )
-            candidate_bilat = [
-                (ce.grid_pos, delta, ce.feature_id)
-                for pe, ce, delta in moved_entities
-                if ce.area <= 64
-                and (
-                    (
-                        not av_feats
-                        and not get_engine_state_attr(view, "_avatar_controllability_evidence", {})
-                    )
-                    or ce.feature_id in av_feats
-                    or len(
-                        get_engine_state_attr(view, "_avatar_controllability_evidence", {}).get(
-                            ce.feature_id, []
-                        )
-                    )
-                    > 0
-                )
-                and ce.feature_id not in view.mobile_threat_features
-                and ce.feature_id not in view.hazard_tracker.known_lethal_features
-                and ce.feature_id != bg
-                and ce.feature_id != view.bg_feature
-            ]
-            if len(candidate_bilat) >= 2:
-                bilat_state = view.bilateral_integrator.detect_bilateral_pairing(
-                    candidate_bilat, (H, W)
-                )
-                if bilat_state is not None:
-                    view.state.bilateral_state = bilat_state
         if view.bilateral_state is not None:
             from scipy.ndimage import label
 
@@ -918,12 +1115,19 @@ class EpistemicFeedbackAssimilator:
                                 setattr(view.bilateral_state, attr, best_c)
 
         def _are_adjacent(e1: SpatialEntity, e2: SpatialEntity) -> bool:
+            if e1.area == 1 and e2.area == 1:
+                return (
+                    abs(e1.grid_pos[0] - e2.grid_pos[0]) + abs(e1.grid_pos[1] - e2.grid_pos[1]) == 1
+                )
             bb1 = e1.bounding_box
             bb2 = e2.bounding_box
             r_gap = max(0, bb1[0] - bb2[1] - 1, bb2[0] - bb1[1] - 1)
             c_gap = max(0, bb1[2] - bb2[3] - 1, bb2[2] - bb1[3] - 1)
-            return r_gap <= 1 and c_gap <= 1
+            return (bb1[0] <= bb2[1] and bb2[0] <= bb1[1] and c_gap == 0) or (
+                bb1[2] <= bb2[3] and bb2[2] <= bb1[3] and r_gap == 0
+            )
 
+        av_moved: list[Any] = []
         if (
             not is_success
             and not is_effector_action
@@ -940,20 +1144,107 @@ class EpistemicFeedbackAssimilator:
                 )
 
                 if not has_retained_dynamics:
-                    # ── Fresh start (no prior knowledge) ──────────────────────
-                    # No dynamics to cross-reference. Use the original heuristic:
-                    # the largest group of entities sharing the same displacement
-                    # is most likely the avatar (first level, typically no enemies).
                     best_delta, pairs = max(delta_groups.items(), key=lambda item: len(item[1]))
-                    EpistemicFeedbackAssimilator._commit_avatar_identity(
-                        view,
-                        pairs,
-                        best_delta,
-                        action,
-                        H,
-                        W,
-                        calibrate_dynamics=True,
-                    )
+                    single_rigid_group = len(delta_groups) == 1
+                    if single_rigid_group and len(pairs) > 1:
+                        comp_check = [pairs[0]]
+                        for pe_c, ce_c in pairs[1:]:
+                            if any(
+                                _are_adjacent(pe_c, p_k) and _are_adjacent(ce_c, c_k)
+                                for p_k, c_k in comp_check
+                            ):
+                                comp_check.append((pe_c, ce_c))
+                        single_rigid_group = len(comp_check) == len(pairs)
+
+                    if single_rigid_group and not view._avatar_controllability_evidence:
+                        EpistemicFeedbackAssimilator._commit_avatar_identity(
+                            view,
+                            pairs,
+                            best_delta,
+                            action,
+                            H,
+                            W,
+                            calibrate_dynamics=True,
+                            is_failure=is_failure,
+                            is_success=is_success,
+                        )
+                    else:
+                        for delta_val, group in delta_groups.items():
+                            for _, ce in group:
+                                feat = ce.feature_id
+                                if feat != bg and feat != view.bg_feature:
+                                    view._avatar_controllability_evidence.setdefault(
+                                        feat, []
+                                    ).append((action, delta_val))
+
+                        best_cand_fresh: int | None = None
+                        best_tuple_fresh = (-1, -1)
+                        best_act_deltas: dict[int, tuple[int, int]] = {}
+                        for feat, observations in view._avatar_controllability_evidence.items():
+                            act_map: dict[int, set[tuple[int, int]]] = {}
+                            bounced = False
+                            for obs_a, obs_d in observations:
+                                if obs_a is None or obs_d == (0, 0):
+                                    continue
+                                prev_ds = act_map.setdefault(obs_a, set())
+                                if (-obs_d[0], -obs_d[1]) in prev_ds:
+                                    bounced = True
+                                    break
+                                prev_ds.add(obs_d)
+                            if bounced or len(act_map) < 2:
+                                continue
+                            all_ds = {d for ds in act_map.values() for d in ds}
+                            if len(all_ds) < 2:
+                                continue
+                            spans_2d = any(d[0] != 0 for d in all_ds) and any(
+                                d[1] != 0 for d in all_ds
+                            )
+                            if not (spans_2d or H == 1 or W == 1 or len(act_map) >= 3):
+                                continue
+                            cand_key = (1 if spans_2d else 0, len(all_ds))
+                            if cand_key > best_tuple_fresh:
+                                best_tuple_fresh = cand_key
+                                best_cand_fresh = feat
+                                best_act_deltas = {
+                                    oa: next(iter(ods)) for oa, ods in act_map.items()
+                                }
+
+                        if best_cand_fresh is not None:
+                            last_a, last_d = view._avatar_controllability_evidence[best_cand_fresh][
+                                -1
+                            ]
+                            avatar_pairs_f = [
+                                (pe, ce)
+                                for dg_p in delta_groups.values()
+                                for pe, ce in dg_p
+                                if ce.feature_id == best_cand_fresh
+                            ]
+                            if avatar_pairs_f:
+                                EpistemicFeedbackAssimilator._commit_avatar_identity(
+                                    view,
+                                    avatar_pairs_f,
+                                    last_d,
+                                    last_a,
+                                    H,
+                                    W,
+                                    calibrate_dynamics=False,
+                                    is_failure=is_failure,
+                                    is_success=is_success,
+                                )
+                                for cal_a, (cal_dr, cal_dc) in best_act_deltas.items():
+                                    view.action_dynamics[cal_a] = ActionDynamicsModel(
+                                        action_id=cal_a,
+                                        delta_r=cal_dr,
+                                        delta_c=cal_dc,
+                                        confidence=0.8,
+                                        probes_tested=1,
+                                    )
+                                    view.action_affordances[cal_a] = ActionAffordance(
+                                        action_id=cal_a,
+                                        is_displacement=(cal_dr != 0 or cal_dc != 0),
+                                        delta=(cal_dr, cal_dc),
+                                    )
+                                view._avatar_controllability_evidence.clear()
                 else:
                     # ── Controllability Test (retained dynamics) ───────────────
                     # The human brain identifies its avatar not from a single
@@ -1025,6 +1316,8 @@ class EpistemicFeedbackAssimilator:
                                 H,
                                 W,
                                 calibrate_dynamics=False,  # keep retained dynamics
+                                is_failure=is_failure,
+                                is_success=is_success,
                             )
                             view._avatar_controllability_evidence.clear()
                             logger.info(
@@ -1041,139 +1334,58 @@ class EpistemicFeedbackAssimilator:
                             len(view._avatar_controllability_evidence),
                         )
 
-        # Faculty C: Dorsal Visual Stream (Area MT/V5) Kinetic Figure-Ground Segregation
-        cmd_delta = act_dyn.get_displacement() if act_dyn else None
-        kinetic_res = view.dorsal_kinetic_stream.segregate_motion(
-            prev_grid=view.prev_grid,
-            curr_grid=curr_grid,
-            commanded_delta=cmd_delta,
-            background_feature=bg,
-            known_avatar_features=view.avatar_features,
-        )
-        if kinetic_res.external_agents and view.prev_grid is not None and action is not None:
-            self_feats = (
-                set(kinetic_res.self_avatar.features)
-                if kinetic_res.self_avatar is not None
-                else set()
-            )
-            for ext in kinetic_res.external_agents:
-                if ext.velocity != (0.0, 0.0):
-                    valid_threat_feats = {
-                        f
-                        for f in ext.features
-                        if f != bg
-                        and f != view.bg_feature
-                        and f not in view.avatar_features
-                        and (view.avatar_feature is None or f != view.avatar_feature)
-                        and f not in self_feats
-                    }
-                    view.mobile_threat_features.update(valid_threat_feats)
-
-        # Premotor Collision Cones: Update forward space-time trajectories
-        static_walls = set(view.learned_barriers)
-        for r_w in range(H):
-            for c_w in range(W):
-                c_val = int(curr_grid[r_w, c_w])
-                if c_val in view.symbolic_theory.barrier_features:
-                    static_walls.add((r_w, c_w))
-                elif (
-                    len(view.symbolic_theory.walkable_features) > 0
-                    and view.bg_feature is not None
-                    and view.bg_feature not in view.symbolic_theory.walkable_features
-                    and c_val == view.bg_feature
-                ):
-                    static_walls.add((r_w, c_w))
-
-        # Dynamic entities cannot be static barriers to themselves
-        for ext_entity in kinetic_res.external_agents:
-            if ext_entity.cells:
-                static_walls.difference_update(ext_entity.cells)
-            if ext_entity.centroid is not None:
-                cr_i, cc_i = int(round(ext_entity.centroid[0])), int(round(ext_entity.centroid[1]))
-                static_walls.discard((cr_i, cc_i))
-        view.collision_cones.update_trajectories(
-            kinetic_entities=kinetic_res.external_agents,
-            static_barriers=static_walls,
-            grid_shape=(H, W),
-            horizon=12,
-            oriented_threats=get_engine_state_attr(view, "_prev_oriented_threats", None),
-            mobile_threat_features=view.mobile_threat_features,
-            stride=get_engine_state_attr(view, "spatial_lattice_stride", 1),
-        )
-
-        if (
-            not is_success
-            and not is_effector_action
-            and kinetic_res.self_avatar is not None
-            and kinetic_res.self_avatar.confidence >= 0.70
-            and cmd_delta is not None
-            and (cmd_delta[0] != 0 or cmd_delta[1] != 0)
-        ):
-            valid_feats = {
-                f for f in kinetic_res.self_avatar.features if f != bg and f != view.bg_feature
-            }
-            if valid_feats:
-                view.state.avatar_features = valid_feats
-                view.state.avatar_feature = next(iter(valid_feats))
-                view.mobile_threat_features.difference_update(valid_feats)
-                view.symbolic_theory.goal_features.difference_update(valid_feats)
-                view.symbolic_theory.candidate_goal_features.difference_update(valid_feats)
-                cells_to_purge = set(kinetic_res.self_avatar.cells)
-                if kinetic_res.raw_delta is not None:
-                    dr_p, dc_p = kinetic_res.raw_delta
-                    cells_to_purge.update(
-                        (r - dr_p, c - dc_p) for r, c in kinetic_res.self_avatar.cells
-                    )
-                view.learned_goal_positions.difference_update(cells_to_purge)
-                view.state.avatar_size = kinetic_res.self_avatar.area
-                view.state.avatar_pos = (
-                    int(round(kinetic_res.self_avatar.centroid[0])),
-                    int(round(kinetic_res.self_avatar.centroid[1])),
-                )
-                if kinetic_res.self_avatar.cells:
-                    ac = kinetic_res.self_avatar.cells
-                    view.state.avatar_h = max(c[0] for c in ac) - min(c[0] for c in ac) + 1
-                    view.state.avatar_w = max(c[1] for c in ac) - min(c[1] for c in ac) + 1
-                if kinetic_res.raw_delta is not None and action is not None:
-                    dr, dc = kinetic_res.raw_delta
-                    if abs(dc) >= 2 * abs(dr):
-                        dr = 0
-                    elif abs(dr) >= 2 * abs(dc):
-                        dc = 0
-                    EpistemicFeedbackAssimilator._record_safe_traversal(
-                        view, kinetic_res.self_avatar.cells, (dr, dc), H, W
-                    )
-                    if (
-                        action not in view.action_dynamics
-                        or not view.action_dynamics[action].is_displacement_action()
-                    ):
-                        dyn = view.action_dynamics.get(action)
-                        prev_p = getattr(dyn, "probes_tested", 0) if dyn is not None else 0
-                        view.action_dynamics[action] = ActionDynamicsModel(
-                            action_id=action,
-                            delta_r=dr,
-                            delta_c=dc,
-                            confidence=0.8,
-                            probes_tested=max(1, prev_p + 1),
-                        )
-                    else:
-                        view.action_dynamics[action].update_from_trial((dr, dc), success=True)
-                    if dr != 0 or dc != 0:
-                        EpistemicFeedbackAssimilator._synchronize_lattice_stride(
-                            view, max(abs(dr), abs(dc))
-                        )
-                logger.info(
-                    "AutonomousEpistemicEngine: Avatar segregated/re-grounded via MT/V5 kinetic stream (feats=%s, size=%d, pos=%s)",
-                    view.avatar_features,
-                    view.avatar_size,
-                    view.avatar_pos,
-                )
-
-        elif not is_effector_action:
+        if not is_effector_action:
             known_av_feats = view.avatar_features or (
                 {view.avatar_feature} if view.avatar_feature is not None else set()
             )
             av_moved = [item for item in moved_entities if item[1].feature_id in known_av_feats]
+            if (
+                av_moved
+                and not is_success
+                and not is_failure
+                and len(known_av_feats) == 1
+                and len(view.action_dynamics) <= 3
+                and not any(d.slip_rate > 0.05 for d in view.action_dynamics.values())
+            ):
+                _, chk_ce, chk_delta = av_moved[0]
+                f_av = chk_ce.feature_id
+                reversed_on_same = (
+                    action in view.action_dynamics
+                    and chk_delta != (0, 0)
+                    and chk_delta
+                    == (
+                        -view.action_dynamics[action].delta_r,
+                        -view.action_dynamics[action].delta_c,
+                    )
+                )
+                drifted_on_new = (
+                    action is not None
+                    and action not in view.action_dynamics
+                    and chk_delta != (0, 0)
+                    and any(
+                        d.get_displacement() == chk_delta for d in view.action_dynamics.values()
+                    )
+                    and any(
+                        ce_o.feature_id != f_av
+                        and ce_o.feature_id != bg
+                        and ce_o.feature_id != view.bg_feature
+                        and d_o != chk_delta
+                        for _, ce_o, d_o in moved_entities
+                    )
+                )
+                if reversed_on_same or drifted_on_new:
+                    view.state.avatar_feature = None
+                    view.state.avatar_features = set()
+                    view.state.avatar_pos = None
+                    view.action_dynamics.clear()
+                    view.action_affordances.clear()
+                    for _, ce_ev, d_ev in moved_entities:
+                        if ce_ev.feature_id != bg and ce_ev.feature_id != view.bg_feature:
+                            view._avatar_controllability_evidence.setdefault(
+                                ce_ev.feature_id, []
+                            ).append((action, d_ev))
+                    known_av_feats = set()
+                    av_moved = []
             # Check if known avatar entity is still visible on the grid
             avatar_still_present = (
                 any(ce.feature_id in known_av_feats for ce in curr_entities)
@@ -1266,12 +1478,14 @@ class EpistemicFeedbackAssimilator:
                     view.state.avatar_w = (
                         max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
                     )
-                if not is_success:
+                if not is_success and not is_failure:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         view, all_cells, (dr, dc), H, W
                     )
 
                 if not is_effector_action:
+                    if dr != 0 or dc != 0:
+                        view.immobile_entity_actions.discard(action)
                     if action not in view.action_dynamics:
                         view.action_dynamics[action] = ActionDynamicsModel(
                             action_id=action,
@@ -1297,50 +1511,114 @@ class EpistemicFeedbackAssimilator:
                         EpistemicFeedbackAssimilator._synchronize_lattice_stride(
                             view, max(abs(dr), abs(dc))
                         )
+                    EpistemicFeedbackAssimilator._assimilate_cargo_pushing(
+                        view, moved_entities, prev_avatar_pos, dr, dc, is_success
+                    )
 
                 if not is_success:
+                    for _, ce, delta in moved_entities:
+                        if (
+                            ce.feature_id in view.avatar_features
+                            and ce.feature_id != view.avatar_feature
+                            and delta != (dr, dc)
+                        ):
+                            view.avatar_features.discard(ce.feature_id)
                     for pe, ce, delta in moved_entities:
                         if ce.feature_id in known_av_feats:
                             continue
-                        # Pushing requires physical contact: entity must be adjacent and ahead in motion direction
-                        is_contact = _are_adjacent(pe, av_pe)
-                        is_ahead = False
-                        if dr != 0 and dc == 0:
-                            is_ahead = (pe.centroid[0] - av_pe.centroid[0]) * dr > 0 and abs(
-                                pe.centroid[1] - av_pe.centroid[1]
-                            ) <= 3
-                        elif dc != 0 and dr == 0:
-                            is_ahead = (pe.centroid[1] - av_pe.centroid[1]) * dc > 0 and abs(
-                                pe.centroid[0] - av_pe.centroid[0]
-                            ) <= 3
-                        else:
-                            is_ahead = (pe.centroid[0] - av_pe.centroid[0]) * dr + (
-                                pe.centroid[1] - av_pe.centroid[1]
-                            ) * dc > 0
-
-                        is_pushed = is_contact and is_ahead and (delta == (dr, dc))
-                        if is_pushed:
-                            view.symbolic_theory.induce_cargo(ce.feature_id)
-                            logger.info(
-                                "AutonomousEpistemicEngine: Discovered PUSHABLE CARGO (feat=%d, size=%d)",
-                                ce.feature_id,
-                                ce.area,
-                            )
-                        elif delta != (0, 0):
-                            # Autonomous dynamic entity (moved under its own agency) — not passive cargo
-                            view.symbolic_theory.cargo_features.discard(ce.feature_id)
-                        elif delta == (dr, dc) and any(
-                            _are_adjacent(ce, c_ce) for _, c_ce, _ in av_moved
+                        if (
+                            ce.feature_id in view.symbolic_theory.cargo_features
+                            or ce.feature_id in view.mobile_threat_features
+                            or ce.feature_id in view.hazard_tracker.mobile_entities
+                        ):
+                            continue
+                        if delta == (dr, dc) and any(
+                            _are_adjacent(pe, p_ce) and _are_adjacent(ce, c_ce)
+                            for p_ce, c_ce, _ in av_moved
                         ):
                             view.avatar_features.add(ce.feature_id)
                             view.avatar_size += ce.area
-                            view.symbolic_theory.cargo_features.discard(ce.feature_id)
                             logger.info(
                                 "AutonomousEpistemicEngine: Discovered compound avatar component (feat=%d, size=%d)",
                                 ce.feature_id,
                                 ce.area,
                             )
         # ── Proprioceptive Efference Copy Verification & Obstacle Grounding ──
+        continuous_moved = bool(getattr(view.working_memory, "last_continuous_moved", False))
+        if continuous_moved and action is not None and not is_effector_action:
+            cd_x, cd_y = getattr(view.working_memory, "continuous_delta", (0.0, 0.0))
+            if (abs(cd_x) > 1e-4 or abs(cd_y) > 1e-4) and action in view.action_dynamics:
+                view.action_dynamics[action].record_continuous_delta(cd_x, cd_y)
+        if not av_moved and continuous_moved and action is not None:
+            cd_x, cd_y = getattr(view.working_memory, "continuous_delta", (0.0, 0.0))
+            if abs(cd_x) > 1e-4 or abs(cd_y) > 1e-4:
+                rf = getattr(view.working_memory, "reference_frame", None)
+                origin_desc = (
+                    getattr(rf, "origin_description", "bottom_left_metric")
+                    if rf
+                    else "bottom_left_metric"
+                )
+                y_sign = -1 if "bottom_left" in origin_desc else 1
+
+                if abs(cd_y) >= abs(cd_x):
+                    dr_c = y_sign if cd_y > 0 else -y_sign
+                    dc_c = 0
+                else:
+                    dr_c = 0
+                    dc_c = 1 if cd_x > 0 else -1
+
+                if not is_effector_action:
+                    if action not in view.action_dynamics:
+                        view.action_dynamics[action] = ActionDynamicsModel(
+                            action_id=action,
+                            delta_r=dr_c,
+                            delta_c=dc_c,
+                            confidence=0.7,
+                            probes_tested=1,
+                        )
+                    else:
+                        view.action_dynamics[action].update_from_trial(
+                            (dr_c, dc_c), success=True, learning_rate=0.5
+                        )
+                    view.action_dynamics[action].record_continuous_delta(cd_x, cd_y)
+                    if action in view.action_affordances:
+                        view.action_affordances[action].is_displacement = True
+                        view.action_affordances[action].delta = (dr_c, dc_c)
+                    else:
+                        view.action_affordances[action] = ActionAffordance(
+                            action_id=action,
+                            is_displacement=True,
+                            delta=(dr_c, dc_c),
+                        )
+
+        if continuous_moved and (view.avatar_feature is None or view.avatar_pos is None):
+            c_pos = getattr(view.working_memory, "continuous_agent_pos", None)
+            rf = getattr(view.working_memory, "reference_frame", None)
+            if c_pos is not None and len(c_pos) >= 2:
+                origin_desc = (
+                    getattr(rf, "origin_description", "bottom_left_metric")
+                    if rf
+                    else "bottom_left_metric"
+                )
+                y_max = (
+                    float(rf.bounds[1][1])
+                    if (rf and rf.bounds and len(rf.bounds) >= 2)
+                    else float(H)
+                )
+                if "bottom_left" in origin_desc:
+                    ar_l = int(np.clip(round(y_max - 0.5 - float(c_pos[1])), 0, H - 1))
+                else:
+                    ar_l = int(np.clip(round(float(c_pos[1]) - 0.5), 0, H - 1))
+                ac_l = int(np.clip(round(float(c_pos[0]) - 0.5), 0, W - 1))
+                feat_l = int(curr_grid[ar_l, ac_l])
+                if feat_l != bg and feat_l != view.bg_feature:
+                    if view.avatar_feature is None:
+                        view.state.avatar_features = {feat_l}
+                        view.state.avatar_feature = feat_l
+                        view.symbolic_theory.induce_avatar(
+                            feat_l, evidence="continuous_kinematic_stream"
+                        )
+                    view.state.avatar_pos = (ar_l, ac_l)
         avatar_moved = bool(
             (
                 view.avatar_pos is not None
@@ -1348,36 +1626,52 @@ class EpistemicFeedbackAssimilator:
                 and view.avatar_pos != prev_avatar_pos
             )
             or manip_moved
+            or continuous_moved
         )
         if not is_effector_action and not is_known_displacement and not avatar_moved:
             view.state.last_non_displacement_action = action
 
         if view.avatar_pos is not None:
-            view.learned_goal_positions.discard(view.avatar_pos)
-            if prev_avatar_pos is not None:
-                view.learned_goal_positions.discard(prev_avatar_pos)
-            view.learned_goal_positions.difference_update(view.recent_positions)
-            if view.avatar_features:
-                view.symbolic_theory.avatar_features.update(view.avatar_features)
-                view.symbolic_theory.goal_features.difference_update(view.avatar_features)
-                view.symbolic_theory.candidate_goal_features.difference_update(view.avatar_features)
-                view.symbolic_theory.barrier_features.difference_update(view.avatar_features)
-                view.hazard_tracker.known_lethal_features.difference_update(view.avatar_features)
-                view.learned_goal_features.difference_update(view.avatar_features)
-                if hasattr(view, "episodic_cortex"):
-                    view.episodic_cortex.discovered_lethal_features.difference_update(
-                        view.avatar_features
+            if (
+                getattr(view.working_memory, "continuous_agent_pos", None) is None
+                and getattr(view.working_memory, "reference_frame", None) is None
+                and not view.symbolic_theory.cargo_features
+                and not view.symbolic_theory.receptacle_features
+            ):
+                confirmed_pos = set()
+                if view.prev_grid is not None:
+                    confirmed_feats = (
+                        view.symbolic_theory.goal_features
+                        | view.symbolic_theory.receptacle_features
                     )
+                    if confirmed_feats:
+                        confirmed_pos = {
+                            (r, c)
+                            for r in range(H)
+                            for c in range(W)
+                            if int(view.prev_grid[r, c]) in confirmed_feats
+                        }
+                if view.avatar_pos not in confirmed_pos:
+                    view.learned_goal_positions.discard(view.avatar_pos)
+                if prev_avatar_pos is not None and prev_avatar_pos not in confirmed_pos:
+                    view.learned_goal_positions.discard(prev_avatar_pos)
+                view.learned_goal_positions.difference_update(
+                    set(view.recent_positions) - confirmed_pos
+                )
+            if view.avatar_features:
+                for af in view.avatar_features:
+                    view.symbolic_theory.induce_avatar(af, evidence="motor_grounding")
+                view.hazard_tracker.known_lethal_features.difference_update(view.avatar_features)
+                view.episodic_cortex.discovered_lethal_features.difference_update(
+                    view.avatar_features
+                )
             if view.avatar_feature is not None:
-                view.symbolic_theory.avatar_features.add(view.avatar_feature)
-                view.symbolic_theory.goal_features.discard(view.avatar_feature)
-                view.symbolic_theory.candidate_goal_features.discard(view.avatar_feature)
-                view.symbolic_theory.barrier_features.discard(view.avatar_feature)
+                view.symbolic_theory.induce_avatar(view.avatar_feature, evidence="motor_grounding")
                 view.hazard_tracker.known_lethal_features.discard(view.avatar_feature)
-                view.learned_goal_features.discard(view.avatar_feature)
-                if hasattr(view, "episodic_cortex"):
-                    view.episodic_cortex.discovered_lethal_features.discard(view.avatar_feature)
+                view.episodic_cortex.discovered_lethal_features.discard(view.avatar_feature)
 
+        leading_cell_mutated = False
+        possible_orthogonal_wall_slip = False
         if is_known_displacement and prev_avatar_pos is not None:
             # 1. Physical resistance detection (Avatar did not move upon directional motor command)
             if not avatar_moved and not is_success:
@@ -1392,23 +1686,6 @@ class EpistemicFeedbackAssimilator:
                         av_feats = view.avatar_features or (
                             {view.avatar_feature} if view.avatar_feature is not None else set()
                         )
-                        # HCIR Attractor Invariant: Gather candidate goal features
-                        bg_val = view.bg_feature if view.bg_feature is not None else 0
-                        cand_goals = view.detect_structural_goals(curr_grid, bg=bg_val)
-                        cand_goal_feats = {
-                            int(g["feature"])
-                            for g in cand_goals
-                            if "feature" in g
-                            and g["feature"] is not None
-                            and int(g["feature"]) != bg_val
-                            and int(g["feature"]) not in av_feats
-                        }
-                        cand_goal_positions = {
-                            g["position"]
-                            for g in cand_goals
-                            if "position" in g and g["position"] is not None
-                        }
-
                         av_rad_r = max(0, (get_engine_state_attr(view, "avatar_h", 1) or 1) // 2)
                         av_rad_c = max(0, (get_engine_state_attr(view, "avatar_w", 1) or 1) // 2)
 
@@ -1416,24 +1693,89 @@ class EpistemicFeedbackAssimilator:
                         # can physically impede motor displacement. Distant features across void are NEVER obstacles.
                         adj_r = prev_avatar_pos[0] + step_r * (av_rad_r + 1)
                         adj_c = prev_avatar_pos[1] + step_c * (av_rad_c + 1)
-                        if 0 <= adj_r < H and 0 <= adj_c < W:
+                        leading_cell_mutated = bool(
+                            view.prev_grid is not None
+                            and 0 <= adj_r < H
+                            and 0 <= adj_c < W
+                            and int(curr_grid[adj_r, adj_c]) != int(view.prev_grid[adj_r, adj_c])
+                        )
+                        if (
+                            not leading_cell_mutated
+                            and 0 <= adj_r < H
+                            and 0 <= adj_c < W
+                            and view.working_memory.consecutive_stuck_steps < 2
+                            and any(d.slip_rate > 0.05 for d in view.action_dynamics.values())
+                            and not view.symbolic_theory.is_barrier(int(curr_grid[adj_r, adj_c]))
+                            and (adj_r, adj_c) not in view.learned_barriers
+                        ):
+                            pr_s, pc_s = prev_avatar_pos
+                            possible_orthogonal_wall_slip = any(
+                                orth_r * step_r + orth_c * step_c == 0
+                                and (
+                                    not (0 <= pr_s + orth_r < H and 0 <= pc_s + orth_c < W)
+                                    or view.symbolic_theory.is_barrier(
+                                        int(curr_grid[pr_s + orth_r, pc_s + orth_c])
+                                    )
+                                    or (pr_s + orth_r, pc_s + orth_c) in view.learned_barriers
+                                )
+                                for orth_r, orth_c in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                            )
+                        if leading_cell_mutated:
+                            view.learned_barriers.discard((adj_r, adj_c))
+                        elif (
+                            0 <= adj_r < H and 0 <= adj_c < W and not possible_orthogonal_wall_slip
+                        ):
                             val = (
                                 int(view.prev_grid[adj_r, adj_c])
                                 if view.prev_grid is not None
                                 else int(curr_grid[adj_r, adj_c])
                             )
-                            is_candidate_goal = (
-                                val in view.learned_goal_features
-                                or val in cand_goal_feats
-                                or (adj_r, adj_c) in cand_goal_positions
+                            is_confirmed_goal = (
+                                val in view.symbolic_theory.goal_features
+                                or (adj_r, adj_c) in view.learned_goal_positions
                             )
-                            if (
-                                val not in av_feats
-                                and val not in view.avatar_features
-                                and val != view.avatar_feature
+                            is_avatar = (
+                                val in av_feats
+                                or val in view.avatar_features
+                                or val == view.avatar_feature
+                            )
+                            if not is_avatar and is_confirmed_goal:
+                                if (
+                                    view.symbolic_theory.has_prior_context_transition
+                                    and val in view.symbolic_theory.goal_features
+                                    and not view.symbolic_theory.is_verified_in_context("goal", val)
+                                    and not view.symbolic_theory.cargo_features
+                                ):
+                                    from hbllm.hcir.world.cortex_causal import (
+                                        invalidate_stale_context_ontology,
+                                    )
+
+                                    invalidate_stale_context_ontology(
+                                        view.symbolic_theory,
+                                        hazard_tracker=view.hazard_tracker,
+                                        episodic_cortex=view.episodic_cortex,
+                                        working_memory=view.working_memory,
+                                        engine_or_view=view,
+                                        bg_feature=view.bg_feature,
+                                        preserve_current_context=True,
+                                        reason=f"prior_goal_blocked_on_collision:{val}",
+                                    )
+                                    view.symbolic_theory.induce_barrier(val, evidence="collision")
+                                if val not in view.symbolic_theory.goal_features:
+                                    view.learned_goal_positions.discard((adj_r, adj_c))
+                                view.record_learned_barrier((adj_r, adj_c))
+                            elif (
+                                not is_avatar
+                                and not is_confirmed_goal
                                 and val != bg
                                 and val != view.bg_feature
-                                and not is_candidate_goal
+                                and val != view.working_memory.shroud_feature
+                                and val not in view.mobile_threat_features
+                                and val not in view.hazard_tracker.mobile_entities
+                                and not (
+                                    view.symbolic_theory.has_verified_walkable(val)
+                                    and view.symbolic_theory.is_verified_in_context("walkable", val)
+                                )
                             ):
                                 # Multi-cell leading edge recording
                                 if step_c != 0:
@@ -1449,17 +1791,61 @@ class EpistemicFeedbackAssimilator:
                                 else:
                                     view.record_learned_barrier((adj_r, adj_c))
 
-                                if val not in view.verified_safe_features:
-                                    view.symbolic_theory.walkable_features.discard(val)
-                                    if not view.symbolic_theory.is_barrier(val):
-                                        view.symbolic_theory.induce_barrier(val)
+                                has_discrete_non_disp = len(available_actions or []) > 4 and any(
+                                    not view.is_displacement_action(a)
+                                    and not view.is_spatial_effector(a)
+                                    for a in (available_actions or [])
+                                )
+                                view.learned_goal_positions.discard((adj_r, adj_c))
+                                is_isolated_interior = (
+                                    has_discrete_non_disp
+                                    and 1 <= adj_r < H - 1
+                                    and 1 <= adj_c < W - 1
+                                    and int(np.count_nonzero(curr_grid == val)) <= 2
+                                )
+
+                                if (
+                                    view.symbolic_theory.has_verified_walkable(val)
+                                    and view.symbolic_theory.has_prior_context_transition
+                                    and not view.symbolic_theory.is_verified_in_context(
+                                        "walkable", val
+                                    )
+                                ):
+                                    from hbllm.hcir.world.cortex_causal import (
+                                        invalidate_stale_context_ontology,
+                                    )
+
+                                    invalidate_stale_context_ontology(
+                                        view.symbolic_theory,
+                                        hazard_tracker=view.hazard_tracker,
+                                        episodic_cortex=view.episodic_cortex,
+                                        working_memory=view.working_memory,
+                                        engine_or_view=view,
+                                        bg_feature=view.bg_feature,
+                                        preserve_current_context=True,
+                                        reason=f"prior_walkable_blocked_on_collision:{val}",
+                                    )
+                                if not (
+                                    view.symbolic_theory.has_verified_walkable(val)
+                                    and view.symbolic_theory.is_verified_in_context("walkable", val)
+                                ):
+                                    view.symbolic_theory.retract_walkable(
+                                        val, reason="collision_obstacle"
+                                    )
+                                    if (
+                                        not is_isolated_interior
+                                        and not view.symbolic_theory.is_barrier(val)
+                                    ):
+                                        view.symbolic_theory.induce_barrier(
+                                            val, evidence="collision"
+                                        )
                                         logger.info(
                                             "AutonomousEpistemicEngine: Proprioceptive obstacle grounded at leading edge (%d, %d) with feature %d",
                                             adj_r,
                                             adj_c,
                                             val,
                                         )
-                                        if view.bg_feature == val:
+                                        if view.bg_feature == val or bg == val:
                                             view.state.bg_feature = view.estimate_background(
                                                 curr_grid
                                             )
@@ -1469,45 +1855,103 @@ class EpistemicFeedbackAssimilator:
                             if 0 <= end_r < H and 0 <= end_c < W:
                                 view.record_learned_barrier((end_r, end_c))
 
-                    if view.last_action is not None and prev_avatar_pos is not None:
-                        view.failed_transitions.add((prev_avatar_pos, view.last_action))
-                        view.entity_action_failed_positions.setdefault(view.last_action, set()).add(
-                            prev_avatar_pos
+                    if (
+                        not leading_cell_mutated
+                        and view.last_action is not None
+                        and prev_avatar_pos is not None
+                    ):
+                        lead_mob = (
+                            0 <= adj_r < H
+                            and 0 <= adj_c < W
+                            and (
+                                int(curr_grid[adj_r, adj_c]) in view.mobile_threat_features
+                                or int(curr_grid[adj_r, adj_c])
+                                in view.hazard_tracker.mobile_entities
+                            )
                         )
-                        if len(view.entity_action_failed_positions[view.last_action]) >= 2:
-                            view.immobile_entity_actions.add(view.last_action)
-                        prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                        view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
-                        view.simulation_cooldown = 0
-                        view.consecutive_simulation_failures = 0
+                        if not lead_mob and not possible_orthogonal_wall_slip:
+                            view.failed_transitions.add((prev_avatar_pos, view.last_action))
+                        view.working_memory.pending_gate_check = False
+                        is_disp = view.is_displacement_action(view.last_action)
+                        if not is_disp:
+                            view.entity_action_failed_positions.setdefault(
+                                view.last_action, set()
+                            ).add(prev_avatar_pos)
+                            cal_dirs_now = {
+                                (
+                                    (1 if d.delta_r > 0 else (-1 if d.delta_r < 0 else 0)),
+                                    (1 if d.delta_c > 0 else (-1 if d.delta_c < 0 else 0)),
+                                )
+                                for d in view.action_dynamics.values()
+                                if d.is_displacement_action()
+                            }
+                            cal_dirs_now.discard((0, 0))
+                            pr, pc = prev_avatar_pos
+                            all_cardinals_open = all(
+                                0 <= pr + dr_n < H
+                                and 0 <= pc + dc_n < W
+                                and (
+                                    int(curr_grid[pr + dr_n, pc + dc_n]) == bg
+                                    or view.symbolic_theory.is_walkable(
+                                        int(curr_grid[pr + dr_n, pc + dc_n])
+                                    )
+                                )
+                                for dr_n, dc_n in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                            )
+                            if len(view.entity_action_failed_positions[view.last_action]) >= 2 and (
+                                len(cal_dirs_now) >= 4 or all_cardinals_open
+                            ):
+                                view.immobile_entity_actions.add(view.last_action)
+                            prev_inh = view.inhibited_actions.get(view.last_action, 0)
+                            view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
+                        view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
+                        view.apply_wm_delta(
+                            WorkingMemoryDelta("consecutive_simulation_failures", 0)
+                        )
 
             if diff.changed_pixel_count == 0 and not is_success and not is_failure:
-                view.consecutive_stuck_steps += 1
-                if view.last_action is not None:
-                    prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                    view.inhibited_actions[view.last_action] = max(prev_inh + 3, 5)
-                    if view.consecutive_stuck_steps >= 2:
-                        view.inhibited_actions[view.last_action] = max(prev_inh + 6, 8)
-                    if prev_avatar_pos is not None:
-                        view.failed_transitions.add((prev_avatar_pos, view.last_action))
-                        view.working_memory.habenular_ior.failed_transitions.add(
-                            (prev_avatar_pos, view.last_action)
-                        )
+                if continuous_moved or leading_cell_mutated:
+                    view.working_memory.consecutive_stuck_steps = 0
+                else:
+                    view.working_memory.consecutive_stuck_steps += 1
+                    if (
+                        view.last_action is not None
+                        and view.is_displacement_action(view.last_action)
+                        and not possible_orthogonal_wall_slip
+                    ):
+                        prev_inh = view.inhibited_actions.get(view.last_action, 0)
+                        view.inhibited_actions[view.last_action] = max(prev_inh + 3, 5)
+                        if view.consecutive_stuck_steps >= 2:
+                            view.inhibited_actions[view.last_action] = max(prev_inh + 6, 8)
+                        if prev_avatar_pos is not None:
+                            view.failed_transitions.add((prev_avatar_pos, view.last_action))
+                            view.working_memory.habenular_ior.failed_transitions.add(
+                                (prev_avatar_pos, view.last_action)
+                            )
             elif prev_avatar_pos is not None and view.avatar_pos is not None:
                 if view.avatar_pos == prev_avatar_pos and not is_success and not is_failure:
-                    view.consecutive_stuck_steps += 1
-                    if view.last_action is not None:
-                        prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                        view.inhibited_actions[view.last_action] = max(prev_inh + 2, 4)
-                        if view.is_displacement_action(view.last_action):
+                    if continuous_moved or leading_cell_mutated:
+                        view.working_memory.consecutive_stuck_steps = 0
+                    else:
+                        view.working_memory.consecutive_stuck_steps += 1
+                        if (
+                            view.last_action is not None
+                            and view.is_displacement_action(view.last_action)
+                            and not possible_orthogonal_wall_slip
+                        ):
+                            prev_inh = view.inhibited_actions.get(view.last_action, 0)
+                            view.inhibited_actions[view.last_action] = max(prev_inh + 2, 4)
                             view.failed_transitions.add((prev_avatar_pos, view.last_action))
                             view.working_memory.habenular_ior.failed_transitions.add(
                                 (prev_avatar_pos, view.last_action)
                             )
                 else:
-                    view.state.consecutive_stuck_steps = 0
+                    view.working_memory.consecutive_stuck_steps = 0
+                    for inh_act in list(view.inhibited_actions.keys()):
+                        if view.is_displacement_action(inh_act):
+                            view.inhibited_actions.pop(inh_act, None)
             else:
-                view.state.consecutive_stuck_steps = 0
+                view.working_memory.consecutive_stuck_steps = 0
 
             # 2. Predictive coding efference copy divergence check & surprise computation
             expected_dr = (
@@ -1531,32 +1975,8 @@ class EpistemicFeedbackAssimilator:
                 else 0
             )
 
-            expected_state = {
-                "dr": expected_dr,
-                "dc": expected_dc,
-                "avatar_moved": 1
-                if (is_known_displacement or expected_dr != 0 or expected_dc != 0)
-                else 0,
-            }
-            actual_state = {
-                "dr": actual_dr,
-                "dc": actual_dc,
-                "avatar_moved": 1 if avatar_moved else 0,
-            }
-
-            confidence = 0.85 if view.mental_plan else (0.70 if is_known_displacement else 0.40)
-            salience = 1.3 if diff.changed_pixel_count > 0 else 0.8
-            surprise_eval = view.surprise_engine.evaluate_surprise(
-                prediction_id=f"step_{view.step_counter}",
-                expected_state=expected_state,
-                actual_state=actual_state,
-                confidence=confidence,
-                attention_salience=salience,
-                prediction_source="motor_calibration",
-                context_signature=f"act_{action}",
-            )
-            view.state.last_surprise = surprise_eval.surprise_score
-            view.state.last_surprise_eval = surprise_eval
+            view.state.last_surprise = 0.0
+            view.state.last_surprise_eval = None
 
             discrepancy = False
             if not is_success:
@@ -1572,62 +1992,87 @@ class EpistemicFeedbackAssimilator:
                 elif (
                     view.last_predicted_pos is not None
                     and view.avatar_pos is not None
-                    and max(
-                        abs(view.avatar_pos[0] - view.last_predicted_pos[0]),
-                        abs(view.avatar_pos[1] - view.last_predicted_pos[1]),
-                    )
-                    > 1
+                    and view.avatar_pos != view.last_predicted_pos
                 ):
                     discrepancy = True
-                elif surprise_eval.is_surprising and not avatar_moved and is_known_displacement:
-                    discrepancy = True
-
-            # Involuntary Orienting Reflex: When surprising visual change occurs,
-            # shift prefrontal attentional focus to the centroid of the mutation
-            if (
-                surprise_eval.is_surprising
-                and diff.changed_mask is not None
-                and np.any(diff.changed_mask)
-            ):
-                mut_cells = np.argwhere(diff.changed_mask)
-                if len(mut_cells) > 0:
-                    sal_r = int(round(float(np.mean([pt[0] for pt in mut_cells]))))
-                    sal_c = int(round(float(np.mean([pt[1] for pt in mut_cells]))))
-                    view.working_memory.orient_attention((sal_r, sal_c))
 
             if discrepancy:
                 did_displace_correctly = (expected_dr != 0 and actual_dr * expected_dr > 0) or (
                     expected_dc != 0 and actual_dc * expected_dc > 0
                 )
-                if (
-                    view.last_action is not None
-                    and prev_avatar_pos is not None
-                    and not did_displace_correctly
-                ):
-                    view.failed_transitions.add((prev_avatar_pos, view.last_action))
-                    prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                    view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
-                if view.mental_plan:
-                    logger.debug(
-                        "AutonomousEpistemicEngine: Sensory discrepancy/surprise detected (pred=%s, actual=%s, surprise=%.3f). Invalidating %d-step mental plan.",
-                        view.last_predicted_pos,
-                        view.avatar_pos,
-                        surprise_eval.surprise_score,
-                        len(view.mental_plan),
-                    )
-                    view.mental_plan.clear()
-                    view.transition_to_phase(
-                        EpistemicPhase.REPLANNING,
-                        reason="motor_surprise_plan_divergence",
-                    )
-                    if not did_displace_correctly:
-                        view.consecutive_plan_failures += 1
-                        if view.consecutive_plan_failures >= 2:
-                            view.exploration_cooldown = 2
-                            view.consecutive_plan_failures = 0
+                pred_open = False
+                if view.last_predicted_pos is not None:
+                    pr_p, pc_p = view.last_predicted_pos
+                    if 0 <= pr_p < H and 0 <= pc_p < W:
+                        pv_p = int(curr_grid[pr_p, pc_p])
+                        pred_open = pv_p == bg or view.symbolic_theory.is_walkable(pv_p)
+                is_orthogonal_slip = bool(avatar_moved and not did_displace_correctly) or bool(
+                    not avatar_moved
+                    and pred_open
+                    and any(d.slip_rate > 0.05 for d in view.action_dynamics.values())
+                )
+                if continuous_moved:
+                    cd = view.working_memory.continuous_delta
+                    c_dr = -cd[1]
+                    c_dc = cd[0]
+                    if (
+                        (expected_dr != 0 and c_dr * expected_dr > 0)
+                        or (expected_dc != 0 and c_dc * expected_dc > 0)
+                        or (
+                            expected_dr == 0
+                            and expected_dc == 0
+                            and (abs(cd[0]) > 1e-4 or abs(cd[1]) > 1e-4)
+                        )
+                    ):
+                        did_displace_correctly = True
+
+                if not (continuous_moved and did_displace_correctly):
+                    pred_mob = False
+                    if view.last_predicted_pos is not None:
+                        pr_m, pc_m = view.last_predicted_pos
+                        if 0 <= pr_m < H and 0 <= pc_m < W:
+                            pm_curr = int(curr_grid[pr_m, pc_m])
+                            pm_prev = (
+                                int(view.prev_grid[pr_m, pc_m])
+                                if view.prev_grid is not None
+                                else pm_curr
+                            )
+                            pred_mob = (
+                                pm_curr != pm_prev
+                                or pm_curr in view.mobile_threat_features
+                                or pm_curr in view.hazard_tracker.mobile_entities
+                                or pm_prev in view.mobile_threat_features
+                                or pm_prev in view.hazard_tracker.mobile_entities
+                            )
+                    if (
+                        view.last_action is not None
+                        and prev_avatar_pos is not None
+                        and not did_displace_correctly
+                        and not is_orthogonal_slip
+                        and not pred_mob
+                    ):
+                        view.failed_transitions.add((prev_avatar_pos, view.last_action))
+                        prev_inh = view.inhibited_actions.get(view.last_action, 0)
+                        view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
+                    if view.mental_plan:
+                        view.mental_plan.clear()
+                        view.working_memory.active_plan_step = None
+                        view.transition_to_phase(
+                            EpistemicPhase.REPLANNING,
+                            reason="motor_surprise_plan_divergence",
+                        )
+                        if is_orthogonal_slip:
+                            view.working_memory.simulation_cooldown = 0
+                        elif not did_displace_correctly:
+                            view.consecutive_plan_failures += 1
+                            if view.consecutive_plan_failures >= 2:
+                                view.apply_wm_delta(WorkingMemoryDelta("exploration_cooldown", 2))
+                                view.apply_wm_delta(
+                                    WorkingMemoryDelta("consecutive_plan_failures", 0)
+                                )
             else:
                 if avatar_moved or diff.changed_pixel_count > 0:
-                    view.consecutive_plan_failures = 0
+                    view.apply_wm_delta(WorkingMemoryDelta("consecutive_plan_failures", 0))
 
         # ── B. Environmental Mutation Induction ──────────────────────────────
         # Per-call invariants resolved once: the owned-subsystem reads below are
@@ -1642,54 +2087,29 @@ class EpistemicFeedbackAssimilator:
         movable_features.update(view.avatar_features)
         if view.avatar_feature is not None:
             movable_features.add(view.avatar_feature)
-        if _hazard_tracker is not None and hasattr(_hazard_tracker, "mobile_threat_features"):
-            movable_features.update(_hazard_tracker.mobile_threat_features)
+        movable_features.update(view.mobile_threat_features)
 
-        # Divider-line scan is invariant for the whole assimilate call:
-        # compute each row's dominant value/count once (lazily), then reuse.
-        _divider_rows: np.ndarray | None = None
+        _wm_exog = view.working_memory
+        _eff_target = (
+            (int(action_data["y"]), int(action_data["x"]))
+            if isinstance(action_data, dict) and "x" in action_data and "y" in action_data
+            else None
+        )
+        if diff.mutated_pixels:
+            _wm_exog.exogenous_tracker.observe_transition(
+                [(int(r), int(c)) for r, c, _, _ in diff.mutated_pixels],
+                action,
+                avatar_locus=_avatar_pos_now,
+                target_locus=_eff_target,
+            )
 
-        def _hud_dividers() -> np.ndarray:
-            nonlocal _divider_rows
-            rows = _prev_grid
-            n_vals = int(rows.max()) + 1
-            counts = np.stack([np.bincount(row.astype(np.int64), minlength=n_vals) for row in rows])
-            dom_vals = np.argmax(counts, axis=1)
-            dom_counts = counts[np.arange(rows.shape[0]), dom_vals]
-            _divider_rows = (dom_vals != bg) & (dom_counts >= int(rows.shape[1] * 0.85))
-            return _divider_rows
-
-        # The HUD predicate depends only on the mutated row: the divider-slice
-        # test is precomputed once per row instead of per mutated pixel.
-        _hud_row_flags: np.ndarray | None = None
-
-        def _hud_flags() -> np.ndarray:
-            nonlocal _hud_row_flags
-            pH, _ = _prev_grid.shape
-            max_hud_depth = max(16, pH // 4)
-            div_rows = _divider_rows if _divider_rows is not None else _hud_dividers()
-            flags = np.zeros(pH, dtype=bool)
-            # Top peripheral band partitioned by a solid non-background divider
-            # line spanning >= 85% width.
-            for r in range(min(max_hud_depth + 1, pH)):
-                if div_rows[r + 1 : min(max_hud_depth + 1, pH)].any():
-                    flags[r] = True
-            # Bottom peripheral band, symmetric to the top band.
-            for r in range(max(0, pH - 1 - max_hud_depth), pH):
-                if not flags[r] and div_rows[max(0, pH - 1 - max_hud_depth) : r].any():
-                    flags[r] = True
-            _hud_row_flags = flags
-            return flags
-
-        def is_hud_mutation(r: int, c: int) -> bool:
-            """Perimeter status bar / HUD isolation: detects mutations in peripheral bands separated by solid divider lines."""
-            if _prev_grid is None:
-                return False
-            pH, pW = _prev_grid.shape
-            if pH < 24 or pW < 24:
-                return False
-            flags = _hud_row_flags if _hud_row_flags is not None else _hud_flags()
-            return bool(flags[r])
+        def is_exogenous_mutation(r: int, c: int) -> bool:
+            """Isolate uncontrollable exogenous / topologically partitioned mutations (I(DeltaS; A) ~ 0)."""
+            return bool(
+                _wm_exog.is_exogenous_locus(
+                    (r, c), lattice=_prev_grid, bg=bg, include_outer_edge=False
+                )
+            )
 
         av_radius = max(2, int(round(math.sqrt(max(1, view.avatar_size)))))
 
@@ -1708,7 +2128,7 @@ class EpistemicFeedbackAssimilator:
         lost_counts: dict[int, int] = {}
         gained_counts: dict[int, int] = {}
         for r, c, old_v, new_v in diff.mutated_pixels:
-            if not is_hud_mutation(r, c) and not is_local_to_avatar(r, c):
+            if not is_exogenous_mutation(r, c) and not is_local_to_avatar(r, c):
                 if old_v != bg and old_v != _bg_feature:
                     lost_counts[old_v] = lost_counts.get(old_v, 0) + 1
                 if new_v != bg and new_v != _bg_feature:
@@ -1719,17 +2139,15 @@ class EpistemicFeedbackAssimilator:
                 2, int(count * 0.25)
             ):
                 movable_features.add(feat)
-                if _hazard_tracker is not None and hasattr(
-                    _hazard_tracker, "mobile_threat_features"
-                ):
-                    _hazard_tracker.mobile_threat_features.add(feat)
+                if feat not in view.symbolic_theory.cargo_features:
+                    view.mobile_threat_features.add(feat)
 
         distant_mutations = [
             (r, c, old_v, new_v)
             for r, c, old_v, new_v in diff.mutated_pixels
             if old_v not in movable_features
             and new_v not in movable_features
-            and not is_hud_mutation(r, c)
+            and not is_exogenous_mutation(r, c)
             and not is_local_to_avatar(r, c)
         ]
 
@@ -1744,6 +2162,32 @@ class EpistemicFeedbackAssimilator:
                 if trigger_pos and 0 <= trigger_pos[0] < H and 0 <= trigger_pos[1] < W
                 else None
             )
+
+            av_feats = set(view.avatar_features or ()) | (
+                {view.avatar_feature} if view.avatar_feature is not None else set()
+            )
+            if (not action_data or "x" not in action_data) and (
+                trigger_feat is None
+                or trigger_feat == bg
+                or trigger_feat == _bg_feature
+                or trigger_feat in av_feats
+            ):
+                agent_origin = prev_avatar_pos or _avatar_pos_now
+                if agent_origin is not None:
+                    ar, ac = agent_origin
+                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        nr, nc = ar + dr, ac + dc
+                        if 0 <= nr < H and 0 <= nc < W:
+                            cand_f = int(_prev_grid[nr, nc])
+                            if (
+                                cand_f != bg
+                                and cand_f != _bg_feature
+                                and cand_f not in av_feats
+                                and not view.symbolic_theory.is_walkable(cand_f)
+                            ):
+                                trigger_pos = (nr, nc)
+                                trigger_feat = cand_f
+                                break
 
             if trigger_feat is None or trigger_feat == bg or trigger_feat == _bg_feature:
                 trigger_feat = None
@@ -1761,9 +2205,17 @@ class EpistemicFeedbackAssimilator:
                 )
                 if existing_mut is not None:
                     existing_mut.record_observation(distant_mutations[0][3])
+                    existing_mut.metadata["mutated_positions"] = [
+                        (int(mr), int(mc)) for mr, mc, _, _ in distant_mutations
+                    ]
                 else:
+                    is_action_trigger = (
+                        bool(action_data and "x" in action_data)
+                        or (trigger_pos != _avatar_pos_now)
+                        or not is_known_displacement
+                    )
                     mutation_model = StateMutationModel(
-                        trigger_type="CONTACT" if is_known_displacement else "ACTION",
+                        trigger_type="ACTION" if is_action_trigger else "CONTACT",
                         trigger_pos=trigger_pos,
                         trigger_feature=trigger_feat,
                         mutation_type="ENVIRONMENTAL_TOGGLE",
@@ -1771,10 +2223,89 @@ class EpistemicFeedbackAssimilator:
                         posterior_value=distant_mutations[0][3],
                         confidence=0.8,
                         occurrences=1,
-                        metadata={"action_id": action},
+                        metadata={
+                            "action_id": action,
+                            "mutated_positions": [
+                                (int(mr), int(mc)) for mr, mc, _, _ in distant_mutations
+                            ],
+                        },
                     )
                     view.state_mutations.append(mutation_model)
+                    if (
+                        trigger_feat is not None
+                        and mutation_model.prior_value != view.bg_feature
+                        and not view.symbolic_theory.is_walkable(mutation_model.prior_value)
+                        and (
+                            mutation_model.posterior_value == view.bg_feature
+                            or view.symbolic_theory.is_walkable(mutation_model.posterior_value)
+                        )
+                    ):
+                        view.symbolic_theory.induce_conditional_affordance(
+                            feature=mutation_model.prior_value,
+                            condition=CausalPredicate(
+                                variable="trigger",
+                                operator="==",
+                                value=trigger_feat,
+                            ),
+                            evidence=f"state_mutation:{trigger_pos}",
+                            prerequisite_feature=trigger_feat,
+                        )
                     view.exhausted_candidate_goals.clear()
+                    if view.avatar_pos is not None:
+                        satisfied_when_map.pop(view.avatar_pos, None)
+                    if view.avatar_pos is not None:
+                        av_set_m = set(view.avatar_features or ())
+                        if view.avatar_feature is not None:
+                            av_set_m.add(view.avatar_feature)
+                        if view.prev_grid is not None and view.prev_grid.shape == curr_grid.shape:
+                            view.object_planner.ledger.observe_grid_connectivity(
+                                view.prev_grid,
+                                view.avatar_pos,
+                                view.bg_feature,
+                                set(view.symbolic_theory.walkable_features),
+                                av_set_m,
+                            )
+                        view.object_planner.ledger.observe_grid_connectivity(
+                            curr_grid,
+                            view.avatar_pos,
+                            view.bg_feature,
+                            set(view.symbolic_theory.walkable_features),
+                            av_set_m,
+                        )
+                    if trigger_pos is not None:
+                        view.symbolic_theory.mark_locus_explored(
+                            trigger_pos, reason="remote_mutation_triggered"
+                        )
+                        if action is not None and not view.is_displacement_action(action):
+                            for oa in available_actions or ():
+                                if not view.is_displacement_action(
+                                    oa
+                                ) and not view.is_spatial_effector(oa):
+                                    view.tested_action_positions.add((trigger_pos, oa))
+                                    view.entity_action_failed_positions.setdefault(oa, set()).add(
+                                        trigger_pos
+                                    )
+                    view.mental_plan.clear()
+                    for mr, mc, old_val, new_val in distant_mutations:
+                        view.learned_barriers.discard((mr, mc))
+                        for dr_m, dc_m in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
+                            adj_m = (int(mr) + dr_m, int(mc) + dc_m)
+                            for fp in [fp for fp in view.failed_transitions if fp[0] == adj_m]:
+                                view.failed_transitions.discard(fp)
+                    for ent in view.extract_entities(curr_grid, view.bg_feature):
+                        if (
+                            ent.feature_id != view.bg_feature
+                            and ent.feature_id not in (view.avatar_features or ())
+                            and ent.area <= 64
+                        ):
+                            view.symbolic_theory.induce_candidate_goal(
+                                ent.feature_id, evidence="post_mutation_exploration"
+                            )
+                    if view.subgoal_stack.has_pending_goals:
+                        cur_sg = view.subgoal_stack.current_subgoal
+                        if cur_sg is not None:
+                            cur_sg.metadata["triggered"] = True
+                            view.subgoal_stack.pop_subgoal()
                     logger.info(
                         "AutonomousEpistemicEngine: Induced StateMutationModel! Trigger %s at %s changed %d distant pixels.",
                         mutation_model.trigger_type,
@@ -1782,40 +2313,109 @@ class EpistemicFeedbackAssimilator:
                         len(distant_mutations),
                     )
 
-        # ── C. Win / Loss Feedback Assimilation ──────────────────────────────
+        # ── B2. Inventory / Contact-Item Pickup -> Re-evaluate Singleton Gates ──
         av_feats = view.avatar_features or (
             {view.avatar_feature} if view.avatar_feature is not None else set()
         )
-
-        # Faculty: Telic Depletion Goal Induction
-        # When an interventional non-locomotion action clears pixels of a non-background, non-avatar feature,
-        # hypothesize that feature as an active depletion objective (e.g. board clearing / matching).
-        is_locomotion = False
-        if action in view.action_dynamics and view.action_dynamics[action].is_displacement_action():
-            is_locomotion = True
-        elif view.is_displacement_action(action):
-            is_locomotion = True
-
         if (
-            diff.mutated_pixels
-            and not is_failure
-            and not is_locomotion
-            and view.is_motor_grounded()
+            not is_failure
+            and not is_success
+            and view.avatar_pos is not None
+            and _prev_grid is not None
+            and _prev_grid.shape == curr_grid.shape
         ):
-            for r, c, old_v, new_v in diff.mutated_pixels:
+            ar_now, ac_now = view.avatar_pos
+            if 0 <= ar_now < H and 0 <= ac_now < W:
+                stepped_val = int(_prev_grid[ar_now, ac_now])
                 if (
-                    new_v == bg
-                    and old_v != bg
-                    and old_v not in av_feats
-                    and old_v != view.avatar_feature
-                    and not _sym_theory.is_barrier(old_v)
+                    stepped_val != bg
+                    and stepped_val != _bg_feature
+                    and stepped_val not in av_feats
+                    and stepped_val != view.working_memory.shroud_feature
+                    and not _sym_theory.is_barrier(stepped_val)
+                    and int(np.count_nonzero(curr_grid == stepped_val))
+                    < int(np.count_nonzero(_prev_grid == stepped_val))
                 ):
-                    _sym_theory.induce_depletion_goal(old_v)
-                    break
+                    view.working_memory.collected_inventory_features.add(stepped_val)
+                    if (
+                        stepped_val in _sym_theory.barrier_features
+                        or (ar_now, ac_now) in view.learned_barriers
+                    ):
+                        view.working_memory.pending_gate_check = False
+                    else:
+                        view.working_memory.pending_gate_check = True
+                    gate_pts: set[tuple[int, int]] = set()
+                    for b_feat in list(_sym_theory.barrier_features):
+                        b_pts = np.argwhere(curr_grid == b_feat)
+                        if 1 <= len(b_pts) <= 2:
+                            _sym_theory.retract_barrier(b_feat, reason="inventory_state_change")
+                            _sym_theory._explored_features.discard(b_feat)
+                            for br_i, bc_i in b_pts:
+                                gate_pts.add((int(br_i), int(bc_i)))
+                    for lb_r, lb_c in list(view.learned_barriers):
+                        if 0 <= lb_r < H and 0 <= lb_c < W:
+                            lb_v = int(curr_grid[lb_r, lb_c])
+                            if (
+                                lb_v != bg
+                                and lb_v != _bg_feature
+                                and lb_v != view.working_memory.shroud_feature
+                                and lb_v not in _hazard_tracker.known_lethal_features
+                                and int(np.count_nonzero(curr_grid == lb_v)) <= 2
+                            ):
+                                _sym_theory.retract_barrier(lb_v, reason="inventory_state_change")
+                                _sym_theory._explored_features.discard(lb_v)
+                                gate_pts.add((lb_r, lb_c))
+                    for b_pt in gate_pts:
+                        view.learned_barriers.discard(b_pt)
+                        view.exhausted_candidate_goals.discard(b_pt)
+                        _sym_theory.unmark_locus_explored(b_pt)
+                        for dr_g, dc_g in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                            adj_g = (b_pt[0] + dr_g, b_pt[1] + dc_g)
+                            view.exhausted_candidate_goals.discard(adj_g)
+                            _sym_theory.unmark_locus_explored(adj_g)
+                            for fp in [fp for fp in view.failed_transitions if fp[0] == adj_g]:
+                                view.failed_transitions.discard(fp)
+                    if gate_pts:
+                        view.mental_plan.clear()
+
+        # ── C. Win / Loss Feedback Assimilation ──────────────────────────────
 
         if is_success:
             win_target = None
-            if prev_avatar_pos is not None:
+            cargo_win_target = None
+            cargo_feat = None
+            receptacle_feat = None
+
+            # Detect non-ego entity displacement to goal on winning step (e.g. block push / cargo delivery)
+            if diff and diff.mutated_pixels:
+                for r_m, c_m, old_m, new_m in diff.mutated_pixels:
+                    if (
+                        (r_m, c_m) != view.avatar_pos
+                        and (r_m, c_m) != prev_avatar_pos
+                        and new_m not in av_feats
+                        and new_m != bg
+                        and new_m != _bg_feature
+                    ):
+                        cargo_win_target = (r_m, c_m)
+                        cargo_feat = int(new_m)
+                        if old_m != bg and old_m != _bg_feature and old_m not in av_feats:
+                            receptacle_feat = int(old_m)
+                        break
+
+            if cargo_win_target is not None:
+                win_target = cargo_win_target
+                if cargo_feat is not None:
+                    _sym_theory.induce_cargo(cargo_feat, evidence="cargo_delivery_win")
+                if receptacle_feat is not None:
+                    _sym_theory.induce_receptacle(receptacle_feat, evidence="cargo_delivery_win")
+                    _sym_theory.induce_goal(receptacle_feat, evidence=TerminalSignal.SUCCESS)
+                    _sym_theory.mark_verified_in_context("goal", receptacle_feat)
+                    view.learned_receptacle_positions.add(cargo_win_target)
+            elif view.avatar_pos is not None and (
+                prev_avatar_pos is None or view.avatar_pos != prev_avatar_pos
+            ):
+                win_target = view.avatar_pos
+            elif prev_avatar_pos is not None:
                 dr, dc = 0, 0
                 if action in view.action_dynamics:
                     dr, dc = view.action_dynamics[action].get_displacement()
@@ -1833,9 +2433,52 @@ class EpistemicFeedbackAssimilator:
                 win_target = (int(action_data["y"]), int(action_data["x"]))
 
             if win_target is not None:
+                c_goal = getattr(view.working_memory, "continuous_goal_pos", None)
+                if c_goal is not None and _prev_grid is not None:
+                    rf = getattr(view.working_memory, "reference_frame", None)
+                    origin_desc = (
+                        getattr(rf, "origin_description", "bottom_left_metric")
+                        if rf
+                        else "bottom_left_metric"
+                    )
+                    y_max = (
+                        float(rf.bounds[1][1])
+                        if (rf and rf.bounds and len(rf.bounds) >= 2)
+                        else float(H)
+                    )
+                    if "bottom_left" in origin_desc:
+                        gr_l = int(np.clip(round(y_max - 0.5 - float(c_goal[1])), 0, H - 1))
+                    else:
+                        gr_l = int(np.clip(round(float(c_goal[1]) - 0.5), 0, H - 1))
+                    gc_l = int(np.clip(round(float(c_goal[0]) - 0.5), 0, W - 1))
+                    cand_c_feat = int(_prev_grid[gr_l, gc_l])
+                    if cand_c_feat != bg and cand_c_feat != _bg_feature:
+                        win_target = (gr_l, gc_l)
+
                 view.record_learned_goal(win_target)
                 if _prev_grid is not None and 0 <= win_target[0] < H and 0 <= win_target[1] < W:
                     goal_feat = int(_prev_grid[win_target[0], win_target[1]])
+                    if (goal_feat == bg or goal_feat == _bg_feature) and _prev_grid is not None:
+                        for dr_w in (-1, 0, 1):
+                            for dc_w in (-1, 0, 1):
+                                nr_w, nc_w = win_target[0] + dr_w, win_target[1] + dc_w
+                                if 0 <= nr_w < H and 0 <= nc_w < W:
+                                    cand_f = int(_prev_grid[nr_w, nc_w])
+                                    if (
+                                        cand_f != bg
+                                        and cand_f != _bg_feature
+                                        and cand_f not in av_feats
+                                        and not _sym_theory.is_barrier(cand_f)
+                                        and (
+                                            cand_f in _sym_theory.candidate_goal_features
+                                            or cand_f in _sym_theory.goal_features
+                                        )
+                                    ):
+                                        goal_feat = cand_f
+                                        win_target = (nr_w, nc_w)
+                                        break
+                            if goal_feat != bg and goal_feat != _bg_feature:
+                                break
                     is_distant_target = (
                         prev_avatar_pos is None
                         or abs(win_target[0] - prev_avatar_pos[0]) > 0
@@ -1847,10 +2490,11 @@ class EpistemicFeedbackAssimilator:
                         goal_feat != bg
                         and goal_feat != _bg_feature
                         and (goal_feat not in av_feats or is_distant_target)
-                        and not _sym_theory.is_barrier(goal_feat)
                         and not is_substrate
                     ):
-                        _sym_theory.induce_goal(goal_feat)
+                        _sym_theory.induce_goal(goal_feat, evidence=TerminalSignal.SUCCESS)
+                        _sym_theory.mark_verified_in_context("goal", goal_feat)
+                        view.learned_barriers.discard(win_target)
                         logger.info(
                             "AutonomousEpistemicEngine: Grounded invariant WIN GOAL FEATURE %d at %s",
                             goal_feat,
@@ -1868,12 +2512,13 @@ class EpistemicFeedbackAssimilator:
                         (pe.feature_id not in av_feats or is_distant_pe)
                         and pe.feature_id != bg
                         and pe.feature_id != _bg_feature
-                        and not _sym_theory.is_barrier(pe.feature_id)
                         and 1 <= pe.area <= max_entity_area
                     ):
                         pe_cells = pe.properties.get("cells", [pe.grid_pos])
                         if win_target in pe_cells or pe.grid_pos == win_target:
-                            _sym_theory.induce_goal(pe.feature_id)
+                            _sym_theory.induce_goal(pe.feature_id, evidence=TerminalSignal.SUCCESS)
+                            _sym_theory.mark_verified_in_context("goal", pe.feature_id)
+                            view.learned_barriers.discard(win_target)
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded invariant WIN GOAL ENTITY feature %d (area=%d)",
                                 pe.feature_id,
@@ -1890,26 +2535,51 @@ class EpistemicFeedbackAssimilator:
                         sim_feat != bg
                         and sim_feat != _bg_feature
                         and sim_feat not in av_feats
-                        and not _sym_theory.is_barrier(sim_feat)
                         and not (
                             sim_feat in _sym_theory.walkable_features or sim_extent > max_sim_extent
                         )
                     ):
-                        _sym_theory.induce_goal(sim_feat)
+                        _sym_theory.induce_goal(sim_feat, evidence=TerminalSignal.SUCCESS)
+                        _sym_theory.mark_verified_in_context("goal", sim_feat)
 
             if view.active_hypothesis:
                 view.active_hypothesis.confirmed = True
                 view.active_hypothesis.confidence = 1.0
 
-            # Level transition: cleanly reset episodic spatial memory for the next level
+            # Record the terminal winning transition before reset clears current_episode
+            # so Hippocampal SWR consolidation and DreamCoder LibraryLearner capture the full trace.
+            view.episodic_cortex.record_transition(
+                step=view.step_counter,
+                avatar_pos=view.avatar_pos,
+                action=action,
+                action_data=action_data,
+                observation_diff=diff,
+                reward=1.0,
+                is_terminal=True,
+                terminal=terminal,
+                is_failure=False,
+                is_success=True,
+                grid_snapshot=curr_grid,
+            )
+
+            # Context transition: cleanly reset episodic spatial memory for the next context
             view.reset_episode(
-                retain_dynamics=True, is_new_level=True, level=view.current_level + 1
+                retain_dynamics=True,
+                is_new_context=True,
+                context_epoch=view.context_epoch + 1,
             )
             return
         elif view.avatar_pos is not None and not is_failure:
-            view.exhausted_candidate_goals.add(view.avatar_pos)
+            if view.avatar_pos not in getattr(
+                view.working_memory, "active_epistemic_conditions", {}
+            ):
+                view.exhausted_candidate_goals.add(view.avatar_pos)
 
-        if is_failure:
+        is_fatal = (terminal == TerminalSignal.FAILURE) or (
+            is_failure and terminal != TerminalSignal.TIMEOUT
+        )
+
+        if is_fatal:
             # Faculty: Lateral Habenula & aMCC Fatal Prefix Backpropagation & Negative Valence
             view.working_memory.habenular_ior.record_catastrophe(
                 final_step=view.step_counter,
@@ -1956,61 +2626,151 @@ class EpistemicFeedbackAssimilator:
                 )
 
             target_pos = None
-            if prev_avatar_pos is not None:
-                dr, dc = 0, 0
-                if action in view.action_dynamics:
-                    dr, dc = view.action_dynamics[action].get_displacement()
-                elif action_data and "x" in action_data and "y" in action_data:
+            # Derive death cell from the terminal lattice (curr_grid) first.
+            # view.avatar_pos is NOT yet updated by _update_avatar_position_from_grid
+            # (that runs in deliberate(), after prepare()/assimilate_feedback()).
+            # In stochastic dynamics the avatar may have landed on a different cell
+            # than predicted from displacement alone, so we scan curr_grid for the
+            # avatar feature to get the actual terminal position.
+            if curr_grid is not None and av_feats:
+                for av_f in av_feats:
+                    av_locs = np.argwhere(curr_grid == av_f)
+                    if len(av_locs) > 0:
+                        # Pick the nearest candidate to prev_avatar_pos (or any if unknown)
+                        if prev_avatar_pos is not None:
+                            dists = [
+                                abs(int(r) - prev_avatar_pos[0]) + abs(int(c) - prev_avatar_pos[1])
+                                for r, c in av_locs
+                            ]
+                            best_idx = int(np.argmin(dists))
+                        else:
+                            best_idx = 0
+                        cand_p = (int(av_locs[best_idx][0]), int(av_locs[best_idx][1]))
+                        if cand_p != prev_avatar_pos:
+                            target_pos = cand_p
+                            break
+
+            if target_pos is None and prev_avatar_pos is not None:
+                # Fallback: predict from action displacement (deterministic envs)
+                if action_data and "x" in action_data and "y" in action_data:
                     target_pos = (int(action_data["y"]), int(action_data["x"]))
-                if target_pos is None:
+                else:
+                    dr, dc = 0, 0
+                    if action in view.action_dynamics:
+                        dr, dc = view.action_dynamics[action].get_displacement()
                     tr, tc = prev_avatar_pos[0] + dr, prev_avatar_pos[1] + dc
                     if 0 <= tr < H and 0 <= tc < W:
                         target_pos = (tr, tc)
-            elif view.avatar_pos is not None:
-                target_pos = view.avatar_pos
-            elif action_data and "x" in action_data and "y" in action_data:
-                target_pos = (int(action_data["y"]), int(action_data["x"]))
+            elif target_pos is None:
+                if view.avatar_pos is not None:
+                    target_pos = view.avatar_pos
+                elif action_data and "x" in action_data and "y" in action_data:
+                    target_pos = (int(action_data["y"]), int(action_data["x"]))
 
             if target_pos is not None:
                 if _prev_grid is not None and 0 <= target_pos[0] < H and 0 <= target_pos[1] < W:
-                    # Check for lethal hazard features in a 5x5 window around target_pos
-                    r0 = max(0, target_pos[0] - 2)
-                    r1 = min(H, target_pos[0] + 3)
-                    c0 = max(0, target_pos[1] - 2)
-                    c1 = min(W, target_pos[1] + 3)
-                    candidate_cells = set(np.unique(curr_grid[r0:r1, c0:c1])).union(
-                        set(np.unique(_prev_grid[r0:r1, c0:c1]))
-                    )
-                    # Also inspect unobstructed cardinal line-of-sight rays for remote turrets/projectiles
-                    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        curr_r, curr_c = target_pos[0] + dr, target_pos[1] + dc
-                        while 0 <= curr_r < H and 0 <= curr_c < W:
-                            val = int(_prev_grid[curr_r, curr_c])
-                            if _sym_theory.is_barrier(val):
-                                break
-                            if (
-                                val != _bg_feature
-                                and val not in av_feats
-                                and not _sym_theory.is_walkable(val)
-                            ):
-                                candidate_cells.add(val)
-                            curr_r += dr
-                            curr_c += dc
+                    direct_feat = int(_prev_grid[target_pos[0], target_pos[1]])
+                    is_direct_contact = direct_feat != _bg_feature and direct_feat not in av_feats
+                    if is_direct_contact:
+                        # Direct physical contact hazard at the destination cell
+                        candidate_cells = {direct_feat}
+                    else:
+                        # Check adjacent mobile entities first (e.g. patroller stepping onto avatar)
+                        mob_cands: set[int] = set()
+                        for mr_c in range(max(0, target_pos[0] - 2), min(H, target_pos[0] + 3)):
+                            for mc_c in range(max(0, target_pos[1] - 2), min(W, target_pos[1] + 3)):
+                                if abs(mr_c - target_pos[0]) + abs(mc_c - target_pos[1]) <= 2:
+                                    mv = int(_prev_grid[mr_c, mc_c])
+                                    if (
+                                        mv in _hazard_tracker.mobile_entities
+                                        or mv in view.mobile_threat_features
+                                    ):
+                                        mob_cands.add(mv)
+                        if mob_cands:
+                            candidate_cells = mob_cands
+                            is_direct_contact = True
+                        else:
+                            # Remote hazard attribution (e.g. projectile or turret in line-of-sight)
+                            candidate_cells = set()
+                            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                                curr_r, curr_c = target_pos[0] + dr, target_pos[1] + dc
+                                while 0 <= curr_r < H and 0 <= curr_c < W:
+                                    val = int(_prev_grid[curr_r, curr_c])
+                                    if _sym_theory.is_barrier(val):
+                                        break
+                                    if (
+                                        val != _bg_feature
+                                        and val not in av_feats
+                                        and not _sym_theory.is_walkable(val)
+                                    ):
+                                        candidate_cells.add(val)
+                                    curr_r += dr
+                                    curr_c += dc
                     total_cells = H * W
                     for cand_feat in candidate_cells:
                         cand_feat_int = int(cand_feat)
                         feat_count = int(np.sum(_prev_grid == cand_feat_int))
                         if (
                             cand_feat_int != _bg_feature
+                            and cand_feat_int != bg
                             and cand_feat_int not in av_feats
-                            and not _sym_theory.is_walkable(cand_feat_int)
+                            and (
+                                is_direct_contact
+                                or not (
+                                    _sym_theory.is_walkable(cand_feat_int)
+                                    and _sym_theory.is_verified_in_context(
+                                        "walkable", cand_feat_int
+                                    )
+                                )
+                            )
                             and feat_count <= max(64, int(total_cells * 0.40))
                         ):
+                            was_prior_safe = _sym_theory.has_prior_context_transition and (
+                                (
+                                    cand_feat_int in _sym_theory.goal_features
+                                    and not _sym_theory.is_verified_in_context(
+                                        "goal", cand_feat_int
+                                    )
+                                )
+                                or (
+                                    cand_feat_int != bg
+                                    and cand_feat_int != _bg_feature
+                                    and cand_feat_int in _sym_theory.walkable_features
+                                    and not _sym_theory.is_verified_in_context(
+                                        "walkable", cand_feat_int
+                                    )
+                                )
+                                or (
+                                    cand_feat_int in _sym_theory.cargo_features
+                                    and not _sym_theory.is_verified_in_context(
+                                        "cargo", cand_feat_int
+                                    )
+                                )
+                            )
                             _hazard_tracker.register_lethal_feature(cand_feat_int)
-                            _sym_theory.induce_barrier(cand_feat_int)
-                            _sym_theory.cargo_features.discard(cand_feat_int)
-                            _sym_theory.goal_features.discard(cand_feat_int)
-                            _sym_theory.candidate_goal_features.discard(cand_feat_int)
+                            _sym_theory.mark_verified_in_context("lethal", cand_feat_int)
+                            _sym_theory.retract_cargo(cand_feat_int, reason="lethal_hazard")
+                            _sym_theory.retract_goal(cand_feat_int, reason="lethal_hazard")
+                            _sym_theory.retract_walkable(cand_feat_int, reason="lethal_hazard")
+                            _sym_theory.retract_conditional_affordance(
+                                cand_feat_int, reason="lethal_hazard"
+                            )
+                            _sym_theory.induce_barrier(cand_feat_int, evidence="lethal_hazard")
+                            if was_prior_safe:
+                                from hbllm.hcir.world.cortex_causal import (
+                                    invalidate_stale_context_ontology,
+                                )
+
+                                invalidate_stale_context_ontology(
+                                    _sym_theory,
+                                    hazard_tracker=_hazard_tracker,
+                                    episodic_cortex=view.episodic_cortex,
+                                    working_memory=view.working_memory,
+                                    engine_or_view=view,
+                                    bg_feature=_bg_feature,
+                                    preserve_current_context=True,
+                                    reason=f"prior_safe_became_lethal:{cand_feat_int}",
+                                )
                             logger.info(
                                 "AutonomousEpistemicEngine: Grounded lethal feature %d at barrier %s",
                                 cand_feat_int,
@@ -2018,18 +2778,14 @@ class EpistemicFeedbackAssimilator:
                             )
                     view.exhausted_candidate_goals.add(target_pos)
 
-                    # Trajectory-level aversive conditioning:
+                    # Trajectory-scale aversive conditioning:
                     # The destination cell target_pos resulted in catastrophic loss/death.
                     # Ground it as a static lethal position and barrier so neither mental simulation
                     # nor exploratory probes step into this coordinate again!
                     _hazard_tracker.register_lethal_position(target_pos)
                     view.record_learned_barrier(target_pos)
-                    view.level_learned_barriers.setdefault(view.current_level, set()).add(
-                        target_pos
-                    )
-                    view.level_lethal_positions.setdefault(view.current_level, set()).add(
-                        target_pos
-                    )
+                    view.context_barriers.setdefault(view.context_epoch, set()).add(target_pos)
+                    view.context_hazards.setdefault(view.context_epoch, set()).add(target_pos)
 
                     # Blacklist all cardinal incoming moves into target_pos from immediate neighbors
                     for m_dr, m_dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
@@ -2050,13 +2806,20 @@ class EpistemicFeedbackAssimilator:
 
         # Prefrontal item acquisition
         if view.avatar_pos is not None:
+            cond_prereqs = {
+                aff.prerequisite_feature
+                for aff in _sym_theory.conditional_affordances.values()
+                if aff.prerequisite_feature is not None
+            }
             for pe in prev_entities:
                 if (
-                    pe.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
+                    (
+                        pe.role in (EntityRole.MANIPULABLE, EntityRole.RESOURCE)
+                        or pe.feature_id in cond_prereqs
+                    )
                     and pe.feature_id not in av_feats
                     and pe.feature_id != bg
                     and pe.feature_id != _bg_feature
-                    and not _sym_theory.is_walkable(pe.feature_id)
                 ):
                     dist_to_av = abs(pe.grid_pos[0] - view.avatar_pos[0]) + abs(
                         pe.grid_pos[1] - view.avatar_pos[1]
@@ -2064,26 +2827,38 @@ class EpistemicFeedbackAssimilator:
                     if dist_to_av <= 1:
                         view.working_memory.acquire_item(
                             feature_id=pe.feature_id,
-                            role=pe.role.value,
+                            role=getattr(pe.role, "value", str(pe.role)),
                             step=view.step_counter,
                             position=pe.grid_pos,
                         )
 
         # Tool-Barrier Resonance Credit Assignment
-        if (
-            _prev_grid is not None
-            and view.working_memory.held_items
-            and diff.changed_mask is not None
-        ):
+        if _prev_grid is not None and diff.changed_mask is not None:
             changed_coords = np.argwhere(diff.changed_mask)
             _barrier_feats = _sym_theory.barrier_features
             _learned_barriers = view.learned_barriers
             for mr, mc in changed_coords:
                 orig_val = int(_prev_grid[mr, mc])
                 post_val = int(curr_grid[mr, mc])
-                if (orig_val in _barrier_feats or (int(mr), int(mc)) in _learned_barriers) and (
-                    post_val == _bg_feature or _sym_theory.is_walkable(post_val)
+                if (
+                    orig_val in _barrier_feats
+                    or orig_val in _sym_theory.conditional_affordances
+                    or (int(mr), int(mc)) in _learned_barriers
+                ) and (
+                    post_val == _bg_feature
+                    or _sym_theory.is_walkable(post_val)
+                    or _sym_theory.is_conditionally_traversable(post_val)
                 ):
+                    view.learned_barriers.discard((int(mr), int(mc)))
+                    stale_txs = set()
+                    for p, act in view.failed_transitions:
+                        d = view.action_deltas.get(act)
+                        if d and (p[0] + d[0], p[1] + d[1]) == (int(mr), int(mc)):
+                            stale_txs.add((p, act))
+                    view.failed_transitions.difference_update(stale_txs)
+                    view.working_memory.habenular_ior.failed_transitions.difference_update(
+                        stale_txs
+                    )
                     for h_item in view.working_memory.held_items:
                         view.working_memory.register_tool_unlock(h_item.feature_id, orig_val)
 
@@ -2101,31 +2876,6 @@ class EpistemicFeedbackAssimilator:
             is_success=is_success,
             grid_snapshot=curr_grid,
         )
-
-        # Faculty: vmPFC Action-Effect Interventional Binding (Pearl's do(a))
-        if view.prev_grid is not None:
-            action_locus: tuple[int, int] | None = None
-            if action_data and isinstance(action_data, dict):
-                if "y" in action_data and "x" in action_data:
-                    action_locus = (int(action_data["y"]), int(action_data["x"]))
-                elif "r" in action_data and "c" in action_data:
-                    action_locus = (int(action_data["r"]), int(action_data["c"]))
-                elif "target" in action_data and isinstance(action_data["target"], (list, tuple)):
-                    action_locus = (int(action_data["target"][0]), int(action_data["target"][1]))
-            elif view.avatar_pos is not None:
-                action_locus = view.avatar_pos
-
-            view.causal_cortex.bind_intervention(
-                action=action,
-                origin_pos=prev_avatar_pos,
-                target_pos=view.avatar_pos,
-                obs_diff=diff,
-                prev_grid=view.prev_grid,
-                curr_grid=curr_grid,
-                bg_feature=view.bg_feature,
-                action_locus=action_locus,
-                avatar_features=view.avatar_features,
-            )
 
         # Faculty: Prefrontal Inductive Hypothesis Testing & Relational Rule Discovery
         if view.prev_grid is not None:
@@ -2149,13 +2899,19 @@ class EpistemicFeedbackAssimilator:
             view.mobile_threat_features.discard(view.avatar_feature)
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export feedback assimilator capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export feedback assimilator capability and runtime grounding state as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "motor_dynamics_assimilation"
+        if view is not None:
+            grounded = len(getattr(view, "action_dynamics", {}) or {})
+            phase = getattr(getattr(view, "state", None), "phase", "unknown")
+            rel = f"motor_dynamics_assimilation:grounded:{grounded}:phase:{phase}"
         return CausalPredicate(
             variable="epistemic_feedback_assimilator",
             operator="==",
-            value="ACTIVE",
-            relation="motor_dynamics_assimilation",
+            value=val,
+            relation=rel,
             target_entity="cortex_assimilator",
         )
 
@@ -2175,7 +2931,7 @@ class EpistemicFeedbackAssimilator:
 
 
 @dataclass
-class AssimilationStage(CorticalStage):
+class AssimilationStage:
     """Cortical Stage 2: Assimilation & Surprise Induction.
 
     Binds motor diffs to actions; updates EpistemicPhase; detects high surprise
@@ -2184,9 +2940,14 @@ class AssimilationStage(CorticalStage):
     """
 
     name: str = "assimilation_stage"
+    engine: Any | None = None
+    _current_journal: Any = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
+        engine = getattr(self, "engine", None)
         if engine is not None:
             # WP1: real assimilation — the full prepare() preamble (terminal
             # resolution, step_counter, normalize, strict-budget, bg estimate,
@@ -2198,20 +2959,28 @@ class AssimilationStage(CorticalStage):
             )
 
             journal = FacultyWriteJournal(author="assimilation_stage")
+            self._current_journal = journal
             view = JournaledEngineView(engine, journal)
-            g, term = engine.deliberation_engine.prepare(
-                view,
-                ctx.signals.get("_curr_grid"),
-                ctx.signals.get("_available_actions", []),
-                terminal=ctx.signals.get("_terminal"),
-                is_success=ctx.signals.get("_is_success", False),
-                is_failure=ctx.signals.get("_is_failure", False),
-                action_schemas=ctx.signals.get("_action_schemas"),
-                **ctx.signals.get("_kwargs", {}),
-            )
+            try:
+                g, term = engine.deliberation_engine.prepare(
+                    view,
+                    ctx.signals.get("_curr_grid"),
+                    ctx.signals.get("_available_actions", []),
+                    terminal=ctx.signals.get("_terminal"),
+                    is_success=ctx.signals.get("_is_success", False),
+                    is_failure=ctx.signals.get("_is_failure", False),
+                    action_schemas=ctx.signals.get("_action_schemas"),
+                    **ctx.signals.get("_kwargs", {}),
+                )
+            except Exception:
+                engine.rollback_faculty_journal(journal)
+                raise
+            finally:
+                self._current_journal = None
             return StageResult(
                 author=self.name,
                 journal=journal,
+                wm_deltas=list(journal.deltas),
                 signals={"_curr_grid": g, "_terminal": term},
             )
         ops: list[TransactionOperation] = [

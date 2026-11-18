@@ -16,11 +16,13 @@ resource budgets, and simulation branches.  It does NOT own persistence
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from hbllm.hcir.graph import (
     CognitiveGraph,
+    ConceptNode,
     GoalNode,
     HCIREdge,
     HCIRNode,
@@ -96,11 +98,18 @@ class HCIRWorkspaceState:
         branch_name: str = "main",
         graph: CognitiveGraph | None = None,
         tier: WorkspaceTier = WorkspaceTier.WORKING,
+        max_nodes: int | None = None,
     ) -> None:
         self._tier = tier
-        self._graph = graph if graph is not None else CognitiveGraph()
+        self._max_nodes = max_nodes
         self._event_store = event_store or InMemoryEventStore()
         self._snapshot_manager = SnapshotManager(self._event_store)
+        if graph is not None:
+            self._graph = graph
+        elif self._event_store.latest_sequence() > 0:
+            self._graph = self._snapshot_manager.replay(self._event_store)
+        else:
+            self._graph = CognitiveGraph()
         self._query_engine = InMemoryQueryEngine(self._graph)
         self._branch_mode = branch_mode
         self._branch_name = branch_name
@@ -115,10 +124,19 @@ class HCIRWorkspaceState:
         # Single commit authority bound to this workspace (attached by the kernel)
         self._transaction_manager: Any | None = None
 
-        # Bootstrap: create initial snapshot
-        self._snapshot_manager.create_snapshot(self._graph)
+        # Bootstrap: create initial snapshot if empty
+        if self._event_store.latest_sequence() == 0:
+            self._snapshot_manager.create_snapshot(self._graph)
 
     # ── Properties ───────────────────────────────────────────────────
+
+    @property
+    def max_nodes(self) -> int | None:
+        return self._max_nodes
+
+    @max_nodes.setter
+    def max_nodes(self, value: int | None) -> None:
+        self._max_nodes = value
 
     @property
     def branch_name(self) -> str:
@@ -199,7 +217,16 @@ class HCIRWorkspaceState:
         meta = dict(metadata or {})
         if grant is not None:
             meta["commit_grant"] = grant.grant_id
-        tx = HCIRTransaction(author=author, operations=list(operations), metadata=meta)
+        ops_list = list(operations)
+        if len(ops_list) > 400:
+            last_committed = None
+            for i in range(0, len(ops_list), 400):
+                sub_tx = HCIRTransaction(
+                    author=author, operations=ops_list[i : i + 400], metadata=meta
+                )
+                last_committed = self.transaction_manager.commit(sub_tx)
+            return last_committed  # type: ignore[return-value]
+        tx = HCIRTransaction(author=author, operations=ops_list, metadata=meta)
         return self.transaction_manager.commit(tx)
 
     # ── Graph Operations (kernel-internal; recorded in event log) ────
@@ -231,6 +258,14 @@ class HCIRWorkspaceState:
 
     def _add_edge(self, edge: HCIREdge, author: str = "system") -> None:
         """Add an edge and record the event (kernel-internal)."""
+        self._graph.add_edge(edge)
+        self._snapshot_manager.record_edge_added(edge, author)
+
+    def _upsert_edge(self, edge: HCIREdge, author: str = "system") -> None:
+        """Add or update an edge and record the event (kernel-internal)."""
+        if self._graph.has_edge(edge.id):
+            self._graph.remove_edge(edge.id)
+            self._snapshot_manager.record_edge_removed(edge.id, author)
         self._graph.add_edge(edge)
         self._snapshot_manager.record_edge_added(edge, author)
 
@@ -343,6 +378,102 @@ class HCIRWorkspaceState:
             return True  # Unknown resources are unconstrained
         return budget.consume(amount)
 
+    @staticmethod
+    def _node_world_scope(node: HCIRNode) -> str | None:
+        props = node.properties or {}
+        scope = props.get("world_id") or props.get("context_id")
+        return str(scope) if scope is not None else None
+
+    @staticmethod
+    def _eviction_score(node: HCIRNode) -> tuple[float, float, float]:
+        props = node.properties or {}
+        energy = float(props.get("activation_energy", 1.0))
+        conf = float(getattr(node, "confidence", 0.5) or 0.5)
+        ts = float(
+            props.get("last_accessed")
+            or props.get("timestamp")
+            or getattr(node, "created_at", 0.0)
+            or 0.0
+        )
+        return (energy, conf, ts)
+
+    def consolidate_node_budget(
+        self,
+        max_nodes: int | None = None,
+        *,
+        world_id: str | None = None,
+        grant: Any = None,
+        author: str = "node_budget_consolidator",
+    ) -> list[str]:
+        """Enforce a hard node cap (workspace or per-world) by consolidating low-salience nodes."""
+        limit = max_nodes if max_nodes is not None else self._max_nodes
+        if limit is None or limit <= 0:
+            return []
+        all_nodes = list(self._graph.all_nodes())
+        scoped = (
+            all_nodes
+            if world_id is None
+            else [n for n in all_nodes if self._node_world_scope(n) == world_id]
+        )
+        if len(scoped) <= limit:
+            return []
+
+        summary_id = f"consolidated_summary_{world_id or self._tier.value}"
+        existing_summary = self._graph.get_node(summary_id)
+        evictable: list[HCIRNode] = []
+        for node in scoped:
+            if node.id == summary_id:
+                continue
+            props = node.properties or {}
+            if props.get("permanent") or props.get("is_axiom") or props.get("locked"):
+                continue
+            evictable.append(node)
+        if not evictable:
+            return []
+
+        emit_summary = limit >= 2
+        extra_slot = 1 if (emit_summary and existing_summary is None) else 0
+        to_evict_count = min(len(evictable), (len(scoped) - limit) + extra_slot)
+        if to_evict_count <= 0:
+            return []
+
+        evictable.sort(key=self._eviction_score)
+        victims = evictable[:to_evict_count]
+        evicted_ids = [n.id for n in victims]
+        ops: list[TransactionOperation] = [
+            TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=nid) for nid in evicted_ids
+        ]
+        if emit_summary:
+            prev_count = 0
+            if existing_summary is not None and isinstance(existing_summary.properties, dict):
+                prev_count = int(existing_summary.properties.get("consolidated_count", 0))
+            total_consolidated = prev_count + len(evicted_ids)
+            summary_props: dict[str, Any] = {
+                "consolidated_count": total_consolidated,
+                "tier": self._tier.value,
+                "activation_energy": 0.95,
+                "last_accessed": time.time(),
+            }
+            if world_id is not None:
+                summary_props["world_id"] = world_id
+            summary_node = ConceptNode(
+                id=summary_id,
+                label=f"consolidated_{world_id or self._tier.value}",
+                definition=f"Consolidated {total_consolidated} lower-salience nodes under budget {limit}",
+                domain="cognitive_compaction",
+                properties=summary_props,
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=summary_id,
+                    node_data=summary_node.model_dump(),
+                )
+            )
+        for i in range(0, len(ops), 400):
+            self.commit_operations(ops[i : i + 400], author=author, grant=grant)
+        return evicted_ids
+
     # ── Snapshot & Branching ─────────────────────────────────────────
 
     def create_snapshot(self, branch: str = "main") -> Snapshot:
@@ -414,50 +545,14 @@ class HCIRWorkspaceState:
         if target_idx == -1:
             raise ValueError(f"Event point '{sequence_or_id}' not found in event store")
 
-        from hbllm.hcir.stores import EventType
+        from hbllm.hcir.snapshot import apply_event_to_graph
 
         resumed = HCIRWorkspaceState(
             branch_mode=self._branch_mode,
             branch_name=f"{self._branch_name}_resumed_{sequence_or_id}",
         )
         for ev in all_events[: target_idx + 1]:
-            d = ev.data or {}
-            if ev.event_type == EventType.NODE_ADDED:
-                node_payload = d.get("node") or d.get("node_data")
-                if node_payload is not None:
-                    resumed._graph.add_node(
-                        node_payload
-                        if isinstance(node_payload, HCIRNode)
-                        else HCIRNode.model_validate(node_payload)
-                    )
-            elif ev.event_type == EventType.NODE_MODIFIED:
-                node_payload = d.get("node") or d.get("node_data")
-                if node_payload is not None:
-                    resumed._graph.upsert_node(
-                        node_payload
-                        if isinstance(node_payload, HCIRNode)
-                        else HCIRNode.model_validate(node_payload)
-                    )
-                elif "node_id" in d and "changes" in d:
-                    if resumed._graph.has_node(d["node_id"]):
-                        curr = resumed._graph.get_node(d["node_id"])
-                        for k, v in d["changes"].items():
-                            if k == "properties" and isinstance(v, dict):
-                                curr.properties.update(v)
-                            elif hasattr(curr, k):
-                                setattr(curr, k, v)
-            elif ev.event_type == EventType.NODE_REMOVED and "node_id" in d:
-                resumed._graph.remove_node(d["node_id"])
-            elif ev.event_type == EventType.EDGE_ADDED:
-                edge_payload = d.get("edge") or d.get("edge_data")
-                if edge_payload is not None:
-                    resumed._graph.add_edge(
-                        edge_payload
-                        if isinstance(edge_payload, HCIREdge)
-                        else HCIREdge.model_validate(edge_payload)
-                    )
-            elif ev.event_type == EventType.EDGE_REMOVED and "edge_id" in d:
-                resumed._graph.remove_edge(d["edge_id"])
+            apply_event_to_graph(resumed._graph, ev)
 
         return resumed
 

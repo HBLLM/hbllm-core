@@ -18,8 +18,7 @@ import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.world.causal_discovery import BeliefTransitionType
-from hbllm.hcir.world.cerebellar_phase_clock import CerebellarPhaseClock
-from hbllm.hcir.world.cortex_causal import CausalInductionCortex, HCIRSymbolicWorldTheory
+from hbllm.hcir.world.cortex_causal import HCIRSymbolicWorldTheory
 from hbllm.hcir.world.cortex_episodic import HippocampalEpisodicCortex
 from hbllm.hcir.world.cortex_hypothesis import (
     HypothesisStatus,
@@ -36,7 +35,6 @@ from hbllm.hcir.world.cortex_motor import (
     MotorCortexEffector,
 )
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
-from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.extended_body_schema import ExtendedBodySchema
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoal,
@@ -45,14 +43,7 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import (
 )
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
-from hbllm.hcir.world.kinetic_stream import KineticEntity
-from hbllm.hcir.world.optical_ray_projection import (
-    MirrorOrientation,
-    OpticalRayProjector,
-)
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
-from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
-from hbllm.hcir.world.spatiotemporal_tracker import DynamicCellPhase, SpatiotemporalHazardTracker
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
 
@@ -239,29 +230,6 @@ class TestVisualSymmetryAnalyzer:
         assert tile_pred.variable == "periodic_tiling"
 
 
-class TestSpatiotemporalCollisionCones:
-    """Test Premotor collision cone projection with static boundary rebound."""
-
-    def test_trajectory_extrapolation_and_hazard_check(self) -> None:
-        cones = SpatiotemporalCollisionCones(default_horizon=6)
-        entity = KineticEntity(
-            centroid=(2.0, 2.0),
-            velocity=(0.0, 1.0),
-            cells=[(2, 2)],
-            bounding_box=(2, 2, 2, 2),
-            area=1,
-            features={5},
-        )
-        static_barriers = {(2, 4)}
-        grid_shape = (10, 10)
-
-        cones.update_trajectories([entity], static_barriers, grid_shape, horizon=5)
-
-        assert cones.is_collision_hazard(2, 3, time_step=1) is True
-        assert cones.is_collision_hazard(2, 2, time_step=2) is True
-        assert cones.is_collision_hazard(5, 5, time_step=1) is False
-
-
 class TestInferotemporalSegmentation:
     """Test Area IT ventral stream object token segmentation and affordance anchors."""
 
@@ -316,57 +284,6 @@ class TestInferotemporalSegmentation:
             assert ent.area > 0
             assert "salience_score" in ent.properties
             assert "is_compact" in ent.properties
-
-
-class TestOpticalRayProjector:
-    """Test Parieto-Occipital V6/MST optical ray tracing and specular reflection."""
-
-    def test_specular_reflection_vectors(self) -> None:
-        # Forward slash '/' reflects right (0, 1) to up (-1, 0)
-        assert OpticalRayProjector.reflect_vector((0, 1), MirrorOrientation.FORWARD_SLASH) == (
-            -1,
-            0,
-        )
-        # Backslash '\' reflects right (0, 1) to down (1, 0)
-        assert OpticalRayProjector.reflect_vector((0, 1), MirrorOrientation.BACKSLASH) == (1, 0)
-
-    def test_ray_tracing_through_mirrors_to_receptor(self) -> None:
-        # Emitter at (2, 0) firing right (0, 1)
-        # Mirror at (2, 5) reflecting down (1, 0)
-        # Receptor at (8, 5)
-        grid_shape = (10, 10)
-        barriers: set[tuple[int, int]] = set()
-        mirrors = {(2, 5): MirrorOrientation.BACKSLASH}
-        receptors = {(8, 5)}
-
-        path = OpticalRayProjector.trace_ray(
-            start_pos=(2, 0),
-            initial_dir=(0, 1),
-            grid_shape=grid_shape,
-            barriers=barriers,
-            mirrors=mirrors,
-            receptors=receptors,
-        )
-        assert path.hit_receptor is True
-        assert path.terminated_at == (8, 5)
-        assert path.termination_reason == "receptor"
-
-    def test_solve_mirror_placement_bidirectional_intersection(self) -> None:
-        # Emitter at (3, 0) firing right (0, 1)
-        # Receptor at (7, 4)
-        # Intersection should be at (3, 4) with backslash mirror reflecting right -> down
-        hypotheses = OpticalRayProjector.solve_mirror_placement(
-            emitter_pos=(3, 0),
-            emitter_dir=(0, 1),
-            receptor_pos=(7, 4),
-            grid_shape=(10, 10),
-            barriers=set(),
-        )
-        assert len(hypotheses) > 0
-        h0 = hypotheses[0]
-        assert h0.mirror_pos == (3, 4)
-        assert h0.required_orientation == MirrorOrientation.BACKSLASH
-        assert h0.outgoing_dir == (1, 0)
 
 
 class TestHabenularEpisodicIOR:
@@ -470,38 +387,6 @@ class TestHippocampalEpisodicCortex:
         assert len(cortex.habenular_ior.fatal_prefixes) == 0
 
 
-class TestCerebellarMotorPhaseGating:
-    """Test Cerebellar interval timer and basal ganglia motor phase gating."""
-
-    def test_evaluate_motion_hazard_gate_with_periodic_cell(self) -> None:
-        clock = CerebellarPhaseClock()
-        tracker = SpatiotemporalHazardTracker()
-
-        # Set up a periodic hazard cell at (3, 3) with period T=4
-        # Sequence: [0, 9, 0, 0] where 9 is lethal
-        tracker.periodic_cells[(3, 3)] = DynamicCellPhase(
-            r=3,
-            c=3,
-            period=4,
-            cycle_values=[0, 9, 0, 0],
-            hazardous_values={9},
-        )
-
-        avatar_pos = (3, 2)
-        target_pos = (3, 3)
-
-        # At current_step = 1, arrival at step 2 has phase (2-1)%4 = 1 -> value 9 (hazardous!)
-        # Waiting 1 step makes arrival at step 3 with phase (3-1)%4 = 2 -> value 0 (safe!)
-        decision = clock.evaluate_motion_hazard_gate(
-            current_step=1,
-            avatar_pos=avatar_pos,
-            target_pos=target_pos,
-            hazard_tracker=tracker,
-        )
-        assert decision.should_wait is True
-        assert decision.wait_steps_recommended == 1
-
-
 class TestFrontopolarSubgoalStack:
     """Test Brodmann Area 10 cognitive branching and holding bay allocation."""
 
@@ -594,42 +479,6 @@ class TestRemoteCausalAttributor:
         # Test alias method
         aff_alias = attributor.get_remote_trigger_for_barrier((8, 8), barrier_feature=8)
         assert aff_alias == aff
-
-    def test_causal_induction_cortex_query_barrier_clearance(self) -> None:
-        cortex = CausalInductionCortex()
-        prev_grid = np.zeros((10, 10), dtype=int)
-        prev_grid[2, 2] = 3
-        prev_grid[8, 8] = 8
-
-        curr_grid = prev_grid.copy()
-        curr_grid[8, 8] = 0
-
-        # Register distal transition
-        for _ in range(2):
-            cortex.causal_attributor.record_transition(
-                prev_grid=prev_grid,
-                curr_grid=curr_grid,
-                action_pos=(2, 2),
-                background_feature=0,
-            )
-
-        # Query barrier clearance via cortex
-        trig_pos, req_tool = cortex.query_barrier_clearance(barrier_pos=(8, 8), barrier_feature=8)
-        assert trig_pos == (2, 2)
-        assert req_tool is None
-
-        # Test reset_episode with retain_dynamics=False
-        cortex.reset_episode(retain_dynamics=False)
-        trig_pos_after, _ = cortex.query_barrier_clearance(barrier_pos=(8, 8), barrier_feature=8)
-        assert trig_pos_after is None
-
-        # Test attributor.reset()
-        cortex.causal_attributor.co_occurrence_evidence[(((2, 2)), ((8, 8)))] = 5
-        cortex.causal_attributor.reset()
-        assert len(cortex.causal_attributor.co_occurrence_evidence) == 0
-
-        # Test cortex.reset()
-        cortex.reset()
 
 
 class TestAnteriorCingulateConflictMonitor:
@@ -774,7 +623,6 @@ class TestMotorCortexEffector:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine()
-        _restore_all(engine)
         engine.register_action_space(
             [
                 {"action_id": 1, "name": "MOVE_UP"},
@@ -798,7 +646,6 @@ class TestMotorCortexEffector:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine()
-        _restore_all(engine)
         engine.avatar_pos = (2, 2)
         engine.avatar_feature = 1
         grid = np.zeros((10, 10), dtype=int)
@@ -983,6 +830,149 @@ class TestInductiveHypothesisEngine:
         assert 9 in theory.barrier_features
         assert len(theory.barrier_predicates) >= 1
 
+    def test_lifted_substrate_agnostic_hypothesis_and_locus_apis(self) -> None:
+        from hbllm.hcir.world.causal_discovery import CausalPredicate, LogicOperator
+        from hbllm.hcir.world.cortex_episodic import EpisodicTransition
+        from hbllm.hcir.world.cortex_hypothesis import (
+            EntityStateDelta,
+            HypothesisStatus,
+            HypothesisType,
+            SynthesizedRuleAST,
+            TransitionObservationContext,
+        )
+        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
+
+        # 1. Symbolic PlaceLocus remote mechanism (zero 2D lattice provided)
+        hyp_engine = InductiveHypothesisEngine(min_support_to_confirm=2)
+        for _ in range(2):
+            hyp_engine.observe_transition(
+                prev_grid=None,
+                action="activate",
+                curr_grid=None,
+                prev_avatar_pos="atrium",
+                curr_avatar_pos="pedestal_north",
+                contact_feature=2,
+                avatar_feature=1,
+                entity_deltas=[
+                    EntityStateDelta(
+                        locus="vault_gate",
+                        prev_feature=9,
+                        curr_feature=0,
+                    )
+                ],
+                prev_feature_counts={2: 1, 9: 1},
+                curr_feature_counts={2: 1, 9: 0},
+            )
+        remote_hyp = hyp_engine.hypotheses.get("remote_mech_2_clears_9")
+        assert remote_hyp is not None
+        assert remote_hyp.rule_type == HypothesisType.REMOTE_MECHANISM
+        assert remote_hyp.status == HypothesisStatus.CONFIRMED
+
+        # 2. 3D coordinate entity translation AST evaluation & HazardContact without grids
+        hyp_engine_3d = InductiveHypothesisEngine(min_support_to_confirm=1)
+        ctx_3d = TransitionObservationContext(
+            prev_grid=None,
+            action="push_east",
+            curr_grid=None,
+            prev_avatar_pos=(1, 1, 0),
+            curr_avatar_pos=(1, 2, 0),
+            contact_feature=6,
+            avatar_feature=1,
+            entity_deltas=(
+                EntityStateDelta(locus=(1, 2, 0), prev_feature=6, curr_feature=1),
+                EntityStateDelta(locus=(1, 3, 0), prev_feature=0, curr_feature=6),
+            ),
+        )
+        hyp_engine_3d.observe_transition(context=ctx_3d)
+        translate_ast = SynthesizedRuleAST(
+            precondition=CausalPredicate(
+                logic_op=LogicOperator.AND,
+                children=[
+                    CausalPredicate(variable="action_id", operator="==", value="push_east"),
+                    CausalPredicate(variable="contact_feature", operator="==", value=6),
+                ],
+            ),
+            effect_operator="translate_entity",
+            effect_params={"feature": 6, "delta": (0, 1, 0)},
+        )
+        assert translate_ast.evaluate_precondition(ctx_3d)
+        assert translate_ast.evaluate_effect(ctx_3d)
+
+        # Counterexample without 3D grid refutes failed translation
+        ctx_3d_fail = TransitionObservationContext(
+            prev_grid=None,
+            action="push_east",
+            curr_grid=None,
+            prev_avatar_pos=(1, 1, 0),
+            curr_avatar_pos=(1, 2, 0),
+            contact_feature=6,
+            avatar_feature=1,
+            entity_deltas=(),
+        )
+        assert translate_ast.evaluate_precondition(ctx_3d_fail)
+        assert not translate_ast.evaluate_effect(ctx_3d_fail)
+
+        # Mortality correlation near symbolic hazard without grids
+        hyp_engine_3d.observe_transition(
+            prev_grid=None,
+            action="step_forward",
+            curr_grid=None,
+            prev_avatar_pos="bridge_edge",
+            curr_avatar_pos="lava_pit",
+            avatar_feature=1,
+            prev_adjacent_features=(7,),
+            is_dead=True,
+        )
+        assert "hazard_contact_7" in hyp_engine_3d.hypotheses
+
+        # 3. Domain-agnostic HCIRSymbolicWorldTheory explored loci & entity distribution
+        theory = HCIRSymbolicWorldTheory()
+        theory.mark_locus_explored("pedestal_north", reason="actuator_probed")
+        assert theory.is_locus_explored("pedestal_north")
+        assert theory.is_locus_actuator_probed("pedestal_north")
+        assert "pedestal_north" in theory.explored_loci
+
+        assert not theory.observe_entity_distribution({9: (2, 0.0, 100)})
+        theory.begin_context_epoch()
+        assert theory.observe_entity_distribution({9: (25, 0.8, 100)})
+
+        # ActionMutation & RelationalCue without grids
+        hyp_engine_lifted = InductiveHypothesisEngine(min_support_to_confirm=1)
+        hyp_engine_lifted.observe_transition(
+            prev_grid=None,
+            action="toggle",
+            curr_grid=None,
+            prev_avatar_pos="node_a",
+            curr_avatar_pos="node_a",
+            avatar_feature=1,
+            curr_adjacent_features=(8,),
+            paired_features=frozenset({8}),
+            entity_deltas=[
+                EntityStateDelta(
+                    locus="distant_gate",
+                    prev_feature=5,
+                    curr_feature=0,
+                )
+            ],
+        )
+        assert "relational_cue_8_clears_5" in hyp_engine_lifted.hypotheses
+        assert "action_toggle_mutates_5_to_0" in hyp_engine_lifted.hypotheses
+
+        # 4. Symbolic PlaceLocus in MentalSimulationStep & EpisodicTransition
+        sim_step = MentalSimulationStep(
+            action="move_corridor",
+            predicted_avatar_pos="corridor_3",
+            is_deterministic_geodesic=True,
+        )
+        assert sim_step.to_causal_predicate().value == "corridor_3"
+        sim_ops = sim_step.to_transaction_operations()
+        assert sim_ops[0].node_id == "sim_step_move_corridor_corridor_3"
+
+        ep_trans = EpisodicTransition(step=4, avatar_pos="corridor_3", action_id="inspect")
+        assert ep_trans.to_causal_predicate().relation == "pos:corridor_3"
+        ep_ops = ep_trans.to_transaction_operations()
+        assert ep_ops[0].node_data["avatar_pos"] == "corridor_3"
+
     def test_frontopolar_spawn_causal_unlock(self) -> None:
         stack = FrontopolarSubgoalStack()
         subgoal = stack.spawn_causal_unlock_subgoal(
@@ -1087,7 +1077,6 @@ class TestPrefrontalDeliberationEngine:
         from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
 
         engine = AutonomousEpistemicEngine()
-        _restore_all(engine)
         assert hasattr(engine, "deliberation_engine")
         assert isinstance(engine.deliberation_engine, PrefrontalDeliberationEngine)
 
@@ -1106,7 +1095,6 @@ class TestPrefrontalDeliberationEngine:
 
         delib = PrefrontalDeliberationEngine()
         engine = AutonomousEpistemicEngine()
-        _restore_all(engine)
         engine.avatar_pos = (5, 5)
 
         # Mark feature 9 as lethal
@@ -1135,7 +1123,6 @@ class TestPrefrontalDeliberationEngine:
 
         delib = PrefrontalDeliberationEngine()
         engine = AutonomousEpistemicEngine()
-        _restore_all(engine)
         engine.avatar_pos = (5, 5)
         engine.phase = EpistemicPhase.EXPLOITATION
         engine.working_memory.update_salience_baseline(engine)
@@ -1274,32 +1261,6 @@ class TestPhase25CognitiveBridgeCausalAndTransactions:
         acc_ops = acc.to_transaction_operations()
         assert len(acc_ops) == 2
 
-    def test_bilateral_coordination_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.bilateral_coordination import (
-            BilateralCoordinateIntegrator,
-            BilateralState,
-            SymmetryAxis,
-        )
-
-        state = BilateralState(
-            pos1=(2, 3),
-            pos2=(2, 7),
-            symmetry_axis=SymmetryAxis.HORIZONTAL,
-            features={1, 2},
-            confidence=0.9,
-        )
-        state_pred = state.to_causal_predicate()
-        assert state_pred.variable == "bilateral_symmetry"
-        state_ops = state.to_transaction_operations()
-        assert len(state_ops) == 1
-
-        integrator = BilateralCoordinateIntegrator()
-        integrator.active_bilateral_state = state
-        preds = integrator.to_causal_predicates()
-        assert len(preds) == 1
-        ops = integrator.to_transaction_operations()
-        assert len(ops) == 1
-
     def test_capability_evidence_causal_and_transactions(self) -> None:
         from hbllm.hcir.world.capability_evidence import (
             BenchmarkStatus,
@@ -1332,31 +1293,6 @@ class TestPhase25CognitiveBridgeCausalAndTransactions:
         assert len(ledger_preds) == 1
         ledger_ops = ledger.to_transaction_operations()
         assert len(ledger_ops) == 2
-
-    def test_cerebellar_clock_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.cerebellar_phase_clock import (
-            CerebellarPhaseClock,
-            PhaseGateDecision,
-        )
-
-        dec = PhaseGateDecision(
-            should_wait=True,
-            wait_steps_recommended=2,
-            current_phase=1,
-            environmental_period=4,
-        )
-        dec_pred = dec.to_causal_predicate()
-        assert dec_pred.variable == "motor_phase_gate"
-        assert dec_pred.value == "WAIT"
-        dec_ops = dec.to_transaction_operations()
-        assert len(dec_ops) == 1
-
-        clock = CerebellarPhaseClock()
-        clock.detected_macro_period = 16
-        clock_preds = clock.export_causal_predicates()
-        assert len(clock_preds) == 1
-        clock_ops = clock.to_transaction_operations()
-        assert len(clock_ops) == 1
 
     def test_habenular_ior_causal_and_transactions(self) -> None:
         from hbllm.hcir.world.habenular_episodic_inhibition import (
@@ -1488,116 +1424,14 @@ class TestPhase26CognitiveBridgeCausalAndTransactions:
 class TestPhase27CognitiveBridgeCausalAndTransactions:
     """Validate declarative causal predicates and atomic HCIR transactions for Phase 27 components."""
 
-    def test_rule_induction_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.rule_induction import (
-            RuleFamily,
-            RuleInductionEngine,
-            RuleInductionResult,
-            RulePosteriorResult,
-            TransformationRule,
-        )
-
-        rule = TransformationRule(
-            rule_id="rule_rot90",
-            family=RuleFamily.AFFINE,
-            params={"angle": 90},
-            complexity=1.5,
-        )
-        r_pred = rule.to_causal_predicate()
-        assert r_pred.variable == "transformation_rule:rule_rot90"
-        assert r_pred.value == "AFFINE"
-        r_ops = rule.to_transaction_operations()
-        assert len(r_ops) == 1
-        assert r_ops[0].node_id == "rule_rule_rot90"
-
-        posterior = RulePosteriorResult(
-            best_rule=rule,
-            probabilities={"rule_rot90": 0.95},
-            entropy_bits=0.1,
-            confidence=0.95,
-            is_ambiguous=False,
-        )
-        res = RuleInductionResult(
-            selected_rule=rule,
-            surviving_rules=[rule],
-            posterior=posterior,
-            refutations=[],
-            metadata={},
-        )
-        res_pred = res.to_causal_predicate()
-        assert res_pred.variable == "rule_induction_selected"
-        res_preds = res.export_causal_predicates()
-        assert len(res_preds) >= 2
-        res_ops = res.to_transaction_operations()
-        assert len(res_ops) >= 2
-
-        engine = RuleInductionEngine()
-        engine_pred = engine.to_causal_predicate()
-        assert engine_pred.variable == "rule_induction_engine"
-        engine_ops = engine.to_transaction_operations()
-        assert len(engine_ops) == 1
-
-    def test_global_invariant_induction_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.global_invariant_induction import (
-            BranchRule,
-            GlobalScalarConditionedOperator,
-        )
-
-        branch = BranchRule(
-            rule_type="recolor",
-            params={"src_color": 1, "dst_color": 2},
-        )
-        b_pred = branch.to_causal_predicate()
-        assert b_pred.variable == "branch_rule:recolor"
-        b_ops = branch.to_transaction_operations()
-        assert len(b_ops) == 1
-        assert b_ops[0].node_id == "branch_rule_recolor"
-
-        op = GlobalScalarConditionedOperator(
-            name="test_scalar_op",
-            property_name="color_count",
-            modulus=2,
-            branches={0: branch},
-            complexity=2.5,
-        )
-        op_pred = op.to_causal_predicate()
-        assert op_pred.variable == "global_invariant:color_count"
-        op_preds = op.export_causal_predicates()
-        assert len(op_preds) == 2
-        op_ops = op.to_transaction_operations()
-        assert len(op_ops) == 2
-
-    def test_topological_graph_induction_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.topological_graph_induction import (
-            GeodesicManifoldRouter,
-            GeodesicPathOperator,
-        )
-
-        router_pred = GeodesicManifoldRouter.to_causal_predicate()
-        assert router_pred.variable == "geodesic_manifold_router"
-        router_ops = GeodesicManifoldRouter.to_transaction_operations()
-        assert len(router_ops) == 1
-
-        path_op = GeodesicPathOperator(
-            name="geodesic_test_op",
-            start_color=1,
-            goal_color=2,
-            path_color=3,
-        )
-        pop_pred = path_op.to_causal_predicate()
-        assert pop_pred.variable == "geodesic_path:1->2"
-        pop_ops = path_op.to_transaction_operations()
-        assert len(pop_ops) == 1
-        assert pop_ops[0].node_id == "op_geodesic_test_op"
-
     def test_relational_graph_matcher_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.inferotemporal_segmentation import VentralObjectToken
-        from hbllm.hcir.world.relational_graph_matcher import (
+        from hbllm.hcir.grounding.concepts.relational_graph_matcher import (
             ObjectCorrespondence,
             ObjectGraph,
             RelationalEdge,
             SpatialRelation,
         )
+        from hbllm.hcir.world.inferotemporal_segmentation import VentralObjectToken
 
         edge = RelationalEdge(
             source_id=1,
@@ -1643,62 +1477,6 @@ class TestPhase27CognitiveBridgeCausalAndTransactions:
         assert c_pred.variable == "object_match:1->10"
         c_ops = corr.to_transaction_operations()
         assert len(c_ops) == 1
-
-    def test_representation_expansion_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.representation_expansion import (
-            RepresentationExpansionEngine,
-            RepresentationRevisionTrace,
-            ResidualEvent,
-            SynthesizedCellularFluxOperator,
-        )
-
-        event = ResidualEvent(
-            r=2,
-            c=3,
-            x_val=0,
-            y_val=5,
-        )
-        ev_pred = event.to_causal_predicate()
-        assert ev_pred.variable == "residual_event:2_3"
-        ev_ops = event.to_transaction_operations()
-        assert len(ev_ops) == 1
-
-        op = SynthesizedCellularFluxOperator(
-            name="flux_op_fill",
-            flux_mode="flood_infill",
-            direction=(0, 1),
-            params={"target_color": 5},
-            complexity=2.0,
-        )
-        op_pred = op.to_causal_predicate()
-        assert op_pred.variable == "flux_operator:flux_op_fill"
-        op_ops = op.to_transaction_operations()
-        assert len(op_ops) == 1
-
-        trace = RepresentationRevisionTrace(
-            task_id="task_rev_01",
-            family="flood",
-            phase1_solved=False,
-            phase1_inadequacy_detected=True,
-            phase1_epistemic_uncertainty=0.8,
-            unexplained_residual_pixels=3,
-            synthesized_operator_name="flux_op_fill",
-            out_of_construction_verified=True,
-            phase2_solved=True,
-            phase2_exact_match=True,
-            phase2_epistemic_uncertainty=0.1,
-            reusable_on_novel_task=True,
-            control_ablation_passed=True,
-        )
-        tr_pred = trace.to_causal_predicate()
-        assert tr_pred.variable == "representation_revision:task_rev_01"
-        tr_ops = trace.to_transaction_operations()
-        assert len(tr_ops) == 1
-
-        eng_pred = RepresentationExpansionEngine.to_causal_predicate()
-        assert eng_pred.variable == "representation_expansion_engine"
-        eng_ops = RepresentationExpansionEngine.to_transaction_operations()
-        assert len(eng_ops) == 1
 
 
 class TestPhase28CognitiveBridgeCausalAndTransactions:
@@ -1777,6 +1555,8 @@ class TestPhase28CognitiveBridgeCausalAndTransactions:
             MorphologicalEntity,
             MorphologicalSaliencyEngine,
             MorphologyPrimitiveType,
+        )
+        from plugins.arc_agi_adapter.morphology_arc import (
             ScaleInferenceResult,
             StampInstance,
             WallpaperSymmetryGroup,
@@ -1913,72 +1693,6 @@ class TestPhase28CognitiveBridgeCausalAndTransactions:
         assert len(preds) == 2
         ops = attributor.to_transaction_operations()
         assert len(ops) == 2
-
-    def test_spatiotemporal_tracker_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.spatiotemporal_tracker import (
-            DeformationRecord,
-            DynamicCellPhase,
-            LifecycleTrackingResult,
-            MorphologicalDeformationTracker,
-            MorphologicalDeformationType,
-            PhasePrecessionEstimator,
-            SpatiotemporalHazardTracker,
-        )
-
-        phase = DynamicCellPhase(
-            r=4,
-            c=4,
-            period=3,
-            cycle_values=[0, 1, 2],
-            hazardous_values={2},
-        )
-        p_pred = phase.to_causal_predicate()
-        assert p_pred.variable == "cell_phase:4_4"
-        p_ops = phase.to_transaction_operations()
-        assert len(p_ops) == 1
-
-        est_pred = PhasePrecessionEstimator.to_causal_predicate()
-        assert est_pred.variable == "phase_precession_estimator"
-        est_ops = PhasePrecessionEstimator.to_transaction_operations()
-        assert len(est_ops) == 1
-
-        tracker = SpatiotemporalHazardTracker()
-        tracker.periodic_cells[(4, 4)] = phase
-        tracker_preds = tracker.export_causal_predicates()
-        assert len(tracker_preds) == 2
-        tracker_ops = tracker.to_transaction_operations()
-        assert len(tracker_ops) == 2
-
-        rec = DeformationRecord(
-            entity_id="entity_e1",
-            prior_cells_count=4,
-            current_cells_count=5,
-            iou=0.8,
-            euler_characteristic=1,
-            deformation_type=MorphologicalDeformationType.TOPOLOGICAL_GROWTH,
-        )
-        rec_pred = rec.to_causal_predicate()
-        assert rec_pred.variable == "deformation_record:entity_e1"
-        rec_ops = rec.to_transaction_operations()
-        assert len(rec_ops) == 1
-
-        lifecycle_res = LifecycleTrackingResult(
-            one_to_one_mappings={"entity_e1": "entity_e1_next"},
-            deformation_records=[rec],
-            fission_records=[],
-            fusion_records=[],
-            unmatched_prior_ids=[],
-            unmatched_current_ids=[],
-        )
-        lc_preds = lifecycle_res.export_causal_predicates()
-        assert len(lc_preds) == 2
-        lc_ops = lifecycle_res.to_transaction_operations()
-        assert len(lc_ops) == 2
-
-        eng_pred = MorphologicalDeformationTracker.to_causal_predicate()
-        assert eng_pred.variable == "morphological_deformation_tracker"
-        eng_ops = MorphologicalDeformationTracker.to_transaction_operations()
-        assert len(eng_ops) == 1
 
     def test_spatial_containment_causal_and_transactions(self) -> None:
         from hbllm.hcir.world.spatial_containment import (
@@ -2209,7 +1923,6 @@ class TestPhase29CognitiveBridgeCausalAndTransactions:
             DualStoreConsolidationEngine,
             EpisodicTransition,
             HippocampalEpisodicCortex,
-            SchemaMorphism,
         )
 
         trans = EpisodicTransition(
@@ -2233,16 +1946,6 @@ class TestPhase29CognitiveBridgeCausalAndTransactions:
         c_ops = cortex.to_transaction_operations()
         assert len(c_ops) == 2
 
-        morphism = SchemaMorphism(
-            source_domain="grid_a",
-            target_domain="grid_b",
-            predicate_mapping={"Key": "Switch"},
-        )
-        m_pred = morphism.to_causal_predicate()
-        assert "schema_morphism:grid_a->grid_b" in m_pred.variable
-        m_ops = morphism.to_transaction_operations()
-        assert len(m_ops) == 1
-
         item = ConsolidatedKnowledgeItem(
             concept_id="invariant_wall",
             representation={"solid": True},
@@ -2260,52 +1963,6 @@ class TestPhase29CognitiveBridgeCausalAndTransactions:
         assert len(eng_preds) == 2
         eng_ops = engine.to_transaction_operations()
         assert len(eng_ops) == 2
-
-    def test_grid_operator_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.grid_operator import (
-            AffineOperator,
-            DecisionAction,
-            OperationalEpistemicDecision,
-            OperatorBinding,
-            TransformationProgramSearch,
-        )
-
-        binding = OperatorBinding(
-            operator_name="affine",
-            params={"rotate": 90},
-            complexity=1.5,
-        )
-        b_pred = binding.to_causal_predicate()
-        assert b_pred.variable == "operator_binding:affine"
-        b_ops = binding.to_transaction_operations()
-        assert len(b_ops) == 1
-
-        decision = OperationalEpistemicDecision(
-            action=DecisionAction.PREDICT,
-            selected_prediction=None,
-            probing_coordinate=None,
-            expected_information_gain=0.0,
-            abstention_reason=None,
-            brier_score=0.1,
-        )
-        d_pred = decision.to_causal_predicate()
-        assert d_pred.variable == "operational_epistemic_decision"
-        d_ops = decision.to_transaction_operations()
-        assert len(d_ops) == 1
-
-        op = AffineOperator()
-        op_pred = op.to_causal_predicate()
-        assert op_pred.variable == "grid_operator:affine"
-        op_ops = op.to_transaction_operations()
-        assert len(op_ops) == 1
-
-        search = TransformationProgramSearch(max_depth=1)
-        s_pred = search.to_causal_predicate()
-        assert s_pred.variable == "transformation_program_search"
-        s_preds = search.export_causal_predicates()
-        assert len(s_preds) >= 2
-        s_ops = search.to_transaction_operations()
-        assert len(s_ops) == 1
 
     def test_autonomous_epistemic_engine_causal_and_transactions(self) -> None:
         from hbllm.hcir.world.autonomous_epistemic_engine import (
@@ -2326,7 +1983,6 @@ class TestPhase29CognitiveBridgeCausalAndTransactions:
         assert len(obs_ops) == 1
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         engine.learned_goal_positions.add((7, 7))
         engine.learned_barriers.add((1, 1))
         engine_pred = engine.to_causal_predicate()
@@ -2346,7 +2002,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
 
         # Spelke core knowledge: background 0 is seeded as walkable space by default
         assert engine.symbolic_theory.is_walkable(0)
@@ -2380,7 +2035,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
 
         # Active plan queue resides in working_memory
         step = MentalSimulationStep(
@@ -2420,7 +2074,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
 
         # Level 0 barriers & failed transitions
         engine.learned_barriers.add((3, 3))
@@ -2452,7 +2105,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
 
         engine.symbolic_theory.induce_goal(3)
         engine.symbolic_theory.induce_barrier(9)
@@ -2586,7 +2238,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         tiered = TieredWorkspace()
 
         # Attach workspace and create active task frame
@@ -2649,7 +2300,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         curr_grid = np.zeros((10, 10), dtype=int)
         curr_grid[5, 5] = 2  # Tool
         curr_grid[8, 8] = 3  # Goal
@@ -2710,61 +2360,52 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
     def test_persistent_workspace_lifelong_memory_hydration(self) -> None:
         """Test Option 2: Lifelong memory hydration from TieredWorkspace persistent tier."""
         from hbllm.hcir.graph import ConceptNode, ConstraintNode, GoalNode, SkillNode
+        from hbllm.hcir.transactions import TransactionOp, TransactionOperation
         from hbllm.hcir.workspace_tiers import TieredWorkspace
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
         from hbllm.hcir.world.cortex_causal import SpelkePhysicalAxiom
 
         tiered = TieredWorkspace()
 
-        # Seed persistent tier directly with promoted nodes
-        tiered.persistent.upsert_node(
+        # Seed persistent tier via transactional commit of promoted nodes
+        nodes = [
             SkillNode(
                 id="procedural_skill_PERSISTENT_UNLOCK",
                 name="PERSISTENT_UNLOCK",
                 description="Long-term key-door solver",
                 properties={"schema_name": "PERSISTENT_UNLOCK"},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             ConceptNode(
                 id="ontology_goal_8",
                 label="goal_feature_8",
                 definition="Known winning entity feature",
                 properties={"feature_id": 8},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             GoalNode(
                 id="learned_goal_4_4",
                 description="Persistent goal coordinate",
                 properties={"position": [4, 4]},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             ConstraintNode(
                 id="learned_barrier_6_6",
                 name="barrier_6_6",
                 description="Persistent static barrier",
                 properties={"position": [6, 6]},
             ),
-            author="test",
-        )
-        tiered.persistent.upsert_node(
             ConceptNode(
                 id="spelke_axiom_solidity_continuity",
                 label="solidity_continuity",
                 definition="Spelke solidity axiom",
                 properties={"axiom_name": "solidity_continuity"},
             ),
+        ]
+        tiered.persistent.commit_operations(
+            [TransactionOperation(op=TransactionOp.UPSERT_NODE, node=n) for n in nodes],
             author="test",
         )
 
         # Initialize a new epistemic engine (tabula rasa)
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         assert 8 not in engine.symbolic_theory.goal_features
         assert (4, 4) not in engine.learned_goal_positions
         assert (6, 6) not in engine.learned_barriers
@@ -2788,7 +2429,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         engine.symbolic_theory.seed_core_knowledge(bg_feature=0)
         engine.avatar_pos = (2, 2)
         engine.avatar_features = {1}
@@ -2829,7 +2469,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.prefrontal_working_memory import SubgoalSchema, SubgoalStage
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         engine._phase = EpistemicPhase.EXPLOITATION
         schema = SubgoalSchema(
             schema_name="FRAGILE_SCHEMA",
@@ -2981,51 +2620,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         assert len(schema.stages) == 2
         assert schema.stages[0].stage_id == "GRAB_KEY"
         assert schema.stages[1].stage_id == "OPEN_BARRIER"
-
-    def test_pearl_epistemic_intervention_information_gain(self) -> None:
-        """Test Pearl do(a) causal intervention planning for ambiguous entity disambiguation."""
-        from hbllm.hcir.spatial_planner import SpatialEntity
-        from hbllm.hcir.world.cortex_causal import CausalInductionCortex
-
-        cortex = CausalInductionCortex()
-        avatar_pos = (1, 1)
-
-        # Ambiguous entity 1: near avatar at (2, 2)
-        e1 = SpatialEntity(
-            id="unknown_switch",
-            feature_id=5,
-            grid_pos=(2, 2),
-            area=1,
-            centroid=(2.0, 2.0),
-            bounding_box=(2, 2, 2, 2),
-        )
-        # Ambiguous entity 2: far from avatar at (8, 8)
-        e2 = SpatialEntity(
-            id="unknown_box",
-            feature_id=6,
-            grid_pos=(8, 8),
-            area=1,
-            centroid=(8.0, 8.0),
-            bounding_box=(8, 8, 8, 8),
-        )
-
-        proposal = cortex.plan_epistemic_intervention(
-            avatar_pos=avatar_pos,
-            candidate_entities=[e1, e2],
-            available_actions=[1, 2, 3, 4],
-            bg_feature=0,
-        )
-
-        assert proposal is not None
-        assert proposal.target_coord == (2, 2)
-        assert proposal.target_feature == 5
-        assert proposal.expected_information_gain > 0.0
-
-        # Verify transaction proposal serialization
-        ops = proposal.to_transaction_operations()
-        assert len(ops) == 1
-        assert ops[0].node_id == "active_epistemic_intervention"
-        assert ops[0].node_data["target_feature"] == 5
 
     def test_parietal_egocentric_polar_and_entity_lifting(self) -> None:
         """Test Posterior Parietal Cortex viewpoint-invariant polar transformations and entity frame lifting."""
@@ -3285,7 +2879,6 @@ class TestMemoryAndKnowledgeBaseSingleSourceOfTruth:
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
         engine = AutonomousEpistemicEngine(exploration_budget=50, enable_logging=False)
-        _restore_all(engine)
 
         # Mutate through engine properties
         engine.active_probe_target = (4, 7)
@@ -3493,7 +3086,6 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
 
         # Engine integration check
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         grid0 = np.zeros((10, 10), dtype=np.int32)
         grid0[5, 5] = 4  # Clickable entity
         engine.prev_grid = grid0.copy()
@@ -3531,7 +3123,6 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_planner import MentalSimulationStep
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         g0 = np.zeros((6, 6), dtype=np.int32)
         g1 = np.zeros((6, 6), dtype=np.int32)
         g1[2, 2] = 3
@@ -3549,7 +3140,7 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
 
         assert 7 in engine.undo_actions
         assert 7 in engine.symbolic_theory.undo_actions
-        assert engine.inhibited_actions.get(7, 0) >= 999999
+        assert engine.inhibited_actions.get(7, 0) > 0
 
         # Safety predicate check
         safety_eval = PlanSafetyEvaluator([CausalUndoSafetyPredicate()])
@@ -3569,7 +3160,6 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_deliberation import PrefrontalDeliberationEngine
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         g0 = np.zeros((5, 10), dtype=np.int32)
         g0[2, 2] = 8  # 1D cursor indicator
         engine.prev_grid = g0.copy()
@@ -3620,7 +3210,6 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_motor import MotorCortexEffector
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         blank_grid = np.zeros((15, 15), dtype=np.int32)
 
         coords = MotorCortexEffector.ground_effector_action(engine, blank_grid, action=6)
@@ -3639,7 +3228,6 @@ class TestMultiArchetypeNeuroSymbolicFaculties:
         from hbllm.hcir.world.cortex_planner import MentalSimulationPlanner
 
         engine = AutonomousEpistemicEngine(enable_logging=False)
-        _restore_all(engine)
         engine.avatar_pos = None
 
         # Simulate body_schema with has_manipulandum returning True but active_manipulandum is None

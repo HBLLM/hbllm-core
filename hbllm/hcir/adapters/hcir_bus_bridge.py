@@ -188,8 +188,8 @@ class HCIRBusBridge:
         for sub in self._subscriptions:
             try:
                 await self._bus.unsubscribe(sub)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Bus unsubscribe error during stop: %s", exc)
         self._subscriptions.clear()
         self._running = False
         logger.info(

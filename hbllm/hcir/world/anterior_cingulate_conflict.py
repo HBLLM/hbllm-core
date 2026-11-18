@@ -20,15 +20,12 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-
-if TYPE_CHECKING:
-    from hbllm.hcir.world.spatiotemporal_collision import SpatiotemporalCollisionCones
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +94,9 @@ class AnteriorCingulateConflictMonitor:
 
         self._motor_oscillation_monitor = MotorACC()
 
-    def record_step(self, action: Any, avatar_pos: tuple[int, int] | None) -> None:
+    def record_step(
+        self, action: Any, avatar_pos: tuple[float, float] | tuple[int, int] | None
+    ) -> None:
         """Record step in the motor oscillation detector."""
         self._motor_oscillation_monitor.record_step(action, avatar_pos)
 
@@ -125,13 +124,15 @@ class AnteriorCingulateConflictMonitor:
         """Episode lifecycle boundary handler (WP0.5). Delegates to the
         deprecated reset_episode for backward-compatible semantics."""
         self.reset_episode()
+        if hasattr(self, "_motor_oscillation_monitor"):
+            self._motor_oscillation_monitor.reset()
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient conflict state, optionally preserving long-term failure clusters."""
@@ -348,35 +349,6 @@ class AnteriorCingulateConflictMonitor:
             cl.count >= 2 and math.hypot(cl.center_r - pr, cl.center_c - pc) <= r
             for cl in self.clusters
         )
-
-    def should_advise_temporal_wait(
-        self,
-        current_pos: tuple[int, int],
-        candidate_pos: tuple[int, int],
-        collision_cones: SpatiotemporalCollisionCones | Any,
-        max_steps: int = 3,
-    ) -> tuple[bool, int]:
-        """Check whether temporal waiting is advised due to a transient collision cone crossing candidate_pos.
-
-        Returns:
-            (should_wait, wait_steps)
-        """
-        if collision_cones is None or not hasattr(collision_cones, "is_collision_hazard"):
-            return False, 0
-
-        cr, cc = candidate_pos
-        # If candidate_pos is an immediate collision hazard at step 1:
-        if collision_cones.is_collision_hazard(cr, cc, time_step=1):
-            # Check if it clears at step 2 or 3
-            for wait_step in range(2, max_steps + 1):
-                if not collision_cones.is_collision_hazard(cr, cc, time_step=wait_step):
-                    # Also ensure current position is safe to wait in during step 1
-                    if not collision_cones.is_collision_hazard(
-                        current_pos[0], current_pos[1], time_step=1
-                    ):
-                        return True, wait_step - 1
-            return False, 0
-        return False, 0
 
     def compute_heuristic_weight(self, default_weight: float = 1.0) -> float:
         """Compute modulated A* goal heuristic weight.

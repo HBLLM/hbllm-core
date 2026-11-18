@@ -1,0 +1,56 @@
+{
+  "n_trials": 80,
+  "baseline": {
+    "generality_score": 0.7547,
+    "solve_rate": 0.8,
+    "n_solved": 64,
+    "n_trials": 80,
+    "wilson_95_ci": [
+      0.6995,
+      0.873
+    ],
+    "deaths": 10,
+    "mean_steps": 24.16,
+    "mean_p50_ms": 65.43,
+    "mean_p95_ms": 173.13,
+    "family_scores": {
+      "grid": 0.7601,
+      "continuous": 0.6228,
+      "symbolic": 0.8812
+    },
+    "family_solve_rates": {
+      "grid": 0.725,
+      "continuous": 0.75,
+      "symbolic": 1.0
+    },
+    "crash": null
+  },
+  "calls": {
+    "subgoal_stack": 14523,
+    "body_schema": 3347,
+    "habenular_ior": 150459,
+    "remote_causal": 3760,
+    "hazard_tracker": 198352,
+    "acc_conflict_monitor": 49244,
+    "object_planner": 2337,
+    "prediction_budget": 756,
+    "option_discovery": 75878,
+    "budget_governor": 67050,
+    "world_kernel": 0
+  },
+  "used": [
+    "acc_conflict_monitor",
+    "body_schema",
+    "budget_governor",
+    "habenular_ior",
+    "hazard_tracker",
+    "object_planner",
+    "option_discovery",
+    "prediction_budget",
+    "remote_causal",
+    "subgoal_stack"
+  ],
+  "unused": [
+    "world_kernel"
+  ]
+}

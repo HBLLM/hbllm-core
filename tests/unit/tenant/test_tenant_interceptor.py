@@ -188,34 +188,3 @@ async def test_bus_dispatch_explicit_tenant_id():
 
     assert len(captured_tenant) == 1
     assert captured_tenant[0] == "explicit_tenant"
-
-
-# ── TaskCapsule Auto-Population Tests ───────────────────────────────────
-
-
-def test_capsule_auto_populates_tenant_from_context():
-    """TaskCapsule created inside TenantContext gets tenant_id automatically."""
-    from hbllm.brain.mesh.capsule import TaskCapsule
-
-    with TenantContext("ws_123"):
-        capsule = TaskCapsule()
-
-    assert capsule.tenant_id == "ws_123"
-
-
-def test_capsule_default_tenant_without_context():
-    """TaskCapsule created without TenantContext gets 'default' tenant_id."""
-    from hbllm.brain.mesh.capsule import TaskCapsule
-
-    capsule = TaskCapsule()
-    assert capsule.tenant_id == "default"
-
-
-def test_capsule_explicit_tenant_not_overwritten():
-    """TaskCapsule with explicit tenant_id preserves it even inside context."""
-    from hbllm.brain.mesh.capsule import TaskCapsule
-
-    with TenantContext("ws_999"):
-        capsule = TaskCapsule(tenant_id="explicit")
-
-    assert capsule.tenant_id == "explicit"

@@ -11,6 +11,7 @@ import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +47,54 @@ def open_connection(
     profile: str | SQLiteProfile = "default",
     timeout: float = 5.0,
     check_same_thread: bool = True,
+    **kwargs: Any,
 ) -> sqlite3.Connection:
     """Open a SQLite connection configured with the specified profile PRAGMAs."""
     prof = get_profile(profile) if isinstance(profile, str) else profile
 
     path_str = str(db_path)
-    conn = sqlite3.connect(path_str, timeout=timeout, check_same_thread=check_same_thread)
+    if path_str != ":memory:" and not path_str.startswith("file:"):
+        Path(path_str).parent.mkdir(parents=True, exist_ok=True)
 
-    conn.execute(f"PRAGMA journal_mode={prof.journal_mode}")
+    conn = sqlite3.connect(path_str, timeout=timeout, check_same_thread=check_same_thread, **kwargs)
+
+    if path_str != ":memory:":
+        try:
+            conn.execute(f"PRAGMA journal_mode={prof.journal_mode}")
+        except sqlite3.OperationalError:
+            pass
     conn.execute(f"PRAGMA synchronous={prof.synchronous}")
     conn.execute(f"PRAGMA cache_size=-{prof.cache_size_kb}")
     conn.execute(f"PRAGMA temp_store={prof.temp_store}")
     conn.execute(f"PRAGMA mmap_size={prof.mmap_size_mb * 1024 * 1024}")
     conn.execute(f"PRAGMA busy_timeout={prof.busy_timeout_ms}")
 
+    return conn
+
+
+async def open_async_connection(
+    db_path: str | Path,
+    profile: str | SQLiteProfile = "default",
+    timeout: float = 5.0,
+    **kwargs: Any,
+) -> Any:
+    """Open an aiosqlite connection configured with the specified profile PRAGMAs."""
+    import aiosqlite
+
+    prof = get_profile(profile) if isinstance(profile, str) else profile
+    path_str = str(db_path)
+    if path_str != ":memory:" and not path_str.startswith("file:"):
+        Path(path_str).parent.mkdir(parents=True, exist_ok=True)
+
+    conn = await aiosqlite.connect(path_str, timeout=timeout, **kwargs)
+    if path_str != ":memory:":
+        try:
+            await conn.execute(f"PRAGMA journal_mode={prof.journal_mode}")
+        except Exception:
+            pass
+    await conn.execute(f"PRAGMA synchronous={prof.synchronous}")
+    await conn.execute(f"PRAGMA cache_size=-{prof.cache_size_kb}")
+    await conn.execute(f"PRAGMA temp_store={prof.temp_store}")
+    await conn.execute(f"PRAGMA mmap_size={prof.mmap_size_mb * 1024 * 1024}")
+    await conn.execute(f"PRAGMA busy_timeout={prof.busy_timeout_ms}")
     return conn

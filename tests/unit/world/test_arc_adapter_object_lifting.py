@@ -10,6 +10,7 @@ Validates:
    to synthesize and execute neuro-symbolic macro plans without hardcoded rules in the core.
 """
 
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -55,10 +56,10 @@ def test_extract_arc_objects_basic_lifting() -> None:
     engine.avatar_pos = (2, 2)
     engine.avatar_feature = 2
     engine.avatar_features.add(2)
-    engine.symbolic_theory.cargo_features.add(6)
-    engine.symbolic_theory.receptacle_features.add(8)
-    engine.symbolic_theory.goal_features.add(3)
-    engine.symbolic_theory.barrier_features.add(1)
+    engine.symbolic_theory.induce_cargo(6, evidence="cargo")
+    engine.symbolic_theory.induce_receptacle(8, evidence="receptacle")
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_barrier(1, evidence="collision")
 
     objects = extract_arc_objects(grid, engine=engine)
 
@@ -97,8 +98,8 @@ def test_extract_arc_objects_switch_actuator() -> None:
     engine = AutonomousEpistemicEngine()
     engine.avatar_pos = (2, 1)
     engine.avatar_feature = 2
-    engine.symbolic_theory.actuator_features.add(9)
-    engine.symbolic_theory.goal_features.add(3)
+    engine.symbolic_theory.induce_actuator(9, evidence="actuator")
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
 
     objects = extract_arc_objects(grid, engine=engine)
     switch_objs = [obj for obj in objects if obj.pos == (2, 3)]
@@ -151,10 +152,8 @@ def test_extract_arc_objects_with_sprite_tags() -> None:
 
 def test_my_agent_choose_action_wires_objects_to_core() -> None:
     """Test MyAgent.choose_action feeds lifted ObjectSpecs into engine.decide and triggers macro execution."""
-    from hbllm.hcir.world.experimental import restore_all as _restore_all
 
     agent = MyAgent(game_id="test_game")
-    _restore_all(agent.internal_engine)
     grid = np.zeros((10, 10), dtype=int)
     grid[2, 2] = 2  # Avatar
     grid[2, 4] = 9  # Switch
@@ -164,8 +163,8 @@ def test_my_agent_choose_action_wires_objects_to_core() -> None:
     agent.internal_engine.avatar_pos = (2, 2)
     agent.internal_engine.avatar_feature = 2
     agent.internal_engine.avatar_features.add(2)
-    agent.internal_engine.symbolic_theory.actuator_features.add(9)
-    agent.internal_engine.symbolic_theory.goal_features.add(3)
+    agent.internal_engine.symbolic_theory.induce_actuator(9, evidence="actuator")
+    agent.internal_engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
 
     # Provide movement actions 1..4 (UP, DOWN, LEFT, RIGHT)
     for aid, dr, dc in [(1, -1, 0), (2, 1, 0), (3, 0, -1), (4, 0, 1)]:
@@ -187,7 +186,7 @@ def test_my_agent_choose_action_wires_objects_to_core() -> None:
             self.game_id = "test_game"
 
     frame = MockFrameData()
-    action = agent.choose_action([], frame)
+    action = agent.choose_action([], cast(Any, frame))
 
     # Chosen action should move RIGHT towards (2, 6)
     assert action.value == 4

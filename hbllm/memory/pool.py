@@ -34,12 +34,10 @@ class DatabasePool:
 
     async def _create_connection(self) -> aiosqlite.Connection:
         """Create a new tuned SQLite connection."""
-        conn = await aiosqlite.connect(self.db_path)
+        from hbllm.persistence.sqlite_profiles import open_async_connection
+
+        conn = await open_async_connection(self.db_path)
         conn.row_factory = aiosqlite.Row
-        # Standard optimizations for concurrent read/write
-        await conn.execute("PRAGMA journal_mode=WAL;")
-        await conn.execute("PRAGMA synchronous=NORMAL;")
-        await conn.execute("PRAGMA cache_size=-64000;")  # 64MB cache
         return conn
 
     @asynccontextmanager

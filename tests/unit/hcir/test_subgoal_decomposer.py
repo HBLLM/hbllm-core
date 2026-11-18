@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from hbllm.hcir.graph import GoalNode, HCIREdgeType
 from hbllm.hcir.subgoal_decomposer import HierarchicalGoalDecomposer
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 
@@ -17,7 +18,7 @@ def test_decomposer_unobstructed_returns_primary_goal() -> None:
         description="Reach the exit zone",
         properties={"target_position": (1, 4)},
     )
-    ws.upsert_node(primary_goal)
+    ws.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=primary_goal)])
 
     active_goal = decomposer.decompose_goal(
         workspace=ws,
@@ -41,7 +42,7 @@ def test_decomposer_obstructed_synthesizes_reachable_subgoal() -> None:
         description="Reach the exit zone",
         properties={"target_position": (1, 4)},
     )
-    ws.upsert_node(primary_goal)
+    ws.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=primary_goal)])
 
     # Wall completely blocking access to row 1
     barrier_cells = {(2, c) for c in range(8)}
@@ -78,7 +79,7 @@ def test_decomposer_resolving_subgoal_advances_to_primary_goal() -> None:
         description="Reach the exit zone",
         properties={"target_position": (1, 4)},
     )
-    ws.upsert_node(primary_goal)
+    ws.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=primary_goal)])
 
     # 1. Obstructed -> returns subgoal
     barrier_cells = {(2, c) for c in range(8)}
@@ -117,7 +118,7 @@ def test_decomposer_with_skills() -> None:
         description="Solve overarching puzzle",
         priority=1.0,
     )
-    ws.upsert_node(primary_goal)
+    ws.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=primary_goal)])
 
     skills = [
         HCIRSkill(
@@ -165,7 +166,7 @@ def test_decompose_obstructed_goal_synthesizes_barrier_clearance() -> None:
         resolved=False,
         properties={"target_position": (0, 4)},
     )
-    ws.upsert_node(primary_goal)
+    ws.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=primary_goal)])
 
     # Path from (0, 0) to (0, 4) is blocked by a wall of barriers dividing column 2
     barrier_cells = {(r, 2) for r in range(5)}

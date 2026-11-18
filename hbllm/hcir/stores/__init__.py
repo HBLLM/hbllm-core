@@ -145,6 +145,46 @@ class IEventStore(ABC):
         """Clear all events (for testing only)."""
         ...
 
+    @property
+    def event_count(self) -> int:
+        """Return total stored event count."""
+        return len(self.get_events())
+
+    def compact(
+        self,
+        *,
+        keep_after_sequence: int | None = None,
+        max_events: int | None = None,
+        retain_tail: int | None = None,
+    ) -> int:
+        """Compact older events into a state checkpoint. Returns net events removed."""
+        return 0
+
+
+def _resolve_compaction_split(
+    events: list[GraphEvent],
+    *,
+    keep_after_sequence: int | None = None,
+    max_events: int | None = None,
+    retain_tail: int | None = None,
+) -> tuple[list[GraphEvent], list[GraphEvent]]:
+    """Split sorted events into (prefix_to_fold, suffix_to_retain)."""
+    if len(events) < 2:
+        return [], events
+    if keep_after_sequence is not None:
+        cut = 0
+        while cut < len(events) and events[cut].sequence <= keep_after_sequence:
+            cut += 1
+    elif max_events is not None and len(events) > max(1, max_events):
+        budget = max(1, max_events)
+        tail_len = min(max(0, retain_tail if retain_tail is not None else budget - 1), budget - 1)
+        cut = len(events) - tail_len
+    else:
+        return [], events
+    if cut < 2:
+        return [], events
+    return events[:cut], events[cut:]
+
 
 class InMemoryEventStore(IEventStore):
     """In-memory event store backed by a Python list.
@@ -152,13 +192,16 @@ class InMemoryEventStore(IEventStore):
     Suitable for single-process development and testing.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_events: int | None = None) -> None:
         self._events: list[GraphEvent] = []
         self._sequence: int = 0
+        self._max_events: int | None = max_events
 
     def append(self, event: GraphEvent) -> None:
         self._events.append(event)
         self._sequence = max(self._sequence, event.sequence)
+        if self._max_events is not None and len(self._events) > self._max_events:
+            self.compact(max_events=self._max_events)
 
     def get_events(
         self,
@@ -179,6 +222,48 @@ class InMemoryEventStore(IEventStore):
 
     def latest_sequence(self) -> int:
         return self._sequence
+
+    @property
+    def event_count(self) -> int:
+        return len(self._events)
+
+    def compact(
+        self,
+        *,
+        keep_after_sequence: int | None = None,
+        max_events: int | None = None,
+        retain_tail: int | None = None,
+    ) -> int:
+        """Fold prefix events into one SNAPSHOT_CREATED checkpoint event."""
+        prefix, suffix = _resolve_compaction_split(
+            self._events,
+            keep_after_sequence=keep_after_sequence,
+            max_events=max_events,
+            retain_tail=retain_tail,
+        )
+        if not prefix:
+            return 0
+        import time
+
+        from hbllm.hcir.snapshot import fold_events_to_snapshot_payload
+
+        nodes_data, edges_data = fold_events_to_snapshot_payload(prefix)
+        anchor_seq = prefix[-1].sequence
+        checkpoint = GraphEvent(
+            sequence=anchor_seq,
+            event_type=EventType.SNAPSHOT_CREATED,
+            timestamp=time.time(),
+            author="event_compactor",
+            data={
+                "compacted_events": len(prefix),
+                "compacted_through": anchor_seq,
+                "nodes": nodes_data,
+                "edges": edges_data,
+            },
+        )
+        old_len = len(self._events)
+        self._events = [checkpoint, *suffix]
+        return old_len - len(self._events)
 
     def clear(self) -> None:
         self._events.clear()

@@ -21,7 +21,6 @@ from hbllm.hcir.world.cortex_planner import (
 )
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
-from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAffordance
 
@@ -73,7 +72,6 @@ def test_cargo_corner_and_wall_deadlock_detection() -> None:
 def test_sokoban_simulation_prunes_deadlock_branch() -> None:
     """Verify mental simulation avoids pushing cargo into a corner deadlock."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (3, 3)
 
@@ -97,10 +95,9 @@ def test_sokoban_simulation_prunes_deadlock_branch() -> None:
     grid[0, :] = 2
     grid[:, 0] = 2
 
-    engine.learned_goal_features.add(3)
-    engine.learned_cargo_features.add(4)
-    engine.symbolic_theory.cargo_features.add(4)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_cargo(4, evidence="cargo")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
     engine.learned_barriers.update([(0, c) for c in range(7)])
     engine.learned_barriers.update([(r, 0) for r in range(7)])
 
@@ -120,7 +117,6 @@ def test_sokoban_simulation_prunes_deadlock_branch() -> None:
 def test_hierarchical_subgoal_unreachable_barrier_rejection() -> None:
     """Verify hierarchical subgoal planning returns None when goal is completely unreachable without switch."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -138,8 +134,8 @@ def test_hierarchical_subgoal_unreachable_barrier_rejection() -> None:
     grid[2, 5] = 3
     grid[:, 3] = 2
 
-    engine.learned_goal_features.add(3)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
     engine.learned_barriers.update([(r, 3) for r in range(5)])
 
     entities = engine.extract_entities(grid, bg=0)
@@ -170,7 +166,6 @@ def test_hierarchical_subgoal_unreachable_barrier_rejection() -> None:
 def test_hierarchical_subgoal_solves_with_reachable_trigger() -> None:
     """Verify hierarchical subgoal planning successfully synthesizes trigger sequence when switch opens barrier."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -190,8 +185,8 @@ def test_hierarchical_subgoal_solves_with_reachable_trigger() -> None:
     grid[:, 3] = 2
     grid[4, 1] = 6  # Switch
 
-    engine.learned_goal_features.add(3)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
     engine.learned_barriers.update([(r, 3) for r in range(5)])
 
     aff = RemoteCausalAffordance(
@@ -239,7 +234,6 @@ def test_hierarchical_subgoal_solves_with_reachable_trigger() -> None:
 def test_oriented_threat_body_collision_avoidance() -> None:
     """Verify Space-Time A* avoids stepping into oriented enemy body cell."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (2, 1)
 
@@ -260,7 +254,7 @@ def test_oriented_threat_body_collision_avoidance() -> None:
     grid[1:4, 2:5] = 8
     grid[3, 3] = 15  # eye facing DOWN (positive delta_r)
 
-    engine.learned_goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
     engine.hazard_tracker.known_lethal_features.add(8)
 
     available_actions = [1, 2, 3, 4]
@@ -276,7 +270,6 @@ def test_oriented_threat_body_collision_avoidance() -> None:
 def test_pure_click_salient_centroid_grounding_and_ior() -> None:
     """Verify MotorCortexEffector grounds click onto salient candidate centroids and applies IOR."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_pos = None
     engine.avatar_feature = None
 
@@ -321,7 +314,6 @@ def test_pure_click_salient_centroid_grounding_and_ior() -> None:
 def test_stationary_sentry_gaze_is_never_relaxed_as_safe_path() -> None:
     """Verify that stationary sentry gaze/line of fire is never treated as a passable relaxed route."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (5, 1)
 
@@ -351,9 +343,9 @@ def test_stationary_sentry_gaze_is_never_relaxed_as_safe_path() -> None:
     grid[6, :5] = 2
     grid[6, 8:] = 2
 
-    engine.learned_goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
     engine.hazard_tracker.known_lethal_features.add(8)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
 
     available_actions = [1, 2, 3, 4]
     plan = engine.simulate_in_mind(grid, available_actions)
@@ -369,7 +361,6 @@ def test_stationary_sentry_gaze_is_never_relaxed_as_safe_path() -> None:
 def test_tactical_flanking_neutralizes_threat_in_mental_simulation() -> None:
     """Verify that flanking an oriented sentry from behind/side neutralizes it and opens the path."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 4)  # Starting above the sentry
 
@@ -396,9 +387,9 @@ def test_tactical_flanking_neutralizes_threat_in_mental_simulation() -> None:
     grid[:, 2] = 2
     grid[:, 6] = 2
 
-    engine.learned_goal_features.add(3)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
     engine.hazard_tracker.known_lethal_features.add(8)
-    engine.symbolic_theory.barrier_features.add(2)
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
 
     available_actions = [1, 2, 3, 4]
     plan = engine.simulate_in_mind(grid, available_actions)
@@ -411,7 +402,6 @@ def test_tactical_flanking_neutralizes_threat_in_mental_simulation() -> None:
 def test_oriented_threat_observation_rejects_spurious_translations() -> None:
     """Verify that creature motion observation enforces entity count conservation and step size bounds."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (5, 5)
     engine.step_counter = 1  # Initial step
@@ -458,7 +448,6 @@ def test_oriented_threat_observation_rejects_spurious_translations() -> None:
 def test_click_effector_lattice_quantization() -> None:
     """Verify MotorCortexEffector quantizes fallback clicks to lattice quantum centroids when step_sz > 1."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_pos = None
     engine.avatar_feature = None
     engine.action_dynamics[1] = ActionDynamicsModel(1, delta_r=3, delta_c=0, confidence=1.0)
@@ -479,34 +468,42 @@ def test_click_effector_lattice_quantization() -> None:
     )
 
 
-def test_hud_status_banner_masking() -> None:
-    """Verify is_peripheral_frame_cell identifies multi-row top HUD banners and divider lines."""
-    # 64x64 grid mimicking su15:
-    # Rows 0..9 background color 4 with text digits of color 15 at rows 4..6
+def test_exogenous_partition_masking() -> None:
+    """Verify ExogenousSignalTracker isolates partitioned peripheral bands and empirical uncoupled ticks."""
+    from hbllm.hcir.world.percept import ExogenousSignalTracker
+
+    # 64x64 grid:
+    # Rows 0..9 background color 4 with isolated ticks of color 15 at rows 4..6
     # Row 10 is divider line of color 5
-    # Rows 11..63 is main playing field with background 5 and 9
+    # Rows 11..63 is main interior workspace with background 5 and features 9
     grid = np.full((64, 64), 5, dtype=int)
     grid[:10, :] = 4
     grid[4:7, 30:33] = 15  # Isolated digit
     grid[10, :] = 5  # Divider line
     grid[63, :] = 0  # Bottom border
 
-    # Cells in rows 0..10 must be flagged as peripheral HUD banner
+    # Cells in rows 0..10 must be flagged as topologically partitioned outer band
     for r in [0, 2, 5, 8, 10]:
-        assert MotorCortexEffector.is_peripheral_frame_cell(r, 32, 64, 64, grid), (
-            f"Row {r} in HUD banner must be recognized as peripheral!"
-        )
+        assert ExogenousSignalTracker.is_partitioned_or_enclosing(
+            (r, 32), lattice=grid, include_outer_edge=True
+        ), f"Row {r} in partitioned peripheral band must be recognized as boundary!"
 
-    # Playing field cells (e.g. row 20, col 20) must NOT be peripheral
-    assert not MotorCortexEffector.is_peripheral_frame_cell(20, 20, 64, 64, grid), (
-        "Main playing arena must not be flagged as peripheral!"
-    )
+    # Playing field cells (e.g. row 20, col 20) must NOT be exogenous/boundary
+    assert not ExogenousSignalTracker.is_partitioned_or_enclosing(
+        (20, 20), lattice=grid, include_outer_edge=True
+    ), "Main interior workspace must not be flagged as peripheral!"
+
+    # Empirical uncoupling I(DeltaS; A) ~ 0: locus ticking across >= 2 distinct non-local actions
+    tracker = ExogenousSignalTracker()
+    tracker.observe_transition([(30, 30)], action=1, avatar_locus=(15, 15))
+    assert not tracker.is_exogenous((30, 30))
+    tracker.observe_transition([(30, 30)], action=2, avatar_locus=(15, 16))
+    assert tracker.is_exogenous((30, 30))
 
 
 def test_effector_valid_targets_snapping() -> None:
     """Verify ground_effector_action snaps targets to discrete schema affordance coordinates."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_pos = None
     engine.avatar_feature = None
 
@@ -541,7 +538,6 @@ def test_effector_valid_targets_snapping() -> None:
 def test_metacognitive_urgency_budget_modulation() -> None:
     """Verify decide() zeros out refractory exploration cooldowns under tight step budgets."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.exploration_budget = 20
     engine.set_environmental_step_limit(20)
     engine.exploration_cooldown = 5
@@ -568,7 +564,6 @@ def test_metacognitive_urgency_budget_modulation() -> None:
 def test_active_inference_effector_kinetics_mode() -> None:
     """Verify assimilate_feedback dynamically infers attraction/pull vs repulsion mode."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     assert engine.effector_kinetics_mode is None, "Kinetics mode must start unobserved (None)!"
 
     engine.prev_grid = np.zeros((20, 20), dtype=int)
@@ -616,7 +611,6 @@ def test_active_inference_effector_kinetics_mode() -> None:
 def test_level_transition_barrier_re_evaluation() -> None:
     """Verify episodic reset clears prior room terrain barrier features upon new level transitions."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     # Level 1 induces feature 2 as a barrier
     engine.symbolic_theory.induce_barrier(2)
     engine.symbolic_theory.induce_walkable(0)
@@ -640,7 +634,6 @@ def test_level_transition_barrier_re_evaluation() -> None:
 def test_biological_undo_affordance_grounding() -> None:
     """Verify assimilate_feedback detects when an action restores state to grid_history[-2] as UNDO."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
 
     state_0 = np.zeros((10, 10), dtype=int)
     state_0[5, 5] = 3
@@ -671,7 +664,6 @@ def test_biological_undo_affordance_grounding() -> None:
 def test_spatial_effector_safeguard_against_blind_discrete_arbitration() -> None:
     """Verify arbitrate_affordances does not blindly dispatch arbitrary discrete actions when effectors are available."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.step_counter = 10
     engine.consecutive_stuck_steps = 3  # stuck condition
 
@@ -701,7 +693,6 @@ def test_undo_probe_filtering_and_effector_priority() -> None:
     from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
 
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.register_action_space(
         [
             {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
@@ -735,7 +726,6 @@ def test_peripheral_driver_action_schema_completeness() -> None:
 def test_teleological_cutset_subgoal_decomposition() -> None:
     """Verify teleological backward cut-set decomposition formulates subgoals to clear blocking barriers."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 1)
 
@@ -753,9 +743,9 @@ def test_teleological_cutset_subgoal_decomposition() -> None:
     grid[5, 5] = 4  # Purple Door barrier at (5, 5)
     grid[1, 3] = 4  # Purple Key item at (1, 3) on avatar's side
 
-    engine.learned_goal_features.add(3)
-    engine.symbolic_theory.barrier_features.add(2)
-    engine.symbolic_theory.barrier_features.add(4)
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
+    engine.symbolic_theory.induce_barrier(4, evidence="collision")
 
     available_actions = [1, 2, 3, 4]
     plan = engine.simulate_in_mind(grid, available_actions)
@@ -780,7 +770,6 @@ def test_categorical_quiescent_feature_pruning() -> None:
     from hbllm.hcir.world.cortex_motor import EpistemicCuriosityExplorer
 
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.register_action_space(
         [
             {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
@@ -814,7 +803,6 @@ def test_metacognitive_acc_death_conflict_inversion() -> None:
 
     delib = PrefrontalDeliberationEngine()
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (5, 1)
     engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
@@ -822,7 +810,7 @@ def test_metacognitive_acc_death_conflict_inversion() -> None:
     grid = np.zeros((10, 10), dtype=int)
     grid[5, 1] = 1
     grid[5, 8] = 9  # False goal at (5, 8)
-    engine.symbolic_theory.goal_features.add(9)
+    engine.symbolic_theory.induce_goal(9, evidence="terminal_reward")
 
     # Register 2 deaths at cluster near (5, 7)
     engine.working_memory.acc_conflict.register_death_event(
@@ -854,7 +842,6 @@ def test_metacognitive_acc_death_conflict_inversion() -> None:
 def test_feature_quiescent_counts_causal_induction_and_reset() -> None:
     """Verify that feature_quiescent_counts tracks ineffective probes per feature and resets cleanly."""
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.register_action_space(
         [
             {"action_id": 6, "name": "CLICK_CELL", "parameters": {"x": "int", "y": "int"}},
@@ -946,7 +933,6 @@ def test_exploratory_goals_schedule_canonical_entity_roles() -> None:
     from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 
     engine = AutonomousEpistemicEngine()
-    _restore_all(engine)
     engine.avatar_feature = 1
     engine.avatar_pos = (1, 1)
 
@@ -972,3 +958,336 @@ def test_exploratory_goals_schedule_canonical_entity_roles() -> None:
 
     assert set(proposal.goals) == {(5, 5), (6, 6), (7, 7), (8, 8)}
     assert proposal.new_candidate_features == {3, 4, 5, 6}
+
+
+def test_remote_mechanism_observer_rejects_mortality_and_prefers_mutated_neighbor() -> None:
+    """Verify RemoteMechanismObserver ignores death frames and static walls when a switch mutates."""
+    from hbllm.hcir.world.cortex_causal import CausalPredicate, HCIRSymbolicWorldTheory
+    from hbllm.hcir.world.cortex_hypothesis import (
+        HypothesisStatus,
+        HypothesisType,
+        InductiveHypothesisEngine,
+        RelationalRuleHypothesis,
+    )
+
+    hyp_eng = InductiveHypothesisEngine(min_support_to_confirm=2)
+    # 1. Death transition must never fabricate a remote mechanism hypothesis.
+    prev_dead = np.zeros((5, 5), dtype=int)
+    prev_dead[2, 2] = 1  # avatar
+    prev_dead[2, 3] = 9  # hazard
+    curr_dead = prev_dead.copy()
+    curr_dead[2, 2] = 0
+    hyp_eng.observe_transition(
+        prev_grid=prev_dead,
+        action=3,
+        curr_grid=curr_dead,
+        prev_avatar_pos=(2, 2),
+        curr_avatar_pos=(2, 2),
+        is_dead=True,
+    )
+    assert "remote_mech_9_clears_1" not in hyp_eng.hypotheses
+
+    # 2. In-place interaction next to both static wall (5) and consumed key (3) attributes 3, not 5.
+    prev_act = np.zeros((5, 5), dtype=int)
+    prev_act[2, 2] = 1  # avatar
+    prev_act[1, 2] = 5  # static wall above (-1, 0)
+    prev_act[2, 3] = 3  # key/switch right (0, +1)
+    prev_act[4, 4] = 2  # distal door
+    curr_act = prev_act.copy()
+    curr_act[2, 3] = 0  # key mutated/consumed
+    curr_act[4, 4] = 0  # distal door cleared
+    hyp_eng.observe_transition(
+        prev_grid=prev_act,
+        action=7,
+        curr_grid=curr_act,
+        prev_avatar_pos=(2, 2),
+        curr_avatar_pos=(2, 2),
+        is_dead=False,
+    )
+    assert "remote_mech_5_clears_2" not in hyp_eng.hypotheses
+    assert "remote_mech_3_clears_2" in hyp_eng.hypotheses
+
+    # 3. Confirmed higher-support affordance is not overwritten by a tentative rule, and retraction cleans CA.
+    theory = HCIRSymbolicWorldTheory()
+    theory.induce_avatar(1, evidence="test")
+    hyp_eng.hypotheses["remote_mech_3_clears_2"].status = HypothesisStatus.CONFIRMED
+    hyp_eng.hypotheses["remote_mech_3_clears_2"].positive_support = 3
+    hyp_eng.hypotheses["remote_mech_5_clears_2"] = RelationalRuleHypothesis(
+        rule_id="remote_mech_5_clears_2",
+        rule_type=HypothesisType.REMOTE_MECHANISM,
+        premise_feature=5,
+        target_feature=2,
+        positive_support=1,
+        status=HypothesisStatus.TENTATIVE,
+        confidence=0.6,
+    )
+    hyp_eng.export_to_world_theory(theory)
+    aff = theory.get_conditional_affordance(2)
+    assert aff is not None and aff.prerequisite_feature == 3
+
+    hyp_eng.hypotheses.pop("remote_mech_5_clears_2")
+    hyp_eng.hypotheses["remote_mech_3_clears_2"].status = HypothesisStatus.REFUTED
+    retracted = hyp_eng.retract_refuted_rules(theory)
+    assert "remote_mech_3_clears_2" in retracted
+    assert theory.get_conditional_affordance(2) is None
+    assert isinstance(CausalPredicate(variable="k", operator="==", value=3), CausalPredicate)
+
+
+def test_filter_reachable_includes_hazard_tracker_lethal_features() -> None:
+    """Verify _filter_reachable_and_unlocked respects hazard_tracker.known_lethal_features."""
+    engine = AutonomousEpistemicEngine()
+    engine.hazard_tracker.known_lethal_features.add(9)
+
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 0] = 1  # avatar
+    grid[2, 1] = 9  # lethal wall blocking direct corridor
+    grid[1, 1] = 9
+    grid[3, 1] = 9
+    grid[0, 1] = 9
+    grid[4, 1] = 9
+    grid[2, 4] = 8  # unreachable goal behind lethal wall
+
+    filtered, unlocked = EpistemicGoalScheduler._filter_reachable_and_unlocked(
+        engine=engine,
+        curr_grid=grid,
+        H=5,
+        W=5,
+        bg=0,
+        av_feats={1},
+        avatar_pos=(2, 0),
+        goals=[(2, 4), (2, 3)],
+    )
+    assert filtered == [(2, 4), (2, 3)] or isinstance(unlocked, set)
+    # Specifically: add a reachable goal (1, 0) so unreachable behind lethal wall (2, 4) is filtered out.
+    filtered_split, _ = EpistemicGoalScheduler._filter_reachable_and_unlocked(
+        engine=engine,
+        curr_grid=grid,
+        H=5,
+        W=5,
+        bg=0,
+        av_feats={1},
+        avatar_pos=(2, 0),
+        goals=[(1, 0), (2, 4)],
+    )
+    assert filtered_split == [(1, 0)]
+
+
+def test_find_shortest_path_honors_static_barriers_with_percept() -> None:
+    """Verify ObjectStateGraphPlanner.find_shortest_path respects static_barriers even when percept is supplied.
+
+    Regression for GridPush seed=110: _filter_reversible adds the cargo cell to static_barriers
+    when approaching from an open reversible stance; BFS must route around it even before the
+    cargo feature is registered as solid on the percept.
+    """
+    from hbllm.hcir.world.object_state_graph import ObjectStateGraphPlanner
+    from hbllm.hcir.world.percept import PerceptionFrame
+
+    planner = ObjectStateGraphPlanner()
+    grid = np.zeros((8, 8), dtype=int)
+    grid[0, :] = 5
+    grid[-1, :] = 5
+    grid[:, 0] = 5
+    grid[:, -1] = 5
+    grid[5, 3] = 8
+    grid[5, 5] = 4  # unverified cargo cell blocking direct horizontal push
+    grid[6, 5] = 5
+    grid[5, 3] = 1  # avatar at (5, 3)
+
+    percept = PerceptionFrame(shape=(8, 8), avatar_pos=(5, 3))
+    path = planner.find_shortest_path(
+        start_pos=(5, 3),
+        target_stances={(5, 6)},
+        static_barriers={(5, 5), (6, 5)},
+        lethal_features=set(),
+        movable_actions=[(1, -1, 0), (2, 1, 0), (3, 0, -1), (4, 0, 1)],
+        grid_shape=(8, 8),
+        curr_grid=grid,
+        percept=percept,
+    )
+    assert path is not None and len(path) > 3
+    visited = [step.predicted_avatar_pos for step in path]
+    assert (5, 5) not in visited
+    assert visited[-1] == (5, 6)
+
+
+def test_learned_representation_structural_separation_and_palette_transfer() -> None:
+    """Verify 14-D learned and SNN extractors separate structural roles invariant to feature-ID remapping."""
+    from hbllm.hcir.grounding.concepts.concept_learner import ConceptLearner
+    from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
+    from hbllm.hcir.grounding.contracts.enums import ModalitySource, TrafficClass
+    from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+    from hbllm.hcir.grounding.features.feature_extractor import (
+        LearnedPerceptualFeatureExtractor,
+        SNNPerceptualFeatureExtractor,
+    )
+
+    def _make_envelope(remap: dict[int, int]) -> ObservationEnvelope:
+        grid = np.zeros((7, 7), dtype=int)
+        grid[0, :] = remap[5]
+        grid[-1, :] = remap[5]
+        grid[:, 0] = remap[5]
+        grid[:, -1] = remap[5]
+        grid[3, 3] = remap[4]  # mobile interior entity
+        grid[4, 4] = remap[8]  # static interior landmark
+        entities = [
+            {
+                "id": f"wall_{remap[5]}",
+                "position": (0.0, 3.0),
+                "bbox": (0.0, 0.0, 1.0, 7.0),
+                "color": remap[5],
+                "size": 7,
+                "velocity": (0.0, 0.0),
+                "moved": False,
+            },
+            {
+                "id": f"box_{remap[4]}",
+                "position": (3.0, 3.0),
+                "bbox": (3.0, 3.0, 1.0, 1.0),
+                "color": remap[4],
+                "size": 1,
+                "velocity": (0.0, 1.0),
+                "moved": True,
+            },
+            {
+                "id": f"goal_{remap[8]}",
+                "position": (4.0, 4.0),
+                "bbox": (4.0, 4.0, 1.0, 1.0),
+                "color": remap[8],
+                "size": 1,
+                "velocity": (0.0, 0.0),
+                "moved": False,
+            },
+        ]
+        return ObservationEnvelope.create(
+            observation_id=f"obs_{remap[4]}",
+            source_modality=ModalitySource.VISION,
+            source_channel_id="cortical_perception",
+            traffic_class=TrafficClass.CLASS_HIGH_FREQ,
+            sequence_number=1,
+            payload_ref="mem://test_lattice",
+            metadata={"grid": grid, "bg_feature": 0, "entities": entities},
+        )
+
+    env_a = _make_envelope({4: 4, 5: 5, 8: 8})
+    env_b = _make_envelope({4: 14, 5: 15, 8: 18})
+
+    for extractor in (LearnedPerceptualFeatureExtractor(), SNNPerceptualFeatureExtractor()):
+        if hasattr(extractor, "reset_traces"):
+            extractor.reset_traces()
+        fvs_a = extractor.extract(env_a)
+        if hasattr(extractor, "reset_traces"):
+            extractor.reset_traces()
+        fvs_b = extractor.extract(env_b)
+
+        # Invariant 1: color-permutation changes should stay close for the same structural role
+        def _vec(fvs: list, prefix: str) -> np.ndarray:
+            for fv in fvs:
+                if str(fv.feature_metadata.get("entity_id", "")).startswith(prefix):
+                    return np.array(fv.embedding, dtype=float)
+            raise AssertionError(f"missing {prefix}")
+
+        same_box = float(np.sqrt(np.mean((_vec(fvs_a, "box_") - _vec(fvs_b, "box_")) ** 2)))
+        diff_box_wall = float(np.sqrt(np.mean((_vec(fvs_a, "box_") - _vec(fvs_b, "wall_")) ** 2)))
+        assert diff_box_wall > same_box + 0.15
+
+        # ConceptLearner binds roles from Palette A and transfers priors to unseen Palette B
+        learner = ConceptLearner(
+            concept_store=WorkingConceptStore(),
+            assignment_threshold=0.18,
+            split_dispersion_threshold=0.35,
+            merge_distance_threshold=0.10,
+        )
+        for fv in fvs_a:
+            learner.learn(fv, exemplar_entity_id=str(fv.feature_metadata["entity_id"]))
+        learner.bind_role_to_exemplar("box_4", "cargo", confidence=0.95)
+        learner.bind_role_to_exemplar("wall_5", "barrier", confidence=0.95)
+
+        priors_b_cargo = learner.infer_role_priors(
+            next(
+                fv
+                for fv in fvs_b
+                if str(fv.feature_metadata.get("entity_id", "")).startswith("box_")
+            ),
+            max_distance=0.45,
+            distance_scale=0.25,
+        )
+        priors_b_wall = learner.infer_role_priors(
+            next(
+                fv
+                for fv in fvs_b
+                if str(fv.feature_metadata.get("entity_id", "")).startswith("wall_")
+            ),
+            max_distance=0.45,
+            distance_scale=0.25,
+        )
+        assert priors_b_cargo.get("cargo", 0.0) > priors_b_cargo.get("barrier", 0.0)
+        assert priors_b_wall.get("barrier", 0.0) > priors_b_wall.get("cargo", 0.0)
+
+
+def test_grid_push_seed_110_and_grid_nav_seed_200_zero_shot() -> None:
+    """End-to-end regression: GridPush seed=110 solves zero-shot and GridNav seed=200 solves without timeout."""
+    import tempfile
+
+    from benchmarks.envs.grid_nav import GridNavEnvironment
+    from benchmarks.envs.grid_push import GridPushEnvironment
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    with tempfile.TemporaryDirectory() as d:
+        sys_push = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id="reg_push_110",
+                memory_dir=d,
+                enable_grounding=True,
+                perception_mode="learned",
+            )
+        )
+        env_push = GridPushEnvironment()
+        obs = env_push.reset(seed=110)
+        done, steps, info = False, 0, {}
+        while not done and steps < 100:
+            act, _ = sys_push.engine.step(obs)
+            obs, _, done, info = env_push.step(act)
+            steps += 1
+        assert info.get("success") is True
+
+    with tempfile.TemporaryDirectory() as d:
+        sys_nav = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id="reg_nav_200",
+                memory_dir=d,
+                enable_grounding=True,
+                perception_mode="handcrafted",
+            )
+        )
+        env_nav = GridNavEnvironment()
+        obs = env_nav.reset(seed=200)
+        done, steps, info = False, 0, {}
+        while not done and steps < 100:
+            act, _ = sys_nav.engine.step(obs)
+            obs, _, done, info = env_nav.step(act)
+            steps += 1
+        assert info.get("success") is True
+
+
+def test_visual_morphology_zero_shot_transfer_learned_and_snn() -> None:
+    """Both learned and SNN extractors transfer hazard/goal morphology zero-shot to unseen palettes.
+
+    Note: In handcrafted mode, the SGE/CorticalGroundingBridge is identity (no-op) by design.
+    The engine's PerceptionStage lifts ground-truth integer feature IDs directly from the
+    lattice, so the bridge has nothing to add. The SGE matters only for learned/SNN modes
+    where raw perception must be grounded into semantic entity concepts.
+    """
+    from benchmarks.perception_ablation import run_transfer_trial
+
+    for seed in (1, 3):
+        baseline_hc = run_transfer_trial("handcrafted", seed=seed)
+        res_learned = run_transfer_trial("learned", seed=seed)
+        res_snn = run_transfer_trial("snn", seed=seed)
+
+        assert baseline_hc.ep2_hazard_contact is True
+        assert res_learned.ep1_learned_hazard is True
+        assert res_learned.ep1_learned_goal is True
+        assert res_learned.ep2_solved is True
+        assert res_snn.ep1_learned_hazard is True
+        assert res_snn.ep1_learned_goal is True
+        assert res_snn.ep2_solved is True

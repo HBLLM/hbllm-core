@@ -83,14 +83,20 @@ class TestConstitutionalVerifier:
     def test_reject_remove_active_goal(self) -> None:
         """Safety check: cannot remove an active goal node."""
         goal = GoalNode(id="g_active", description="Active goal", lifecycle=NodeLifecycle.ACTIVE)
-        self.workspace.add_node(goal)
+        self.workspace.commit_operations(
+            [TransactionOperation(op=TransactionOp.ADD_NODE, node=goal)],
+            author="test",
+        )
 
         tx = self._make_tx([TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id="g_active")])
         assert self.verifier.verify(tx, self.workspace) is False
 
     def test_allow_remove_archived_goal(self) -> None:
         goal = GoalNode(id="g_archived", description="Done", lifecycle=NodeLifecycle.ARCHIVED)
-        self.workspace.add_node(goal)
+        self.workspace.commit_operations(
+            [TransactionOperation(op=TransactionOp.ADD_NODE, node=goal)],
+            author="test",
+        )
 
         tx = self._make_tx(
             [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id="g_archived")]

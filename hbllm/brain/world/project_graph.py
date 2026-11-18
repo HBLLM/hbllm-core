@@ -38,6 +38,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -156,7 +158,7 @@ class ProjectGraph:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS entities (
                     entity_id TEXT PRIMARY KEY,
@@ -276,7 +278,7 @@ class ProjectGraph:
             relation_type=relation_type,
             metadata=metadata or {},
         )
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO relations "
                 "(source_id, target_id, relation_type, created_at, metadata) "
@@ -293,7 +295,7 @@ class ProjectGraph:
 
     def get_entity(self, entity_id: str) -> ProjectEntity | None:
         """Retrieve a single entity by ID."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM entities WHERE entity_id = ?", (entity_id,)
@@ -305,7 +307,7 @@ class ProjectGraph:
     def update_status(self, entity_id: str, status: str) -> bool:
         """Update entity status."""
         now = time.time()
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE entities SET status = ?, updated_at = ? WHERE entity_id = ?",
                 (status, now, entity_id),
@@ -319,7 +321,7 @@ class ProjectGraph:
             return False
 
         now = time.time()
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             meta = entity.metadata
             meta["resolution"] = resolution
             meta["resolved_at"] = now
@@ -344,7 +346,7 @@ class ProjectGraph:
         entity_type: str | None = None,
     ) -> list[ProjectEntity]:
         """Get entities connected from source via outgoing edges."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             if relation_type:
                 rel_rows = conn.execute(
@@ -413,7 +415,7 @@ class ProjectGraph:
 
     def get_active_projects(self, tenant_id: str = "default") -> list[ProjectEntity]:
         """Get all active projects for a tenant."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM entities WHERE entity_type = 'project' "
@@ -508,7 +510,7 @@ class ProjectGraph:
         self._save_context(ctx)
 
         # Update entity timestamp
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "UPDATE entities SET updated_at = ? WHERE entity_id = ?",
                 (time.time(), project_id),
@@ -604,7 +606,7 @@ class ProjectGraph:
     # ── Persistence Helpers ──────────────────────────────────────────
 
     def _save_entity(self, entity: ProjectEntity) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO entities "
                 "(entity_id, entity_type, name, description, status, tenant_id, "
@@ -623,7 +625,7 @@ class ProjectGraph:
             )
 
     def _save_context(self, ctx: ProjectContext) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO project_context "
                 "(project_id, tags, last_topics, last_files_touched, last_decisions, "
@@ -640,7 +642,7 @@ class ProjectGraph:
             )
 
     def _load_context(self, project_id: str) -> ProjectContext | None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM project_context WHERE project_id = ?",
@@ -687,7 +689,7 @@ class ProjectGraph:
 
     def stats(self) -> dict[str, Any]:
         """Summary statistics."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             total_entities = conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
             total_relations = conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
             by_type = conn.execute(

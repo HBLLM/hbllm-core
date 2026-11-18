@@ -1,0 +1,81 @@
+{
+  "git_sha": "1479da3c9dcc72791fabc81aa7e5311a46228c1a",
+  "config_hash": "0f18255c39c1ee4d",
+  "timestamp": "20261110_081458",
+  "split": "dev",
+  "tasks": [
+    {
+      "task_id": "grid_nav_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 52,
+      "max_budget": 100,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 90.61,
+      "p95_latency_ms": 249.41,
+      "errors": []
+    },
+    {
+      "task_id": "grid_push_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 96,
+      "max_budget": 100,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 54.98,
+      "p95_latency_ms": 296.85,
+      "errors": []
+    },
+    {
+      "task_id": "continuous_reach_dev_system_handcrafted",
+      "family": "continuous",
+      "split": "dev",
+      "steps": 60,
+      "max_budget": 60,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 103.71,
+      "p95_latency_ms": 206.92,
+      "errors": []
+    }
+  ],
+  "family_scores": {
+    "grid": 0.0,
+    "continuous": 0.0
+  },
+  "generality_score": 0.0,
+  "mean_p50_latency_ms": 83.1,
+  "mean_p95_latency_ms": 251.06,
+  "baselines": {
+    "random": {
+      "generality_score": 0.0,
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0
+      },
+      "solve_rate": 0.0
+    },
+    "oracle": {
+      "generality_score": 0.8696,
+      "family_scores": {
+        "grid": 0.9475,
+        "continuous": 0.7917
+      },
+      "solve_rate": 1.0
+    },
+    "no_grounding": {
+      "generality_score": 0.0,
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0
+      },
+      "solve_rate": 0.0
+    }
+  },
+  "env_hash": "88b8bea0d5cc4bc9"
+}

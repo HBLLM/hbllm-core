@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from typing import Any
+
+# Extend package search path to include experiments/legacy_perception
+_exp_path = Path(__file__).resolve().parents[2] / "experiments" / "legacy_perception"
+if _exp_path.exists() and str(_exp_path) not in __path__:
+    __path__.append(str(_exp_path))
 
 # PEP 562 Lazy Loading: Map public exports to (module_path, attribute_name).
 # Eliminates monolithic dependency loading when importing submodules (e.g. edge/robotics plugins).

@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -261,7 +263,7 @@ class ContradictionDetector:
         self._scans_run += 1
 
         try:
-            with sqlite3.connect(self.causal_graph.db_path) as conn:
+            with open_connection(self.causal_graph.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 # Find all unique source_ids
                 sources = conn.execute("SELECT DISTINCT source_id FROM causal_links").fetchall()
@@ -398,7 +400,7 @@ class BeliefRevisionEngine:
         self._pruned = 0
 
     def _init_db(self) -> None:
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS belief_states (
                     concept TEXT PRIMARY KEY,
@@ -420,7 +422,7 @@ class BeliefRevisionEngine:
 
     def _load_from_db(self) -> None:
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 for row in conn.execute("SELECT * FROM belief_states"):
                     state = BeliefState.from_dict(json.loads(row["data"]))
@@ -430,7 +432,7 @@ class BeliefRevisionEngine:
 
     def _persist(self, state: BeliefState) -> None:
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO belief_states
                        (concept, data, created_at, last_updated)
@@ -447,7 +449,7 @@ class BeliefRevisionEngine:
 
     def _persist_contradiction(self, contradiction: Contradiction) -> None:
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO contradictions
                        (contradiction_id, concept, data, resolved, detected_at)
@@ -609,7 +611,7 @@ class BeliefRevisionEngine:
         """Get stored contradictions, optionally filtered by resolution status."""
         contradictions: list[Contradiction] = []
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 if resolved is not None:
                     rows = conn.execute(

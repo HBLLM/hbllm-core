@@ -56,6 +56,51 @@ class DriverManager:
         self._on_driver_input_callbacks: list[Callable[[DriverInput], Any]] = []
         self._streaming_tasks: dict[str, asyncio.Task[None]] = {}
         self._streaming_active: bool = False
+        self._observation_adapter: Any | None = None
+
+    @property
+    def observation_adapter(self) -> Any:
+        """SGE CompositeObservationAdapter for converting DriverInputs into ObservationEnvelopes."""
+        if self._observation_adapter is None:
+            from hbllm.hcir.grounding.features.composite_observation_adapter import (
+                CompositeObservationAdapter,
+            )
+
+            self._observation_adapter = CompositeObservationAdapter()
+        return self._observation_adapter
+
+    def adapt_to_grounded_observation(
+        self, driver_input: DriverInput, **kwargs: Any
+    ) -> tuple[Any, list[Any]]:
+        """Lifts a raw DriverInput into an SGE ObservationEnvelope + PerceptualFeatureVectors."""
+        return self.observation_adapter.adapt_driver_input(driver_input, **kwargs)
+
+    def fuse_mimo_observations(
+        self,
+        observations: dict[str, DriverInput] | None = None,
+        entity_id: str = "mimo_environment",
+    ) -> Any:
+        """Fuses multi-modal observations from concurrent active drivers into a single
+        FusedFeatureVector via SGE MultiModalFeatureBundle and FeatureFusion.
+        """
+        from hbllm.hcir.grounding.features.feature_fusion import (
+            FeatureFusion,
+            MultiModalFeatureBundle,
+        )
+
+        bundle = MultiModalFeatureBundle(entity_id=entity_id)
+        target_obs = observations or {
+            name: drv.get_inputs() for name, drv in self._active_drivers.items() if drv.is_connected
+        }
+
+        for source_id, inp in target_obs.items():
+            inp.source_id = inp.source_id or source_id
+            _, features = self.adapt_to_grounded_observation(inp)
+            for fv in features:
+                bundle.add_feature(fv)
+
+        fuser = FeatureFusion()
+        return fuser.fuse_bundle(bundle)
 
     @property
     def is_streaming(self) -> bool:

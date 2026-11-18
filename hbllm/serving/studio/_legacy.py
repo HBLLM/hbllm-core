@@ -22,6 +22,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
+from hbllm.persistence.sqlite_profiles import open_connection
 from hbllm.serving.state import _get_node_map, _state
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ async def get_temporal_timeline():
         return {"timeline": [], "count": 0}
     try:
         now = time.time()
-        with sqlite3.connect(db_path) as conn:
+        with open_connection(db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT task_id, trigger_time, payload, route_topic, status FROM scheduled_tasks ORDER BY trigger_time ASC LIMIT 50"

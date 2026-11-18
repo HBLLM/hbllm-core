@@ -1,5 +1,14 @@
 """Actions — executable effector nodes (code execution, browser, API, tools)."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
+# Extend package search path to include experiments/legacy_actions
+_exp_path = Path(__file__).resolve().parents[2] / "experiments" / "legacy_actions"
+if _exp_path.exists() and str(_exp_path) not in __path__:
+    __path__.append(str(_exp_path))
+
 from hbllm.actions.api_node import ApiNode
 from hbllm.actions.browser_node import BrowserNode
 from hbllm.actions.causal_planner import (

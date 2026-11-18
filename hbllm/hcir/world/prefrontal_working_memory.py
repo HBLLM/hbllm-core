@@ -13,10 +13,13 @@ Modeled on the primate dorsolateral prefrontal cortex (dlPFC):
 from __future__ import annotations
 
 import logging
+import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+import numpy as np
 
 from hbllm.hcir.graph import ConceptNode, FactNode, ProcedureNode, SkillNode
 from hbllm.hcir.skills.declarative import (
@@ -38,7 +41,7 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoalStack
 from hbllm.hcir.world.habenular_episodic_inhibition import HabenularEpisodicIOR
 from hbllm.hcir.world.inferotemporal_segmentation import InferotemporalSegmentationEngine
 from hbllm.hcir.world.macro_actions import MacroActionPlan
-from hbllm.hcir.world.optical_ray_projection import OpticalRayProjector
+from hbllm.hcir.world.percept import EpistemicPhase, ExogenousSignalTracker, PlaceLocus
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
@@ -98,6 +101,194 @@ class HeldItem:
                 op=TransactionOp.UPSERT_NODE,
                 node_id=node_id,
                 node_data=node.model_dump(),
+            )
+        ]
+
+
+@dataclass
+class HomeostaticState:
+    """Homeostatic state regulating intrinsic motivation and goal arbitration (Gap 5, WP10).
+
+    Biologically grounded in allostatic regulation and active inference:
+    - energy_budget: Available computational / physical energy (0.0 to 100.0).
+      Depletion forces low-cost, safety-first policies.
+    - safety_margin: Minimum acceptable safety margin / clearance distance (0.0 to 1.0).
+    - competence_progress: Rate of prediction error reduction / learning progress d/dt(Error).
+    - social_instructions: Explicit externally-commanded goals or directives that preempt open-ended curiosity.
+    - fatigue: Accumulated cognitive fatigue decaying after rest or idle consolidation.
+    """
+
+    energy_budget: float = 100.0
+    safety_margin: float = 1.0
+    competence_progress: float = 0.0
+    social_instructions: list[dict[str, Any]] = field(default_factory=list)
+    fatigue: float = 0.0
+
+    def consume_energy(self, amount: float) -> float:
+        """Consume energy budget and accumulate fatigue."""
+        self.energy_budget = max(0.0, float(self.energy_budget - amount))
+        self.fatigue = min(100.0, float(self.fatigue + amount * 0.5))
+        return self.energy_budget
+
+    def replenish_energy(self, amount: float) -> float:
+        """Replenish energy budget and alleviate fatigue."""
+        self.energy_budget = min(100.0, float(self.energy_budget + amount))
+        self.fatigue = max(0.0, float(self.fatigue - amount))
+        return self.energy_budget
+
+    def record_progress(self, progress: float) -> None:
+        """Record competence progress signal (d/dt of prediction accuracy or error)."""
+        self.competence_progress = float(progress)
+
+    def add_instruction(self, instruction: dict[str, Any]) -> None:
+        """Add an explicit social or environmental instruction."""
+        self.social_instructions.append(dict(instruction))
+
+    def clear_instructions(self) -> None:
+        """Clear all social instructions upon fulfillment or cancellation."""
+        self.social_instructions.clear()
+
+    @property
+    def is_critical_energy(self) -> bool:
+        """True when energy is severely depleted (<= 25.0), requiring immediate risk-averse preservation."""
+        return self.energy_budget <= 25.0
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        """Export homeostatic variables as declarative CausalPredicates."""
+        return [
+            CausalPredicate(
+                variable="homeostatic:energy_budget",
+                operator="==",
+                value=round(self.energy_budget, 2),
+                relation="allostatic_regulation",
+                target_entity="prefrontal_working_memory",
+            ),
+            CausalPredicate(
+                variable="homeostatic:competence_progress",
+                operator="==",
+                value=round(self.competence_progress, 3),
+                relation="learning_progress",
+                target_entity="prefrontal_working_memory",
+            ),
+            CausalPredicate(
+                variable="homeostatic:social_instructions_count",
+                operator="==",
+                value=len(self.social_instructions),
+                relation="instructed_goals",
+                target_entity="prefrontal_working_memory",
+            ),
+        ]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Propose atomic HCIR updates reflecting homeostatic state."""
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id="homeostatic_state",
+                node_data={
+                    "energy_budget": float(self.energy_budget),
+                    "safety_margin": float(self.safety_margin),
+                    "competence_progress": float(self.competence_progress),
+                    "social_instructions_count": len(self.social_instructions),
+                    "fatigue": float(self.fatigue),
+                    "is_critical_energy": self.is_critical_energy,
+                },
+            )
+        ]
+
+
+@dataclass
+class DomainCompetenceProfile:
+    """Metacognitive competence profile per domain (G9).
+
+    Tracks calibration, win rate, and learning progress to answer:
+    'What am I bad at, and is practicing it worth it?'
+    """
+
+    domain_id: str
+    total_episodes: int = 0
+    successful_episodes: int = 0
+    running_win_rate: float = 0.0
+    mean_prediction_error: float = 0.50
+    error_history: list[float] = field(default_factory=list)
+    calibration_score: float = 0.50
+    learning_progress_rate: float = 0.0
+    last_updated: float = field(default_factory=time.time)
+
+    def record_episode(
+        self,
+        success: bool,
+        mean_error: float = 0.20,
+        predicted_confidence: float = 0.80,
+    ) -> None:
+        self.total_episodes += 1
+        if success:
+            self.successful_episodes += 1
+        self.running_win_rate = self.successful_episodes / self.total_episodes
+
+        clamped_err = max(0.0, min(1.0, float(mean_error)))
+        self.error_history.append(clamped_err)
+        if len(self.error_history) > 30:
+            self.error_history.pop(0)
+
+        alpha = 0.25
+        self.mean_prediction_error = (
+            1.0 - alpha
+        ) * self.mean_prediction_error + alpha * clamped_err
+
+        if len(self.error_history) >= 4:
+            split = len(self.error_history) // 2
+            older_mean = float(np.mean(self.error_history[:split]))
+            recent_mean = float(np.mean(self.error_history[split:]))
+            self.learning_progress_rate = max(-1.0, min(1.0, older_mean - recent_mean))
+
+        outcome_val = 1.0 if success else 0.0
+        brier = (float(predicted_confidence) - outcome_val) ** 2
+        self.calibration_score = max(0.0, min(1.0, 1.0 - brier))
+        self.last_updated = time.time()
+
+    @property
+    def practice_priority(self) -> float:
+        """Computes Zone of Proximal Development practice priority in [0.0, 1.0].
+
+        High priority when:
+        1. Not yet fully mastered (1.0 - win_rate is high)
+        2. Capable of learning (learning_progress_rate is positive or non-negative)
+        3. Well-calibrated (not delusionally overconfident on impossible tasks)
+        """
+        if self.running_win_rate >= 0.95 and self.total_episodes >= 5:
+            return 0.05
+
+        unmastered_factor = 1.0 - self.running_win_rate
+        learnability = max(0.10, min(1.0, 0.40 + self.learning_progress_rate * 1.5))
+        priority = unmastered_factor * learnability * max(0.2, self.calibration_score)
+        return float(max(0.0, min(1.0, priority)))
+
+    def to_causal_predicates(self) -> list[CausalPredicate]:
+        return [
+            CausalPredicate(
+                variable=f"domain_competence:{self.domain_id}",
+                operator="==",
+                value=f"win_rate:{self.running_win_rate:.2f}:priority:{self.practice_priority:.2f}",
+                relation="domain_metacognition",
+                target_entity=self.domain_id,
+            )
+        ]
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=f"domain_competence_{self.domain_id}",
+                node_data={
+                    "domain_id": self.domain_id,
+                    "total_episodes": self.total_episodes,
+                    "successful_episodes": self.successful_episodes,
+                    "running_win_rate": self.running_win_rate,
+                    "practice_priority": self.practice_priority,
+                    "learning_progress_rate": self.learning_progress_rate,
+                    "calibration_score": self.calibration_score,
+                },
             )
         ]
 
@@ -318,7 +509,35 @@ class PBWMWorkingMemoryBuffer:
 class PrefrontalWorkingMemory:
     """Biologically-modeled Prefrontal Working Memory (dlPFC) for latent state and subgoal reasoning."""
 
+    @classmethod
+    def get_mirrored_fields(cls) -> frozenset[str]:
+        """Set of prefrontal fields mirrored to authoritative HCIR transactions."""
+        return frozenset(
+            {
+                "phase",
+                "step_counter",
+                "avatar_pos",
+                "avatar_feature",
+                "avatar_features",
+                "tested_actions",
+                "exploration_budget",
+                "consecutive_plan_failures",
+                "consecutive_simulation_failures",
+                "simulation_cooldown",
+                "exploration_cooldown",
+                "pipeline_runs",
+                "homeostatic_state",
+            }
+        )
+
     def __init__(self) -> None:
+        self.phase: EpistemicPhase = EpistemicPhase.MOTOR_GROUNDING
+        self.pipeline_runs: int = 0
+        self.last_decision_branch: str | None = None
+        self.evidence_provenance_log: list[dict[str, Any]] = []
+
+        self.homeostatic_state: HomeostaticState = HomeostaticState()
+        self.domain_competence_profiles: dict[str, DomainCompetenceProfile] = {}
         self.pbwm_buffer: PBWMWorkingMemoryBuffer = PBWMWorkingMemoryBuffer()
         self.held_items: list[HeldItem] = []
         self.active_schema: SubgoalSchema | None = None
@@ -359,12 +578,29 @@ class PrefrontalWorkingMemory:
         self.macro_plan: MacroActionPlan = MacroActionPlan()
         self.remote_causal: RemoteCausalAttributor = RemoteCausalAttributor()
         self.habenular_ior: HabenularEpisodicIOR = HabenularEpisodicIOR()
-        self.optical_projector: OpticalRayProjector = OpticalRayProjector()
         self.it_segmenter: InferotemporalSegmentationEngine = InferotemporalSegmentationEngine()
         self.acc_conflict: AnteriorCingulateConflictMonitor = AnteriorCingulateConflictMonitor()
+        self.exogenous_tracker: ExogenousSignalTracker = ExogenousSignalTracker()
         self.hypothesis_engine: InductiveHypothesisEngine = InductiveHypothesisEngine()
         self.morphology: MorphologicalSaliencyEngine = MorphologicalSaliencyEngine()
         self._salience_baseline: WorkingMemorySalienceState = WorkingMemorySalienceState()
+        self.concept_role_priors: dict[int, dict[str, float]] = {}
+
+        # Continuous metric reference frame & sub-cell kinematic tracking
+        self.continuous_agent_pos: np.ndarray | tuple[float, ...] | None = None
+        self.continuous_goal_pos: np.ndarray | tuple[float, ...] | None = None
+        self.continuous_displacement: float = 0.0
+        self.continuous_delta: tuple[float, float] = (0.0, 0.0)
+        self.last_continuous_moved: bool = False
+        self.reference_frame: Any | None = None
+        self.last_observation_metadata: dict[str, Any] = {}
+        self.compiled_linguistic_hints: set[str] = set()
+        self.active_plan_step: Any | None = None
+        self.shroud_feature: int | None = None
+        self.allocentric_belief_grid: np.ndarray | None = None
+        self.prev_raw_sensory_grid: np.ndarray | None = None
+        self.collected_inventory_features: set[int] = set()
+        self.pending_gate_check: bool = False
 
         # Exploration & Curiosity Tracking (Single Source of Truth)
         self.active_probe_target: tuple[int, int] | None = None
@@ -373,6 +609,8 @@ class PrefrontalWorkingMemory:
         self.probed_entity_ids: set[str] = set()
         self.entity_visit_counts: dict[str, int] = {}
         self.position_visit_counts: dict[tuple[int, int], int] = {}
+        self.visited_cells: set[tuple[int, int]] = set()
+        self.active_epistemic_conditions: dict[tuple[int, int], dict[str, Any]] = {}
         self.recent_positions: deque[tuple[int, int]] = deque(maxlen=16)
         self.recent_actions: deque[Any] = deque(maxlen=16)
         self.exhausted_candidate_goals: set[tuple[int, int]] = set()
@@ -391,13 +629,13 @@ class PrefrontalWorkingMemory:
         self.causal_actuator_streak_limit: int = 4
 
         # Feature-level interventional causal falsification
-        self.quiescent_features: set[int] = set()
-        self.effective_features: set[int] = set()
-        self.feature_quiescent_counts: dict[int, int] = {}
+        self.quiescent_features: set[Any] = set()
+        self.effective_features: set[Any] = set()
+        self.feature_quiescent_counts: dict[Any, int] = {}
 
         # Metacognitive Refractory Action Inhibition
         self.inhibited_actions: dict[Any, int] = {}
-        self.prior_avatar_feature: int | None = None
+        self.prior_avatar_feature: Any | None = None
         self.entity_action_failed_positions: dict[Any, set[tuple[int, int]]] = {}
         self.immobile_entity_actions: set[Any] = set()
 
@@ -411,7 +649,7 @@ class PrefrontalWorkingMemory:
         self.last_effector_target_coord: tuple[int, int] | None = None
         self.last_effector_target_entity_id: str | None = None
         self.last_non_displacement_action: Any | None = None
-        self.level_epistemic_probes: int = 0
+        self.context_epistemic_probes: int = 0
         self.total_epistemic_probes: int = 0
 
         # Object Knowledge Base and Atomic Macro-Task Stores (Rule 1.8)
@@ -420,6 +658,95 @@ class PrefrontalWorkingMemory:
         self.object_trial_counts: dict[str, int] = {}
         self.object_success_counts: dict[str, int] = {}
 
+    @property
+    def level_epistemic_probes(self) -> int:
+        """Deprecated alias for ``context_epistemic_probes``."""
+        return self.context_epistemic_probes
+
+    @level_epistemic_probes.setter
+    def level_epistemic_probes(self, val: int) -> None:
+        self.context_epistemic_probes = val
+
+    @property
+    def exogenous_uncontrollable(self) -> set[PlaceLocus]:
+        """Loci empirically identified as uncontrollable/exogenous (I(DeltaS; A) ~ 0)."""
+        return self.exogenous_tracker.exogenous_loci
+
+    @exogenous_uncontrollable.setter
+    def exogenous_uncontrollable(self, val: set[PlaceLocus]) -> None:
+        self.exogenous_tracker.exogenous_loci = set(val)
+
+    def is_exogenous_locus(
+        self,
+        locus: PlaceLocus,
+        *,
+        lattice: Any = None,
+        bg: Any = 0,
+        include_outer_edge: bool = False,
+    ) -> bool:
+        """True if locus is empirically uncontrollable or topologically partitioned."""
+        return self.exogenous_tracker.is_exogenous(
+            locus,
+            lattice=lattice,
+            bg=bg,
+            include_outer_edge=include_outer_edge,
+        )
+
+    def inhibit_action(self, action: Any, duration: int = 4) -> None:
+        """Apply bounded, decaying inhibition to an action (Rule 1.8 & P2-7)."""
+        if action is not None:
+            self.inhibited_actions[action] = max(
+                self.inhibited_actions.get(action, 0), min(int(duration), 10)
+            )
+
+    def decay_inhibited_actions(self) -> None:
+        """Decay all active action inhibitions by 1 step, evicting expired ones."""
+        expired = [act for act, timer in self.inhibited_actions.items() if timer <= 1]
+        for act in list(self.inhibited_actions.keys()):
+            self.inhibited_actions[act] -= 1
+        for act in expired:
+            self.inhibited_actions.pop(act, None)
+
+    def record_domain_episode(
+        self,
+        domain_id: str,
+        success: bool,
+        mean_error: float = 0.20,
+        predicted_confidence: float = 0.80,
+    ) -> DomainCompetenceProfile:
+        """Record domain performance outcome and update metacognitive competence profile (G9)."""
+        if domain_id not in self.domain_competence_profiles:
+            self.domain_competence_profiles[domain_id] = DomainCompetenceProfile(
+                domain_id=domain_id
+            )
+
+        profile = self.domain_competence_profiles[domain_id]
+        profile.record_episode(
+            success=success,
+            mean_error=mean_error,
+            predicted_confidence=predicted_confidence,
+        )
+
+        self.homeostatic_state.record_progress(profile.learning_progress_rate)
+        return profile
+
+    def get_domain_competence(self, domain_id: str) -> DomainCompetenceProfile:
+        """Retrieve competence profile for domain, creating initial profile if absent."""
+        if domain_id not in self.domain_competence_profiles:
+            self.domain_competence_profiles[domain_id] = DomainCompetenceProfile(
+                domain_id=domain_id
+            )
+        return self.domain_competence_profiles[domain_id]
+
+    def get_highest_priority_practice_domain(self) -> str | None:
+        """Identify which domain has the highest practice priority in the Zone of Proximal Development."""
+        if not self.domain_competence_profiles:
+            return None
+        return max(
+            self.domain_competence_profiles.keys(),
+            key=lambda d: self.domain_competence_profiles[d].practice_priority,
+        )
+
     def has_salience_shift(self, engine: Any) -> bool:
         """Evaluate whether semantic discoveries, dynamic patroller kinematics, or high surprise
         warrant an executive phase shift back to forward mental simulation.
@@ -427,11 +754,7 @@ class PrefrontalWorkingMemory:
         n_act = len(get_engine_state_attr(engine, "action_dynamics", {}))
         n_goals = len(get_engine_state_attr(engine, "learned_goal_positions", set()))
         n_barriers = len(get_engine_state_attr(engine, "learned_barriers", set()))
-        n_traj = len(
-            getattr(
-                get_engine_state_attr(engine, "collision_cones", None), "projected_trajectories", []
-            )
-        )
+        n_traj = 0
         n_threats = len(get_engine_state_attr(engine, "mobile_threat_features", set()))
 
         b = self._salience_baseline
@@ -458,11 +781,7 @@ class PrefrontalWorkingMemory:
         n_act = len(get_engine_state_attr(engine, "action_dynamics", {}))
         n_goals = len(get_engine_state_attr(engine, "learned_goal_positions", set()))
         n_barriers = len(get_engine_state_attr(engine, "learned_barriers", set()))
-        n_traj = len(
-            getattr(
-                get_engine_state_attr(engine, "collision_cones", None), "projected_trajectories", []
-            )
-        )
+        n_traj = 0
         n_threats = len(get_engine_state_attr(engine, "mobile_threat_features", set()))
         self._salience_baseline = WorkingMemorySalienceState(
             calibrated_actions=n_act,
@@ -486,6 +805,88 @@ class PrefrontalWorkingMemory:
             lines = [str(l).strip() for l in instructions if str(l).strip()]
         self.executive_directives = lines
         logger.info("PrefrontalWorkingMemory: Loaded %d executive directives.", len(lines))
+
+    def integrate_sensory_observation(
+        self,
+        raw_grid: Any,
+        avatar_features: set[int],
+        bg_hint: Any = None,
+    ) -> Any:
+        """Integrate partially observable egocentric frames into a persistent allocentric belief map."""
+        if raw_grid is None:
+            return None
+        arr = np.asarray(raw_grid)
+        if arr.ndim != 2 or arr.size < 25:
+            return raw_grid
+        H, W = arr.shape
+        if self.allocentric_belief_grid is not None and self.allocentric_belief_grid.shape != (
+            H,
+            W,
+        ):
+            self.shroud_feature = None
+            self.allocentric_belief_grid = None
+            self.prev_raw_sensory_grid = None
+
+        prev = self.prev_raw_sensory_grid
+        if self.shroud_feature is None:
+            if prev is not None and prev.shape == (H, W):
+                diff_mask = prev != arr
+                if int(np.count_nonzero(diff_mask)) >= 6:
+                    corners = {
+                        int(arr[0, 0]),
+                        int(arr[0, W - 1]),
+                        int(arr[H - 1, 0]),
+                        int(arr[H - 1, W - 1]),
+                    } | {
+                        int(prev[0, 0]),
+                        int(prev[0, W - 1]),
+                        int(prev[H - 1, 0]),
+                        int(prev[H - 1, W - 1]),
+                    }
+                    for cand_s in corners:
+                        newly_hidden = int(np.count_nonzero((prev != cand_s) & (arr == cand_s)))
+                        newly_revealed = int(np.count_nonzero((prev == cand_s) & (arr != cand_s)))
+                        if newly_hidden >= 3 and newly_revealed >= 3:
+                            self.shroud_feature = cand_s
+                            self.allocentric_belief_grid = prev.copy()
+                            break
+            elif H >= 7 and W >= 7:
+                c0 = int(arr[0, 0])
+                outer_uniform = (
+                    bool(np.all(arr[0, :] == c0))
+                    and bool(np.all(arr[H - 1, :] == c0))
+                    and bool(np.all(arr[:, 0] == c0))
+                    and bool(np.all(arr[:, W - 1] == c0))
+                )
+                if outer_uniform:
+                    inner_rings = sum(
+                        [
+                            bool(np.all(arr[1, :] == c0)),
+                            bool(np.all(arr[H - 2, :] == c0)),
+                            bool(np.all(arr[:, 1] == c0)),
+                            bool(np.all(arr[:, W - 2] == c0)),
+                        ]
+                    )
+                    non_s = arr[arr != c0]
+                    if inner_rings >= 2 and non_s.size >= 9 and len(np.unique(non_s)) >= 2:
+                        self.shroud_feature = c0
+                        self.allocentric_belief_grid = arr.copy()
+
+        self.prev_raw_sensory_grid = arr.copy()
+        if self.shroud_feature is None:
+            return raw_grid
+
+        s_val = self.shroud_feature
+        if self.allocentric_belief_grid is None:
+            self.allocentric_belief_grid = arr.copy()
+        vis_mask = arr != s_val
+        if avatar_features:
+            floor_fill = int(bg_hint) if (bg_hint is not None and int(bg_hint) != s_val) else 0
+            stale_av = (~vis_mask) & np.isin(self.allocentric_belief_grid, list(avatar_features))
+            if np.any(stale_av):
+                self.allocentric_belief_grid[stale_av] = floor_fill
+        self.allocentric_belief_grid[vis_mask] = arr[vis_mask]
+        return self.allocentric_belief_grid.copy()
 
     def reset_episode(
         self, retain_long_term: bool = True, retain_inhibitions: bool = False
@@ -516,17 +917,34 @@ class PrefrontalWorkingMemory:
         self.macro_plan.clear()
         self.remote_causal.reset_episode(retain_long_term=retain_long_term)
         self.acc_conflict.reset_episode(retain_long_term=retain_long_term)
+        self.exogenous_tracker.reset_episode(retain_long_term=retain_long_term)
         self.hypothesis_engine.reset_episode(retain_confirmed=retain_long_term)
         self.active_probe_target = None
         self.active_probe_id = None
         self.probe_target_steps = 0
+        self.continuous_agent_pos = None
+        self.continuous_goal_pos = None
+        self.continuous_displacement = 0.0
+        self.continuous_delta = (0.0, 0.0)
+        self.last_continuous_moved = False
+        self.active_plan_step = None
+        self.reference_frame = None
+        self.last_observation_metadata.clear()
+        self.compiled_linguistic_hints.clear()
+        self.shroud_feature = None
+        self.allocentric_belief_grid = None
+        self.prev_raw_sensory_grid = None
+        self.collected_inventory_features.clear()
+        self.pending_gate_check = False
         self.recent_positions.clear()
         self.recent_actions.clear()
+        self.visited_cells.clear()
+        self.active_epistemic_conditions.clear()
         self.consecutive_effective_actuations = 0
         self.consecutive_goal_converging_actuations = 0
         self.active_causal_actuator_coord = None
         self.consecutive_causal_probes = 0
-        self.level_epistemic_probes = 0
+        self.context_epistemic_probes = 0
         self.dial_mutation_streak = 0
         self.last_effector_target_coord = None
         self.last_effector_target_entity_id = None
@@ -570,6 +988,77 @@ class PrefrontalWorkingMemory:
                 retain_long_term=True,
                 retain_inhibitions=retain_inhibitions,
             )
+
+    def update_continuous_goal_from_lattice(
+        self,
+        grid: np.ndarray | None,
+        theory: Any,
+        avatar_features: Any,
+        avatar_feature: int | None,
+        bg_feature: int | None,
+    ) -> None:
+        """Lift active lattice goal or singleton waypoint into continuous metric coordinates."""
+        if self.reference_frame is None or self.continuous_agent_pos is None or grid is None:
+            return
+        if grid.ndim < 2:
+            return
+        H, W = grid.shape
+        rf = self.reference_frame
+        origin_desc = rf.origin_description or "bottom_left_metric"
+        x_b = rf.bounds
+        x_min = float(x_b[0][0]) if (x_b and len(x_b) >= 1) else 0.0
+        x_max = float(x_b[0][1]) if (x_b and len(x_b) >= 1) else float(W)
+        y_min = float(x_b[1][0]) if (x_b and len(x_b) >= 2) else 0.0
+        y_max = float(x_b[1][1]) if (x_b and len(x_b) >= 2) else float(H)
+
+        target_rc: tuple[int, int] | None = None
+        for gf in theory.goal_features:
+            coords = np.argwhere(grid == gf)
+            if len(coords) > 0:
+                target_rc = (int(coords[0][0]), int(coords[0][1]))
+                break
+        if target_rc is None:
+            bg_v = int(bg_feature) if bg_feature is not None else int(grid[1, 1])
+            av_s = set(avatar_features or ())
+            if avatar_feature is not None:
+                av_s.add(int(avatar_feature))
+            av_s.add(int(grid[0, 0]))
+            vals, cnts = np.unique(grid, return_counts=True)
+            for v_np, c_np in sorted(
+                zip(vals.tolist(), cnts.tolist(), strict=False), key=lambda vc: vc[1]
+            ):
+                vf = int(v_np)
+                if (
+                    vf != bg_v
+                    and vf not in av_s
+                    and 1 <= int(c_np) <= 2
+                    and not theory.is_barrier(vf)
+                ):
+                    coords = np.argwhere(grid == vf)
+                    if len(coords) > 0:
+                        target_rc = (int(coords[0][0]), int(coords[0][1]))
+                        break
+        if target_rc is not None:
+            gr, gc = target_rc
+            cell_w = (x_max - x_min) / max(1, W)
+            cell_h = (y_max - y_min) / max(1, H)
+            cont_x = x_min + (float(gc) + 0.5) * cell_w
+            cont_y = (
+                y_max - (float(gr) + 0.5) * cell_h
+                if "bottom_left" in origin_desc
+                else y_min + (float(gr) + 0.5) * cell_h
+            )
+            self.continuous_goal_pos = np.array([cont_x, cont_y], dtype=float)
+        elif (
+            self.continuous_goal_pos is None
+            or float(
+                np.linalg.norm(
+                    np.asarray(self.continuous_goal_pos) - np.asarray(self.continuous_agent_pos)
+                )
+            )
+            <= 0.35
+        ):
+            self.continuous_goal_pos = None
 
     def register_cardinality_constraint(
         self,
@@ -849,15 +1338,18 @@ class PrefrontalWorkingMemory:
         context: Any = None,
     ) -> tuple[str, DeclarativeNeuroSymbolicSkill] | None:
         """Match stored procedural skills against available actions and context signature."""
-        curr_lvl = (
-            context.get("current_level")
+        curr_epoch = (
+            context.get("context_epoch", context.get("current_level"))
             if isinstance(context, dict)
-            else getattr(context, "current_level", None)
+            else getattr(context, "context_epoch", getattr(context, "current_level", None))
         )
         for name, skill in self.procedural_library.items():
             proc_macro = getattr(skill, "_procedural_macro", None)
-            if proc_macro is not None and curr_lvl is not None:
-                if proc_macro.level != curr_lvl:
+            if proc_macro is not None and curr_epoch is not None:
+                macro_epoch = getattr(
+                    proc_macro, "context_epoch", getattr(proc_macro, "level", None)
+                )
+                if macro_epoch != curr_epoch:
                     continue
             sig = getattr(skill, "signature", None)
             if sig is None:
@@ -988,4 +1480,32 @@ class PrefrontalWorkingMemory:
 
         ops.extend(self.visuospatial.to_transaction_operations())
         ops.extend(self.habenular_ior.to_transaction_operations())
+        ops.extend(self.homeostatic_state.to_transaction_operations())
         return ops
+
+    # ── Homeostatic Regulation & Social Directives (WP10) ────────────
+
+    @property
+    def homeostatic(self) -> HomeostaticState:
+        """Alias for homeostatic_state."""
+        return self.homeostatic_state
+
+    def get_homeostatic_state(self) -> HomeostaticState:
+        """Return the current prefrontal homeostatic state."""
+        return self.homeostatic_state
+
+    def consume_energy(self, amount: float) -> float:
+        """Consume energy budget."""
+        return self.homeostatic_state.consume_energy(amount)
+
+    def replenish_energy(self, amount: float) -> float:
+        """Replenish energy budget."""
+        return self.homeostatic_state.replenish_energy(amount)
+
+    def add_social_instruction(self, instruction: dict[str, Any]) -> None:
+        """Add an explicit social instruction."""
+        self.homeostatic_state.add_instruction(instruction)
+
+    def clear_social_instructions(self) -> None:
+        """Clear all social instructions."""
+        self.homeostatic_state.clear_instructions()

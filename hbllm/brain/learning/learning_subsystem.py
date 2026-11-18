@@ -25,13 +25,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from hbllm.brain.causality.causal_model_builder import CausalModelBuilder
     from hbllm.brain.emotion.goal_manager import GoalManager
     from hbllm.brain.emotion.mechanism_store import MechanismStore
     from hbllm.brain.evaluation.failure_analyzer import FailureAnalyzer
     from hbllm.brain.learning.meta_learner import MetaLearner
     from hbllm.brain.reasoning.belief_store import BeliefStore
-    from hbllm.brain.reasoning.concept_formation import ConceptFormationEngine
     from hbllm.brain.reasoning.contradiction_detector import (
         BeliefRevisionEngine,
         ContradictionDetector,
@@ -223,7 +221,7 @@ class CognitiveConcepts:
     Pure adapter — delegates to ConceptFormationEngine, never duplicates logic.
     """
 
-    def __init__(self, concept_engine: ConceptFormationEngine | None) -> None:
+    def __init__(self, concept_engine: Any | None) -> None:
         self._engine = concept_engine
 
     @property
@@ -445,11 +443,11 @@ class CognitiveGraph:
     belief_engine: BeliefRevisionEngine | None = None
     contradiction_detector: ContradictionDetector | None = None
     meta_learner: MetaLearner | None = None
-    causal_model_builder: CausalModelBuilder | None = None
+    causal_model_builder: Any | None = None
 
     # Persistent stores
     belief_store: BeliefStore | None = None
-    concept_engine: ConceptFormationEngine | None = None
+    concept_engine: Any | None = None
 
     # Goal system (optional, explicit)
     goal_manager: GoalManager | None = None

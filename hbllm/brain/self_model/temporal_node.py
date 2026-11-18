@@ -15,6 +15,7 @@ from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeType
+from hbllm.persistence.sqlite_profiles import open_connection
 from hbllm.utils.temporal import parse_temporal_references
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,7 @@ class TemporalNode(Node):
         """Create the SQLite schema."""
         if self._db_path is None:
             return
-        with sqlite3.connect(self._db_path) as conn:
+        with open_connection(self._db_path) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS temporal_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,7 +156,7 @@ class TemporalNode(Node):
         if self._db_path is None:
             return
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     "SELECT * FROM temporal_events ORDER BY timestamp DESC LIMIT ?",
@@ -182,7 +183,7 @@ class TemporalNode(Node):
         if self._db_path is None:
             return
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.execute(
                     """INSERT INTO temporal_events
                        (topic, summary, timestamp, domain, correlation_id)
@@ -302,7 +303,7 @@ class TemporalNode(Node):
         if self._db_path is None:
             return []
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with open_connection(self._db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     """SELECT * FROM temporal_events
@@ -335,7 +336,7 @@ class TemporalNode(Node):
         """
         if self._db_path is not None:
             try:
-                with sqlite3.connect(self._db_path) as conn:
+                with open_connection(self._db_path) as conn:
                     conn.row_factory = sqlite3.Row
                     rows = conn.execute(
                         """SELECT * FROM temporal_events
@@ -364,7 +365,7 @@ class TemporalNode(Node):
 
         if self._db_path is not None:
             try:
-                with sqlite3.connect(self._db_path) as conn:
+                with open_connection(self._db_path) as conn:
                     rows = conn.execute(
                         """SELECT domain, COUNT(*) as cnt
                            FROM temporal_events
@@ -444,7 +445,7 @@ class TemporalNode(Node):
         total_persisted = 0
         if self._db_path is not None:
             try:
-                with sqlite3.connect(self._db_path) as conn:
+                with open_connection(self._db_path) as conn:
                     total_persisted = conn.execute(
                         "SELECT COUNT(*) FROM temporal_events"
                     ).fetchone()[0]

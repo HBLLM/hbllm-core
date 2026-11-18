@@ -15,6 +15,7 @@ from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 
@@ -65,19 +66,35 @@ async def test_mcts_counterfactual_planner_selects_goal_directed_action(
     ws, services = hcir_setup
 
     # Avatar at (4, 4), Goal at (1, 4) -> UP reduces distance
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [4, 4], "is_avatar": True, "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="goal",
-            entity_name="goal",
-            properties={"position": [1, 4], "is_goal": True, "movable": False, "passable": True},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [4, 4],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="goal",
+                    entity_name="goal",
+                    properties={
+                        "position": [1, 4],
+                        "is_goal": True,
+                        "movable": False,
+                        "passable": True,
+                    },
+                ),
+            ),
+        ]
     )
 
     planner = CounterfactualPlanner(ws, services)
@@ -123,26 +140,38 @@ async def test_mcts_counterfactual_planner_prunes_deadlock(
 ) -> None:
     ws, services = hcir_setup
 
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [4, 4], "is_avatar": True, "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="box",
-            entity_name="box",
-            properties={"position": [4, 5], "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="wall_corner",
-            entity_name="wall",
-            properties={"position": [4, 6], "movable": False, "passable": False},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [4, 4],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="box",
+                    entity_name="box",
+                    properties={"position": [4, 5], "movable": True, "passable": False},
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="wall_corner",
+                    entity_name="wall",
+                    properties={"position": [4, 6], "movable": False, "passable": False},
+                ),
+            ),
+        ]
     )
 
     planner = CounterfactualPlanner(ws, services)
@@ -181,12 +210,22 @@ async def test_evaluate_and_select_dual_mode_with_mcts(
 ) -> None:
     ws, services = hcir_setup
 
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [2, 2], "is_avatar": True, "movable": True, "passable": False},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [2, 2],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            )
+        ]
     )
 
     planner = CounterfactualPlanner(ws, services)
@@ -234,26 +273,38 @@ async def test_evaluate_and_select_auto_mode_selects_mcts_on_hazards(
     """Verify that evaluate_and_select without use_mcts autonomously triggers MCTS when hazards exist."""
     ws, services = hcir_setup
 
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [4, 4], "is_avatar": True, "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="box",
-            entity_name="box",
-            properties={"position": [4, 5], "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="wall_corner",
-            entity_name="wall",
-            properties={"position": [4, 6], "movable": False, "passable": False},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [4, 4],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="box",
+                    entity_name="box",
+                    properties={"position": [4, 5], "movable": True, "passable": False},
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="wall_corner",
+                    entity_name="wall",
+                    properties={"position": [4, 6], "movable": False, "passable": False},
+                ),
+            ),
+        ]
     )
 
     planner = CounterfactualPlanner(ws, services)

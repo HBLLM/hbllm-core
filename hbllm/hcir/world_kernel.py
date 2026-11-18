@@ -82,10 +82,13 @@ class WorldKernel:
     def epistemic_engine(self) -> Any:
         """Attached or lazily provisioned AutonomousEpistemicEngine instance."""
         if self._epistemic_engine is None:
-            from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
             branch = getattr(self._workspace, "branch_name", "default")
-            self._epistemic_engine = AutonomousEpistemicEngine(world_id=branch)
+            sys = build_cognitive_system(
+                CognitiveSystemConfig(world_id=branch, enable_logging=False)
+            )
+            self._epistemic_engine = sys.engine
         return self._epistemic_engine
 
     @epistemic_engine.setter

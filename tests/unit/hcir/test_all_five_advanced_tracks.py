@@ -51,7 +51,6 @@ from hbllm.hcir.world.cortex_episodic import (
     HippocampalEpisodicCortex,
     HippocampalReplayConsolidator,
 )
-from hbllm.hcir.world.experimental import restore_all as _restore_all
 from hbllm.hcir.world.frontopolar_subgoal_stack import (
     FrontopolarSubgoalStack,
     SubgoalType,
@@ -108,7 +107,6 @@ def test_track1_autonomous_epistemic_engine_consolidation_integration() -> None:
     """Verify end-to-end memory consolidation within AutonomousEpistemicEngine."""
     engine = AutonomousEpistemicEngine(world_id="test_swr_world")
 
-    _restore_all(engine)
     cortex: HippocampalEpisodicCortex = engine.episodic_cortex
 
     # Record transitions into active episodic cortex buffer

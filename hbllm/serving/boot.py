@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -210,34 +211,22 @@ class BootOrchestrator:
         # ── 2.5 Initialize HCIR Kernel & Executive Runtime ───────────
         try:
             from hbllm.hcir.adapters.node_adapter import NodeAdapter
-            from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
-            from hbllm.hcir.kernel.capability_sandboxing import CapabilitySandboxManager
-            from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
-            from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
-            from hbllm.hcir.kernel.services import KernelServices
-            from hbllm.hcir.kernel.transaction_manager import TransactionManager
             from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-            from hbllm.hcir.workspace import HCIRWorkspaceState
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-            hcir_ws = (
-                ctx.brain.workspace_node.hcir_workspace
-                if hasattr(ctx.brain, "workspace_node") and ctx.brain.workspace_node
-                else HCIRWorkspaceState()
+            # Route through single canonical composition root
+            cog_cfg = CognitiveSystemConfig(
+                world_id=cfg.profile_name,
+                memory_dir=Path(cfg.data_dir) / "worlds" / cfg.profile_name,
+                enable_grounding=cfg.enable_perception,
             )
-            tx_mgr = TransactionManager(hcir_ws)
-            sandbox_mgr = CapabilitySandboxManager()
-            resolver = CapabilityResolver(sandbox_manager=sandbox_mgr)
-            hcir_sched = KernelInstructionScheduler()
+            cog_sys = build_cognitive_system(cog_cfg)
+            ctx.kernel_services = cog_sys.services
+            ctx.executive_runtime = cog_sys.runtime
+            hcir_ws = cog_sys.workspace
 
-            ctx.kernel_services = KernelServices(
-                workspace=hcir_ws,
-                transaction_manager=tx_mgr,
-                capability_resolver=resolver,
-                scheduler=hcir_sched,
-                sandbox_manager=sandbox_mgr,
-            )
-            ctx.executive_runtime = ExecutiveRuntime(ctx.kernel_services)
-            await ctx.executive_runtime.start()
+            if ctx.executive_runtime:
+                await ctx.executive_runtime.start()
 
             # Export brain nodes capabilities to HCIR workspace
             if hasattr(ctx.brain, "nodes"):

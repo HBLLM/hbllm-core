@@ -224,41 +224,6 @@ def test_visual_symmetry_structural_goal_induction() -> None:
             assert g["confidence"] > 0.5
 
 
-def test_intuitive_physics_gravity_and_fall_projection() -> None:
-    """Verify IntuitivePhysicsEngine infers environmental gravity and simulates falling descent."""
-    from hbllm.hcir.world.intuitive_physics import IntuitivePhysicsEngine
-
-    physics = IntuitivePhysicsEngine()
-    assert not physics.has_gravity
-
-    # Simulate 2 transitions where horizontal move caused downward displacement (gravity drift)
-    physics.record_transition(
-        prev_pos=(2, 2), curr_pos=(3, 3), is_displacement_action=True, commanded_delta=(0, 1)
-    )
-    physics.record_transition(
-        prev_pos=(3, 3), curr_pos=(4, 4), is_displacement_action=True, commanded_delta=(0, 1)
-    )
-
-    assert physics.has_gravity is True
-    assert physics.gravity_vector == (1, 0)
-
-    # Project falling trajectory in a 10x10 grid with a platform at row 7
-    grid = np.zeros((10, 10), dtype=int)
-    barrier_feats = {1}
-    grid[7, :] = 1  # solid floor at row 7
-
-    # Entity released at (2, 5) falls until resting on platform at (6, 5)
-    landing_pos, trajectory, is_lethal = physics.project_fall(
-        start_r=2,
-        start_c=5,
-        grid=grid,
-        barrier_features=barrier_feats,
-    )
-    assert landing_pos == (6, 5)
-    assert not is_lethal
-    assert len(trajectory) == 4  # rows 3, 4, 5, 6
-
-
 def test_symbolic_constraint_solver_unit_propagation() -> None:
     """Verify SymbolicConstraintSolver deductively isolates safe cells and hazards without guessing."""
     from hbllm.hcir.world.prefrontal_working_memory import PrefrontalWorkingMemory

@@ -112,7 +112,6 @@ class InteractiveARCEvaluator:
         engine: Any = None,
     ) -> dict[str, Any]:
         """Evaluate an interactive environment end-to-end using dynamic neuro-symbolic faculties."""
-        from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
         from hbllm.hcir.world.macro_actions import MacroActionDriverManager
         from plugins.arc_agi_adapter.arc_macro_actions import register_arc_macro_actions
         from plugins.arc_agi_adapter.arc_perception import ARCPerceptionAdapter, extract_arc_objects
@@ -120,7 +119,13 @@ class InteractiveARCEvaluator:
         register_arc_macro_actions()
 
         if engine is None:
-            engine = AutonomousEpistemicEngine(perception_adapter=ARCPerceptionAdapter())
+            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+            sys = build_cognitive_system(
+                CognitiveSystemConfig(world_id="arc_eval", enable_logging=False)
+            )
+            engine = sys.engine
+            engine.perception_adapter = ARCPerceptionAdapter()
 
         engine.reset()
         engine.attach_game_reference(env)

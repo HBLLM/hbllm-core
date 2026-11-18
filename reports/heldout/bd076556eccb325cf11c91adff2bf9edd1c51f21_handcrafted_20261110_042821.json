@@ -1,0 +1,98 @@
+{
+  "git_sha": "bd076556eccb325cf11c91adff2bf9edd1c51f21",
+  "config_hash": "ce3a97ec839f0918",
+  "timestamp": "20261110_042821",
+  "split": "heldout",
+  "tasks": [
+    {
+      "task_id": "grid_nav_heldout_system_handcrafted",
+      "family": "grid",
+      "split": "heldout",
+      "steps": 76,
+      "max_budget": 100,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 43.31,
+      "p95_latency_ms": 197.06,
+      "errors": []
+    },
+    {
+      "task_id": "grid_push_heldout_system_handcrafted",
+      "family": "grid",
+      "split": "heldout",
+      "steps": 91,
+      "max_budget": 100,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 45.96,
+      "p95_latency_ms": 173.97,
+      "errors": []
+    },
+    {
+      "task_id": "continuous_reach_heldout_system_handcrafted",
+      "family": "continuous",
+      "split": "heldout",
+      "steps": 60,
+      "max_budget": 60,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 30.34,
+      "p95_latency_ms": 154.5,
+      "errors": []
+    },
+    {
+      "task_id": "symbolic_rules_heldout_system_handcrafted",
+      "family": "symbolic",
+      "split": "heldout",
+      "steps": 80,
+      "max_budget": 80,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "p50_latency_ms": 37.81,
+      "p95_latency_ms": 123.21,
+      "errors": []
+    }
+  ],
+  "family_scores": {
+    "grid": 0.0,
+    "continuous": 0.0,
+    "symbolic": 0.0
+  },
+  "generality_score": 0.0,
+  "mean_p50_latency_ms": 39.36,
+  "mean_p95_latency_ms": 162.19,
+  "baselines": {
+    "random": {
+      "generality_score": 0.0,
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0,
+        "symbolic": 0.0
+      },
+      "solve_rate": 0.0
+    },
+    "oracle": {
+      "generality_score": 0.8938,
+      "family_scores": {
+        "grid": 0.95,
+        "continuous": 0.8,
+        "symbolic": 0.9313
+      },
+      "solve_rate": 1.0
+    },
+    "no_grounding": {
+      "generality_score": 0.0,
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0,
+        "symbolic": 0.0
+      },
+      "solve_rate": 0.0
+    }
+  },
+  "env_hash": "88b8bea0d5cc4bc9"
+}

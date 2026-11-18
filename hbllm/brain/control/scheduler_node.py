@@ -16,6 +16,7 @@ from typing import Any
 
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.node import Node, NodeInfo, NodeType
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,7 @@ class SchedulerNode(Node):
 
     def _db_get_due_tasks(self, now: float) -> list[dict[str, Any]]:
         """Return all pending tasks whose trigger_time <= now."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 "SELECT * FROM scheduled_tasks WHERE status = 'pending' AND trigger_time <= ?",
@@ -106,7 +107,7 @@ class SchedulerNode(Node):
 
     def _db_mark_processing(self, task_id: str) -> None:
         """Transition a task to the 'processing' state."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 "UPDATE scheduled_tasks SET status = 'processing' WHERE task_id = ?",
                 (task_id,),
@@ -117,7 +118,7 @@ class SchedulerNode(Node):
 
         Returns an outcome string: 'rescheduled', 'completed', 'retrying', or 'failed'.
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             if success:
                 if task["cron_expression"]:
                     interval = parse_interval_seconds(task["cron_expression"])
@@ -155,7 +156,7 @@ class SchedulerNode(Node):
 
     def _init_db(self) -> None:
         """Initialize the SQLite schema (called synchronously at construction time)."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS scheduled_tasks (
@@ -242,7 +243,7 @@ class SchedulerNode(Node):
         retry_policy: str = "fire_and_forget",
     ) -> None:
         """Schedule a new generalized event."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO scheduled_tasks
@@ -266,7 +267,7 @@ class SchedulerNode(Node):
 
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a scheduled task. Returns True if a task was modified."""
-        with sqlite3.connect(self.db_path) as conn:
+        with open_connection(self.db_path) as conn:
             cursor = conn.execute(
                 "UPDATE scheduled_tasks SET status = 'cancelled' WHERE task_id = ? AND status = 'pending'",
                 (task_id,),
@@ -277,7 +278,7 @@ class SchedulerNode(Node):
         """Return scheduler telemetry."""
         pending = 0
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with open_connection(self.db_path) as conn:
                 row = conn.execute(
                     "SELECT COUNT(*) FROM scheduled_tasks WHERE status = 'pending'"
                 ).fetchone()

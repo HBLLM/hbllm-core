@@ -1,0 +1,838 @@
+{
+  "rule": "sd = std(baseline_levels across seeds) floored at 0.5; keep iff (baseline - ablated) > sd, OR steps-to-first-level +>5% with no level gain, OR load_bearing_crash; else experimental. 0-call faculties are unused. NOTE: 9 small games is limited evidence.",
+  "games": [
+    "nav_basic",
+    "blocked_first",
+    "stride2",
+    "key_door",
+    "push_block",
+    "click_toggle",
+    "recolour_gate",
+    "hazard",
+    "death_reset"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "steps": 120,
+  "note": "9 small games is limited evidence for retention decisions.",
+  "faculties": {
+    "subgoal_stack": {
+      "class": "FrontopolarSubgoalStack",
+      "calls": 6,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -266.3,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "body_schema": {
+      "class": "ExtendedBodySchema",
+      "calls": 3,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 130.1,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "habenular_ior": {
+      "class": "HabenularEpisodicIOR",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "remote_causal": {
+      "class": "RemoteCausalAttributor",
+      "calls": 3,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -300.3,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "optical_projector": {
+      "class": "OpticalRayProjector",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "it_segmenter": {
+      "class": "InferotemporalSegmentationEngine",
+      "calls": 1539,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -311.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "acc_conflict": {
+      "class": "AnteriorCingulateConflictMonitor",
+      "calls": 3,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -0.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "hazard_tracker": {
+      "class": "SpatiotemporalHazardTracker",
+      "calls": 67449,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1287.0,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "physics_engine": {
+      "class": "IntuitivePhysicsEngine",
+      "calls": 1542,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -294.7,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "dorsal_kinetic_stream": {
+      "class": "DorsalKineticStream",
+      "calls": 1536,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1172.4,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "bilateral_integrator": {
+      "class": "BilateralCoordinateIntegrator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "cerebellar_clock": {
+      "class": "CerebellarPhaseClock",
+      "calls": 1845,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.4444444444444444,
+      "delta_levels": 0.333,
+      "sd": 0.641,
+      "delta_steps_pct": -51.1,
+      "delta_latency_ms": -86.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.33 <= sd 0.64"
+    },
+    "smith_predictor": {
+      "class": "CerebellarSmithPredictor",
+      "calls": 1296,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -313.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "collision_cones": {
+      "class": "SpatiotemporalCollisionCones",
+      "calls": 67785,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1159.8,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "causal_cortex": {
+      "class": "CausalInductionCortex",
+      "calls": 1563,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -46.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "acc_conflict_monitor": {
+      "class": "AnteriorCingulateConflictMonitor",
+      "calls": 2316,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1184.5,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "room_topology": {
+      "class": "RoomTopologyExtractor",
+      "calls": 174,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -310.4,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "object_planner": {
+      "class": "ObjectStateGraphPlanner",
+      "calls": 735,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.6666666666666666,
+      "delta_levels": 0.111,
+      "sd": 0.641,
+      "delta_steps_pct": -15.1,
+      "delta_latency_ms": -250.3,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.11 <= sd 0.64"
+    },
+    "surprise_engine": {
+      "class": "SurpriseEngine",
+      "calls": 831,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1014.0,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "active_inference": {
+      "class": "ActiveInferenceEngine",
+      "calls": 54,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 105.5,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "hierarchical_active_inference": {
+      "class": "HierarchicalActiveInferenceEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "precision_controller": {
+      "class": "HierarchicalPrecisionController",
+      "calls": 1536,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1050.6,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "prediction_budget": {
+      "class": "PredictionBudget",
+      "calls": 312,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1050.3,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "efe_evaluator": {
+      "class": "ExpectedFreeEnergyEvaluator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "affordance_extractor": {
+      "class": "GibsonianAffordanceExtractor",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "deformation_tracker": {
+      "class": "MorphologicalDeformationTracker",
+      "calls": 951,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1129.9,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "retrosplenial_transformer": {
+      "class": "RetrosplenialCoordinateTransformer",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "analogy_engine": {
+      "class": "FalsifiableAnalogyEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "counterfactual_regret": {
+      "class": "CounterfactualRegretEvaluator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "gnw": {
+      "class": "GlobalNeuronalWorkspace",
+      "calls": 2985,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -308.4,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "neuromodulatory_system": {
+      "class": "NeuromodulatorySystem",
+      "calls": 5982,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1052.1,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "thalamocortical_binding": {
+      "class": "ThalamocorticalBindingEngine",
+      "calls": 1539,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -301.4,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "superposition_planner": {
+      "class": "SuperpositionPlanner",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "predictive_coding_cortex": {
+      "class": "HierarchicalPredictiveCodingCortex",
+      "calls": 1539,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1056.7,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "entorhinal_grid_cortex": {
+      "class": "EntorhinalGridCortex",
+      "calls": 822,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -317.7,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "metacognitive_agency_cortex": {
+      "class": "MetacognitiveAgencyCortex",
+      "calls": 3078,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1054.5,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "skill_synthesizer": {
+      "class": "SkillProgramSynthesizer",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "snn_predictor": {
+      "class": "SNNTemporalPredictor",
+      "calls": 5910,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.0,
+      "delta_levels": 0.778,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -1057.9,
+      "decision": "keep",
+      "rule_outcome": "\u0394levels 0.78 > sd 0.64"
+    },
+    "ventral_relational_matcher": {
+      "class": "RelationalGraphMatcher",
+      "calls": 3051,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -637.5,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "allostasis_cortex": {
+      "class": "InteroceptiveAllostasisCortex",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "claustrum_conductor": {
+      "class": "ClaustrumSalienceConductor",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "distance_transform_engine": {
+      "class": "SpatialDistanceTransformEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "value_opponency": {
+      "class": "DualValueOpponencyCortex",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "potential_field_navigator": {
+      "class": "ParietalPotentialFieldNavigator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "shape_hasher": {
+      "class": "InferotemporalShapeHasher",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "drift_diffusion": {
+      "class": "SubthalamicDriftDiffusionEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "foveated_attention": {
+      "class": "ParietalFoveatedAttentionEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "blame_attributor": {
+      "class": "PrefrontalBlameAttributor",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "hippocampal_replay": {
+      "class": "HippocampalPrioritizedReplayBuffer",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "task_switcher": {
+      "class": "LateralPrefrontalTaskSwitcher",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "retrosplenial_anchor": {
+      "class": "RetrosplenialLandmarkAnchorEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "phase_precession": {
+      "class": "HippocampalPhasePrecessionEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "exploration_horizon": {
+      "class": "FrontopolarExplorationHorizonEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "superior_colliculus": {
+      "class": "SuperiorColliculusTargetArbiter",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "cerebellar_microzone": {
+      "class": "CerebellarMicrozoneAdaptor",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "premotor_resonator": {
+      "class": "VentralPremotorAffordanceResonator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "effort_allocator": {
+      "class": "AnteriorCingulateEffortAllocator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "subicular_bvc": {
+      "class": "SubicularBoundaryVectorEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "somatic_marker": {
+      "class": "VentromedialSomaticMarkerEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "pulvinar_router": {
+      "class": "PulvinarAttentionRouter",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "parahippocampal_context": {
+      "class": "ParahippocampalContextEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "locus_coeruleus": {
+      "class": "LocusCoeruleusNoradrenalineEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "somatosensory_haptic": {
+      "class": "SomatosensoryHapticEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "entorhinal_border": {
+      "class": "EntorhinalBorderCellEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "amygdala_threat": {
+      "class": "AmygdalarThreatConditioningEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "vta_curiosity": {
+      "class": "VentralTegmentalCuriosityEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "retrosplenial_heading": {
+      "class": "RetrosplenialHeadingEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "trn_gating": {
+      "class": "ThalamicReticularGatingEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "rule_abstraction": {
+      "class": "DorsolateralRuleAbstractionEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "hippocampal_time": {
+      "class": "HippocampalTimeCellEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "vl_motor_inhibition": {
+      "class": "VentrolateralMotorInhibitionEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "claustrum_interhemispheric": {
+      "class": "ClaustrumInterhemisphericIntegrator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "anterior_insula_timing": {
+      "class": "AnteriorInsularTimingEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "ofc_counterfactual": {
+      "class": "OrbitofrontalCreditAssignmentEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "ppn_locomotor": {
+      "class": "PedunculopontineLocomotorEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "boundary_grid_aligner": {
+      "class": "BoundaryGridPhaseAligner",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "mpfc_schema_engine": {
+      "class": "MedialPrefrontalSchemaEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "stn_escalator": {
+      "class": "SubthalamicThresholdEscalator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "workspace_ignition": {
+      "class": "GlobalWorkspaceIgnitionEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "temporal_buffer": {
+      "class": "TemporalStateBuffer",
+      "calls": 1539,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -277.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "transition_sequence_model": {
+      "class": "TransitionSequenceModel",
+      "calls": 1512,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -473.3,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "confidence_calibrator": {
+      "class": "ConfidenceCalibrator",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "action_discovery": {
+      "class": "UngroundedActionDiscoveryEngine",
+      "calls": 1539,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 23.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "budget_governor": {
+      "class": "ActionBudgetGovernor",
+      "calls": 71202,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 125.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "goal_induction": {
+      "class": "BayesianGoalInductionEngine",
+      "calls": 3,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -310.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "delayed_effects": {
+      "class": "DelayedEffectModeler",
+      "calls": 1539,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -300.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "delayed_effect_modeler": {
+      "class": "DelayedEffectModeler",
+      "calls": 1539,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -296.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "dual_memory": {
+      "class": "DualStoreMemoryManager",
+      "calls": 3,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -311.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    },
+    "point_actuation_learner": {
+      "class": "PointActuationAffordanceLearner",
+      "calls": 0,
+      "decision": "unused",
+      "delta_levels": 0.0,
+      "evidence": "0 calls across all runs"
+    },
+    "entropy_monitor": {
+      "class": "DeliberationEntropyMonitor",
+      "calls": 1602,
+      "baseline_levels": 0.7777777777777778,
+      "ablated_levels": 0.7777777777777778,
+      "delta_levels": 0.0,
+      "sd": 0.641,
+      "delta_steps_pct": 0.5,
+      "delta_latency_ms": -315.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394levels 0.00 <= sd 0.64"
+    }
+  }
+}

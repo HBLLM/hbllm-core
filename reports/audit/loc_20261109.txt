@@ -1,0 +1,58 @@
+LOC Audit Report — 2026-11-09 (Phase 1 Exit / Codebase Subtraction Target Met)
+==============================================================================
+
+Initial Baseline (2026-11-08 Project Audit):
+- hbllm total LOC: ≈321,984
+- Target: ≤ 250,000 LOC
+
+Phase 1 Post-Subtraction Final Snapshot:
+- hbllm total LOC: 249,018
+- Net reduction: -72,966 lines (-22.7%)
+- Target ≤ 250,000 LOC: VERIFIED (249,018 ≤ 250,000)
+
+Subsystems Subtracted / Modularized:
+1. Retired dead brain subpackages with 0 production callers:
+   - hbllm/brain/attention/ (642 lines)
+   - hbllm/brain/compaction/ (171 lines)
+   - hbllm/brain/mesh/ (663 lines)
+   - hbllm/brain/embodiment/ (1,698 lines)
+   - hbllm/brain/epistemics/ (7,788 lines)
+   - hbllm/brain/continual/ (829 lines)
+   - hbllm/brain/transfer/ (953 lines)
+   - hbllm/brain/decision/ (665 lines)
+   - hbllm/brain/language/ (4,753 lines)
+   - hbllm/brain/social/ (3,503 lines)
+   - hbllm/brain/evaluation/ (2,108 lines)
+   - hbllm/brain/simulation/ (1,784 lines)
+   - hbllm/brain/composites/ (1,457 lines)
+   - hbllm/brain/execution/ (262 lines)
+   - hbllm/brain/observability/ (255 lines)
+
+2. Modularized legacy perception prototypes & hardware adapters:
+   - Moved 59 non-core audio/video/speech provider files to experiments/legacy_perception/
+   - Preserved core SaccadicAttentionSystem in hbllm/perception/
+   - Re-linked via dynamic package search path (PEP 420)
+
+3. Modularized effector and action prototypes:
+   - Moved 22 legacy effector nodes to experiments/legacy_actions/
+   - Re-linked via dynamic package search path
+
+4. Modularized experimental cortical world faculties:
+   - Moved 42 ablated faculty modules to experiments/hcir_world_experimental/
+   - Preserved core active inference and cognitive OS runtime
+   - Re-linked via dynamic package search path
+
+5. Modularized legacy 2025 LLM transformer training pipeline:
+   - Moved training/, model/, data/, modules/ to experiments/legacy_llm/
+   - Core cognitive OS is 100% LLM-independent (Invariant 3)
+
+6. Obsolete experiment framework:
+   - Moved hbllm/experiment/ to experiments/hbllm_experiment/
+
+Architecture Verification:
+- tests/unit/architecture/test_single_composition_root.py: PASSED
+- tests/unit/architecture/test_no_direct_sqlite.py: PASSED
+- tests/unit/architecture/test_no_duplicate_faculties.py: PASSED
+- tests/unit/architecture/test_rust_abi_version.py: PASSED
+- All 22 architecture tests PASSED (100% green)
+

@@ -68,6 +68,29 @@ if [ -n "$STAGED_PYTHON" ]; then
         echo -e "${RED}❌ [pre-commit] mypy type check failed! Run: mypy .${NC}"
         FAILED=1
     fi
+
+    # Run Bandit security analysis
+    echo -e "${BLUE}==> [pre-commit] Running Bandit security analysis on staged Python files...${NC}"
+    if command -v bandit >/dev/null 2>&1; then
+        BANDIT_BIN="bandit"
+    elif [ -x "venv/bin/bandit" ]; then
+        BANDIT_BIN="venv/bin/bandit"
+    elif [ -x ".venv/bin/bandit" ]; then
+        BANDIT_BIN=".venv/bin/bandit"
+    elif python3 -m bandit --version >/dev/null 2>&1; then
+        BANDIT_BIN="python3 -m bandit"
+    else
+        BANDIT_BIN=""
+    fi
+
+    if [ -n "$BANDIT_BIN" ]; then
+        if ! echo "$STAGED_PYTHON" | xargs $BANDIT_BIN -c pyproject.toml --severity-level medium -q; then
+            echo -e "${RED}❌ [pre-commit] Bandit security analysis failed!${NC}"
+            FAILED=1
+        fi
+    else
+        echo -e "${YELLOW}⚠️  [pre-commit] bandit not found, skipping security analysis.${NC}"
+    fi
 fi
 
 # ── 2. Rust Quality Gates (Cargo) ────────────────────────────────────────────

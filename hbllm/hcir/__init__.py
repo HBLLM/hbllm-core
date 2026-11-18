@@ -19,13 +19,6 @@ from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.optimizer import HCIROptimizer
 from hbllm.hcir.replay_debugger import CognitiveBreakpoint, ReplayDebugger
 from hbllm.hcir.spatial_planner import (
-    AVATAR,
-    BARRIER,
-    DOORWAY,
-    EXIT,
-    MOVABLE_ITEM,
-    REFILL,
-    SWITCH,
     EntityGraph,
     EntityRole,
     HCIRSpatialEntityPlanner,
@@ -89,14 +82,6 @@ __all__ = [
     "WorldKernel",
     "ReplayDebugger",
     "CognitiveBreakpoint",
-    # --- Backward Compat Aliases (deprecated) ---
-    "AVATAR",
-    "BARRIER",
-    "MOVABLE_ITEM",
-    "DOORWAY",
-    "SWITCH",
-    "REFILL",
-    "EXIT",
 ]
 
 
@@ -108,4 +93,24 @@ def __getattr__(name: str):
             "LLMCompilerFrontend": LLMCompilerFrontend,
             "StructuredIntentPayload": StructuredIntentPayload,
         }[name]
+
+    _DEPRECATED_ALIASES = {
+        "AVATAR": EntityRole.AGENT,
+        "BARRIER": EntityRole.OBSTACLE,
+        "MOVABLE_ITEM": EntityRole.MANIPULABLE,
+        "DOORWAY": EntityRole.PORTAL,
+        "SWITCH": EntityRole.ACTUATOR,
+        "REFILL": EntityRole.RESOURCE,
+        "EXIT": EntityRole.GOAL,
+    }
+    if name in _DEPRECATED_ALIASES:
+        import warnings
+
+        warnings.warn(
+            f"Accessing {name} from hbllm.hcir is deprecated; use EntityRole.{_DEPRECATED_ALIASES[name].name} instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _DEPRECATED_ALIASES[name]
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

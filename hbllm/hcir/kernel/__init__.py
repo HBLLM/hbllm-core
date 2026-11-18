@@ -32,6 +32,15 @@ from hbllm.hcir.kernel.governance.constitutional_verifier import (
 )
 from hbllm.hcir.kernel.identity_bridge import IdentityBridge
 from hbllm.hcir.kernel.runtime_state import RuntimeState
+from hbllm.hcir.kernel.safety_corrigibility import (
+    ActionDeferralRequest,
+    CorrigibilityMonitor,
+    DeferralReason,
+    GoalProvenanceChain,
+    GoalProvenanceNode,
+    GoalProvenanceTracker,
+    ValueUncertaintyArbiter,
+)
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler, ScheduledTask
 from hbllm.hcir.kernel.scheduler_policy import CognitiveScoreCalculator
 from hbllm.hcir.kernel.services import KernelServices
@@ -99,4 +108,11 @@ __all__ = [
     "TransactionManager",
     "TransactionResult",
     "create_default_pipeline",
+    "ActionDeferralRequest",
+    "CorrigibilityMonitor",
+    "DeferralReason",
+    "GoalProvenanceChain",
+    "GoalProvenanceNode",
+    "GoalProvenanceTracker",
+    "ValueUncertaintyArbiter",
 ]

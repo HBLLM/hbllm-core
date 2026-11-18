@@ -110,7 +110,7 @@ All decision-making and planning are handled universally by the general cognitiv
   2. Finds candidate `ActionNode`s whose `produces` list satisfies unsatisfied conditions.
   3. Evaluates action `requirements` against the current graph view. If prerequisites are missing (e.g., container is closed, target is beyond physical reach), it spawns recursive causal sub-goals to find the immediately executable prerequisite action.
   4. Dispatches the winning `ActionNode` with a complete `ProvenanceChain` detailing the causal derivation.
-- **Deterministic & Zero-Token**: Achieves 100% success on multi-tier manipulation tasks with strictly **0 LLM tokens** and sub-millisecond planning latency.
+- **Deterministic & Zero-Token**: Achieves 100% success on multi-tier manipulation tasks with strictly **0 LLM tokens** and low-millisecond latency (sub-millisecond native Rust spatial/graph kernels `< 0.2ms`; full 5-stage Python cognitive step `p50 ~ 10-15ms / p95 <= 45ms` at `32x32`).
 
 ---
 

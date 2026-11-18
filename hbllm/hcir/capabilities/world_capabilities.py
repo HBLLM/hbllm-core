@@ -218,7 +218,11 @@ def execute_world_capability(
     elif name == "world.predictive_coding_cycle":
         sensory = params.get("sensory_inputs")
         priors = params.get("abstract_priors")
-        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+        if (
+            kernel is not None
+            and hasattr(kernel, "epistemic_engine")
+            and hasattr(kernel.epistemic_engine, "step_predictive_coding")
+        ):
             snap = kernel.epistemic_engine.step_predictive_coding(
                 sensory_inputs=sensory,
                 abstract_priors=priors,
@@ -240,7 +244,11 @@ def execute_world_capability(
     elif name == "world.path_integrate_odometry":
         dr = float(params.get("delta_r", 0.0))
         dc = float(params.get("delta_c", 0.0))
-        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+        if (
+            kernel is not None
+            and hasattr(kernel, "epistemic_engine")
+            and hasattr(kernel.epistemic_engine, "path_integrate_odometry")
+        ):
             pos = kernel.epistemic_engine.path_integrate_odometry(dr, dc)
             return CapabilityResult(
                 capability_name=name,
@@ -267,7 +275,11 @@ def execute_world_capability(
         )
         other_chg = int(params.get("observed_other_changes_count", 0))
         emp_succ = params.get("empirical_success")
-        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+        if (
+            kernel is not None
+            and hasattr(kernel, "epistemic_engine")
+            and hasattr(kernel.epistemic_engine, "assess_metacognitive_agency")
+        ):
             assess = kernel.epistemic_engine.assess_metacognitive_agency(
                 action_id=action_id,
                 raw_confidence=raw_conf,
@@ -298,7 +310,11 @@ def execute_world_capability(
         )
     elif name == "world.synthesize_skills":
         min_supp = int(params.get("min_support", 2))
-        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+        if (
+            kernel is not None
+            and hasattr(kernel, "epistemic_engine")
+            and hasattr(kernel.epistemic_engine, "synthesize_procedural_skills_from_traces")
+        ):
             skills = kernel.epistemic_engine.synthesize_procedural_skills_from_traces(
                 min_support=min_supp
             )
@@ -318,7 +334,11 @@ def execute_world_capability(
     elif name == "world.superposition_rollout":
         acts = params.get("candidate_actions", [])
         sim_fn = params.get("simulator_fn") or (lambda act, hyp: (0.85, hyp))
-        if kernel is not None and hasattr(kernel, "epistemic_engine"):
+        if (
+            kernel is not None
+            and hasattr(kernel, "epistemic_engine")
+            and hasattr(kernel.epistemic_engine, "evaluate_superposition_actions")
+        ):
             results = kernel.epistemic_engine.evaluate_superposition_actions(
                 candidate_actions=acts,
                 simulator_fn=sim_fn,

@@ -44,7 +44,7 @@ def test_interactive_closed_loop_full_cycle():
 
     # Verify world model update
     assert engine.prev_grid is not None
-    assert engine.action_discovery.action_profiles[action_0].total_observations >= 1
+    assert engine.budget_governor.steps_consumed >= 1
 
     # Stage 3: Step 1 Decision conditioned on updated world model
     action_1, data_1 = engine.decide(grid_1, avail_actions)

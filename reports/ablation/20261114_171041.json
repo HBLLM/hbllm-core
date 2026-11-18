@@ -1,0 +1,920 @@
+{
+  "rule": "sd = std(baseline_scores across seeds) floored at 0.05; keep iff (baseline - ablated) > sd, OR load_bearing_crash; else experimental. 0-call faculties are unused on procedural benchmark environments.",
+  "envs": [
+    "grid_nav",
+    "grid_push",
+    "continuous_reach",
+    "symbolic_rules",
+    "visual_transfer",
+    "minigrid_doorkey"
+  ],
+  "seeds": [
+    0,
+    1
+  ],
+  "steps": 100,
+  "episodes": 3,
+  "note": "Evaluated on procedural closed-loop benchmark environments with lifelong metric.",
+  "faculties": {
+    "subgoal_stack": {
+      "class": "FrontopolarSubgoalStack",
+      "calls": 4552,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.7695,
+      "delta_score": 0.0585,
+      "sd": 0.0979,
+      "delta_steps_pct": 30.9,
+      "delta_latency_ms": -11.8,
+      "decision": "keep",
+      "rule_outcome": "mean_steps +30.9% with no score gain"
+    },
+    "body_schema": {
+      "class": "ExtendedBodySchema",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -9.1,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "habenular_ior": {
+      "class": "HabenularEpisodicIOR",
+      "calls": 10164,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.7128,
+      "delta_score": 0.1153,
+      "sd": 0.0979,
+      "delta_steps_pct": 31.8,
+      "delta_latency_ms": -34.3,
+      "decision": "keep",
+      "rule_outcome": "\u0394score 0.1153 > sd 0.0979"
+    },
+    "remote_causal": {
+      "class": "RemoteCausalAttributor",
+      "calls": 322,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -0.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "optical_projector": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "it_segmenter": {
+      "class": "InferotemporalSegmentationEngine",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "hazard_tracker": {
+      "class": "SpatiotemporalHazardTracker",
+      "calls": 39176,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8248,
+      "delta_score": 0.0032,
+      "sd": 0.0979,
+      "delta_steps_pct": 4.0,
+      "delta_latency_ms": -22.4,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0032 <= sd 0.0979"
+    },
+    "physics_engine": {
+      "class": "IntuitivePhysicsEngine",
+      "calls": 1361,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -6.4,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "dorsal_kinetic_stream": {
+      "class": "DorsalKineticStream",
+      "calls": 1146,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -32.0,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "bilateral_integrator": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "cerebellar_clock": {
+      "class": "CerebellarPhaseClock",
+      "calls": 3125,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -18.0,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "smith_predictor": {
+      "class": "CerebellarSmithPredictor",
+      "calls": 1142,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -15.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "collision_cones": {
+      "class": "SpatiotemporalCollisionCones",
+      "calls": 16045,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -0.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "causal_cortex": {
+      "class": "CausalInductionCortex",
+      "calls": 3770,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 2.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "acc_conflict_monitor": {
+      "class": "AnteriorCingulateConflictMonitor",
+      "calls": 3233,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8,
+      "delta_score": 0.0281,
+      "sd": 0.0979,
+      "delta_steps_pct": 17.5,
+      "delta_latency_ms": 7.8,
+      "decision": "keep",
+      "rule_outcome": "mean_steps +17.5% with no score gain"
+    },
+    "room_topology": {
+      "class": "RoomTopologyExtractor",
+      "calls": 64,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -8.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "object_planner": {
+      "class": "ObjectStateGraphPlanner",
+      "calls": 826,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8312,
+      "delta_score": -0.0031,
+      "sd": 0.0979,
+      "delta_steps_pct": -2.1,
+      "delta_latency_ms": -24.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score -0.0031 <= sd 0.0979"
+    },
+    "surprise_engine": {
+      "class": "SurpriseEngine",
+      "calls": 1156,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -15.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "active_inference": {
+      "class": "ActiveInferenceEngine",
+      "calls": 32,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8267,
+      "delta_score": 0.0014,
+      "sd": 0.0979,
+      "delta_steps_pct": 1.4,
+      "delta_latency_ms": 1.3,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0014 <= sd 0.0979"
+    },
+    "hierarchical_active_inference": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "precision_controller": {
+      "class": "HierarchicalPrecisionController",
+      "calls": 1082,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -2.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "prediction_budget": {
+      "class": "PredictionBudget",
+      "calls": 768,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.7099,
+      "delta_score": 0.1182,
+      "sd": 0.0979,
+      "delta_steps_pct": 78.7,
+      "delta_latency_ms": 40.6,
+      "decision": "keep",
+      "rule_outcome": "\u0394score 0.1182 > sd 0.0979"
+    },
+    "efe_evaluator": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "affordance_extractor": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "deformation_tracker": {
+      "class": "MorphologicalDeformationTracker",
+      "calls": 902,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -40.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "retrosplenial_transformer": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "analogy_engine": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "counterfactual_regret": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "gnw": {
+      "class": "AblatedFaculty",
+      "calls": 2292,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -88.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "neuromodulatory_system": {
+      "class": "NeuromodulatorySystem",
+      "calls": 5759,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -12.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "thalamocortical_binding": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "superposition_planner": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "predictive_coding_cortex": {
+      "class": "HierarchicalPredictiveCodingCortex",
+      "calls": 1719,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -32.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "entorhinal_grid_cortex": {
+      "class": "AblatedFaculty",
+      "calls": 806,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -26.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "metacognitive_agency_cortex": {
+      "class": "MetacognitiveAgencyCortex",
+      "calls": 2292,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -19.5,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "skill_synthesizer": {
+      "class": "SkillProgramSynthesizer",
+      "calls": 337,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -18.5,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "library_learner": {
+      "class": "LibraryLearner",
+      "calls": 2102,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -38.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "recursive_value_inducer": {
+      "class": "RecursiveValueInducer",
+      "calls": 1827,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -13.1,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "social_cognition": {
+      "class": "SocialCognitionEngine",
+      "calls": 224,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -20.3,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "option_discovery": {
+      "class": "OptionDiscoveryEngine",
+      "calls": 21548,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -53.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "snn_predictor": {
+      "class": "SNNTemporalPredictor",
+      "calls": 4520,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -13.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "ventral_relational_matcher": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "allostasis_cortex": {
+      "class": "AblatedFaculty",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -9.0,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "claustrum_conductor": {
+      "class": "AblatedFaculty",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -5.7,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "distance_transform_engine": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "value_opponency": {
+      "class": "AblatedFaculty",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -37.1,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "potential_field_navigator": {
+      "class": "AblatedFaculty",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 9.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "shape_hasher": {
+      "class": "AblatedFaculty",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -9.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "drift_diffusion": {
+      "class": "AblatedFaculty",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 10.2,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "foveated_attention": {
+      "class": "AblatedFaculty",
+      "calls": 60,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -74.9,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "blame_attributor": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "hippocampal_replay": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "task_switcher": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "retrosplenial_anchor": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "phase_precession": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "exploration_horizon": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "superior_colliculus": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "cerebellar_microzone": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "premotor_resonator": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "effort_allocator": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "subicular_bvc": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "somatic_marker": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "pulvinar_router": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "parahippocampal_context": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "locus_coeruleus": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "somatosensory_haptic": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "entorhinal_border": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "amygdala_threat": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "vta_curiosity": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "retrosplenial_heading": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "trn_gating": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "rule_abstraction": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "hippocampal_time": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "vl_motor_inhibition": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "claustrum_interhemispheric": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "anterior_insula_timing": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "ofc_counterfactual": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "ppn_locomotor": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "boundary_grid_aligner": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "mpfc_schema_engine": {
+      "class": "MedialPrefrontalSchemaEngine",
+      "calls": 1042,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -28.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "stn_escalator": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "workspace_ignition": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "temporal_buffer": {
+      "class": "TemporalStateBuffer",
+      "calls": 1719,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -10.7,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "transition_sequence_model": {
+      "class": "TransitionSequenceModel",
+      "calls": 1122,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -31.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "confidence_calibrator": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "action_discovery": {
+      "class": "UngroundedActionDiscoveryEngine",
+      "calls": 1146,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": 2.6,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "budget_governor": {
+      "class": "ActionBudgetGovernor",
+      "calls": 11476,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.6921,
+      "delta_score": 0.1359,
+      "sd": 0.0979,
+      "delta_steps_pct": 70.7,
+      "delta_latency_ms": 27.4,
+      "decision": "keep",
+      "rule_outcome": "\u0394score 0.1359 > sd 0.0979"
+    },
+    "goal_induction": {
+      "class": "BayesianGoalInductionEngine",
+      "calls": 72,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -86.4,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "delayed_effect_modeler": {
+      "class": "DelayedEffectModeler",
+      "calls": 1620,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -79.7,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "dual_memory": {
+      "class": "DualStoreMemoryManager",
+      "calls": 168,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -4.3,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    },
+    "world_kernel": {
+      "class": "WorldKernel",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "point_actuation_learner": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "entropy_monitor": {
+      "class": "AblatedFaculty",
+      "calls": 0,
+      "decision": "unused",
+      "delta_score": 0.0,
+      "evidence": "0 calls across all procedural runs"
+    },
+    "goal_arbiter": {
+      "class": "GoalArbiter",
+      "calls": 2046,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8424,
+      "delta_score": -0.0143,
+      "sd": 0.0979,
+      "delta_steps_pct": -0.5,
+      "delta_latency_ms": -90.8,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score -0.0143 <= sd 0.0979"
+    },
+    "grounding_bridge": {
+      "class": "CorticalGroundingBridge",
+      "calls": 5481,
+      "baseline_score": 0.8281,
+      "ablated_score": 0.8281,
+      "delta_score": 0.0,
+      "sd": 0.0979,
+      "delta_steps_pct": 0.0,
+      "delta_latency_ms": -100.1,
+      "decision": "experimental",
+      "rule_outcome": "\u0394score 0.0000 <= sd 0.0979"
+    }
+  }
+}

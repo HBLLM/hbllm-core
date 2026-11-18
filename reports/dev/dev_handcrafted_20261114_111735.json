@@ -1,0 +1,444 @@
+{
+  "git_sha": "3cd56ce4d2400957462cfce701eb712d7464185d",
+  "config_hash": "7ad0617e03901e04",
+  "timestamp": "20261114_111735",
+  "split": "dev",
+  "tasks": [
+    {
+      "task_id": "gym_frozenlake_independent_system_handcrafted",
+      "family": "external_gymnasium",
+      "split": "dev",
+      "steps": 8,
+      "max_budget": 60,
+      "steps_to_first_success": 14,
+      "steps_to_stable_policy": 1,
+      "success_at_budget": true,
+      "p50_latency_ms": 21.89,
+      "p95_latency_ms": 87.61,
+      "errors": [],
+      "episode_successes": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        2,
+        14,
+        8,
+        8,
+        8
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 2
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          2,
+          14,
+          8,
+          8,
+          8
+        ],
+        "steps_to_stable_policy": 1
+      },
+      "one_shot_imitation": {
+        "success": false,
+        "steps": 2,
+        "oracle_success": true,
+        "oracle_steps": 8
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          500,
+          501,
+          502,
+          503,
+          504
+        ],
+        "successes": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          2,
+          14,
+          8,
+          8,
+          8
+        ],
+        "solve_rate": 0.8,
+        "transfer_solve_rate": 1.0,
+        "skills_consolidated": 5
+      }
+    },
+    {
+      "task_id": "minigrid_empty_independent_system_handcrafted",
+      "family": "external_minigrid",
+      "split": "dev",
+      "steps": 6,
+      "max_budget": 60,
+      "steps_to_first_success": 12,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "p50_latency_ms": 20.88,
+      "p95_latency_ms": 46.1,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        12,
+        6,
+        6,
+        6,
+        6
+      ],
+      "zero_shot": {
+        "success": true,
+        "steps": 12
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          12,
+          6,
+          6,
+          6,
+          6
+        ],
+        "steps_to_stable_policy": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 6,
+        "oracle_success": true,
+        "oracle_steps": 6
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          510,
+          511,
+          512,
+          513,
+          514
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          12,
+          6,
+          6,
+          6,
+          6
+        ],
+        "solve_rate": 1.0,
+        "transfer_solve_rate": 1.0,
+        "skills_consolidated": 5
+      }
+    },
+    {
+      "task_id": "minigrid_lavagap_independent_system_handcrafted",
+      "family": "external_minigrid",
+      "split": "dev",
+      "steps": 6,
+      "max_budget": 60,
+      "steps_to_first_success": 7,
+      "steps_to_stable_policy": 1,
+      "success_at_budget": true,
+      "p50_latency_ms": 20.95,
+      "p95_latency_ms": 40.05,
+      "errors": [],
+      "episode_successes": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        5,
+        7,
+        6,
+        6,
+        6
+      ],
+      "zero_shot": {
+        "success": false,
+        "steps": 5
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          5,
+          7,
+          6,
+          6,
+          6
+        ],
+        "steps_to_stable_policy": 1
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 6,
+        "oracle_success": true,
+        "oracle_steps": 6
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          520,
+          521,
+          522,
+          523,
+          524
+        ],
+        "successes": [
+          false,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          5,
+          7,
+          6,
+          6,
+          6
+        ],
+        "solve_rate": 0.8,
+        "transfer_solve_rate": 1.0,
+        "skills_consolidated": 5
+      }
+    },
+    {
+      "task_id": "minigrid_doorkey_independent_system_handcrafted",
+      "family": "external_minigrid",
+      "split": "dev",
+      "steps": 8,
+      "max_budget": 80,
+      "steps_to_first_success": 15,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "p50_latency_ms": 23.96,
+      "p95_latency_ms": 41.32,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        15,
+        8,
+        8,
+        8,
+        8
+      ],
+      "zero_shot": {
+        "success": true,
+        "steps": 15
+      },
+      "lifelong": {
+        "success": true,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          15,
+          8,
+          8,
+          8,
+          8
+        ],
+        "steps_to_stable_policy": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 8,
+        "oracle_success": true,
+        "oracle_steps": 7
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          530,
+          531,
+          532,
+          533,
+          534
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          15,
+          15,
+          11,
+          9,
+          27
+        ],
+        "solve_rate": 1.0,
+        "transfer_solve_rate": 1.0,
+        "skills_consolidated": 8
+      }
+    }
+  ],
+  "family_scores": {
+    "external_gymnasium": 0.9333,
+    "external_minigrid": 0.95
+  },
+  "generality_score": 0.9416,
+  "mean_p50_latency_ms": 21.92,
+  "mean_p95_latency_ms": 53.77,
+  "baselines": {
+    "random": {
+      "generality_score": 0.2948,
+      "family_scores": {
+        "external_gymnasium": 0.0,
+        "external_minigrid": 0.5896
+      },
+      "solve_rate": 0.5,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    },
+    "oracle": {
+      "generality_score": 0.9427,
+      "family_scores": {
+        "external_gymnasium": 0.9333,
+        "external_minigrid": 0.9521
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    },
+    "no_grounding": {
+      "generality_score": 0.9416,
+      "family_scores": {
+        "external_gymnasium": 0.9333,
+        "external_minigrid": 0.95
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        false,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.5
+    },
+    "demonstration": {
+      "generality_score": 0.475,
+      "family_scores": {
+        "external_gymnasium": 0.0,
+        "external_minigrid": 0.95
+      },
+      "solve_rate": 0.75,
+      "lifelong_curve": [
+        true,
+        false,
+        true,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0
+    }
+  },
+  "env_hash": "99604e455a2342f9",
+  "zero_shot": {
+    "generality_score": 0.3683,
+    "family_scores": {
+      "external_gymnasium": 0.0,
+      "external_minigrid": 0.7365
+    },
+    "solve_rate": 0.5
+  },
+  "lifelong": {
+    "generality_score": 0.9416,
+    "family_scores": {
+      "external_gymnasium": 0.9333,
+      "external_minigrid": 0.95
+    },
+    "solve_rate": 1.0,
+    "mean_steps_to_stable_policy": 0.5
+  },
+  "one_shot_imitation": {
+    "generality_score": 0.475,
+    "family_scores": {
+      "external_gymnasium": 0.0,
+      "external_minigrid": 0.95
+    },
+    "solve_rate": 0.75
+  },
+  "cross_seed_transfer": {
+    "solve_rate": 0.9,
+    "transfer_solve_rate": 1.0,
+    "family_solve_rates": {
+      "external_gymnasium": 0.8,
+      "external_minigrid": 0.9333
+    },
+    "skills_consolidated": 23
+  }
+}

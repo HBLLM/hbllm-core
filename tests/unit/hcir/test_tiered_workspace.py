@@ -14,12 +14,20 @@ from hbllm.hcir.graph import GoalNode, HCIRNodeType, ObservationNode
 from hbllm.hcir.query import GraphQuery
 from hbllm.hcir.semantic_normalizer import SemanticNormalizer
 from hbllm.hcir.stores import InMemoryEventStore
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace_tiers import (
     TaskFrame,
     TieredWorkspace,
     WorkingWorkspace,
     WorkspaceTier,
 )
+
+
+def _seed_node(ws: Any, node: Any) -> None:
+    ws.commit_operations(
+        [TransactionOperation(op=TransactionOp.UPSERT_NODE, node=node)], author="test"
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Task Frame Tests
@@ -56,7 +64,7 @@ class TestTaskFrame:
     def test_frame_workspace_is_usable(self) -> None:
         frame = TaskFrame(goal_id="goal_abc")
         node = GoalNode(id="g1", description="Test goal")
-        frame.workspace.add_node(node)
+        _seed_node(frame.workspace, node)
         assert frame.workspace.get_node("g1") is not None
 
 
@@ -110,7 +118,7 @@ class TestWorkingWorkspace:
         _f1 = ww.create_frame("goal_1")
         f2 = ww.create_frame("goal_2")
         node = GoalNode(id="g_target", description="Find me")
-        f2.workspace.add_node(node)
+        _seed_node(f2.workspace, node)
         found = ww.get_node_across_frames("g_target")
         assert found is not None
         assert found.id == "g_target"
@@ -145,7 +153,7 @@ class TestTieredWorkspace:
 
     def test_promote_brain_to_persistent(self) -> None:
         node = GoalNode(id="g_promote", description="Promotable goal")
-        self.tiered.brain.add_node(node)
+        _seed_node(self.tiered.brain, node)
 
         result = self.tiered.promote("g_promote", WorkspaceTier.BRAIN, WorkspaceTier.PERSISTENT)
         assert result is True
@@ -164,7 +172,7 @@ class TestTieredWorkspace:
 
     def test_demote_persistent_to_brain(self) -> None:
         node = ObservationNode(id="obs_1", sensor_source="test")
-        self.tiered.persistent.add_node(node)
+        _seed_node(self.tiered.persistent, node)
 
         result = self.tiered.demote("obs_1", WorkspaceTier.PERSISTENT, WorkspaceTier.BRAIN)
         assert result is True
@@ -175,19 +183,19 @@ class TestTieredWorkspace:
 
     def test_query_across_tiers(self) -> None:
         # Add goals to different tiers
-        self.tiered.brain.add_node(GoalNode(id="g_brain", description="Brain goal"))
-        self.tiered.persistent.add_node(GoalNode(id="g_persist", description="Persistent goal"))
+        _seed_node(self.tiered.brain, GoalNode(id="g_brain", description="Brain goal"))
+        _seed_node(self.tiered.persistent, GoalNode(id="g_persist", description="Persistent goal"))
 
         frame = self.tiered.create_task_frame("g_working")
-        frame.workspace.add_node(GoalNode(id="g_working", description="Working goal"))
+        _seed_node(frame.workspace, GoalNode(id="g_working", description="Working goal"))
 
         query = GraphQuery(node_type=HCIRNodeType.GOAL)
         result = self.tiered.query_across_tiers(query)
         assert result.total_matches == 3
 
     def test_query_specific_tiers(self) -> None:
-        self.tiered.brain.add_node(GoalNode(id="g_brain", description="Brain goal"))
-        self.tiered.persistent.add_node(GoalNode(id="g_persist", description="Persistent"))
+        _seed_node(self.tiered.brain, GoalNode(id="g_brain", description="Brain goal"))
+        _seed_node(self.tiered.persistent, GoalNode(id="g_persist", description="Persistent"))
 
         query = GraphQuery(node_type=HCIRNodeType.GOAL)
         result = self.tiered.query_across_tiers(query, tiers=[WorkspaceTier.BRAIN])
@@ -195,8 +203,8 @@ class TestTieredWorkspace:
         assert result.nodes[0].id == "g_brain"
 
     def test_archive_brain(self) -> None:
-        self.tiered.brain.add_node(GoalNode(id="g1", description="Goal 1"))
-        self.tiered.brain.add_node(GoalNode(id="g2", description="Goal 2"))
+        _seed_node(self.tiered.brain, GoalNode(id="g1", description="Goal 1"))
+        _seed_node(self.tiered.brain, GoalNode(id="g2", description="Goal 2"))
 
         count = self.tiered.archive_brain()
         assert count == 2
@@ -206,7 +214,7 @@ class TestTieredWorkspace:
         assert self.tiered.persistent.get_node("g2") is not None
 
     def test_snapshot(self) -> None:
-        self.tiered.brain.add_node(GoalNode(id="g1", description="Snap"))
+        _seed_node(self.tiered.brain, GoalNode(id="g1", description="Snap"))
         snap = self.tiered.snapshot(WorkspaceTier.BRAIN)
         assert snap is not None
         assert snap.branch == "brain"

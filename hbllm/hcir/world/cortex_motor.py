@@ -15,7 +15,7 @@ and ACC conflict monitoring:
 3. ACC Conflict Monitor & Limit-Cycle Breaker:
    - Detects motor deadlocks (e.g. 2-cycle or 3-cycle oscillations) and forces orthogonal exploration.
 4. Epistemic Curiosity Explorer:
-   - Systematically probes uncalibrated actions, unvisited spatial frontiers, and affordance panels.
+   - Systematically probes uncalibrated actions, unvisited spatial frontiers, and interactive control clusters.
    - Emits pure EpistemicProbeProposals to maintain HCIR Reasoning and State Ownership Invariants.
 """
 
@@ -91,10 +91,12 @@ class ACCConflictMonitor:
         self.history_window = history_window
         self.oscillation_threshold = oscillation_threshold
         self.action_history: deque[Any] = deque(maxlen=history_window)
-        self.position_history: deque[tuple[int, int]] = deque(maxlen=history_window)
+        self.position_history: deque[Any] = deque(maxlen=history_window)
         self.conflict_records: list[ACCConflictRecord] = []
 
-    def record_step(self, action: Any, avatar_pos: tuple[int, int] | None) -> None:
+    def record_step(
+        self, action: Any, avatar_pos: tuple[float, float] | tuple[int, int] | None
+    ) -> None:
         """Record an executed action and resulting position."""
         self.action_history.append(action)
         if avatar_pos is not None:
@@ -345,21 +347,37 @@ class EpistemicCuriosityExplorer:
         return True
 
     @staticmethod
+    def _collect_visited_cells(engine: AutonomousEpistemicEngine) -> set[tuple[int, int]]:
+        """Collect all visited coordinates across working memory and position visit counters."""
+        visited_cells = set(engine.working_memory.visited_cells)
+        for c_pos, cnt in engine.position_visit_counts.items():
+            if cnt > 0:
+                visited_cells.add(c_pos)
+        if engine.avatar_pos is not None:
+            visited_cells.add(engine.avatar_pos)
+        return visited_cells
+
+    @staticmethod
+    def _collect_undo_actions(engine: AutonomousEpistemicEngine) -> set[int]:
+        """Collect all known undo actions across engine state, working memory, and symbolic theory."""
+        undo_acts = set(engine.state.undo_actions)
+        undo_acts.update(engine.working_memory.undo_actions)
+        undo_acts.update(engine.symbolic_theory.undo_actions)
+        return undo_acts
+
+    @staticmethod
     def _probe_uncalibrated_action(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
         available_actions: Sequence[int],
     ) -> EpistemicProbeProposal | None:
         """Uncalibrated actions take absolute priority for motor grounding."""
-        undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
-        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
-            undo_acts.update(engine.working_memory.undo_actions)
-        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
-            undo_acts.update(engine.symbolic_theory.undo_actions)
+        undo_acts = EpistemicCuriosityExplorer._collect_undo_actions(engine)
         uncalibrated = [
             a
             for a in available_actions
             if not engine.is_action_calibrated(a)
+            and a not in engine.immobile_entity_actions
             and engine.inhibited_actions.get(a, 0) == 0
             and a not in undo_acts
         ]
@@ -375,10 +393,37 @@ class EpistemicCuriosityExplorer:
                 chosen = disp_acts[0] if disp_acts else untested_at_pos[0]
             else:
                 spatial_effs = [a for a in untested_at_pos if engine.is_spatial_effector(a)]
-                chosen = spatial_effs[0] if spatial_effs else untested_at_pos[0]
+                if spatial_effs:
+                    chosen = spatial_effs[0]
+                else:
+                    # Spatial kinematics: prefer testing displacement actions into OPEN SPACE
+                    # rather than colliding with or displacing adjacent non-background obstacles.
+                    bg = engine.estimate_background(curr_grid)
+                    H, W = curr_grid.shape
+                    av_r, av_c = engine.avatar_pos
+                    open_space_acts: list[int] = []
+                    occupied_acts: list[int] = []
+                    for a in untested_at_pos:
+                        dr, dc = engine.action_deltas.get(a, (0, 0))
+                        tr, tc = av_r + dr, av_c + dc
+                        if 0 <= tr < H and 0 <= tc < W:
+                            val = int(curr_grid[tr, tc])
+                            if val == bg or val == 0 or engine.symbolic_theory.is_walkable(val):
+                                open_space_acts.append(a)
+                            else:
+                                occupied_acts.append(a)
+                        else:
+                            occupied_acts.append(a)
+                    chosen = open_space_acts[0] if open_space_acts else untested_at_pos[0]
             action_data = None
             if engine.is_spatial_effector(chosen):
                 action_data = engine.ground_effector_action(curr_grid, chosen)
+                if action_data is None:
+                    non_effs = [a for a in untested_at_pos if not engine.is_spatial_effector(a)]
+                    if non_effs:
+                        chosen = non_effs[0]
+                    else:
+                        return None
             return EpistemicProbeProposal(
                 action=chosen,
                 action_data=action_data,
@@ -395,7 +440,7 @@ class EpistemicCuriosityExplorer:
     ) -> EpistemicProbeProposal | None:
         """Motor babbling for self-identification and agency discovery."""
         if displacement_actions and not engine.avatar_features and engine.avatar_feature is None:
-            babble_idx = engine.level_epistemic_probes % len(displacement_actions)
+            babble_idx = engine.context_epistemic_probes % len(displacement_actions)
             return EpistemicProbeProposal(
                 action=displacement_actions[babble_idx],
                 exploration_mode="motor_babbling",
@@ -435,7 +480,7 @@ class EpistemicCuriosityExplorer:
             and engine.entity_visit_counts.get(f"actuate_{p[0]}_{p[1]}", 0) < 3
             for p in engine.effective_actuation_targets
         )
-        interleaved_reach = engine.level_epistemic_probes % 6 == 0
+        interleaved_reach = engine.context_epistemic_probes % 6 == 0
 
         should_probe = (
             not displacement_actions
@@ -450,7 +495,7 @@ class EpistemicCuriosityExplorer:
             )
             or (
                 engine.avatar_pos is None
-                and engine.level_epistemic_probes > 4
+                and engine.context_epistemic_probes > 4
                 and not any(a for a in displacement_actions if not engine.is_action_calibrated(a))
             )
         )
@@ -493,6 +538,21 @@ class EpistemicCuriosityExplorer:
             engine.avatar_pos,
         )
 
+        walkable_and_safe = engine.symbolic_theory.walkable_features
+        bg_is_impassable_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
+        visited_cells = EpistemicCuriosityExplorer._collect_visited_cells(engine)
+        frontier_escape = EpistemicCuriosityExplorer._probe_frontier_escape_with_target(
+            engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+        )
+        if frontier_escape is not None and frontier_escape[1] not in visited_cells:
+            return EpistemicProbeProposal(
+                action=frontier_escape[0],
+                clear_active_probe=True,
+                new_probe_target=frontier_escape[1],
+                new_probe_id=f"frontier_{frontier_escape[1][0]}_{frontier_escape[1][1]}",
+                exploration_mode="frontier_backtrack",
+            )
+
         uncalibrated = [
             a
             for a in available_actions
@@ -503,22 +563,26 @@ class EpistemicCuriosityExplorer:
             a for a in uncalibrated if (a, engine.avatar_pos) not in engine.tested_action_positions
         ]
         if untested_here:
-            act = untested_here[0]
-            return EpistemicProbeProposal(
-                action=act,
-                clear_active_probe=True,
-                tested_action_position=(act, engine.avatar_pos),
-                exploration_mode="attractor_loop_untested",
-            )
+            for act in untested_here:
+                act_data = None
+                if engine.is_spatial_effector(act):
+                    act_data = engine.ground_effector_action(curr_grid, act)
+                    if act_data is None:
+                        continue
+                return EpistemicProbeProposal(
+                    action=act,
+                    action_data=act_data,
+                    clear_active_probe=True,
+                    tested_action_position=(act, engine.avatar_pos),
+                    exploration_mode="attractor_loop_untested",
+                )
 
-        if discrete_transform_actions and (is_stuck or is_oscillating):
-            disc_act = discrete_transform_actions[
-                engine.level_epistemic_probes % len(discrete_transform_actions)
-            ]
+        if frontier_escape is not None:
             return EpistemicProbeProposal(
-                action=disc_act,
+                action=frontier_escape[0],
                 clear_active_probe=True,
-                exploration_mode="attractor_loop_discrete",
+                new_probe_target=frontier_escape[1],
+                exploration_mode="frontier_backtrack",
             )
 
         best_act = None
@@ -541,7 +605,7 @@ class EpistemicCuriosityExplorer:
             _osc_feat = int(curr_grid[nr, nc])
             if _osc_feat in engine.hazard_tracker.known_lethal_features:
                 continue
-            uncertainty_pen = engine._epistemic_uncertainty_cost(_osc_feat, bg)
+            uncertainty_pen = engine._epistemic_uncertainty_cost(_osc_feat, bg) * 3.0
             visits = engine.position_visit_counts.get((nr, nc), 0)
             recency_pen = 20.0 if (nr, nc) in list(engine.recent_positions)[-6:] else 0.0
             total_score = visits + recency_pen + uncertainty_pen
@@ -556,33 +620,53 @@ class EpistemicCuriosityExplorer:
                 exploration_mode="attractor_loop_least_visited",
             )
 
-        if spatial_effector_actions and min_visits == float("inf"):
-            chosen_eff = spatial_effector_actions[0]
+        untested_discrete = [
+            a
+            for a in discrete_transform_actions
+            if (a, engine.avatar_pos) not in engine.tested_action_positions
+        ]
+        if untested_discrete and (is_stuck or is_oscillating):
+            disc_act = untested_discrete[engine.context_epistemic_probes % len(untested_discrete)]
             return EpistemicProbeProposal(
-                action=chosen_eff,
-                action_data=engine.ground_effector_action(curr_grid, chosen_eff),
+                action=disc_act,
                 clear_active_probe=True,
-                exploration_mode="attractor_loop_effector",
+                tested_action_position=(disc_act, engine.avatar_pos),
+                exploration_mode="attractor_loop_discrete",
             )
 
-        undo_acts = set(get_engine_state_attr(engine, "undo_actions", set()))
-        if hasattr(engine, "working_memory") and hasattr(engine.working_memory, "undo_actions"):
-            undo_acts.update(engine.working_memory.undo_actions)
-        if hasattr(engine, "symbolic_theory") and hasattr(engine.symbolic_theory, "undo_actions"):
-            undo_acts.update(engine.symbolic_theory.undo_actions)
+        if spatial_effector_actions and min_visits == float("inf"):
+            chosen_eff = spatial_effector_actions[0]
+            eff_data = engine.ground_effector_action(curr_grid, chosen_eff)
+            if eff_data is not None:
+                return EpistemicProbeProposal(
+                    action=chosen_eff,
+                    action_data=eff_data,
+                    clear_active_probe=True,
+                    exploration_mode="attractor_loop_effector",
+                )
+
+        undo_acts = EpistemicCuriosityExplorer._collect_undo_actions(engine)
         uninhibited_available = [
             a
             for a in available_actions
-            if engine.inhibited_actions.get(a, 0) == 0 and a not in undo_acts
+            if engine.inhibited_actions.get(a, 0) == 0
+            and a not in undo_acts
+            and not engine.is_spatial_effector(a)
         ]
-        non_undo_available = [a for a in available_actions if a not in undo_acts]
+        non_undo_available = [
+            a for a in available_actions if a not in undo_acts and not engine.is_spatial_effector(a)
+        ]
         fallback_action = (
             uninhibited_available[0]
             if uninhibited_available
             else (non_undo_available[0] if non_undo_available else available_actions[0])
         )
+        fallback_data = None
+        if engine.is_spatial_effector(fallback_action):
+            fallback_data = engine.ground_effector_action(curr_grid, fallback_action)
         return EpistemicProbeProposal(
             action=fallback_action,
+            action_data=fallback_data,
             clear_active_probe=True,
             exploration_mode="attractor_loop_fallback",
         )
@@ -600,24 +684,6 @@ class EpistemicCuriosityExplorer:
             return None
 
         ar, ac = engine.avatar_pos
-        is_looming_threat = any(
-            engine.collision_cones.is_collision_hazard(ar, ac, t_future) for t_future in (1, 2)
-        )
-        if not is_looming_threat:
-            return None
-
-        for act, (dr_cal, dc_cal) in disp_actions:
-            nr, nc = ar + dr_cal, ac + dc_cal
-            if not EpistemicCuriosityExplorer._is_ray_passable(
-                engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
-            ):
-                continue
-            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
-                continue
-            if (engine.avatar_pos, act) in engine.failed_transitions:
-                continue
-            return act
-
         return None
 
     @staticmethod
@@ -655,11 +721,11 @@ class EpistemicCuriosityExplorer:
             ):
                 continue
 
-            # Premotor Collision Cones
-            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
-                continue
-
             cell_feat = int(curr_grid[nr, nc])
+            rp_map = engine.working_memory.concept_role_priors
+            hz_prior = rp_map.get(cell_feat, {}).get("hazard", 0.0) if rp_map else 0.0
+            if hz_prior >= 0.65 and (nr, nc) != (tr, tc):
+                continue
 
             # OFC Deadlock Pruning
             if cell_feat in engine.learned_cargo_features:
@@ -697,8 +763,26 @@ class EpistemicCuriosityExplorer:
             repulsion_penalty = engine.working_memory.habenular_ior.get_repulsion_penalty(
                 engine.avatar_pos, act
             )
+            mob_avoid = engine.hazard_tracker.get_mobile_avoidance_cells(
+                curr_grid, set(engine.symbolic_theory.barrier_features), bg
+            )
+            dyn_risk_pen = 120.0 if (nr, nc) in mob_avoid else 0.0
+            if any(d.slip_rate > 0.05 for d in engine.action_dynamics.values()):
+                for dr_s, dc_s in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    sr_s, sc_s = nr + dr_s, nc + dc_s
+                    if 0 <= sr_s < H and 0 <= sc_s < W:
+                        sv_s = int(curr_grid[sr_s, sc_s])
+                        if (
+                            sv_s in engine.hazard_tracker.known_lethal_features
+                            or (sr_s, sc_s) in engine.hazard_tracker.static_lethal_positions
+                            or (
+                                rp_map.get(sv_s, {}).get("hazard", 0.0) >= 0.65 if rp_map else False
+                            )
+                        ):
+                            dyn_risk_pen += 80.0
+                            break
             dist_to_target = abs(nr - tr) + abs(nc - tc)
-            estimated_cost = float(dist_to_target) + cycle_pen + repulsion_penalty
+            estimated_cost = float(dist_to_target) + cycle_pen + repulsion_penalty + dyn_risk_pen
 
             act_id = f"act_{act}_{nr}_{nc}"
             node = ActionNode(
@@ -712,7 +796,9 @@ class EpistemicCuriosityExplorer:
             node_to_act_map[act_id] = act
 
         if candidate_action_nodes:
-            eval_results = engine.active_inference.evaluate_candidates(
+            from hbllm.hcir.world.active_inference import ActiveInferenceEngine
+
+            eval_results = ActiveInferenceEngine().evaluate_candidates(
                 candidate_action_nodes,
                 information_gain_map=info_gain_map,
             )
@@ -745,9 +831,69 @@ class EpistemicCuriosityExplorer:
                 engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
             ):
                 continue
-            if any(engine.collision_cones.is_collision_hazard(nr, nc, t_f) for t_f in (1, 2)):
-                continue
             return act
+
+        return None
+
+    @staticmethod
+    @staticmethod
+    def _probe_frontier_escape_with_target(
+        engine: AutonomousEpistemicEngine,
+        curr_grid: np.ndarray,
+        disp_actions: list[tuple[int, tuple[int, int]]],
+        bg: int,
+        bg_is_impassable_void: bool,
+    ) -> tuple[int, tuple[int, int]] | None:
+        """Frontier Backtracking: BFS shortest path to nearest unexhausted walkable frontier cell."""
+        if not disp_actions or engine.avatar_pos is None:
+            return None
+
+        visited_cells = EpistemicCuriosityExplorer._collect_visited_cells(engine)
+
+        bfs_q: deque[tuple[tuple[int, int], list[Any]]] = deque([(engine.avatar_pos, [])])
+        bfs_visited = {engine.avatar_pos}
+        best_frontier_path: list[Any] | None = None
+        best_frontier_target: tuple[int, int] | None = None
+        least_visited_path: list[Any] | None = None
+        least_visited_target: tuple[int, int] | None = None
+        least_visits = float("inf")
+
+        while bfs_q and len(bfs_visited) < 300:
+            p, path = bfs_q.popleft()
+            p_visits = engine.position_visit_counts.get(p, 0)
+            if p != engine.avatar_pos and p_visits < least_visits:
+                least_visits = p_visits
+                least_visited_path = path
+                least_visited_target = p
+
+            for act, (dr_cal, dc_cal) in disp_actions:
+                nbr = (p[0] + dr_cal, p[1] + dc_cal)
+                nr, nc = nbr
+                if (nr, nc) in bfs_visited:
+                    continue
+                if not EpistemicCuriosityExplorer._is_ray_passable(
+                    engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
+                ):
+                    continue
+                if p == engine.avatar_pos and (
+                    (p, act) in engine.failed_transitions
+                    or engine.working_memory.habenular_ior.is_action_inhibited(p, act)
+                ):
+                    continue
+                if nbr not in visited_cells:
+                    best_frontier_path = path + [act]
+                    best_frontier_target = nbr
+                    break
+                bfs_visited.add(nbr)
+                bfs_q.append((nbr, path + [act]))
+
+            if best_frontier_path is not None:
+                break
+
+        if best_frontier_path and best_frontier_target is not None:
+            return best_frontier_path[0], best_frontier_target
+        if least_visited_path and least_visited_target is not None:
+            return least_visited_path[0], least_visited_target
 
         return None
 
@@ -759,61 +905,11 @@ class EpistemicCuriosityExplorer:
         bg: int,
         bg_is_impassable_void: bool,
     ) -> int | None:
-        """Frontier Backtracking: BFS shortest path to nearest unexhausted walkable frontier cell."""
-        if not disp_actions or engine.avatar_pos is None:
-            return None
-
-        bfs_q: deque[tuple[tuple[int, int], list[Any]]] = deque([(engine.avatar_pos, [])])
-        bfs_visited = {engine.avatar_pos}
-        best_frontier_path: list[Any] | None = None
-        least_visited_path: list[Any] | None = None
-        least_visits = float("inf")
-
-        while bfs_q and len(bfs_visited) < 300:
-            p, path = bfs_q.popleft()
-            p_visits = engine.position_visit_counts.get(p, 0)
-            if p != engine.avatar_pos and p_visits < least_visits:
-                least_visits = p_visits
-                least_visited_path = path
-
-            has_unvisited_neighbor = False
-            for act, (dr_cal, dc_cal) in disp_actions:
-                nbr = (p[0] + dr_cal, p[1] + dc_cal)
-                if EpistemicCuriosityExplorer._is_ray_passable(
-                    engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
-                ):
-                    if engine.position_visit_counts.get(nbr, 0) == 0:
-                        has_unvisited_neighbor = True
-                        break
-            if has_unvisited_neighbor and path:
-                best_frontier_path = path
-                break
-
-            for act, (dr_cal, dc_cal) in disp_actions:
-                nr = p[0] + dr_cal
-                nc = p[1] + dc_cal
-                if (nr, nc) in bfs_visited:
-                    continue
-                if not EpistemicCuriosityExplorer._is_ray_passable(
-                    engine, curr_grid, p[0], p[1], dr_cal, dc_cal, bg, bg_is_impassable_void
-                ):
-                    continue
-                step_idx = len(path) + 1
-                if engine.collision_cones.is_collision_hazard(nr, nc, step_idx):
-                    continue
-                if p == engine.avatar_pos and (
-                    (p, act) in engine.failed_transitions
-                    or engine.working_memory.habenular_ior.is_action_inhibited(p, act)
-                ):
-                    continue
-                bfs_visited.add((nr, nc))
-                bfs_q.append(((nr, nc), path + [act]))
-
-        chosen_escape = best_frontier_path or least_visited_path
-        if chosen_escape:
-            return chosen_escape[0]
-
-        return None
+        """Frontier Backtracking: BFS shortest path action to nearest walkable frontier cell."""
+        res = EpistemicCuriosityExplorer._probe_frontier_escape_with_target(
+            engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+        )
+        return res[0] if res is not None else None
 
     @classmethod
     def compute_epistemic_probe(
@@ -901,15 +997,18 @@ class EpistemicCuriosityExplorer:
             if osc_prop is not None:
                 return osc_prop
 
-            # Update room topology
-            engine.update_room_topology(curr_grid)
-
             candidate_entities = [
                 e
                 for e in entities
                 if e.id not in engine.probed_entity_ids
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
                 and e.feature_id not in engine.hazard_tracker.known_lethal_features
+                and (
+                    e.feature_id not in engine.hazard_tracker.mobile_entities
+                    or e.feature_id in engine.symbolic_theory.cargo_features
+                    or e.feature_id in engine.learned_cargo_features
+                )
+                and e.feature_id != engine.working_memory.shroud_feature
                 and (
                     abs(e.grid_pos[0] - engine.avatar_pos[0])
                     + abs(e.grid_pos[1] - engine.avatar_pos[1])
@@ -924,11 +1023,6 @@ class EpistemicCuriosityExplorer:
 
             if engine.active_probe_target is None and candidate_entities:
                 scored: list[tuple[SpatialEntity, float]] = []
-                current_room_cells = (
-                    set(engine.topology_rooms.get(engine.current_room_id, []))
-                    if engine.current_room_id is not None
-                    else set()
-                )
                 for e in candidate_entities:
                     dist = abs(e.grid_pos[0] - engine.avatar_pos[0]) + abs(
                         e.grid_pos[1] - engine.avatar_pos[1]
@@ -951,8 +1045,6 @@ class EpistemicCuriosityExplorer:
                         affordance_uncertainty += 1.5
 
                     info_val = (12.0 * affordance_uncertainty) / (visits + 1.0)
-                    if current_room_cells and e.grid_pos in current_room_cells:
-                        info_val *= 1.5
                     cost = dist + 1.0
                     scored.append((e, info_val / cost))
                 scored.sort(key=lambda x: x[1], reverse=True)
@@ -1027,23 +1119,50 @@ class EpistemicCuriosityExplorer:
                     exploration_mode="looming_threat_evasion",
                 )
 
-            # When exploring without an active probe target, prioritize Frontier Backtracking (BFS to nearest unvisited cell)
+            # When exploring without an active probe target, when greedy progress toward a
+            # distant target is blocked by walls, or when revisiting cells, prioritize Frontier
+            # Backtracking (BFS to nearest unvisited cell) over naive Manhattan steps.
+            visited_cells = EpistemicCuriosityExplorer._collect_visited_cells(engine)
             has_explicit_probe_target = bool(new_probe_target or engine.active_probe_target)
-            if not has_explicit_probe_target:
-                esc_act = cls._probe_frontier_escape(
-                    engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            tr, tc = target_pos
+            ar, ac = engine.avatar_pos
+            greedy_unvisited_progress = any(
+                cls._is_ray_passable(
+                    engine, curr_grid, ar, ac, dr_cal, dc_cal, bg, bg_is_impassable_void
                 )
-                if esc_act is not None:
-                    return EpistemicProbeProposal(
-                        action=esc_act,
-                        clear_active_probe=clear_active_probe,
-                        new_probe_target=new_probe_target,
-                        new_probe_id=new_probe_id,
-                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                        topological_doorway=doorway_reg,
-                        exploration_mode="frontier_backtrack",
-                    )
+                and (engine.avatar_pos, act) not in engine.failed_transitions
+                and not engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, act
+                )
+                and (ar + dr_cal, ac + dc_cal) not in visited_cells
+                and (abs(ar + dr_cal - tr) + abs(ac + dc_cal - tc)) < (abs(ar - tr) + abs(ac - tc))
+                for act, (dr_cal, dc_cal) in disp_actions
+            )
+            esc_res = cls._probe_frontier_escape_with_target(
+                engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            )
+            if esc_res is not None and (
+                not has_explicit_probe_target
+                or not greedy_unvisited_progress
+                or engine.recent_positions.count(engine.avatar_pos) >= 2
+                or engine.probe_target_steps >= 2
+            ):
+                esc_act, esc_target = esc_res
+                commit_target = (
+                    esc_target
+                    if esc_target not in visited_cells
+                    else (new_probe_target or esc_target)
+                )
+                return EpistemicProbeProposal(
+                    action=esc_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=commit_target,
+                    new_probe_id=new_probe_id or f"frontier_{commit_target[0]}_{commit_target[1]}",
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="frontier_backtrack",
+                )
 
             # Free Energy Active Inference Action Selection
             inf_act = cls._probe_active_inference(
@@ -1062,21 +1181,18 @@ class EpistemicCuriosityExplorer:
                 )
 
             # Frontier Backtracking fallback if active inference was blocked
-            if has_explicit_probe_target:
-                esc_act = cls._probe_frontier_escape(
-                    engine, curr_grid, disp_actions, bg, bg_is_impassable_void
+            if esc_res is not None:
+                esc_act, esc_target = esc_res
+                return EpistemicProbeProposal(
+                    action=esc_act,
+                    clear_active_probe=clear_active_probe,
+                    new_probe_target=new_probe_target or esc_target,
+                    new_probe_id=new_probe_id,
+                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                    topological_doorway=doorway_reg,
+                    exploration_mode="frontier_backtrack",
                 )
-                if esc_act is not None:
-                    return EpistemicProbeProposal(
-                        action=esc_act,
-                        clear_active_probe=clear_active_probe,
-                        new_probe_target=new_probe_target,
-                        new_probe_id=new_probe_id,
-                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                        topological_doorway=doorway_reg,
-                        exploration_mode="frontier_backtrack",
-                    )
 
             if spatial_effector_actions:
                 eff_candidates = [
@@ -1099,7 +1215,10 @@ class EpistemicCuriosityExplorer:
                         )
             if discrete_transform_actions:
                 uninhibited_discrete = [
-                    a for a in discrete_transform_actions if engine.inhibited_actions.get(a, 0) == 0
+                    a
+                    for a in discrete_transform_actions
+                    if engine.inhibited_actions.get(a, 0) == 0
+                    and (a, engine.avatar_pos) not in engine.tested_action_positions
                 ]
                 if uninhibited_discrete:
                     disc_act = uninhibited_discrete[engine.step_counter % len(uninhibited_discrete)]
@@ -1110,6 +1229,7 @@ class EpistemicCuriosityExplorer:
                         new_probe_id=new_probe_id,
                         probed_entity_ids_to_add=tuple(probed_ids_to_add),
                         entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                        tested_action_position=(disc_act, engine.avatar_pos),
                         topological_doorway=doorway_reg,
                         exploration_mode="discrete_transform_round_robin",
                     )
@@ -1119,18 +1239,24 @@ class EpistemicCuriosityExplorer:
                 a for a in uncal if (a, engine.avatar_pos) not in engine.tested_action_positions
             ]
             if untested_here:
-                act = untested_here[0]
-                return EpistemicProbeProposal(
-                    action=act,
-                    clear_active_probe=clear_active_probe,
-                    new_probe_target=new_probe_target,
-                    new_probe_id=new_probe_id,
-                    probed_entity_ids_to_add=tuple(probed_ids_to_add),
-                    entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
-                    tested_action_position=(act, engine.avatar_pos),
-                    topological_doorway=doorway_reg,
-                    exploration_mode="untested_non_displacement",
-                )
+                for act in untested_here:
+                    act_data = None
+                    if engine.is_spatial_effector(act):
+                        act_data = engine.ground_effector_action(curr_grid, act)
+                        if act_data is None:
+                            continue
+                    return EpistemicProbeProposal(
+                        action=act,
+                        action_data=act_data,
+                        clear_active_probe=clear_active_probe,
+                        new_probe_target=new_probe_target,
+                        new_probe_id=new_probe_id,
+                        probed_entity_ids_to_add=tuple(probed_ids_to_add),
+                        entity_visit_counts_to_inc=tuple(entity_visits_to_inc),
+                        tested_action_position=(act, engine.avatar_pos),
+                        topological_doorway=doorway_reg,
+                        exploration_mode="untested_non_displacement",
+                    )
 
             uninhibited_acts = [
                 a
@@ -1267,8 +1393,17 @@ class EpistemicCuriosityExplorer:
             cand.sort(key=_global_key)
             fallback_global = cand[0] if cand else available_actions[0]
 
+        fallback_data = None
+        if engine.is_spatial_effector(fallback_global):
+            fallback_data = engine.ground_effector_action(curr_grid, fallback_global)
+            if fallback_data is None:
+                non_effs = [a for a in available_actions if not engine.is_spatial_effector(a)]
+                if non_effs:
+                    fallback_global = non_effs[0]
+
         return EpistemicProbeProposal(
             action=fallback_global,
+            action_data=fallback_data,
             exploration_mode="global_fallback",
         )
 
@@ -1321,7 +1456,7 @@ class EpistemicCuriosityExplorer:
         proposal: EpistemicProbeProposal,
     ) -> None:
         """Atomically commit EpistemicProbeProposal mutations via StateDelta (WP1)."""
-        delta.set("level_epistemic_probes", view.level_epistemic_probes + 1)
+        delta.set("context_epistemic_probes", view.context_epistemic_probes + 1)
         delta.set("total_epistemic_probes", view.total_epistemic_probes + 1)
 
         if view.avatar_pos is not None:
@@ -1482,25 +1617,13 @@ class MotorCortexEffector:
                 vy = int(raw_vy) if raw_vy is not None else 0
                 if (vy, vx) in engine.quiescent_actuation_targets:
                     continue
-                if hasattr(engine, "working_memory") and hasattr(
-                    engine.working_memory, "habenular_ior"
+                if engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, action, action_data={"x": vx, "y": vy}
                 ):
-                    if engine.working_memory.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                    ):
-                        continue
-                elif hasattr(engine, "habenular_ior"):
-                    if engine.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                    ):
-                        continue
-                haben_pen = 0.0
-                if hasattr(engine, "working_memory") and hasattr(
-                    engine.working_memory, "habenular_ior"
-                ):
-                    haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
-                        engine.avatar_pos, action, action_data={"x": vx, "y": vy}
-                    )
+                    continue
+                haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                    engine.avatar_pos, action, action_data={"x": vx, "y": vy}
+                )
                 vis = engine.entity_visit_counts.get(f"actuate_{vy}_{vx}", 0)
                 # Distance penalization with inhibition-of-return visit penalty and Habenular repulsion
                 d = float(abs(vx - target_c) + abs(vy - target_r)) + float(vis) * 25.0 + haben_pen
@@ -1614,72 +1737,15 @@ class MotorCortexEffector:
         return step
 
     @staticmethod
-    def is_peripheral_frame_cell(r: int, c: int, H: int, W: int, grid: np.ndarray) -> bool:
-        """True if (r, c) is on an outer grid frame, border line, or peripheral HUD status banner."""
-        # 1. Outer 1-pixel perimeter boundary checks
-        if r == 0 or r == H - 1 or c == 0 or c == W - 1:
-            return True
-
-        # 2. Universal Top HUD / Status Banner Detection:
-        # A top HUD banner is a multi-row band across the top (r <= 16, H >= 24)
-        # separated from the gameplay grid by a distinct divider line or having a distinct
-        # banner background color different from the main gameplay field.
-        if r <= 16 and H >= 24:
-            for div_r in range(min(16, H // 3), 2, -1):
-                line = grid[div_r, :]
-                line_vals, line_counts = np.unique(line, return_counts=True)
-                if len(line_counts) > 0:
-                    max_idx = int(np.argmax(line_counts))
-                    if line_counts[max_idx] >= int(W * 0.85):
-                        line_color = int(line_vals[max_idx])
-                        banner_region = grid[:div_r, :]
-                        field_region = grid[div_r + 1 :, :]
-                        b_vals, b_counts = np.unique(banner_region, return_counts=True)
-                        f_vals, f_counts = np.unique(field_region, return_counts=True)
-                        if len(b_counts) > 0 and len(f_counts) > 0:
-                            banner_dom = int(b_vals[np.argmax(b_counts)])
-                            field_dom = int(f_vals[np.argmax(f_counts)])
-                            banner_dom_count = b_counts[np.argmax(b_counts)]
-                            has_distinct_bg = (banner_dom != field_dom) and (
-                                (banner_dom_count / banner_region.size) >= 0.85
-                            )
-                            has_divider_line = (line_color != field_dom) and (
-                                line_counts[max_idx] >= int(W * 0.85)
-                            )
-                            if has_distinct_bg or has_divider_line:
-                                if r <= div_r:
-                                    return True
-                                break
-
-        # 3. Bottom HUD / Status Banner Detection
-        if r >= H - 16 and H >= 24:
-            for div_r in range(H - 4, max(H - 18, H - H // 3), -1):
-                line = grid[div_r, :]
-                line_vals_bot, line_counts_bot = np.unique(line, return_counts=True)
-                if len(line_counts_bot) > 0:
-                    max_idx_bot = int(np.argmax(line_counts_bot))
-                    if line_counts_bot[max_idx_bot] >= int(W * 0.85):
-                        line_color = int(line_vals_bot[max_idx_bot])
-                        banner_region = grid[div_r + 1 :, :]
-                        field_region = grid[:div_r, :]
-                        b_vals_bot, b_counts_bot = np.unique(banner_region, return_counts=True)
-                        f_vals_bot, f_counts_bot = np.unique(field_region, return_counts=True)
-                        if len(b_counts_bot) > 0 and len(f_counts_bot) > 0:
-                            banner_dom = int(b_vals_bot[np.argmax(b_counts_bot)])
-                            field_dom = int(f_vals_bot[np.argmax(f_counts_bot)])
-                            banner_dom_count = b_counts_bot[np.argmax(b_counts_bot)]
-                            has_distinct_bg = (banner_dom != field_dom) and (
-                                (banner_dom_count / banner_region.size) >= 0.85
-                            )
-                            has_divider_line = (line_color != field_dom) and (
-                                line_counts_bot[max_idx_bot] >= int(W * 0.85)
-                            )
-                            if has_distinct_bg or has_divider_line:
-                                if r >= div_r:
-                                    return True
-                                break
-
-        return False
+    def _is_exogenous_or_boundary(
+        engine: Any, r: int, c: int, lattice: np.ndarray, bg: Any = 0
+    ) -> bool:
+        """True when ``(r, c)`` lies in an enclosing border, partitioned band, or exogenous locus."""
+        return bool(
+            engine.working_memory.is_exogenous_locus(
+                (r, c), lattice=lattice, bg=bg, include_outer_edge=True
+            )
+        )
 
     @classmethod
     def ground_effector_action(
@@ -1738,7 +1804,7 @@ class MotorCortexEffector:
                 if (
                     (sr, sc) not in engine.quiescent_actuation_targets
                     and feat not in engine.quiescent_features
-                    and not cls.is_peripheral_frame_cell(sr, sc, H, W, curr_grid)
+                    and not cls._is_exogenous_or_boundary(engine, sr, sc, curr_grid, bg)
                 ):
                     vis = engine.entity_visit_counts.get(f"actuate_{sr}_{sc}", 0)
                     actuation_candidates.append((sr, sc, 180.0 - float(vis) * 15.0))
@@ -1774,7 +1840,7 @@ class MotorCortexEffector:
                         cc,
                     )
                     in engine.quiescent_actuation_targets
-                    or MotorCortexEffector.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
+                    or MotorCortexEffector._is_exogenous_or_boundary(engine, cr, cc, curr_grid, bg)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
@@ -1790,17 +1856,13 @@ class MotorCortexEffector:
                     else 0.0
                 )
                 ior_penalty = float(visit_count) * 30.0 + (float(visit_count) ** 2) * 15.0
-                haben_pen = 0.0
-                if hasattr(engine, "working_memory") and hasattr(
-                    engine.working_memory, "habenular_ior"
+                if engine.working_memory.habenular_ior.is_action_inhibited(
+                    engine.avatar_pos, action, action_data={"x": cc, "y": cr}
                 ):
-                    if engine.working_memory.habenular_ior.is_action_inhibited(
-                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
-                    ):
-                        continue
-                    haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
-                        engine.avatar_pos, action, action_data={"x": cc, "y": cr}
-                    )
+                    continue
+                haben_pen = engine.working_memory.habenular_ior.get_repulsion_penalty(
+                    engine.avatar_pos, action, action_data={"x": cc, "y": cr}
+                )
                 cand_score = (
                     saliency + affordance_bonus + feat_bias + telic_bonus - ior_penalty - haben_pen
                 )
@@ -1824,7 +1886,7 @@ class MotorCortexEffector:
                     or (ar, ac) == engine.avatar_pos
                     or int(curr_grid[ar, ac]) in av_feats
                     or int(curr_grid[ar, ac]) in engine.quiescent_features
-                    or cls.is_peripheral_frame_cell(ar, ac, H, W, curr_grid)
+                    or cls._is_exogenous_or_boundary(engine, ar, ac, curr_grid, bg)
                 ):
                     continue
                 actuation_candidates.append((ar, ac, score))
@@ -1846,7 +1908,7 @@ class MotorCortexEffector:
                     or feat in av_feats
                     or feat in engine.quiescent_features
                     or (cr, cc) == engine.avatar_pos
-                    or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
+                    or cls._is_exogenous_or_boundary(engine, cr, cc, curr_grid, bg)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
@@ -1894,7 +1956,7 @@ class MotorCortexEffector:
                     or feat == engine.bg_feature
                     or feat in engine.quiescent_features
                     or (cr, cc) == engine.avatar_pos
-                    or cls.is_peripheral_frame_cell(cr, cc, H, W, curr_grid)
+                    or cls._is_exogenous_or_boundary(engine, cr, cc, curr_grid, bg)
                 ):
                     continue
                 visit_count = engine.entity_visit_counts.get(f"actuate_{cr}_{cc}", 0)
@@ -1977,7 +2039,7 @@ class MotorCortexEffector:
         step_stride = max(1, min(H, W) // 16)
         for r in range(1, H - 1, step_stride):
             for c in range(1, W - 1, step_stride):
-                if cls.is_peripheral_frame_cell(r, c, H, W, curr_grid):
+                if cls._is_exogenous_or_boundary(engine, r, c, curr_grid, bg):
                     continue
                 v = engine.entity_visit_counts.get(f"actuate_{r}_{c}", 0)
                 feat = int(curr_grid[r, c])
@@ -2002,13 +2064,18 @@ class MotorCortexEffector:
         return coords_fallback
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export motor cortex effector capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export motor cortex effector capability and runtime DOFs as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "allocentric_spatial_grounding"
+        if view is not None:
+            dofs = len(getattr(view, "action_dynamics", {}) or {})
+            rel = f"allocentric_spatial_grounding:dofs:{dofs}"
         return CausalPredicate(
             variable="motor_cortex_effector",
             operator="==",
-            value="ACTIVE",
-            relation="allocentric_spatial_grounding",
+            value=val,
+            relation=rel,
             target_entity="cortex_motor",
         )
 
@@ -2198,9 +2265,14 @@ class MotorStage:
     """
 
     name: str = "motor_stage"
+    engine: Any | None = None
+    _current_journal: Any = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
+        engine = getattr(self, "engine", None)
         if engine is not None:
             # WP1: real motor dispatch — finalise DeliberationStage's
             # ActionProposal through _finalize_step (grid already normalized).
@@ -2208,10 +2280,13 @@ class MotorStage:
             if proposal is None or not hasattr(proposal, "action"):
                 return StageResult(author=self.name)
             if getattr(proposal, "finalized", False):
+                meta = dict(getattr(proposal, "meta", {}))
+                meta["chosen_action"] = proposal.action
+                meta["action_data"] = proposal.action_data
                 return StageResult(
                     author=self.name,
-                    signals={"branch": proposal.branch},
-                    proposed_action=(proposal.action, proposal.action_data),
+                    signals={"branch": proposal.branch, "meta": meta},
+                    proposed_action=(proposal.action, meta),
                 )
             from hbllm.hcir.world.engine_state import (
                 FacultyWriteJournal,
@@ -2219,28 +2294,61 @@ class MotorStage:
             )
 
             journal = FacultyWriteJournal(author="motor_stage")
-            act, data = engine.deliberation_engine._finalize_step(
-                JournaledEngineView(engine, journal),
-                proposal.grid,
-                proposal.action,
-                proposal.action_data,
-                predicted_pos=proposal.predicted_pos,
-            )
+            self._current_journal = journal
+            try:
+                act, data = engine.deliberation_engine._finalize_step(
+                    JournaledEngineView(engine, journal),
+                    proposal.grid,
+                    proposal.action,
+                    proposal.action_data,
+                    predicted_pos=proposal.predicted_pos,
+                )
+            except Exception:
+                engine.rollback_faculty_journal(journal)
+                raise
+            finally:
+                self._current_journal = None
+            meta = dict(getattr(proposal, "meta", {}))
+            meta["chosen_action"] = act
+            meta["action_data"] = data
             return StageResult(
                 author=self.name,
                 journal=journal,
-                signals={"branch": proposal.branch},
-                proposed_action=(act, data),
+                signals={"branch": proposal.branch, "meta": meta},
+                proposed_action=(act, meta),
             )
         proposed_action = ctx.signals.get("proposed_action")
         ops: list[TransactionOperation] = []
         signals: dict[str, Any] = {}
         if proposed_action is None:
-            actions = list(ctx.action_dynamics.keys()) or [1, 2, 3, 4]
-            proposed_action = actions[0] if actions else 1
+            actions = (
+                list(ctx.action_dynamics.keys())
+                or list(ctx.signals.get("available_actions", []))
+                or [1, 2, 3, 4]
+            )
+            proposed_action = actions[0] if actions else None
+        meta = dict(ctx.signals.get("meta", {}))
+        meta.setdefault("chosen_action", proposed_action)
+        meta.setdefault("goal_target", None)
+        meta.setdefault("goal_source", "none")
+        meta.setdefault("subgoal_stack", [])
+        meta.setdefault("plan", None)
+        meta.setdefault("plan_source", "arbitration")
+        meta.setdefault(
+            "candidates",
+            {
+                int(a): (1.0 if a == proposed_action else 0.0)
+                for a in (actions if proposed_action is not None else [1, 2, 3, 4])
+            },
+        )
+        meta.setdefault("veto_reasons", [])
+        meta.setdefault("phase", "unknown")
+        meta.setdefault("branch", "fallback")
+        meta.setdefault("action_data", None)
+        signals["meta"] = meta
         return StageResult(
             author=self.name,
             operations=ops,
             signals=signals,
-            proposed_action=proposed_action,
+            proposed_action=(proposed_action, meta),
         )

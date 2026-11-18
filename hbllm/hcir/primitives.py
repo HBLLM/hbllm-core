@@ -13,7 +13,7 @@ from typing import Any
 
 import numpy as np
 
-Grid = np.ndarray
+Grid: Any = np.ndarray
 
 
 # ─────────────────────────────────────────────────────────────────────────────

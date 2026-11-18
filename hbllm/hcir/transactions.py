@@ -43,6 +43,7 @@ class TransactionOp(StrEnum):
     UPSERT_NODE = "upsert_node"
     ADD_EDGE = "add_edge"
     REMOVE_EDGE = "remove_edge"
+    UPSERT_EDGE = "upsert_edge"
 
 
 class TransactionOperation(BaseModel):
@@ -59,8 +60,10 @@ class TransactionOperation(BaseModel):
     op: TransactionOp
     node_id: str | None = None
     node_data: dict[str, Any] | None = None
+    node: Any = None
     edge_id: str | None = None
     edge_data: dict[str, Any] | None = None
+    edge: Any = None
     changes: dict[str, Any] | None = None
 
     @model_validator(mode="before")
@@ -155,6 +158,17 @@ class HCIRTransaction(BaseModel):
     @property
     def is_rejected(self) -> bool:
         return self.status == TransactionStatus.REJECTED
+
+    @property
+    def rejection_reason(self) -> str | None:
+        if not self.is_rejected:
+            return None
+        error_annotations = [a.assertion for a in self.annotations if a.severity == "error"]
+        return (
+            "; ".join(error_annotations)
+            if error_annotations
+            else "Transaction rejected by verification"
+        )
 
     @property
     def operation_count(self) -> int:

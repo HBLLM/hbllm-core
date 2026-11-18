@@ -278,7 +278,7 @@ def build_registry(seed: int = 0) -> dict[str, LocalGame]:
         "blocked_first", [nav_level(av=(2, 2), walls=[(1, 2), (2, 1)])], seed
     )
     # 3. stride-2 movement
-    games["stride2"] = LocalGame("stride2", [nav_level(goal=(2, 6), stride=2)], seed)
+    games["stride2"] = LocalGame("stride2", [nav_level(goal=(5, 5), stride=2)], seed)
     # 4. key -> door -> goal
     games["key_door"] = LocalGame(
         "key_door",
@@ -364,7 +364,7 @@ def build_registry(seed: int = 0) -> dict[str, LocalGame]:
                 "shape": (8, 8),
                 "avatar": (1, 1),
                 "goal": [(6, 6)],
-                "walls": [(1, 2)],
+                "walls": [(2, 2)],
                 "hazard": ([(2, 1)], 1),
                 "max_steps": 40,
             },

@@ -5,6 +5,15 @@ Provenance-Preserving Adaptive Compaction, Dependency-Analyzed Stability Gating,
 and Continual Learning Loop without Catastrophic Forgetting.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+
+# Extend package search path to include experiments/legacy_brain/continual
+_exp_path = Path(__file__).resolve().parents[3] / "experiments" / "legacy_brain" / "continual"
+if _exp_path.exists() and str(_exp_path) not in __path__:
+    __path__.append(str(_exp_path))
+
 from hbllm.brain.continual.compaction import (
     CompactionReport,
     ProvenancePreservingCompactor,

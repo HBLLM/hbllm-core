@@ -59,8 +59,19 @@ class ActionDynamicsModel:
     confidence: float = 0.5
     probes_tested: int = 0
     displacement: tuple[float, ...] = ()
+    continuous_deltas: list[tuple[float, float]] = field(default_factory=list)
+    delta_counts: dict[tuple[int, int], int] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     conditional_branches: dict[str, ActionDynamicsModel] = field(default_factory=dict)
+
+    @property
+    def slip_rate(self) -> float:
+        """Empirical fraction of displacement trials deviating from the modal direction."""
+        tot = sum(self.delta_counts.values())
+        if tot < 2 or not self.delta_counts:
+            return 0.0
+        best = max(self.delta_counts.values())
+        return max(0.0, 1.0 - (best / float(tot)))
 
     def __post_init__(self) -> None:
         if not self.displacement:
@@ -68,6 +79,23 @@ class ActionDynamicsModel:
         elif self.delta_r == 0 and self.delta_c == 0 and len(self.displacement) >= 2:
             self.delta_r = int(round(self.displacement[0]))
             self.delta_c = int(round(self.displacement[1]))
+
+    def record_continuous_delta(self, dx: float, dy: float) -> None:
+        """Record an empirically observed continuous displacement vector (dx, dy)."""
+        if abs(dx) > 1e-6 or abs(dy) > 1e-6:
+            self.continuous_deltas.append((float(dx), float(dy)))
+            if len(self.continuous_deltas) > 64:
+                self.continuous_deltas = self.continuous_deltas[-64:]
+
+    def get_continuous_velocity(self) -> tuple[float, float]:
+        """Compute the mean continuous velocity vector (vx, vy) from observed trials."""
+        if self.continuous_deltas:
+            vx = sum(d[0] for d in self.continuous_deltas) / len(self.continuous_deltas)
+            vy = sum(d[1] for d in self.continuous_deltas) / len(self.continuous_deltas)
+            return (float(vx), float(vy))
+        if len(self.displacement) >= 2:
+            return (float(self.displacement[0]), float(self.displacement[1]))
+        return (float(self.delta_r), float(self.delta_c))
 
     def get_dynamics(self, condition: str | None = None) -> ActionDynamicsModel:
         """Retrieve the dynamics model for a specific condition or fallback to self."""
@@ -88,7 +116,10 @@ class ActionDynamicsModel:
     def is_displacement_action(self, condition: str | None = None) -> bool:
         """True if empirical testing demonstrates spatial translation of the body."""
         dr, dc = self.get_displacement(condition)
-        return dr != 0 or dc != 0
+        if dr != 0 or dc != 0:
+            return True
+        vx, vy = self.get_continuous_velocity()
+        return (vx * vx + vy * vy) > 1e-6
 
     def update_from_trial(
         self,
@@ -178,6 +209,20 @@ class ActionDynamicsModel:
                     and target_c != 0
                     and (target_c % self.delta_c == 0 or self.delta_c % target_c == 0)
                 )
+                is_unit_step = (target_r != 0 or target_c != 0) and max(
+                    abs(target_r), abs(target_c)
+                ) == 1
+                if is_unit_step:
+                    if (
+                        not self.delta_counts
+                        and self.probes_tested > 1
+                        and (self.delta_r != 0 or self.delta_c != 0)
+                    ):
+                        self.delta_counts[(self.delta_r, self.delta_c)] = self.probes_tested - 1
+                    self.delta_counts[(target_r, target_c)] = (
+                        self.delta_counts.get((target_r, target_c), 0) + 1
+                    )
+
                 if not is_quantum_multiple and self.confidence >= 0.7 and self.probes_tested >= 2:
                     dist_dev = abs(target_r - self.delta_r) + abs(target_c - self.delta_c)
                     if dist_dev >= 1:
@@ -204,7 +249,22 @@ class ActionDynamicsModel:
                             self.conditional_branches[cond_key].update_from_trial(
                                 observed_delta, success=True, learning_rate=learning_rate
                             )
+                        if is_unit_step:
+                            modal_d, _ = max(self.delta_counts.items(), key=lambda kv: kv[1])
+                            self.delta_r, self.delta_c = modal_d[0], modal_d[1]
+                            self.displacement = (float(self.delta_r), float(self.delta_c))
                         return
+
+                if is_unit_step:
+                    modal_d, modal_cnt = max(self.delta_counts.items(), key=lambda kv: kv[1])
+                    self.delta_r, self.delta_c = modal_d[0], modal_d[1]
+                    self.displacement = (float(self.delta_r), float(self.delta_c))
+                    tot_obs = sum(self.delta_counts.values())
+                    if modal_cnt >= 2 and modal_cnt / max(1, tot_obs) >= 0.5:
+                        self.confidence = min(1.0, max(self.confidence, 0.75) + 0.05)
+                    else:
+                        self.confidence = min(1.0, self.confidence + 0.1)
+                    return
 
                 if (target_r != 0 or target_c != 0) and self.delta_r == 0 and self.delta_c == 0:
                     # Transition from ungrounded/obstructed prior to verified empirical displacement
@@ -277,8 +337,8 @@ class ActionDynamicsModel:
         for k, bd in data.get("conditional_branches", {}).items():
             try:
                 branches[k] = cls.from_dict(bd)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Malformed conditional branch %r skipped: %s", k, exc)
         return cls(
             action_id=data.get("action_id", 0),
             delta_r=data.get("delta_r", 0),
@@ -470,7 +530,9 @@ class StateMutationModel:
         self.posterior_value = posterior_value
         self.confidence = confidence
         self.occurrences = occurrences
-        self.metadata = dict(kwargs)
+        meta_kw = kwargs.pop("metadata", None)
+        self.metadata: dict[str, Any] = dict(meta_kw) if isinstance(meta_kw, dict) else {}
+        self.metadata.update(kwargs)
 
     @property
     def trigger_color(self) -> Any:

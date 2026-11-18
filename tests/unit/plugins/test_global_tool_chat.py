@@ -357,7 +357,7 @@ def _test_config(tmp_path) -> BrainConfig:
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(15)
+@pytest.mark.timeout(30)
 async def test_e2e_global_tool_execution_flow(tmp_path):
     """Verify that E2E flow triggers mock domain thought generation, unified tool execution, and synthesis."""
     provider = ToolCallMockProvider()

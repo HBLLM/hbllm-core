@@ -28,7 +28,8 @@ def test_cortical_pipeline_execution_and_purity() -> None:
     assert isinstance(res, PipelineResult)
     assert len(res.stage_results) == 5
     assert len(res.operations) >= 4
-    assert res.final_action in (1, 2)
+    final_act = res.final_action[0] if isinstance(res.final_action, tuple) else res.final_action
+    assert final_act in (1, 2)
     assert ctx == ctx_before
 
 

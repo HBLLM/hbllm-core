@@ -153,19 +153,6 @@ class TestConstitutionalPrinciples:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Brain — Compaction Entropy
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestCompactionEntropy:
-    def test_import(self):
-        from hbllm.brain.compaction import entropy
-
-        exports = [x for x in dir(entropy) if not x.startswith("_")]
-        assert len(exports) > 0
-
-
-# ═══════════════════════════════════════════════════════════════════════
 # Brain — Action Schema
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -176,50 +163,6 @@ class TestActionSchema:
 
         exports = [x for x in dir(action_schema) if not x.startswith("_")]
         assert len(exports) > 0
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Brain — Mesh (locality, router, resolver)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestMeshSubsystem:
-    def test_locality_import(self):
-        from hbllm.brain.mesh import locality
-
-        assert locality is not None
-
-    def test_router_import(self):
-        from hbllm.brain.mesh import router
-
-        assert router is not None
-
-    def test_resolver_import(self):
-        from hbllm.brain.mesh import resolver
-
-        assert resolver is not None
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Brain — Embodiment
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestEmbodiment:
-    def test_idempotency_import(self):
-        from hbllm.brain.embodiment import idempotency
-
-        assert idempotency is not None
-
-    def test_verifier_import(self):
-        from hbllm.brain.embodiment import verifier
-
-        assert verifier is not None
-
-    def test_os_adapter_import(self):
-        from hbllm.brain.embodiment import os_adapter
-
-        assert os_adapter is not None
 
 
 # ═══════════════════════════════════════════════════════════════════════

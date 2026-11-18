@@ -5,6 +5,15 @@ operators, geometric support/stability reasoning, multi-branch counterfactual pl
 and risk/safety evaluation.
 """
 
+from __future__ import annotations
+
+from pathlib import Path
+
+_exp_path = Path(__file__).resolve().parents[3] / "experiments" / "legacy_brain" / "simulation"
+if _exp_path.exists() and str(_exp_path) not in __path__:
+    __path__.append(str(_exp_path))
+
+
 from hbllm.brain.simulation.branch import SimulationBranch
 from hbllm.brain.simulation.counterfactual_engine import (
     CounterfactualResult,

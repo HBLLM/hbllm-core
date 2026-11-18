@@ -3,6 +3,19 @@
 > **Primary Directive for AI Agents:**  
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
+> [!WARNING]
+> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-17, R1–R9 complete).**  
+> R1–R8 established honest all-seed `dev` evaluation (`n=80`, `zero_shot=0.7791`, `solve_rate=0.8750`, CI `[0.7850, 0.9307]`, `cross_seed transfer_solve_rate=0.9342`, `exploration_deaths=3`, mean latency `p50=10.18ms / p95=28.12ms`, `reports/dev/dev_handcrafted_20261116_180441.json`), sealed held-out v2 with `eval-*` gate & `reports/heldout/LEDGER.md`, retired held-out v1, promoted `novelty.yaml` (`zero_shot=0.8365`, `solve_rate=0.9000`, `p50=11.09ms / p95=33.53ms`), wired grounding into runtime decisions, deleted 28 zero-effect/dead faculties + unwired dead hooks, enforced structural debt + `<= 300,000` LOC ratchets (`<= 150,000` LOC for `hbllm/hcir/**`), added risk-aware exploration, implemented bounded event-store compaction + per-tier/world node budgets + per-stage latency profiling (`p50 ~ 10-16ms / p95 <= 45ms` at `32×32`, Rust kernels `< 0.2ms`).
+>
+> **R9 verified across 6 widened task regimes (PO, stochastic dynamics, other agents, long horizons, continuous control, language goals; n=120, 20 seeds/task; before: `reports/dev/widened_dev_before_r9_20261116.json`, after: `reports/dev/widened_dev_after_r9_20261117.json`):**  
+> - `zero_shot` solve rate rose from 0.3167 (38/120) to 0.5083 (61/120, +60.5% rel, CI `[0.4200, 0.5961]`), `generality_score` rose from 0.4977 to 0.6080 (+0.1103).  
+> - `cross_seed transfer_solve_rate` rose from 0.4123 to 0.7456 (+80.8% rel, CI `[0.6586, 0.8166]`), `solve_rate` rose from 0.4083 to 0.7417.  
+> - `exploration_deaths` reduced from 54 to 33 (−38.9%).  
+> - Regimes: `language_goals` 100% zero-shot (20/20, 0 deaths); `multi_agent` 100% transfer solve rate (up from 0%); `continuous_control` 80% zero-shot; `partial_observability` 68.4% transfer solve rate (up from 15.8%); `long_horizon` 89.5% transfer solve rate with transactional chunking preventing constitutional rejection.  
+> - Dev suite maintained without regression (`reports/dev/dev_handcrafted_20261117_041629.json`: `cross_seed transfer_solve_rate=0.9868`, 75/76 solved). Rust kernels `< 0.2ms`; 32×32 E2E `p50=9.65ms / p95=25.98ms`.  
+> - **Official Sealed Held-Out v2 Milestone (`eval-phase2-r9` on `f0587fc1`, n=120, 20 seeds/task, `reports/heldout/LEDGER.md`):** `zero_shot` solve rate = **0.6083** (73/120 solved, CI `[0.5189, 0.6910]`, generality = **0.6472**) vs random baseline 0.0583 (7/120); `cross_seed transfer_solve_rate` = **0.6930** (CI `[0.6032, 0.7702]`); `same_layout_replay` solve rate = **0.8333** (generality = **0.6987**). Partial obs held-out zero-shot = **0.9500** (19/20 solved, 0 deaths); continuous reach zero-shot = **0.7000** (100% transfer); symbolic rules zero-shot = **0.4500** (100% transfer).
+> - Production gaps, HCIR consolidation plan, and Pure-HCIR graduation roadmap are tracked in `reports/audit/2026-11-18_full_project_audit.md`.
+
 ---
 
 ## 1. Project Vision & Core Invariants
@@ -21,7 +34,8 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
 
 3. **Zero LLM Dependency in Cognitive Core:**
    > The core reasoning runtime (`hbllm.brain.reasoning`, `hbllm.hcir.world`) is **100% LLM-independent**.  
-   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically with sub-millisecond execution without requiring external API calls.
+   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically without requiring external API calls (native Rust spatial/graph kernels run sub-millisecond `< 0.2ms`; the full 5-stage Python `AutonomousEpistemicEngine.step()` loop runs in low tens of milliseconds — `p50 ~ 10-15ms / p95 <= 45ms` at `32×32`, profiled by `hbllm bench profile`).  
+   *(Permitted: deterministic, offline-trained feed-forward neural or spiking neural feature encoders conforming to the `FeatureExtractor` protocol, with zero runtime LLM or cloud dependencies).*
 
 4. **Constitutional Governance:**
    > Every state mutation passes through `ConstitutionalVerifier` before commit. Violations (e.g., budget breach, policy failure, safety conflict) trigger compensating rollbacks.
@@ -88,10 +102,11 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 > **Domain-Agnostic Invariant:** Cortical faculties must never be coupled to a specific game, level, or simulation environment. Mechanisms must be based on universal physical principles (topology, collision cones, reachability, symmetries, causal credit assignment).
 
 > [!NOTE]
-> **Faculty Roster (WP2 measured ablation, `reports/ablation/20261101_211519.json`):**
+> **Faculty Roster (post-R5 measured R1 ablation, `reports/ablation/20261116_175717_r1_dev.json`):**
 > - **Stage owners (core, always kept):** `perception`, `assimilator`, `deliberation_engine`, `planner`, `motor`, `episodic_cortex`, `working_memory`, `symbolic_theory`.
-> - **Kept faculties (Δlevels > sd or load-bearing):** `acc_conflict_monitor`, `collision_cones`, `deformation_tracker`, `dorsal_kinetic_stream`, `hazard_tracker`, `metacognitive_agency_cortex`, `neuromodulatory_system`, `precision_controller`, `prediction_budget`, `predictive_coding_cortex`, `snn_predictor`, `surprise_engine`.
-> - **Experimental/unused (ablated to `AblatedFaculty` nulls; classes importable via `hbllm.hcir.world.experimental`):** 52 faculties — see the report for the measured evidence and the decision rule.
+> - **Measured R1 keepers (positive Δgen / Δsr / Δxs):** `prediction_budget` (+0.0880 gen, +0.2375 sr, +0.2369 xs), `budget_governor` (+0.0181 gen, +0.0500 sr, +0.1053 xs), `option_discovery` (+0.0168 gen, +0.0125 sr), `acc_conflict_monitor` (+0.0114 gen), `object_planner` (+0.0067 gen, +0.0125 sr), `remote_causal` (+0.0054 gen, +0.0125 sr).
+> - **Working-memory / hazard stores retained:** `body_schema`, `subgoal_stack`, `habenular_ior`, `hazard_tracker` (patrol/decoy invariance on `novelty.yaml`), `world_kernel`.
+> - **Removed in R5 & Rescoped LOC Budget:** 28 zero-effect/dead modules deleted and dead pipeline hooks unwired (`hbllm/**/*.py` reduced to `242,638` LOC in R5). Active codebase budget is **`<= 300,000` LOC** across `hbllm/**/*.py` (with `<= 150,000` LOC scoped to `hbllm/hcir/**`, tracked by `tests/unit/architecture/test_loc_budget.py`) so high-value non-LLM subsystems (`reasoning/`, `snn/`, `A16`/`A17` `language/`, multimodal sensory fusion, and governed tool capabilities) can be consolidated directly into `hcir/` without `__path__.append` shadow-tree shims. Every newly admitted cortical/grounding faculty must still pass R1 ablation (`Δ > 0`) and latency (`p95 <= 45ms` at `32×32`) gates.
 
 ---
 
@@ -136,8 +151,9 @@ async with tx_mgr.begin_transaction() as tx:
 
 # ✅ ALSO CORRECT: subsystems holding only a workspace reference (adapters, tier
 # promotion, world kernel) use the workspace's attached commit authority
-workspace.commit_operations([TransactionOperation(op=TransactionOp.UPSERT_NODE, node=new_node)],
-                            author="memory_adapter")
+workspace.commit_operations(
+    [TransactionOperation(op=TransactionOp.UPSERT_NODE, node=new_node)], author="memory_adapter"
+)
 
 # ❌ FORBIDDEN: the raw primitives `workspace.add_node/upsert_node/remove_node/add_edge/
 # remove_edge` are kernel-internal (used only by TransactionManager._apply_one).
@@ -157,12 +173,10 @@ def solve_puzzle(grid, actions):
         return [1, 1, 3]
     ...
 
+
 # ✅ CORRECT: Declarative Neuro-Symbolic Skill with composable predicates
 class KeyDoorSkill(DeclarativeNeuroSymbolicSkill):
-    signature = (
-        ActionAffordancePredicate(required={1, 2, 3, 4})
-        & CutSetPredicate(min_partitions=2)
-    )
+    signature = ActionAffordancePredicate(required={1, 2, 3, 4}) & CutSetPredicate(min_partitions=2)
     program = SubgoalSequence(
         SymbolicSubgoal(
             intent=SpatialActionIntent.NAVIGATE_TO,
@@ -200,7 +214,9 @@ theory.actuator_features.add(hyp.premise_feature)
 # Only verified remote switches/buttons belong in actuator_features; in-place mutations
 # are recorded strictly as CausalPredicate state transforms.
 if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
-    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(hyp.premise_feature):
+    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(
+        hyp.premise_feature
+    ):
         theory.actuator_features.add(hyp.premise_feature)
 ```
 
@@ -210,12 +226,12 @@ if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
 # ❌ FORBIDDEN: Executing untrusted code in-process or blocking parent pipe writers
 proc.start()
 result = await _await_child(proc, parent_conn, timeout)
-child_conn.close() # Bug: writer open in parent leads to EOF hang
+child_conn.close()  # Bug: writer open in parent leads to EOF hang
 
 # ✅ CORRECT: Two-tier isolation with immediate parent write-end cleanup and responsive polling
 proc.start()
 try:
-    child_conn.close() # Close write-end immediately in parent so pipe EOF signals properly
+    child_conn.close()  # Close write-end immediately in parent so pipe EOF signals properly
 except Exception:
     pass
 result = await loop.run_in_executor(None, lambda: _await_child(proc, parent_conn, timeout))
@@ -333,10 +349,15 @@ pytest core/tests/unit/ -k "epistemic or cortex or hcir" -q
 pytest core/tests/unit/ -k "<relevant_component>" -q
 
 # Full system runtime diagnostics
-python -m hbllm.cli.diagnostics
+python -m hbllm diagnostics
 
-# ARC / 25 Games evaluation benchmark
-python core/plugins/arc_agi_adapter/run_local_suite.py
+# Benchmark evaluation harness
+python -m hbllm bench dev
+python -m hbllm bench local-suite
+
+# Kernel status and cognitive mind single step
+python -m hbllm kernel status
+python -m hbllm mind step --obs tests/fixtures/obs_minimal.json
 ```
 
 ### Ecosystem Context

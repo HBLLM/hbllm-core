@@ -11,11 +11,12 @@ Provides real-time cognitive performance metrics for:
 from __future__ import annotations
 
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from hbllm.persistence.sqlite_profiles import open_connection
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class CognitiveMetrics:
         self._init_db()
 
     def _init_db(self) -> None:
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +72,7 @@ class CognitiveMetrics:
 
     def record(self, metric: str, value: float, context: str = "") -> None:
         """Record a single metric event."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "INSERT INTO events (metric, value, context, created_at) VALUES (?, ?, ?, ?)",
                 (metric, value, context, time.time()),
@@ -100,7 +101,7 @@ class CognitiveMetrics:
     def get_metric(self, metric: str, hours: int = 24) -> dict[str, float]:
         """Get stats for a metric over the last N hours."""
         cutoff = time.time() - hours * 3600
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute(
                 "SELECT value FROM events WHERE metric = ? AND created_at >= ?",
                 (metric, cutoff),
@@ -146,7 +147,7 @@ class CognitiveMetrics:
         for i in range(periods):
             end = now - i * period_hours * 3600
             start = end - period_hours * 3600
-            with sqlite3.connect(str(self._db_path)) as conn:
+            with open_connection(str(self._db_path)) as conn:
                 rows = conn.execute(
                     "SELECT value FROM events WHERE metric = ? AND created_at >= ? AND created_at < ?",
                     (metric, start, end),

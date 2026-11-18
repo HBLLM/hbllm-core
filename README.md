@@ -251,13 +251,14 @@ asyncio.run(main())
 ### CLI
 
 ```bash
-hbllm info                         # View active brain architecture
-hbllm nodes                        # List all loaded cognitive nodes
+hbllm diagnostics                  # System & Cognitive OS runtime diagnostics
+hbllm info                         # View Cognitive OS architecture & invariants
+hbllm kernel status                # Inspect HCIR kernel, verifiers, and memory tiers
+hbllm mind step --obs file.json    # Deterministic active inference step
+hbllm bench dev                    # Run frozen dev benchmark suite
+hbllm bench local-suite            # Run ARC local suite benchmark
 hbllm serve --port 8000            # Start the FastAPI + MCP Server
 hbllm plugin list                  # List installed plugins
-hbllm plugin new my-plugin         # Scaffold a new custom plugin
-hbllm train --model-size 125m      # Start local pre-training loop
-hbllm data --dataset fineweb       # Run data preparation pipeline
 ```
 
 > 📖 **[Quickstart Guide →](docs/guides/quickstart.md)** · **[Configuration →](docs/guides/configuration.md)** · **[Deployment →](docs/guides/deployment.md)**

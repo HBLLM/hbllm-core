@@ -15,8 +15,6 @@ Covers uncovered lines in:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -377,36 +375,6 @@ class TestSNNCalibrator:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# brain/mesh/delegator.py
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestContractDelegator:
-    def test_propose_contract(self):
-        from hbllm.brain.mesh.delegator import ContractDelegator
-
-        delegator = ContractDelegator(local_node_id="node_1")
-        capsule = MagicMock()
-        capsule.priority = 5
-        capsule.estimated_cost = 100
-        result = delegator.propose_contract("node_2", capsule)
-        assert result is not None
-
-    def test_evaluate_contract(self):
-        from hbllm.brain.mesh.delegator import ContractDelegator, ContractOffer
-
-        delegator = ContractDelegator(local_node_id="node_1")
-        capsule = MagicMock()
-        capsule.is_valid = True
-        capsule.priority = MagicMock(value=1)  # enum-like with .value
-        capsule.estimated_cost = 50
-        capsule.capsule_id = "cap_1"
-        offer = ContractOffer(capsule=capsule, offered_by="node_2")
-        response = delegator.evaluate_contract(offer, current_memory_pressure=0.3)
-        assert response is not None
-
-
-# ═══════════════════════════════════════════════════════════════════════
 # brain/simulation/risk.py
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -426,15 +394,3 @@ class TestRiskSimulation:
         from hbllm.brain.simulation.risk import RiskProfile
 
         assert RiskProfile is not None
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# brain/causality/causal_memory.py
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestCausalMemory:
-    def test_import(self):
-        from hbllm.brain.causality import causal_memory
-
-        assert causal_memory is not None

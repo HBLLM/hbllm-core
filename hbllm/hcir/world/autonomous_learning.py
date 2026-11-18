@@ -27,7 +27,7 @@ def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
 import json
 import logging
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -83,9 +83,16 @@ class RelationalSubgoalMacro:
     waypoints: list[RelationalWaypoint]
     action_space: frozenset[int]
     confidence: float = 1.0
-    source_level: int = 0
+    source_context_epoch: int = 0
+    source_level: int | None = None
     replay_successes: int = 0
     replay_failures: int = 0
+
+    def __post_init__(self) -> None:
+        if self.source_level is None:
+            self.source_level = self.source_context_epoch
+        elif self.source_context_epoch == 0 and self.source_level != 0:
+            self.source_context_epoch = self.source_level
 
     def matches_grid_features(self, grid: np.ndarray) -> bool:
         """Check if all required waypoint features are present in the target grid."""
@@ -122,29 +129,60 @@ class CausalTheoryPlanner:
                 if feat in theory.barrier_features:
                     barrier_positions.add((r, c))
 
+        lethal_features = set(engine.episodic_cortex.discovered_lethal_features) | set(
+            engine.hazard_tracker.known_lethal_features
+        )
+        mob_feats = set(engine.mobile_threat_features) | (
+            set(engine.hazard_tracker.mobile_entities)
+            - set(theory.cargo_features)
+            - set(engine.learned_cargo_features)
+        )
+        shroud_f = engine.working_memory.shroud_feature
+
         # Fallback to candidate goal features if no concrete goal cells located
         if not goal_positions and theory.candidate_goal_features:
             for r in range(curr_grid.shape[0]):
                 for c in range(curr_grid.shape[1]):
                     feat = int(curr_grid[r, c])
-                    if feat in theory.candidate_goal_features:
+                    if (
+                        feat in theory.candidate_goal_features
+                        and feat not in lethal_features
+                        and feat not in mob_feats
+                        and feat != shroud_f
+                    ):
                         goal_positions.add((r, c))
 
         # Fallback to structural perception goals if still empty
-        if not goal_positions and hasattr(engine, "detect_structural_goals"):
+        if not goal_positions:
             try:
                 struct_goals = engine.detect_structural_goals(curr_grid)
                 for sg in struct_goals:
+                    sg_f = sg.get("feature")
+                    if sg_f is not None and (
+                        int(sg_f) in lethal_features
+                        or int(sg_f) in mob_feats
+                        or int(sg_f) == shroud_f
+                    ):
+                        continue
                     if sg.get("cells"):
                         for cp in sg["cells"]:
                             if cp != engine.avatar_pos:
                                 goal_positions.add(cp)
                     elif sg.get("position") and sg["position"] != engine.avatar_pos:
                         goal_positions.add(sg["position"])
-                    if sg.get("feature") is not None:
-                        theory.candidate_goal_features.add(int(sg["feature"]))
-            except Exception:
-                pass
+                    if sg_f is not None and int(np.count_nonzero(curr_grid == int(sg_f))) == 1:
+                        theory.induce_candidate_goal(int(sg_f), evidence="structural_goal_detector")
+            except Exception as exc:
+                logger.debug("Structural goal induction at reset skipped: %s", exc)
+
+        if goal_positions and not theory.goal_features:
+            singleton_goals = {
+                gp
+                for gp in goal_positions
+                if int(np.count_nonzero(curr_grid == int(curr_grid[gp[0], gp[1]]))) == 1
+            }
+            if singleton_goals:
+                goal_positions = singleton_goals
 
         # Discard avatar position and exhausted goals
         if engine.avatar_pos is not None:
@@ -158,9 +196,6 @@ class CausalTheoryPlanner:
         for act_id, dyn in engine.action_dynamics.items():
             if dyn.is_displacement_action():
                 action_displacements[act_id] = (dyn.delta_r, dyn.delta_c)
-
-        # Extract lethal features from episodic memory
-        lethal_features = set(engine.episodic_cortex.discovered_lethal_features)
 
         return CausalPlanningContext(
             goal_positions=goal_positions,
@@ -208,6 +243,8 @@ class CausalTheoryPlanner:
             if pos in context.barrier_positions:
                 return False
             if feat in context.barrier_features:
+                return False
+            if context.walkable_features and feat not in context.walkable_features:
                 return False
         return True
 
@@ -964,140 +1001,3 @@ class MetaLearningGovernor:
             for name, rates in self.strategy_success_rates.items()
             if rates
         ]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Phase G & I: Point Actuation Affordances & Metacognitive Fail-Fast
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class PointActuationObservation:
-    """Outcome of an empirical point actuation intervention at (row, col)."""
-
-    pos: tuple[int, int]
-    color_before: int
-    color_after: int
-    effect_type: str  # "toggle", "cycle", "trigger", "noop"
-    timestamp: float = field(default_factory=time.time)
-
-
-class PointActuationAffordanceLearner:
-    """Empirical affordance learner for coordinate-targeted actuation."""
-
-    def __init__(self) -> None:
-        self.actuation_history: list[PointActuationObservation] = []
-        self.interactive_features: set[int] = set()
-        self.quiescent_cells: set[tuple[int, int]] = set()
-        self.feature_cycle_maps: dict[int, int] = {}
-
-    def observe_point_actuation(
-        self,
-        pos: tuple[int, int],
-        grid_before: np.ndarray,
-        grid_after: np.ndarray,
-    ) -> PointActuationObservation | None:
-        """Observe the delta caused by a targeted actuation intervention."""
-        r, c = pos
-        H, W = grid_before.shape[:2]
-        if not (0 <= r < H and 0 <= c < W):
-            return None
-        c_before = int(grid_before[r, c])
-        c_after = int(grid_after[r, c])
-        diff_mask = grid_before != grid_after
-        diff_count = int(np.count_nonzero(diff_mask))
-
-        if diff_count == 0:
-            self.quiescent_cells.add(pos)
-            effect = "noop"
-        elif diff_count == 1 and diff_mask[r, c]:
-            effect = "cycle" if c_before in self.feature_cycle_maps else "toggle"
-            self.feature_cycle_maps[c_before] = c_after
-            self.interactive_features.add(c_before)
-            self.interactive_features.add(c_after)
-        else:
-            effect = "trigger"
-            self.interactive_features.add(c_before)
-
-        obs = PointActuationObservation(
-            pos=pos, color_before=c_before, color_after=c_after, effect_type=effect
-        )
-        self.actuation_history.append(obs)
-        return obs
-
-    def pick_exploratory_actuation(
-        self,
-        grid: np.ndarray,
-        bg_feature: int = 0,
-        attempted_cells: set[tuple[int, int]] | None = None,
-    ) -> tuple[int, int] | None:
-        """Select high-EIG actuation target (interactive feature or unprobed non-bg cell)."""
-        attempted = (attempted_cells or set()) | self.quiescent_cells
-        H, W = grid.shape[:2]
-        # 1. Prioritize known interactive features
-        for r in range(H):
-            for c in range(W):
-                if (r, c) not in attempted and int(grid[r, c]) in self.interactive_features:
-                    return (r, c)
-        # 2. Prioritize non-background cells
-        for r in range(H):
-            for c in range(W):
-                if (r, c) not in attempted and int(grid[r, c]) != bg_feature:
-                    return (r, c)
-        return None
-
-
-@dataclass
-class DeliberationEntropyMonitor:
-    """Monitors heuristic stagnation and triggers fail-fast bailouts.
-
-    Prevents runaway simulation loops and timeouts when forward search
-    or planning cannot find a path.
-    """
-
-    stagnation_counter: int = 0
-    stagnation_threshold: int = 35
-    min_heuristic_seen: float = float("inf")
-    visited_window: deque[tuple[int, int]] = field(default_factory=lambda: deque(maxlen=24))
-
-    def reset_for_level(self) -> None:
-        self.stagnation_counter = 0
-        self.min_heuristic_seen = float("inf")
-        self.visited_window.clear()
-
-    def update(
-        self,
-        current_pos: tuple[int, int] | None,
-        current_heuristic: float,
-    ) -> bool:
-        """Update monitor with current step. Returns True if stuck."""
-        if current_pos is not None:
-            self.visited_window.append(current_pos)
-
-        if current_heuristic < self.min_heuristic_seen - 0.01:
-            self.min_heuristic_seen = current_heuristic
-            self.stagnation_counter = 0
-            return False
-
-        self.stagnation_counter += 1
-        return self.stagnation_counter >= self.stagnation_threshold
-
-    def trigger_fail_fast(self, engine: AutonomousEpistemicEngine) -> None:
-        """Abort stalled mental plan and force exploratory state reset."""
-        logger.info(
-            "DeliberationEntropyMonitor: Fail-fast bailout triggered "
-            "(%d stagnant steps). Invalidating dead-end plan.",
-            self.stagnation_counter,
-        )
-        engine.mental_plan.clear()
-        if hasattr(engine.working_memory, "macro_plan") and engine.working_memory.macro_plan:
-            engine.working_memory.macro_plan.clear()
-        engine.working_memory.active_macro_goal = None
-        if engine.avatar_pos is not None:
-            engine.working_memory.exhausted_candidate_goals.add(engine.avatar_pos)
-        engine.simulation_cooldown = 0
-        self.stagnation_counter = 0
-
-
-# Backwards compatibility aliases (WP3)
-CrossGameKnowledgeTransfer = CrossContextKnowledgeTransfer

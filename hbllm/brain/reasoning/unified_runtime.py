@@ -105,6 +105,28 @@ class UnifiedReasoningRuntime:
     def registry(self) -> OperatorRegistry:
         return self._registry
 
+    def reason_for_cycle(
+        self,
+        graph: CognitiveGraph,
+        *,
+        problem_id: str,
+        description: str,
+        goal_node_ids: tuple[str, ...] = (),
+        snapshot_sequence: int = 0,
+    ) -> OperatorTrace:
+        """Execute a predictive reasoning pass for an executive cognitive cycle."""
+        problem = ReasoningProblem(
+            problem_id=problem_id,
+            problem_type=ProblemType.PREDICTION,
+            description=description,
+            goal_node_ids=goal_node_ids,
+        )
+        return self.reason(
+            graph=graph,
+            problem=problem,
+            snapshot_sequence=snapshot_sequence,
+        )
+
     # ── Primary Entry Point ──────────────────────────────────────────
 
     def reason(

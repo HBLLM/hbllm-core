@@ -54,6 +54,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from hbllm.persistence.sqlite_profiles import open_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -186,7 +188,7 @@ class WorkspaceManager:
 
     async def init_db(self) -> None:
         """Create the workspaces table if it doesn't exist."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS workspaces (
                     id TEXT PRIMARY KEY,
@@ -221,7 +223,7 @@ class WorkspaceManager:
             conn.commit()
 
         # Load active workspaces into memory
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             rows = conn.execute("SELECT tenant_id, workspace_id FROM active_workspaces").fetchall()
             for tenant_id, workspace_id in rows:
                 self._active_workspace[tenant_id] = workspace_id
@@ -281,7 +283,7 @@ class WorkspaceManager:
             metadata=metadata or {},
         )
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 """
                 INSERT INTO workspaces
@@ -317,7 +319,7 @@ class WorkspaceManager:
 
     async def get(self, workspace_id: str) -> WorkspaceInfo | None:
         """Get a workspace by ID."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute("SELECT * FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
 
@@ -327,7 +329,7 @@ class WorkspaceManager:
 
     async def find_by_name(self, tenant_id: str, name: str) -> WorkspaceInfo | None:
         """Find a workspace by tenant and name."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT * FROM workspaces WHERE tenant_id = ? AND name = ? AND state != 'deleted'",
@@ -358,7 +360,7 @@ class WorkspaceManager:
             states.append("archived")
 
         placeholders = ",".join("?" for _ in states)
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 f"""
@@ -411,7 +413,7 @@ class WorkspaceManager:
 
         ws.updated_at = time.time()
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 """
                 UPDATE workspaces SET
@@ -438,7 +440,7 @@ class WorkspaceManager:
 
     async def archive(self, workspace_id: str) -> bool:
         """Archive a workspace (soft delete)."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE workspaces SET state = 'archived', updated_at = ? WHERE id = ?",
                 (time.time(), workspace_id),
@@ -451,7 +453,7 @@ class WorkspaceManager:
 
     async def delete(self, workspace_id: str) -> bool:
         """Permanently mark a workspace as deleted."""
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             cursor = conn.execute(
                 "UPDATE workspaces SET state = 'deleted', updated_at = ? WHERE id = ?",
                 (time.time(), workspace_id),
@@ -481,7 +483,7 @@ class WorkspaceManager:
         self._active_workspace[tenant_id] = workspace_id
 
         # Update last_accessed_at
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 "UPDATE workspaces SET last_accessed_at = ? WHERE id = ?",
                 (time.time(), workspace_id),
@@ -535,7 +537,7 @@ class WorkspaceManager:
         if field not in ("project_count", "memory_count", "chat_count"):
             raise ValueError(f"Invalid stat field: {field}")
 
-        with sqlite3.connect(str(self._db_path)) as conn:
+        with open_connection(str(self._db_path)) as conn:
             conn.execute(
                 f"UPDATE workspaces SET {field} = {field} + ? WHERE id = ?",
                 (amount, workspace_id),

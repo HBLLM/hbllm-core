@@ -1,9 +1,7 @@
 """Topological Graph & Geodesic Maze Induction Engine (Milestone 3 Phase 2).
 
 Inductively discovers non-local topological geodesic mechanisms:
-1. GridTopologyGraph: Graph abstraction over 2D grids computing shortest geodesic paths.
-2. GeodesicPathOperator: Parameterized operator connecting landmark markers avoiding obstacles.
-3. InductiveTopologicalGraphSynthesizer: Synthesizes graph operators from demonstration residual events.
+- GridTopologyGraph & GeodesicManifoldRouter: Graph abstraction & Betti-guided manifold routing over 2D grids.
 """
 
 from __future__ import annotations
@@ -17,7 +15,6 @@ import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-from hbllm.hcir.world.grid_operator import GridOperator, OperatorBinding
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +238,137 @@ class GeodesicManifoldRouter:
     """Substrate routing engine computing deterministic action-space geodesics over traversable 2D manifolds."""
 
     @staticmethod
+    def compute_soft_avoidance_and_shroud(
+        engine: Any,
+        curr_grid: np.ndarray,
+        barrier_feats: set[int],
+        bg: int,
+        unknown_entity_cells: set[tuple[int, int]],
+        grid_walls: set[tuple[int, int]],
+    ) -> set[tuple[int, int]]:
+        """Compute dynamic mobile-agent and stochastic-slip soft avoidance zones + shroud walls."""
+        cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
+            engine.learned_cargo_features
+        )
+        soft_avoid = set(
+            engine.hazard_tracker.get_mobile_avoidance_cells(
+                curr_grid, barrier_feats, bg, cargo_features=cargo_feats
+            )
+        )
+        hz_seeds = set(engine.hazard_tracker.static_lethal_positions)
+        if any(
+            float(getattr(d, "slip_rate", 0.0) or 0.0) > 0.05
+            for d in engine.action_dynamics.values()
+        ):
+            hz_seeds |= set(unknown_entity_cells)
+        hz_feats = set(engine.hazard_tracker.known_lethal_features)
+        rp_map = engine.working_memory.concept_role_priors
+        if rp_map:
+            for rc_k, rp_v in rp_map.items():
+                if rp_v.get("hazard", 0.0) >= 0.65 and rp_v.get("goal", 0.0) < 0.50:
+                    hz_feats.add(int(rc_k))
+        for l_f in hz_feats:
+            for lr_i, lc_i in np.argwhere(curr_grid == l_f):
+                pt_h = (int(lr_i), int(lc_i))
+                hz_seeds.add(pt_h)
+                soft_avoid.add(pt_h)
+        for hr_s, hc_s in hz_seeds:
+            for dr_s, dc_s in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                soft_avoid.add((hr_s + dr_s, hc_s + dc_s))
+        shroud_f = engine.working_memory.shroud_feature
+        if shroud_f is not None:
+            for sr_i, sc_i in np.argwhere(curr_grid == shroud_f):
+                grid_walls.add((int(sr_i), int(sc_i)))
+        return soft_avoid
+
+    @staticmethod
+    def compute_reachable_frontiers(
+        engine: Any,
+        curr_grid: np.ndarray,
+        bg: int,
+        prior_hazard_feats: set[int],
+        interactive_cluster_loci: set[tuple[int, int]] | tuple[tuple[int, int], ...],
+        scipy_label_fn: Any,
+    ) -> list[tuple[int, int]]:
+        """Compute reachable unvisited frontier cells prioritizing shroud-revealing boundaries."""
+        H, W = curr_grid.shape
+        avatar_pos = engine.avatar_pos
+        if avatar_pos is None or not (0 <= avatar_pos[0] < H and 0 <= avatar_pos[1] < W):
+            return []
+        wm = engine.working_memory
+        visited: set[tuple[int, int]] = set(wm.visited_cells)
+        for c_pos, cnt in engine.position_visit_counts.items():
+            if cnt > 0:
+                visited.add(c_pos)
+        visited.add(avatar_pos)
+
+        theory = engine.symbolic_theory
+        lethal = engine.hazard_tracker.known_lethal_features
+        shroud_f = wm.shroud_feature
+        allowed_feats = (set(theory.walkable_features) | {int(bg)}) - (
+            set(theory.barrier_features) | set(lethal) | prior_hazard_feats
+        )
+        if shroud_f is not None:
+            allowed_feats.discard(int(shroud_f))
+        passable_mask = np.isin(curr_grid, list(allowed_feats))
+        passable_mask[avatar_pos[0], avatar_pos[1]] = True
+        labeled_reach, _ = scipy_label_fn(passable_mask)
+        av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
+        reach_mask = labeled_reach == av_lbl
+
+        visited_mask = np.zeros((H, W), dtype=bool)
+        for vr, vc in visited:
+            if 0 <= vr < H and 0 <= vc < W:
+                visited_mask[vr, vc] = True
+        unvisited_mask = reach_mask & (~visited_mask)
+        for er, ec in interactive_cluster_loci:
+            if 0 <= er < H and 0 <= ec < W:
+                unvisited_mask[er, ec] = False
+
+        if shroud_f is not None:
+            shroud_mask = curr_grid == int(shroud_f)
+            adj_shroud = np.zeros((H, W), dtype=bool)
+            adj_shroud[1:, :] |= shroud_mask[:-1, :]
+            adj_shroud[:-1, :] |= shroud_mask[1:, :]
+            adj_shroud[:, 1:] |= shroud_mask[:, :-1]
+            adj_shroud[:, :-1] |= shroud_mask[:, 1:]
+            shroud_front = reach_mask & adj_shroud & (~visited_mask)
+            if np.any(shroud_front):
+                sr_r, sr_c = np.nonzero(shroud_front)
+                cands = list(zip(sr_r.tolist(), sr_c.tolist()))
+                cands.sort(key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1]))
+                return cands
+
+        adj_visited = np.zeros((H, W), dtype=bool)
+        adj_visited[1:, :] |= visited_mask[:-1, :]
+        adj_visited[:-1, :] |= visited_mask[1:, :]
+        adj_visited[:, 1:] |= visited_mask[:, :-1]
+        adj_visited[:, :-1] |= visited_mask[:, 1:]
+        frontier_mask = unvisited_mask & adj_visited
+        if not np.any(frontier_mask):
+            frontier_mask = unvisited_mask
+        fr_r, fr_c = np.nonzero(frontier_mask)
+        frontier_candidates = list(zip(fr_r.tolist(), fr_c.tolist()))
+
+        opt_eng = engine.option_discovery
+        if opt_eng is not None and opt_eng.discovered_options:
+            bottleneck_frontiers = [
+                opt.bottleneck_state
+                for opt in opt_eng.discovered_options.values()
+                if opt.bottleneck_state is not None
+                and 0 <= opt.bottleneck_state[0] < H
+                and 0 <= opt.bottleneck_state[1] < W
+                and bool(unvisited_mask[opt.bottleneck_state[0], opt.bottleneck_state[1]])
+            ]
+            if bottleneck_frontiers:
+                frontier_candidates = bottleneck_frontiers
+
+        frontier_candidates.sort(
+            key=lambda p: abs(p[0] - avatar_pos[0]) + abs(p[1] - avatar_pos[1])
+        )
+        return frontier_candidates
+
+    @staticmethod
     def route_geodesic(
         curr_grid: np.ndarray,
         start_pos: tuple[int, int],
@@ -255,6 +383,8 @@ class GeodesicManifoldRouter:
         avatar_features: set[int],
         max_candidate_goals: int = 5,
         prune_cavities: bool = False,
+        preserve_goal_order: bool = False,
+        soft_avoid_cells: set[tuple[int, int]] | None = None,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find deterministic action-space shortest path across the traversable manifold.
 
@@ -272,7 +402,7 @@ class GeodesicManifoldRouter:
             if 0 <= wr < H and 0 <= wc < W:
                 passable_mask[wr, wc] = False
         for ur, uc in unknown_entity_cells:
-            if 0 <= ur < H and 0 <= uc < W and (ur, uc) not in goals:
+            if 0 <= ur < H and 0 <= uc < W:
                 passable_mask[ur, uc] = False
 
         hazard_cells: set[tuple[int, int]] = set()
@@ -331,9 +461,13 @@ class GeodesicManifoldRouter:
                         for cr, cc in cavity:
                             passable_mask[cr, cc] = False
 
-        sorted_goals = sorted(
-            goals,
-            key=lambda g: abs(g[0] - start_pos[0]) + abs(g[1] - start_pos[1]),
+        candidate_goals = (
+            list(goals)
+            if preserve_goal_order
+            else sorted(
+                goals,
+                key=lambda g: abs(g[0] - start_pos[0]) + abs(g[1] - start_pos[1]),
+            )
         )
 
         effective_actions = list(movable_actions)
@@ -360,10 +494,28 @@ class GeodesicManifoldRouter:
 
         effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)
 
-        for cand_goal in sorted_goals[:max_candidate_goals]:
-            passable_mask[cand_goal[0], cand_goal[1]] = True
+        if soft_avoid_cells:
+            for cand_goal in candidate_goals[:max_candidate_goals]:
+                buf_mask = passable_mask.copy()
+                for sr, sc in soft_avoid_cells:
+                    if 0 <= sr < H and 0 <= sc < W and (sr, sc) != start_pos:
+                        buf_mask[sr, sc] = False
+                buf_mask[cand_goal[0], cand_goal[1]] = True
+                buf_plan = GridTopologyGraph.shortest_path_with_actions(
+                    passable_mask=buf_mask,
+                    start_coord=start_pos,
+                    goal_coord=cand_goal,
+                    actions_with_deltas=effective_actions,
+                    goal_radius=effective_goal_radius,
+                )
+                if buf_plan:
+                    return buf_plan
+
+        for cand_goal in candidate_goals[:max_candidate_goals]:
+            cand_mask = passable_mask.copy()
+            cand_mask[cand_goal[0], cand_goal[1]] = True
             action_plan = GridTopologyGraph.shortest_path_with_actions(
-                passable_mask=passable_mask,
+                passable_mask=cand_mask,
                 start_coord=start_pos,
                 goal_coord=cand_goal,
                 actions_with_deltas=effective_actions,
@@ -408,260 +560,118 @@ class GeodesicManifoldRouter:
             )
         ]
 
+    @staticmethod
+    def route_continuous_kinematic(
+        engine: Any,
+        available_actions: Sequence[Any],
+        curr_grid: np.ndarray | None = None,
+        goal_radius: float = 0.55,
+        max_expansions: int = 512,
+    ) -> list[tuple[Any, tuple[int, int]]] | None:
+        """Plan a multi-step kinematic trajectory in continuous metric space using grounded velocity vectors."""
+        import heapq
+        import math
 
-class GeodesicPathOperator(GridOperator):
-    """Operator that connects landmark markers with a geodesic shortest path avoiding obstacle colors."""
+        wm = engine.working_memory
+        if wm is None:
+            return None
+        c_pos = wm.continuous_agent_pos
+        c_goal = wm.continuous_goal_pos
+        rf = wm.reference_frame
+        if c_pos is None or len(c_pos) < 2:
+            return None
 
-    def __init__(
-        self,
-        name: str,
-        start_color: int,
-        goal_color: int,
-        path_color: int,
-        traversable_colors: tuple[int, ...] = (0,),
-        obstacle_colors: tuple[int, ...] = (),
-        include_endpoints: bool = False,
-        connectivity: str = "4_connected",
-        complexity: float = 2.4,
-    ) -> None:
-        self.name = name
-        self.start_color = start_color
-        self.goal_color = goal_color
-        self.path_color = path_color
-        self.traversable_colors = traversable_colors
-        self.obstacle_colors = obstacle_colors
-        self.include_endpoints = include_endpoints
-        self.connectivity = connectivity
-        self.complexity = complexity
+        vel_map: dict[Any, tuple[float, float]] = {}
+        for act in available_actions:
+            dyn = engine.action_dynamics.get(act)
+            if dyn is not None:
+                vx, vy = dyn.get_continuous_velocity()
+                if (vx * vx + vy * vy) > 1e-6:
+                    vel_map[act] = (float(vx), float(vy))
 
-    def to_causal_predicate(self) -> CausalPredicate:
-        """Export geodesic path operator as a declarative causal predicate."""
-        return CausalPredicate(
-            variable=f"geodesic_path:{self.start_color}->{self.goal_color}",
-            operator="==",
-            value=self.path_color,
-            relation=f"conn:{self.connectivity}",
-            target_entity=self.name,
+        if not vel_map or c_goal is None or len(c_goal) < 2:
+            return None
+
+        bounds = rf.bounds if rf is not None and rf.bounds else ((0.0, 10.0), (0.0, 10.0))
+        x_min, x_max = (
+            (float(bounds[0][0]), float(bounds[0][1])) if len(bounds) >= 1 else (0.0, 10.0)
+        )
+        y_min, y_max = (
+            (float(bounds[1][0]), float(bounds[1][1])) if len(bounds) >= 2 else (0.0, 10.0)
+        )
+        origin_desc = (
+            rf.origin_description
+            if rf is not None and rf.origin_description
+            else "bottom_left_metric"
         )
 
-    def to_transaction_operations(self) -> list[TransactionOperation]:
-        """Propose atomic HCIR transaction recording geodesic path operator."""
-        return [
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=f"op_{self.name}",
-                node_data={
-                    "name": self.name,
-                    "start_color": self.start_color,
-                    "goal_color": self.goal_color,
-                    "path_color": self.path_color,
-                    "traversable_colors": list(self.traversable_colors),
-                    "obstacle_colors": list(self.obstacle_colors),
-                    "connectivity": self.connectivity,
-                    "complexity": self.complexity,
-                },
-            )
-        ]
+        gx, gy = float(c_goal[0]), float(c_goal[1])
+        sx, sy = float(c_pos[0]), float(c_pos[1])
 
-    def propose(self, scene: dict[str, Any], context: dict[str, Any]) -> list[OperatorBinding]:
+        def _to_lattice(x: float, y: float) -> tuple[int, int]:
+            if curr_grid is None or curr_grid.ndim < 2:
+                return (0, 0)
+            H, W = curr_grid.shape
+            c_idx = int(np.clip(round((x - x_min) / max(1e-6, x_max - x_min) * W - 0.5), 0, W - 1))
+            if "bottom_left" in origin_desc:
+                r_idx = int(
+                    np.clip(round((y_max - y) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
+                )
+            else:
+                r_idx = int(
+                    np.clip(round((y - y_min) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
+                )
+            return (r_idx, c_idx)
 
-        return [
-            OperatorBinding(
-                operator_name=self.name,
-                params={
-                    "start_color": self.start_color,
-                    "goal_color": self.goal_color,
-                    "path_color": self.path_color,
-                    "traversable_colors": list(self.traversable_colors),
-                    "obstacle_colors": list(self.obstacle_colors),
-                    "include_endpoints": self.include_endpoints,
-                    "connectivity": self.connectivity,
-                },
-                description=f"{self.name}(start={self.start_color}, goal={self.goal_color}, path={self.path_color})",
-                complexity=self.complexity,
-            )
-        ]
+        border_f: int | None = None
+        if curr_grid is not None and curr_grid.ndim >= 2 and curr_grid.shape[0] >= 3:
+            b0 = int(curr_grid[0, 0])
+            if b0 == int(curr_grid[-1, -1]) and b0 == int(curr_grid[0, -1]):
+                border_f = b0
 
-    def _find_endpoints(
-        self, grid: np.ndarray
-    ) -> tuple[int | None, int | None, int | None, int | None]:
-        """Locate start and goal coordinates on the grid."""
-        if self.start_color == self.goal_color:
-            coords = np.argwhere(grid == self.start_color)
-            if len(coords) < 2:
-                return None, None, None, None
-            return int(coords[0][0]), int(coords[0][1]), int(coords[1][0]), int(coords[1][1])
-        start_coords = np.argwhere(grid == self.start_color)
-        goal_coords = np.argwhere(grid == self.goal_color)
-        if len(start_coords) == 0 or len(goal_coords) == 0:
-            return None, None, None, None
-        return (
-            int(start_coords[0][0]),
-            int(start_coords[0][1]),
-            int(goal_coords[0][0]),
-            int(goal_coords[0][1]),
-        )
-
-    def has_multiple_shortest_paths(self, grid: np.ndarray) -> bool:
-        """Check if grid contains ambiguous multiple shortest paths between endpoints."""
-        sr, sc, gr, gc = self._find_endpoints(grid)
-        if sr is None or sc is None or gr is None or gc is None:
+        def _is_blocked(x: float, y: float, margin: float = 0.0) -> bool:
+            if not (x_min + 0.4 <= x <= x_max - 0.4 and y_min + 0.4 <= y <= y_max - 0.4):
+                return True
+            if curr_grid is not None and curr_grid.ndim >= 2:
+                pts = (
+                    [(x, y), (x - margin, y), (x + margin, y), (x, y - margin), (x, y + margin)]
+                    if margin > 0.0
+                    else [(x, y)]
+                )
+                for px, py in pts:
+                    lr, lc = _to_lattice(px, py)
+                    feat = int(curr_grid[lr, lc])
+                    if (
+                        feat == border_f
+                        or engine.symbolic_theory.is_barrier(feat)
+                        or (lr, lc) in engine.learned_barriers
+                    ):
+                        return True
             return False
-        paths = GridTopologyGraph.find_all_shortest_paths(
-            grid=grid,
-            start_coord=(sr, sc),
-            goal_coord=(gr, gc),
-            traversable_colors=set(self.traversable_colors),
-            connectivity=self.connectivity,
-        )
-        return len(paths) > 1
 
-    def apply(self, grid: np.ndarray, binding: OperatorBinding | dict[str, Any]) -> np.ndarray:
-        out = np.copy(grid)
-        sr, sc, gr, gc = self._find_endpoints(grid)
-        if sr is None or sc is None or gr is None or gc is None:
-            return out
-
-        path = GridTopologyGraph.shortest_path(
-            grid=grid,
-            start_coord=(sr, sc),
-            goal_coord=(gr, gc),
-            traversable_colors=set(self.traversable_colors),
-            connectivity=self.connectivity,
-        )
-
-        if path:
-            for pr, pc in path:
-                if self.include_endpoints or ((pr, pc) != (sr, sc) and (pr, pc) != (gr, gc)):
-                    out[pr, pc] = self.path_color
-
-        return out
-
-
-class InductiveTopologicalGraphSynthesizer:
-    """Induces topological geodesic path operators directly from demonstration residuals."""
-
-    @classmethod
-    def synthesize_from_residuals(
-        cls, train_pairs: list[tuple[np.ndarray, np.ndarray]]
-    ) -> GeodesicPathOperator | None:
-        """Deduce landmark endpoints, obstacle sets, and shortest path parameters."""
-        if not train_pairs:
-            return None
-
-        x0, y0 = train_pairs[0]
-        diff_mask = x0 != y0
-        residual_coords = [tuple(int(c) for c in pt) for pt in np.argwhere(diff_mask)]
-
-        if len(residual_coords) == 0:
-            return None
-
-        # Residual path must all be colored with a single path color in y0
-        path_colors = np.unique(y0[diff_mask])
-        if len(path_colors) != 1:
-            return None
-        path_color = int(path_colors[0])
-
-        # Traversable medium in x0
-        traversed_colors = tuple(sorted(set(int(c) for c in np.unique(x0[diff_mask]))))
-
-        # Identify terminal endpoints of the residual path (degree <= 1 in residual graph)
-        residual_set = set(residual_coords)
-        endpoints = [
-            (r, c)
-            for (r, c) in residual_coords
-            if sum(
-                1
-                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                if (r + dr, c + dc) in residual_set
-            )
-            <= 1
-        ]
-
-        H, W = x0.shape
-        candidate_landmarks: set[int] = set()
-
-        for er, ec in endpoints:
-            # Check if endpoint itself was originally a landmark in x0
-            orig_col = int(x0[er, ec])
-            if orig_col not in traversed_colors and orig_col != 0:
-                candidate_landmarks.add(orig_col)
-
-            # Check adjacent cells outside residual path
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nr, nc = er + dr, ec + dc
-                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in residual_set:
-                    col = int(x0[nr, nc])
-                    if col not in traversed_colors and col != 0:
-                        candidate_landmarks.add(col)
-
-        # Also fallback: any non-zero, non-traversed color with count <= 4 in x0
-        for col in np.unique(x0):
-            c_int = int(col)
-            if c_int != 0 and c_int not in traversed_colors:
-                if np.sum(x0 == c_int) <= 4:
-                    candidate_landmarks.add(c_int)
-
-        if not candidate_landmarks:
-            return None
-
-        landmarks = sorted(list(candidate_landmarks))
-        candidate_pairs: list[tuple[int, int]] = []
-
-        # Distinct landmark pairs
-        for i in range(len(landmarks)):
-            for j in range(len(landmarks)):
-                if i != j:
-                    candidate_pairs.append((landmarks[i], landmarks[j]))
-                else:
-                    # Same color pair (e.g. connect two dots of same color)
-                    if np.sum(x0 == landmarks[i]) >= 2:
-                        candidate_pairs.append((landmarks[i], landmarks[i]))
-
-        all_colors = set(int(c) for c in np.unique(x0)) - {0}
-
-        # Test candidate operators
-        for start_c, goal_c in candidate_pairs:
-            obstacle_candidates = tuple(
-                sorted(all_colors - set(traversed_colors) - {start_c, goal_c})
-            )
-
-            for include_endpoints in [False, True]:
-                for conn in ["4_connected", "8_connected"]:
-                    candidate_op = GeodesicPathOperator(
-                        name="synthesized_geodesic_shortest_path",
-                        start_color=start_c,
-                        goal_color=goal_c,
-                        path_color=path_color,
-                        traversable_colors=traversed_colors,
-                        obstacle_colors=obstacle_candidates,
-                        include_endpoints=include_endpoints,
-                        connectivity=conn,
-                    )
-
-                    # Verify on Demo 0
-                    b0 = candidate_op.propose({}, {"train_pairs": train_pairs})[0]
-                    pred0 = candidate_op.apply(x0, b0)
-                    if not np.array_equal(pred0, y0):
+        for pad in (0.28, 0.0):
+            start_key = (round(sx * 4), round(sy * 4))
+            pq: list[tuple[float, int, float, float, list[tuple[Any, tuple[int, int]]]]] = [
+                (math.hypot(gx - sx, gy - sy), 0, sx, sy, [])
+            ]
+            visited: dict[tuple[int, int], int] = {start_key: 0}
+            expansions = 0
+            while pq and expansions < max_expansions:
+                _, cost, cx, cy, path = heapq.heappop(pq)
+                expansions += 1
+                if math.hypot(gx - cx, gy - cy) <= goal_radius and path:
+                    return path
+                for act, (vx, vy) in vel_map.items():
+                    nx, ny = cx + vx, cy + vy
+                    if _is_blocked(nx, ny, pad):
                         continue
-
-                    # Out-of-construction verification on Demo 1..k
-                    verified = True
-                    for xi, yi in train_pairs[1:]:
-                        pred_i = candidate_op.apply(xi, b0)
-                        if not np.array_equal(pred_i, yi):
-                            verified = False
-                            break
-
-                    if verified:
-                        logger.info(
-                            "Successfully induced topological geodesic operator: start=%d, goal=%d, path=%d, traversable=%s, obstacles=%s",
-                            start_c,
-                            goal_c,
-                            path_color,
-                            traversed_colors,
-                            obstacle_candidates,
-                        )
-                        return candidate_op
-
+                    nkey = (round(nx * 4), round(ny * 4))
+                    ncost = cost + 1
+                    if nkey in visited and visited[nkey] <= ncost:
+                        continue
+                    visited[nkey] = ncost
+                    lat_p = _to_lattice(nx, ny)
+                    act_out = int(act) if isinstance(act, (int, np.integer)) else act
+                    h = math.hypot(gx - nx, gy - ny) / max(0.25, math.hypot(vx, vy))
+                    heapq.heappush(pq, (ncost + h, ncost, nx, ny, [*path, (act_out, lat_p)]))
         return None

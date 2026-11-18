@@ -100,10 +100,10 @@ class RemoteCausalAttributor:
 
     @property
     def boundary_retention(self):
-        """Declared retention policy: default level-local semantics."""
+        """Declared retention policy: default episode-local semantics."""
         from hbllm.hcir.world.percept import RetentionPolicy
 
-        return RetentionPolicy.LEVEL_LOCAL
+        return RetentionPolicy.EPISODE_LOCAL
 
     def reset_episode(self, retain_long_term: bool = True) -> None:
         """Reset transient episode state while optionally preserving confirmed causal laws."""
@@ -155,6 +155,9 @@ class RemoteCausalAttributor:
 
         av_set = avatar_features or set()
         trigger_feat = int(prev_grid[tr, tc])
+        # An empty background locus or the avatar's own previous body cell cannot be a mechanism.
+        if trigger_feat == background_feature or trigger_feat in av_set:
+            return []
 
         # Compute all cell mutations between frames
         diff_mask = prev_grid != curr_grid
@@ -179,6 +182,30 @@ class RemoteCausalAttributor:
             if orig_feat in av_set or mut_feat in av_set:
                 continue
 
+            # Spelke Continuity: Ignore local 1-step translation of conserved autonomous entities
+            if orig_feat == background_feature or mut_feat == background_feature:
+                mov_f = mut_feat if orig_feat == background_feature else orig_feat
+                if int(np.count_nonzero(curr_grid == mov_f)) == int(
+                    np.count_nonzero(prev_grid == mov_f)
+                ) and any(
+                    0 <= rr + nr_d < H
+                    and 0 <= rc + nc_d < W
+                    and (
+                        (
+                            orig_feat == background_feature
+                            and int(prev_grid[rr + nr_d, rc + nc_d]) == mov_f
+                            and int(curr_grid[rr + nr_d, rc + nc_d]) == background_feature
+                        )
+                        or (
+                            mut_feat == background_feature
+                            and int(prev_grid[rr + nr_d, rc + nc_d]) == background_feature
+                            and int(curr_grid[rr + nr_d, rc + nc_d]) == mov_f
+                        )
+                    )
+                    for nr_d, nc_d in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                ):
+                    continue
+
             pair_key = (action_pos, (rr, rc))
             self.co_occurrence_evidence[pair_key] += 1
             count = self.co_occurrence_evidence[pair_key]
@@ -194,6 +221,7 @@ class RemoteCausalAttributor:
 
             if existing:
                 aff = existing[0]
+                aff.trigger_feature = trigger_feat
                 aff.activation_count = count
                 aff.confidence = conf
                 aff.mutated_remote_feature = mut_feat

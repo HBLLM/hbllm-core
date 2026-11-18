@@ -1,0 +1,1810 @@
+{
+  "git_sha": "f0587fc183b07a732fb7886d4b4bb3473f79c730",
+  "config_hash": "b14d80e89bc8cc3e",
+  "timestamp": "20261117_054729",
+  "split": "heldout",
+  "eval_tag": "eval-phase2-r9",
+  "tasks": [
+    {
+      "task_id": "grid_nav_heldout_v2_system_handcrafted",
+      "family": "grid",
+      "split": "heldout",
+      "steps": 15,
+      "max_budget": 100,
+      "seed_count": 20,
+      "steps_to_first_success": 40,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 3,
+      "exploration_deaths": 3,
+      "p50_latency_ms": 81.42,
+      "p95_latency_ms": 215.6,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        40,
+        15,
+        15,
+        15,
+        15
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          200010,
+          200011,
+          200012,
+          200013,
+          200014,
+          200015,
+          200016,
+          200017,
+          200018,
+          200019,
+          200020,
+          200021,
+          200022,
+          200023,
+          200024,
+          200025,
+          200026,
+          200027,
+          200028,
+          200029
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          false
+        ],
+        "steps_per_seed": [
+          40,
+          17,
+          19,
+          3,
+          100,
+          28,
+          22,
+          24,
+          15,
+          23,
+          24,
+          18,
+          24,
+          18,
+          21,
+          23,
+          100,
+          50,
+          24,
+          3
+        ],
+        "solve_rate": 0.75,
+        "wilson_95_ci": [
+          0.5313,
+          0.8881
+        ],
+        "total_deaths": 3,
+        "death_rate": 0.15,
+        "exploration_deaths": 3,
+        "exploration_death_rate": 0.15,
+        "success": true,
+        "steps": 30
+      },
+      "same_layout_replay": {
+        "seed": 200010,
+        "success": true,
+        "final_steps": 15,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          40,
+          15,
+          15,
+          15,
+          15
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 200010,
+        "success": true,
+        "final_steps": 15,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          40,
+          15,
+          15,
+          15,
+          15
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 14,
+        "oracle_success": true,
+        "oracle_steps": 14
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          200010,
+          200011,
+          200012,
+          200013,
+          200014,
+          200015,
+          200016,
+          200017,
+          200018,
+          200019,
+          200020,
+          200021,
+          200022,
+          200023,
+          200024,
+          200025,
+          200026,
+          200027,
+          200028,
+          200029
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          40,
+          10,
+          15,
+          15,
+          12,
+          21,
+          14,
+          13,
+          8,
+          14,
+          13,
+          16,
+          14,
+          18,
+          12,
+          11,
+          14,
+          18,
+          12,
+          10
+        ],
+        "solve_rate": 1.0,
+        "solve_rate_wilson_95_ci": [
+          0.8389,
+          1.0
+        ],
+        "transfer_solve_rate": 1.0,
+        "transfer_wilson_95_ci": [
+          0.8318,
+          1.0
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 0
+      }
+    },
+    {
+      "task_id": "grid_push_heldout_v2_system_handcrafted",
+      "family": "grid",
+      "split": "heldout",
+      "steps": 3,
+      "max_budget": 100,
+      "seed_count": 20,
+      "steps_to_first_success": 7,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": false,
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "p50_latency_ms": 78.39,
+      "p95_latency_ms": 309.71,
+      "errors": [
+        "Action selection error at step 23: pop from an empty deque"
+      ],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        7,
+        3,
+        3,
+        3,
+        3
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          200030,
+          200031,
+          200032,
+          200033,
+          200034,
+          200035,
+          200036,
+          200037,
+          200038,
+          200039,
+          200040,
+          200041,
+          200042,
+          200043,
+          200044,
+          200045,
+          200046,
+          200047,
+          200048,
+          200049
+        ],
+        "successes": [
+          true,
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          false,
+          false,
+          true,
+          true,
+          false
+        ],
+        "steps_per_seed": [
+          7,
+          100,
+          100,
+          20,
+          22,
+          100,
+          22,
+          100,
+          13,
+          22,
+          9,
+          100,
+          18,
+          29,
+          11,
+          100,
+          100,
+          18,
+          22,
+          100
+        ],
+        "solve_rate": 0.6,
+        "wilson_95_ci": [
+          0.3866,
+          0.7812
+        ],
+        "total_deaths": 0,
+        "death_rate": 0.0,
+        "exploration_deaths": 0,
+        "exploration_death_rate": 0.0,
+        "success": true,
+        "steps": 51
+      },
+      "same_layout_replay": {
+        "seed": 200030,
+        "success": true,
+        "final_steps": 3,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          7,
+          3,
+          3,
+          3,
+          3
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 200030,
+        "success": true,
+        "final_steps": 3,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          7,
+          3,
+          3,
+          3,
+          3
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 13,
+        "oracle_success": true,
+        "oracle_steps": 3
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          200030,
+          200031,
+          200032,
+          200033,
+          200034,
+          200035,
+          200036,
+          200037,
+          200038,
+          200039,
+          200040,
+          200041,
+          200042,
+          200043,
+          200044,
+          200045,
+          200046,
+          200047,
+          200048,
+          200049
+        ],
+        "successes": [
+          true,
+          false,
+          false,
+          true,
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          true,
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false,
+          false,
+          true
+        ],
+        "steps": [
+          7,
+          100,
+          100,
+          23,
+          100,
+          9,
+          100,
+          100,
+          23,
+          100,
+          4,
+          100,
+          100,
+          10,
+          5,
+          100,
+          8,
+          100,
+          100,
+          14
+        ],
+        "solve_rate": 0.4,
+        "solve_rate_wilson_95_ci": [
+          0.2188,
+          0.6134
+        ],
+        "transfer_solve_rate": 0.3684,
+        "transfer_wilson_95_ci": [
+          0.1915,
+          0.5896
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 0
+      }
+    },
+    {
+      "task_id": "continuous_reach_heldout_v2_system_handcrafted",
+      "family": "continuous",
+      "split": "heldout",
+      "steps": 23,
+      "max_budget": 60,
+      "seed_count": 20,
+      "steps_to_first_success": 27,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "p50_latency_ms": 14.43,
+      "p95_latency_ms": 41.72,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        27,
+        23,
+        23,
+        23,
+        23
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          200050,
+          200051,
+          200052,
+          200053,
+          200054,
+          200055,
+          200056,
+          200057,
+          200058,
+          200059,
+          200060,
+          200061,
+          200062,
+          200063,
+          200064,
+          200065,
+          200066,
+          200067,
+          200068,
+          200069
+        ],
+        "successes": [
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          true,
+          true,
+          true,
+          false,
+          false
+        ],
+        "steps_per_seed": [
+          27,
+          31,
+          60,
+          29,
+          28,
+          28,
+          29,
+          29,
+          28,
+          30,
+          32,
+          30,
+          60,
+          60,
+          60,
+          29,
+          27,
+          29,
+          60,
+          60
+        ],
+        "solve_rate": 0.7,
+        "wilson_95_ci": [
+          0.481,
+          0.8545
+        ],
+        "total_deaths": 0,
+        "death_rate": 0.0,
+        "exploration_deaths": 0,
+        "exploration_death_rate": 0.0,
+        "success": true,
+        "steps": 38
+      },
+      "same_layout_replay": {
+        "seed": 200050,
+        "success": true,
+        "final_steps": 23,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          27,
+          23,
+          23,
+          23,
+          23
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 200050,
+        "success": true,
+        "final_steps": 23,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          27,
+          23,
+          23,
+          23,
+          23
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 57,
+        "oracle_success": true,
+        "oracle_steps": 23
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          200050,
+          200051,
+          200052,
+          200053,
+          200054,
+          200055,
+          200056,
+          200057,
+          200058,
+          200059,
+          200060,
+          200061,
+          200062,
+          200063,
+          200064,
+          200065,
+          200066,
+          200067,
+          200068,
+          200069
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          27,
+          27,
+          32,
+          25,
+          22,
+          24,
+          23,
+          25,
+          22,
+          23,
+          25,
+          23,
+          26,
+          26,
+          23,
+          25,
+          22,
+          25,
+          26,
+          25
+        ],
+        "solve_rate": 1.0,
+        "solve_rate_wilson_95_ci": [
+          0.8389,
+          1.0
+        ],
+        "transfer_solve_rate": 1.0,
+        "transfer_wilson_95_ci": [
+          0.8318,
+          1.0
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 0
+      }
+    },
+    {
+      "task_id": "symbolic_rules_heldout_v2_system_handcrafted",
+      "family": "symbolic",
+      "split": "heldout",
+      "steps": 14,
+      "max_budget": 80,
+      "seed_count": 20,
+      "steps_to_first_success": 20,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "p50_latency_ms": 39.59,
+      "p95_latency_ms": 182.23,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        20,
+        14,
+        14,
+        14,
+        14
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          200070,
+          200071,
+          200072,
+          200073,
+          200074,
+          200075,
+          200076,
+          200077,
+          200078,
+          200079,
+          200080,
+          200081,
+          200082,
+          200083,
+          200084,
+          200085,
+          200086,
+          200087,
+          200088,
+          200089
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false,
+          false,
+          false,
+          true,
+          true,
+          false,
+          false
+        ],
+        "steps_per_seed": [
+          20,
+          17,
+          21,
+          80,
+          80,
+          80,
+          17,
+          18,
+          80,
+          23,
+          80,
+          80,
+          21,
+          80,
+          80,
+          80,
+          27,
+          28,
+          80,
+          80
+        ],
+        "solve_rate": 0.45,
+        "wilson_95_ci": [
+          0.2582,
+          0.6579
+        ],
+        "total_deaths": 0,
+        "death_rate": 0.0,
+        "exploration_deaths": 0,
+        "exploration_death_rate": 0.0,
+        "success": false,
+        "steps": 54
+      },
+      "same_layout_replay": {
+        "seed": 200070,
+        "success": true,
+        "final_steps": 14,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          20,
+          14,
+          14,
+          14,
+          14
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 200070,
+        "success": true,
+        "final_steps": 14,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          20,
+          14,
+          14,
+          14,
+          14
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 14,
+        "oracle_success": true,
+        "oracle_steps": 14
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          200070,
+          200071,
+          200072,
+          200073,
+          200074,
+          200075,
+          200076,
+          200077,
+          200078,
+          200079,
+          200080,
+          200081,
+          200082,
+          200083,
+          200084,
+          200085,
+          200086,
+          200087,
+          200088,
+          200089
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          20,
+          11,
+          15,
+          12,
+          8,
+          10,
+          7,
+          8,
+          9,
+          13,
+          10,
+          15,
+          13,
+          13,
+          11,
+          9,
+          12,
+          13,
+          11,
+          13
+        ],
+        "solve_rate": 1.0,
+        "solve_rate_wilson_95_ci": [
+          0.8389,
+          1.0
+        ],
+        "transfer_solve_rate": 1.0,
+        "transfer_wilson_95_ci": [
+          0.8318,
+          1.0
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 0
+      }
+    },
+    {
+      "task_id": "partial_obs_grid_heldout_v2_system_handcrafted",
+      "family": "partial_observability",
+      "split": "heldout",
+      "steps": 51,
+      "max_budget": 140,
+      "seed_count": 20,
+      "steps_to_first_success": 42,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "p50_latency_ms": 48.83,
+      "p95_latency_ms": 220.83,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        42,
+        51,
+        51,
+        51,
+        51
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          200090,
+          200091,
+          200092,
+          200093,
+          200094,
+          200095,
+          200096,
+          200097,
+          200098,
+          200099,
+          200100,
+          200101,
+          200102,
+          200103,
+          200104,
+          200105,
+          200106,
+          200107,
+          200108,
+          200109
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          true
+        ],
+        "steps_per_seed": [
+          42,
+          59,
+          37,
+          38,
+          22,
+          12,
+          38,
+          25,
+          25,
+          42,
+          20,
+          20,
+          21,
+          34,
+          19,
+          32,
+          48,
+          47,
+          140,
+          59
+        ],
+        "solve_rate": 0.95,
+        "wilson_95_ci": [
+          0.7639,
+          0.9911
+        ],
+        "total_deaths": 0,
+        "death_rate": 0.0,
+        "exploration_deaths": 0,
+        "exploration_death_rate": 0.0,
+        "success": true,
+        "steps": 39
+      },
+      "same_layout_replay": {
+        "seed": 200090,
+        "success": true,
+        "final_steps": 51,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          42,
+          51,
+          51,
+          51,
+          51
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 200090,
+        "success": true,
+        "final_steps": 51,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          42,
+          51,
+          51,
+          51,
+          51
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 36,
+        "oracle_success": true,
+        "oracle_steps": 16
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          200090,
+          200091,
+          200092,
+          200093,
+          200094,
+          200095,
+          200096,
+          200097,
+          200098,
+          200099,
+          200100,
+          200101,
+          200102,
+          200103,
+          200104,
+          200105,
+          200106,
+          200107,
+          200108,
+          200109
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "steps": [
+          42,
+          76,
+          30,
+          31,
+          32,
+          5,
+          32,
+          140,
+          140,
+          140,
+          27,
+          25,
+          25,
+          17,
+          36,
+          140,
+          140,
+          140,
+          140,
+          140
+        ],
+        "solve_rate": 0.6,
+        "solve_rate_wilson_95_ci": [
+          0.3866,
+          0.7812
+        ],
+        "transfer_solve_rate": 0.5789,
+        "transfer_wilson_95_ci": [
+          0.3628,
+          0.7686
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 0
+      }
+    },
+    {
+      "task_id": "stochastic_patrol_heldout_v2_system_handcrafted",
+      "family": "stochastic_dynamic",
+      "split": "heldout",
+      "steps": 53,
+      "max_budget": 120,
+      "seed_count": 20,
+      "steps_to_first_success": null,
+      "steps_to_stable_policy": null,
+      "success_at_budget": false,
+      "total_deaths": 13,
+      "exploration_deaths": 13,
+      "p50_latency_ms": 38.37,
+      "p95_latency_ms": 102.31,
+      "errors": [
+        "Action selection error at step 28: pop from an empty deque",
+        "Action selection error at step 20: pop from an empty deque",
+        "Action selection error at step 9: pop from an empty deque",
+        "Action selection error at step 21: pop from an empty deque",
+        "Action selection error at step 21: pop from an empty deque",
+        "Action selection error at step 27: pop from an empty deque"
+      ],
+      "episode_successes": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "episode_steps": [
+        120,
+        54,
+        13,
+        63,
+        17
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          200110,
+          200111,
+          200112,
+          200113,
+          200114,
+          200115,
+          200116,
+          200117,
+          200118,
+          200119,
+          200120,
+          200121,
+          200122,
+          200123,
+          200124,
+          200125,
+          200126,
+          200127,
+          200128,
+          200129
+        ],
+        "successes": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false,
+          true,
+          false,
+          false,
+          true,
+          false,
+          false
+        ],
+        "steps_per_seed": [
+          120,
+          33,
+          13,
+          97,
+          120,
+          42,
+          22,
+          75,
+          18,
+          16,
+          17,
+          17,
+          26,
+          22,
+          68,
+          24,
+          19,
+          33,
+          120,
+          32
+        ],
+        "solve_rate": 0.2,
+        "wilson_95_ci": [
+          0.0807,
+          0.416
+        ],
+        "total_deaths": 13,
+        "death_rate": 0.65,
+        "exploration_deaths": 13,
+        "exploration_death_rate": 0.65,
+        "success": false,
+        "steps": 47
+      },
+      "same_layout_replay": {
+        "seed": 200110,
+        "success": false,
+        "final_steps": 53,
+        "episodes": 5,
+        "successes": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "steps": [
+          120,
+          54,
+          13,
+          63,
+          17
+        ],
+        "steps_to_stable_policy": null,
+        "total_deaths": 4,
+        "exploration_deaths": 3
+      },
+      "lifelong": {
+        "seed": 200110,
+        "success": false,
+        "final_steps": 53,
+        "episodes": 5,
+        "successes": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "steps": [
+          120,
+          54,
+          13,
+          63,
+          17
+        ],
+        "steps_to_stable_policy": null,
+        "total_deaths": 4,
+        "exploration_deaths": 3
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 106,
+        "oracle_success": false,
+        "oracle_steps": 11
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          200110,
+          200111,
+          200112,
+          200113,
+          200114,
+          200115,
+          200116,
+          200117,
+          200118,
+          200119,
+          200120,
+          200121,
+          200122,
+          200123,
+          200124,
+          200125,
+          200126,
+          200127,
+          200128,
+          200129
+        ],
+        "successes": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          true,
+          true,
+          true,
+          false,
+          false,
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "steps": [
+          120,
+          107,
+          29,
+          12,
+          8,
+          8,
+          120,
+          12,
+          13,
+          24,
+          28,
+          5,
+          29,
+          35,
+          20,
+          6,
+          9,
+          21,
+          21,
+          27
+        ],
+        "solve_rate": 0.2,
+        "solve_rate_wilson_95_ci": [
+          0.0807,
+          0.416
+        ],
+        "transfer_solve_rate": 0.2105,
+        "transfer_wilson_95_ci": [
+          0.0851,
+          0.4333
+        ],
+        "total_deaths": 8,
+        "exploration_deaths": 8,
+        "skills_consolidated": 0
+      }
+    }
+  ],
+  "family_scores": {
+    "grid": 0.7303,
+    "continuous": 0.6083,
+    "symbolic": 0.5917,
+    "partial_observability": 0.8547,
+    "stochastic_dynamic": 0.451
+  },
+  "generality_score": 0.6472,
+  "cross_seed_transfer_score": 0.693,
+  "lifelong_generality_score": 0.6987,
+  "total_deaths": 16,
+  "exploration_deaths": 16,
+  "mean_p50_latency_ms": 50.17,
+  "mean_p95_latency_ms": 178.73,
+  "baselines": {
+    "random": {
+      "generality_score": 0.2001,
+      "zero_shot_generality_score": 0.2001,
+      "zero_shot_family_scores": {
+        "grid": 0.4758,
+        "continuous": 0.0,
+        "symbolic": 0.1125,
+        "partial_observability": 0.1893,
+        "stochastic_dynamic": 0.2229
+      },
+      "zero_shot_n_trials": 120,
+      "zero_shot_solve_rate": 0.0583,
+      "zero_shot_wilson_95_ci": [
+        0.0285,
+        0.1155
+      ],
+      "total_deaths": 20,
+      "exploration_deaths": 20,
+      "same_layout_replay_generality_score": 0.131,
+      "lifelong_generality_score": 0.131,
+      "lifelong_family_scores": {
+        "grid": 0.655,
+        "continuous": 0.0,
+        "symbolic": 0.0,
+        "partial_observability": 0.0,
+        "stochastic_dynamic": 0.0
+      },
+      "family_scores": {
+        "grid": 0.4758,
+        "continuous": 0.0,
+        "symbolic": 0.1125,
+        "partial_observability": 0.1893,
+        "stochastic_dynamic": 0.2229
+      },
+      "solve_rate": 0.1667,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0,
+      "cross_seed_transfer": {}
+    },
+    "oracle": {
+      "generality_score": 0.9109,
+      "zero_shot_generality_score": 0.9109,
+      "zero_shot_family_scores": {
+        "grid": 0.9467,
+        "continuous": 0.7996,
+        "symbolic": 0.9291,
+        "partial_observability": 0.9525,
+        "stochastic_dynamic": 0.9268
+      },
+      "zero_shot_n_trials": 120,
+      "zero_shot_solve_rate": 0.9917,
+      "zero_shot_wilson_95_ci": [
+        0.9543,
+        0.9985
+      ],
+      "total_deaths": 1,
+      "exploration_deaths": 0,
+      "same_layout_replay_generality_score": 0.7242,
+      "lifelong_generality_score": 0.7242,
+      "lifelong_family_scores": {
+        "grid": 0.9575,
+        "continuous": 0.8083,
+        "symbolic": 0.9125,
+        "partial_observability": 0.9429,
+        "stochastic_dynamic": 0.0
+      },
+      "family_scores": {
+        "grid": 0.9467,
+        "continuous": 0.7996,
+        "symbolic": 0.9291,
+        "partial_observability": 0.9525,
+        "stochastic_dynamic": 0.9268
+      },
+      "solve_rate": 0.8333,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0,
+      "cross_seed_transfer": {}
+    },
+    "no_grounding": {
+      "generality_score": 0.6883,
+      "zero_shot_generality_score": 0.6883,
+      "zero_shot_family_scores": {
+        "grid": 0.7187,
+        "continuous": 0.6083,
+        "symbolic": 0.8313,
+        "partial_observability": 0.8323,
+        "stochastic_dynamic": 0.451
+      },
+      "zero_shot_n_trials": 120,
+      "zero_shot_solve_rate": 0.675,
+      "zero_shot_wilson_95_ci": [
+        0.5869,
+        0.7522
+      ],
+      "total_deaths": 16,
+      "exploration_deaths": 16,
+      "same_layout_replay_generality_score": 0.5352,
+      "lifelong_generality_score": 0.5352,
+      "lifelong_family_scores": {
+        "grid": 0.955,
+        "continuous": 0.8083,
+        "symbolic": 0.9125,
+        "partial_observability": 0.0,
+        "stochastic_dynamic": 0.0
+      },
+      "family_scores": {
+        "grid": 0.7187,
+        "continuous": 0.6083,
+        "symbolic": 0.8313,
+        "partial_observability": 0.8323,
+        "stochastic_dynamic": 0.451
+      },
+      "solve_rate": 0.6667,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0,
+      "cross_seed_transfer": {
+        "transfer_solve_rate": 0.7018,
+        "transfer_wilson_95_ci": [
+          0.6123,
+          0.778
+        ]
+      }
+    },
+    "demonstration": {
+      "generality_score": 0.7599,
+      "zero_shot_generality_score": 0.7599,
+      "zero_shot_family_scores": {
+        "grid": 0.9325,
+        "continuous": 0.525,
+        "symbolic": 0.9125,
+        "partial_observability": 0.8714,
+        "stochastic_dynamic": 0.5583
+      },
+      "zero_shot_n_trials": 6,
+      "zero_shot_solve_rate": 1.0,
+      "zero_shot_wilson_95_ci": [
+        0.6097,
+        1.0
+      ],
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "same_layout_replay_generality_score": 0.6992,
+      "lifelong_generality_score": 0.6992,
+      "lifelong_family_scores": {
+        "grid": 0.9575,
+        "continuous": 0.8083,
+        "symbolic": 0.9125,
+        "partial_observability": 0.8179,
+        "stochastic_dynamic": 0.0
+      },
+      "family_scores": {
+        "grid": 0.9325,
+        "continuous": 0.525,
+        "symbolic": 0.9125,
+        "partial_observability": 0.8714,
+        "stochastic_dynamic": 0.5583
+      },
+      "solve_rate": 0.8333,
+      "lifelong_curve": [
+        false,
+        true,
+        false,
+        true,
+        false
+      ],
+      "mean_steps_to_stable_policy": 0.0,
+      "cross_seed_transfer": {}
+    }
+  },
+  "env_hash": "fc495a2dba8a1a49",
+  "zero_shot": {
+    "generality_score": 0.6472,
+    "family_scores": {
+      "grid": 0.7303,
+      "continuous": 0.6083,
+      "symbolic": 0.5917,
+      "partial_observability": 0.8547,
+      "stochastic_dynamic": 0.451
+    },
+    "family_solve_rates": {
+      "grid": 0.675,
+      "continuous": 0.7,
+      "symbolic": 0.45,
+      "partial_observability": 0.95,
+      "stochastic_dynamic": 0.2
+    },
+    "family_wilson_95_ci": {
+      "grid": [
+        0.5202,
+        0.7992
+      ],
+      "continuous": [
+        0.481,
+        0.8545
+      ],
+      "symbolic": [
+        0.2582,
+        0.6579
+      ],
+      "partial_observability": [
+        0.7639,
+        0.9911
+      ],
+      "stochastic_dynamic": [
+        0.0807,
+        0.416
+      ]
+    },
+    "n_trials": 120,
+    "n_solved": 73,
+    "solve_rate": 0.6083,
+    "wilson_95_ci": [
+      0.5189,
+      0.691
+    ],
+    "total_deaths": 16,
+    "death_rate": 0.1333,
+    "exploration_deaths": 16,
+    "exploration_death_rate": 0.1333
+  },
+  "same_layout_replay": {
+    "generality_score": 0.6987,
+    "family_scores": {
+      "grid": 0.955,
+      "continuous": 0.8083,
+      "symbolic": 0.9125,
+      "partial_observability": 0.8179,
+      "stochastic_dynamic": 0.0
+    },
+    "solve_rate": 0.8333,
+    "mean_steps_to_stable_policy": 0.0
+  },
+  "lifelong": {
+    "generality_score": 0.6987,
+    "family_scores": {
+      "grid": 0.955,
+      "continuous": 0.8083,
+      "symbolic": 0.9125,
+      "partial_observability": 0.8179,
+      "stochastic_dynamic": 0.0
+    },
+    "solve_rate": 0.8333,
+    "mean_steps_to_stable_policy": 0.0
+  },
+  "one_shot_imitation": {
+    "generality_score": 0.7599,
+    "family_scores": {
+      "grid": 0.9325,
+      "continuous": 0.525,
+      "symbolic": 0.9125,
+      "partial_observability": 0.8714,
+      "stochastic_dynamic": 0.5583
+    },
+    "solve_rate": 1.0
+  },
+  "cross_seed_transfer": {
+    "n_episodes": 120,
+    "n_transfer_episodes": 114,
+    "solve_rate": 0.7,
+    "solve_rate_wilson_95_ci": [
+      0.6128,
+      0.7747
+    ],
+    "transfer_solve_rate": 0.693,
+    "transfer_wilson_95_ci": [
+      0.6032,
+      0.7702
+    ],
+    "family_solve_rates": {
+      "grid": 0.6842,
+      "continuous": 1.0,
+      "symbolic": 1.0,
+      "partial_observability": 0.5789,
+      "stochastic_dynamic": 0.2105
+    },
+    "family_wilson_95_ci": {
+      "grid": [
+        0.5254,
+        0.8092
+      ],
+      "continuous": [
+        0.8318,
+        1.0
+      ],
+      "symbolic": [
+        0.8318,
+        1.0
+      ],
+      "partial_observability": [
+        0.3628,
+        0.7686
+      ],
+      "stochastic_dynamic": [
+        0.0851,
+        0.4333
+      ]
+    },
+    "total_deaths": 8,
+    "exploration_deaths": 8,
+    "skills_consolidated": 0
+  }
+}

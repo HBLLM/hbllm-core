@@ -10,6 +10,7 @@ from hbllm.hcir.kernel.capability_resolver import CapabilityResolver
 from hbllm.hcir.kernel.scheduler import KernelInstructionScheduler
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 
@@ -25,19 +26,35 @@ async def test_spatial_counterfactual_planner_selects_goal_directed_action() -> 
     )
 
     # Populate workspace with avatar at (4, 4) and goal at (2, 4) [ABOVE]
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [4, 4], "is_avatar": True, "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="goal",
-            entity_name="goal",
-            properties={"position": [2, 4], "is_goal": True, "movable": False, "passable": True},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [4, 4],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="goal",
+                    entity_name="goal",
+                    properties={
+                        "position": [2, 4],
+                        "is_goal": True,
+                        "movable": False,
+                        "passable": True,
+                    },
+                ),
+            ),
+        ]
     )
 
     planner = CounterfactualPlanner(ws, services)
@@ -87,31 +104,48 @@ async def test_spatial_counterfactual_planner_prunes_deadlock() -> None:
     # Setup room with corner at (1, 1). Avatar is at (3, 1). Box is at (2, 1).
     # Moving UP pushes box to (1, 1) [corner deadlock between wall at row 0 and wall at col 0]
     # Moving RIGHT leaves box alone and explores safe area.
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="avatar",
-            entity_name="avatar",
-            properties={"position": [3, 1], "is_avatar": True, "movable": True, "passable": False},
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="box_1",
-            entity_name="box",
-            properties={
-                "position": [2, 1],
-                "movable": True,
-                "passable": False,
-                "affordances": ["PUSHABLE"],
-            },
-        )
-    )
-    ws.upsert_node(
-        PhysicalEntityNode(
-            id="goal",
-            entity_name="goal",
-            properties={"position": [7, 7], "is_goal": True, "movable": False, "passable": True},
-        )
+    ws.commit_operations(
+        [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="avatar",
+                    entity_name="avatar",
+                    properties={
+                        "position": [3, 1],
+                        "is_avatar": True,
+                        "movable": True,
+                        "passable": False,
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="box_1",
+                    entity_name="box",
+                    properties={
+                        "position": [2, 1],
+                        "movable": True,
+                        "passable": False,
+                        "affordances": ["PUSHABLE"],
+                    },
+                ),
+            ),
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node=PhysicalEntityNode(
+                    id="goal",
+                    entity_name="goal",
+                    properties={
+                        "position": [7, 7],
+                        "is_goal": True,
+                        "movable": False,
+                        "passable": True,
+                    },
+                ),
+            ),
+        ]
     )
 
     # Set barrier cells in workspace digital twin via world kernel or properties

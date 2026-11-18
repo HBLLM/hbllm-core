@@ -8,14 +8,14 @@ Biological Modeling:
    - Figure-ground segregation and background estimation.
    - Connected-component morphological entity segmentation using native vectorized labeling.
    - Gestalt grouping and relational alignment affordances (symmetry, collinearity).
-   - Affordance panel array detection.
+   - Homogeneous interactive control cluster detection.
 3. Dorsal Visual Stream & Theory of Mind:
    - Gaze cone and directional orientation tracking of sentient creatures.
    - Frame difference mutation analysis (translation, index cycle, global transition).
 """
 
 import logging
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -27,13 +27,26 @@ from scipy.ndimage import label
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-from hbllm.hcir.world.cortical_stage import CorticalStage, StageResult
+from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
 
 if TYPE_CHECKING:
     from hbllm.hcir.world.engine_state import CognitiveContext
 
 logger = logging.getLogger(__name__)
+
+_STRUCT_4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+
+def _fast_unique_counts(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """O(N) bincount-based unique value & frequency extractor for bounded integer lattices."""
+    if arr.size > 0 and np.issubdtype(arr.dtype, np.integer):
+        amin, amax = int(arr.min()), int(arr.max())
+        if 0 <= amin and amax < 256:
+            bc = np.bincount(arr.ravel(), minlength=amax + 1)
+            nz = np.flatnonzero(bc)
+            return nz, bc[nz]
+    return np.unique(arr, return_counts=True)
 
 
 class FrameDiffType(StrEnum):
@@ -239,25 +252,109 @@ class SensoryThalamus:
 class FigureGroundSegregator:
     """Domain-agnostic background color estimation based on border dominance and frequency."""
 
+    _BG_CACHE: OrderedDict[tuple[Any, ...], int] = OrderedDict()
+    _BG_CACHE_MAX = 64
+
     @staticmethod
     def estimate_background(
         grid: np.ndarray,
         barrier_features: set[int] | None = None,
         avatar_features: set[int] | None = None,
         bg_feature: int = 0,
+        walkable_features: set[int] | None = None,
     ) -> int:
         grid = SensoryThalamus.normalize(grid)
-        H, W = grid.shape
-        border_pixels = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
-        vals, counts = np.unique(border_pixels, return_counts=True)
-        top_val = int(vals[np.argmax(counts)])
-
         barriers = barrier_features or set()
         av_feats = avatar_features or set()
+        walkables = walkable_features or set()
+        cache_key = (
+            grid.shape,
+            str(grid.dtype),
+            frozenset(barriers),
+            frozenset(av_feats),
+            frozenset(walkables),
+            grid.tobytes(),
+        )
+        cached = FigureGroundSegregator._BG_CACHE.get(cache_key)
+        if cached is not None:
+            FigureGroundSegregator._BG_CACHE.move_to_end(cache_key)
+            return cached
+        res = FigureGroundSegregator._estimate_background_uncached(
+            grid, barriers, av_feats, bg_feature, walkables
+        )
+        FigureGroundSegregator._BG_CACHE[cache_key] = res
+        if len(FigureGroundSegregator._BG_CACHE) > FigureGroundSegregator._BG_CACHE_MAX:
+            FigureGroundSegregator._BG_CACHE.popitem(last=False)
+        return res
+
+    @staticmethod
+    def _estimate_background_uncached(
+        grid: np.ndarray,
+        barriers: set[int],
+        av_feats: set[int],
+        bg_feature: int,
+        walkables: set[int],
+    ) -> int:
+        H, W = grid.shape
+        border_pixels = np.concatenate([grid[0, :], grid[-1, :], grid[:, 0], grid[:, -1]])
+        vals, counts = _fast_unique_counts(border_pixels)
+        top_val = int(vals[np.argmax(counts)])
+
+        g_vals, g_counts = _fast_unique_counts(grid)
+        g_dominant = int(g_vals[np.argmax(g_counts)])
+
+        # 1. Empirically Verified Walkable Ground:
+        # If the organism has traversed a feature present in the grid, that navigable ground
+        # takes priority as the spatial background canvas over non-walkables.
+        if walkables:
+            valid_walkables = [w for w in walkables if w not in av_feats and w not in barriers]
+            if valid_walkables:
+                walk_counts = {
+                    w: int(np.sum(grid == w)) for w in valid_walkables if np.any(grid == w)
+                }
+                if walk_counts:
+                    best_w, best_cnt = max(walk_counts.items(), key=lambda item: item[1])
+                    if top_val not in valid_walkables and (
+                        top_val in barriers
+                        or top_val != g_dominant
+                        or best_cnt >= max(3, int(0.15 * grid.size))
+                    ):
+                        return best_w
+
+        # 2. Gestalt Perimeter Enclosure vs Canvas Ground:
+        # If the outer border is dominated by top_val (an enclosing bounding wall/frame),
+        # verify if the interior canvas is dominated by a non-barrier/non-avatar floor feature.
+        if H > 2 and W > 2:
+            interior = grid[1:-1, 1:-1]
+            int_vals, int_counts = _fast_unique_counts(interior)
+            int_dominant = int(int_vals[np.argmax(int_counts)])
+            int_dom_frac = float(np.max(int_counts)) / max(1, interior.size)
+            if (
+                top_val != g_dominant
+                and g_dominant not in av_feats
+                and g_dominant not in barriers
+                and int_dominant == g_dominant
+                and int_dom_frac > 0.40
+            ):
+                return g_dominant
+            top_border_frac = float(np.max(counts)) / max(1, border_pixels.size)
+            top_interior_frac = float(np.sum(interior == top_val)) / max(1, interior.size)
+            int_border_frac = float(np.sum(border_pixels == int_dominant)) / max(
+                1, border_pixels.size
+            )
+            if (
+                int_dominant != top_val
+                and int_dominant not in av_feats
+                and int_dominant not in barriers
+                and top_border_frac >= 0.60
+                and top_interior_frac < 0.30
+                and int_dom_frac >= 0.65
+                and int_border_frac < 0.10
+                and int(np.sum(grid == int_dominant)) >= 0.50 * int(np.sum(grid == top_val))
+            ):
+                return int_dominant
 
         if top_val in barriers:
-            g_vals, g_counts = np.unique(grid, return_counts=True)
-            g_dominant = int(g_vals[np.argmax(g_counts)])
             if top_val == g_dominant and g_counts[np.argmax(g_counts)] > 0.35 * grid.size:
                 pass
             else:
@@ -301,6 +398,7 @@ class SpatialRoleClassifier:
         receptacle_pos: set[tuple[int, int]] | None = None,
         avatar_pos: tuple[int, int] | None = None,
         cells: list[tuple[int, int]] | None = None,
+        bg: int = 0,
     ) -> EntityRole:
         min_r, max_r, min_c, max_c = bounding_box
         av_set = av_feats or set()
@@ -312,28 +410,18 @@ class SpatialRoleClassifier:
             (min_r <= 1 and max_r >= H - 2 and min_c <= 1 and max_c >= W - 2)
             or (max_r - min_r >= H - 2 and max_c - min_c >= W - 2)
             or (area > H * W * 0.20)
-            or (area >= 60 and (max_r - min_r >= H // 3 or max_c - min_c >= W // 3) and area > 100)
+            or (
+                area >= max(4, int(H * W * 0.025))
+                and (max_r - min_r >= H // 3 or max_c - min_c >= W // 3)
+            )
         )
 
         is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
-        is_theory_cargo = (
-            symbolic_theory.is_cargo(
-                SpatialEntity(
-                    id="",
-                    role=EntityRole.MANIPULABLE,
-                    centroid=(float(grid_pos[0]), float(grid_pos[1])),
-                    grid_pos=grid_pos,
-                    area=area,
-                    bounding_box=bounding_box,
-                    feature_id=val,
-                )
-            )
-            if symbolic_theory
-            else False
-        )
+        is_theory_actuator = val in symbolic_theory.actuator_features if symbolic_theory else False
+        is_theory_cargo = symbolic_theory.is_cargo(val) if symbolic_theory else False
         is_theory_walkable = val in symbolic_theory.walkable_features if symbolic_theory else False
         is_candidate_goal = (
-            val != 0
+            val != bg
             and symbolic_theory is not None
             and (
                 val in symbolic_theory.goal_features
@@ -347,41 +435,51 @@ class SpatialRoleClassifier:
             (grid_pos in goal_set or touches_goal) and (cell_set is None or touches_goal)
         ) or grid_pos in receptacle_set
 
-        has_known_goals = bool(symbolic_theory and symbolic_theory.goal_features)
+        is_confirmed_goal = bool(symbolic_theory and val in symbolic_theory.goal_features)
+        has_known_goals = bool(
+            symbolic_theory
+            and (symbolic_theory.goal_features or symbolic_theory.receptacle_features)
+        )
         if val in av_set or (
             avatar_pos is not None
             and (grid_pos == avatar_pos or (cell_set is not None and avatar_pos in cell_set))
         ):
             return EntityRole.AGENT
-        elif is_candidate_goal or (
-            is_spatial_goal and (not has_known_goals or val in symbolic_theory.goal_features)
-        ):
+        elif is_confirmed_goal:
             return EntityRole.GOAL
-        elif is_border or is_theory_barrier:
+        elif is_theory_barrier or is_border:
             return EntityRole.OBSTACLE
-        elif not is_theory_walkable and any(
-            (
-                getattr(m, "trigger_feature", None) is not None
-                and getattr(m, "trigger_feature", None) == val
+        elif is_theory_cargo:
+            return EntityRole.MANIPULABLE
+        elif is_spatial_goal and (not has_known_goals or val in symbolic_theory.goal_features):
+            return EntityRole.GOAL
+        elif is_candidate_goal:
+            return EntityRole.UNKNOWN
+        elif is_theory_actuator or (
+            not is_theory_walkable
+            and any(
+                (
+                    getattr(m, "trigger_feature", None) is not None
+                    and getattr(m, "trigger_feature", None) == val
+                )
+                or (
+                    getattr(m, "trigger_pos", None) == grid_pos
+                    and getattr(m, "occurrences", 0) >= 2
+                    and getattr(m, "confidence", 0.0) >= 0.75
+                )
+                for m in mutation_list
             )
-            or (
-                getattr(m, "trigger_pos", None) == grid_pos
-                and getattr(m, "occurrences", 0) >= 2
-                and getattr(m, "confidence", 0.0) >= 0.75
-            )
-            for m in mutation_list
         ):
             return EntityRole.ACTUATOR
-        elif is_theory_cargo and not is_theory_walkable:
-            return EntityRole.MANIPULABLE
-        elif area <= 16:
-            return EntityRole.UNKNOWN
         else:
             return EntityRole.UNKNOWN
 
 
 class GestaltAffordanceDetector:
     """Extracts structural goals, affordance panels, and oriented threats using Gestalt principles."""
+
+    _STRUCTURAL_GOAL_CACHE: OrderedDict[tuple[Any, ...], list[dict[str, Any]]] = OrderedDict()
+    _STRUCTURAL_GOAL_CACHE_MAX = 64
 
     @staticmethod
     def detect_structural_goals(
@@ -396,24 +494,44 @@ class GestaltAffordanceDetector:
     ) -> list[dict[str, Any]]:
         grid = SensoryThalamus.normalize(grid)
         H, W = grid.shape
-        goals: list[dict[str, Any]] = []
         av_feats = set(avatar_features) if avatar_features else set()
         if avatar_feature is not None:
             av_feats.add(avatar_feature)
 
+        cache_key: tuple[Any, ...] | None = None
+        if not kwargs:
+            cache_key = (
+                (H, W),
+                str(grid.dtype),
+                int(bg),
+                frozenset(av_feats),
+                frozenset(barrier_features or ()),
+                frozenset(known_lethal_features or ()),
+                avatar_pos,
+                grid.tobytes(),
+            )
+            cached = GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE.get(cache_key)
+            if cached is not None:
+                GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE.move_to_end(cache_key)
+                return list(cached)
+
+        goals: list[dict[str, Any]] = []
+        unique_feats, feat_counts = _fast_unique_counts(grid)
+        max_pts = int(H * W * 0.3)
+
         # 1. Detect target zones and salient interior constellations
-        for feat in np.unique(grid):
+        for feat, fcount in zip(unique_feats.tolist(), feat_counts.tolist()):
             feat_int = int(feat)
             if (
                 feat_int == bg
                 or feat_int in av_feats
                 or (barrier_features and feat_int in barrier_features)
                 or (known_lethal_features and feat_int in known_lethal_features)
+                or fcount < 1
+                or fcount > max_pts
             ):
                 continue
             pts = np.argwhere(grid == feat_int)
-            if len(pts) < 1 or len(pts) > H * W * 0.3:
-                continue
 
             min_r, min_c = pts.min(axis=0)
             max_r, max_c = pts.max(axis=0)
@@ -429,10 +547,10 @@ class GestaltAffordanceDetector:
 
             if is_interior and (is_target_zone or is_constellation):
                 centroid = (
-                    int(round(float(np.mean(pts[:, 0])))),
-                    int(round(float(np.mean(pts[:, 1])))),
+                    int(round(float(pts[:, 0].mean()))),
+                    int(round(float(pts[:, 1].mean()))),
                 )
-                target_cells = [(int(r), int(c)) for r, c in pts]
+                target_cells = list(zip(pts[:, 0].tolist(), pts[:, 1].tolist()))
                 if avatar_pos is not None:
                     target_cells = [
                         c
@@ -459,7 +577,7 @@ class GestaltAffordanceDetector:
                 )
 
         # 2. Detect edge and near-edge exit markers
-        for feat in np.unique(grid):
+        for feat, fcount in zip(unique_feats.tolist(), feat_counts.tolist()):
             feat_int = int(feat)
             if (
                 feat_int == bg
@@ -469,8 +587,27 @@ class GestaltAffordanceDetector:
             ):
                 continue
 
+            if fcount == 1:
+                rs1, cs1 = np.nonzero(grid == feat_int)
+                if rs1.size == 0:
+                    continue
+                r0, c0 = int(rs1[0]), int(cs1[0])
+                if r0 == 0 or r0 == H - 1 or c0 == 0 or c0 == W - 1:
+                    if not (min(H, W) <= 3):
+                        goals.append(
+                            {
+                                "type": "exit_marker",
+                                "position": (r0, c0),
+                                "cells": [(r0, c0)],
+                                "feature": feat_int,
+                                "size": 1,
+                                "confidence": 0.75,
+                            }
+                        )
+                continue
+
             feat_mask = grid == feat_int
-            labeled_feat, num_comp = label(feat_mask)
+            labeled_feat, num_comp = label(feat_mask, structure=_STRUCT_4)
             for c_id in range(1, num_comp + 1):
                 pts = np.argwhere(labeled_feat == c_id)
                 max_strip_len = max(16, max(H, W) * 2)
@@ -492,17 +629,17 @@ class GestaltAffordanceDetector:
                     and len(pts) >= 2 * (H + W) - 8
                 )
                 spans_full_edge = (
-                    (int(np.max(r_coords)) - int(np.min(r_coords)) >= H - 2)
-                    or (int(np.max(c_coords)) - int(np.min(c_coords)) >= W - 2)
+                    (int(r_coords.max()) - int(r_coords.min()) >= H - 2)
+                    or (int(c_coords.max()) - int(c_coords.min()) >= W - 2)
                     or len(pts) >= min(H, W) - 2
                 )
                 if covers_all_4 or spans_full_edge:
                     continue
 
-                cells = [(int(r), int(c)) for r, c in pts]
+                cells = list(zip(r_coords.tolist(), c_coords.tolist()))
                 centroid = (
-                    int(round(float(np.mean(pts[:, 0])))),
-                    int(round(float(np.mean(pts[:, 1])))),
+                    int(round(float(r_coords.mean()))),
+                    int(round(float(c_coords.mean()))),
                 )
                 goals.append(
                     {
@@ -585,35 +722,38 @@ class GestaltAffordanceDetector:
         # 4. Gestalt Relational Affordances: Symmetry completion and collinear alignment
         if 0.50 <= sym_score:
             salient_clusters: list[tuple[int, tuple[int, int], np.ndarray]] = []
-            struct_4 = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
-            for feat in np.unique(grid):
+            max_rel_area = max(48, int(H * W * 0.08))
+            for feat, fcount in zip(unique_feats.tolist(), feat_counts.tolist()):
                 feat_int = int(feat)
                 if (
                     feat_int == bg
                     or feat_int in av_feats
                     or (barrier_features and feat_int in barrier_features)
                     or (known_lethal_features and feat_int in known_lethal_features)
+                    or fcount > max_rel_area
                 ):
                     continue
                 mask = grid == feat_int
-                labeled_mask, num_clusters = label(mask, structure=struct_4)
+                labeled_mask, num_clusters = label(mask, structure=_STRUCT_4)
                 # Pervasive substrates, lattices, or maze partitions (>4 clusters or >8% screen area)
                 # cannot be isolated salient relational endpoints
-                if num_clusters > 4 or np.sum(mask) > max(48, int(H * W * 0.08)):
+                if num_clusters > 4:
                     continue
                 for c_idx in range(1, num_clusters + 1):
                     c_pts = np.argwhere(labeled_mask == c_idx)
                     if 1 <= len(c_pts) <= 36:
-                        min_cr, min_cc = c_pts.min(axis=0)
-                        max_cr, max_cc = c_pts.max(axis=0)
-                        # Filter outer frame edges and HUD borders
+                        c_rs = c_pts[:, 0]
+                        c_cs = c_pts[:, 1]
+                        min_cr, max_cr = int(c_rs.min()), int(c_rs.max())
+                        min_cc, max_cc = int(c_cs.min()), int(c_cs.max())
+                        # Filter outer enclosing boundary edges
                         if min_cr <= 0 or max_cr >= H - 1 or min_cc <= 0 or max_cc >= W - 1:
                             continue
                         if (max_cr - min_cr >= H - 4) or (max_cc - min_cc >= W - 4):
                             continue
                         c_centroid = (
-                            int(round(float(np.mean(c_pts[:, 0])))),
-                            int(round(float(np.mean(c_pts[:, 1])))),
+                            int(round(float(c_rs.mean()))),
+                            int(round(float(c_cs.mean()))),
                         )
                         salient_clusters.append((feat_int, c_centroid, c_pts))
 
@@ -672,14 +812,22 @@ class GestaltAffordanceDetector:
                                 }
                             )
 
+        if cache_key is not None:
+            GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE[cache_key] = list(goals)
+            if (
+                len(GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE)
+                > GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE_MAX
+            ):
+                GestaltAffordanceDetector._STRUCTURAL_GOAL_CACHE.popitem(last=False)
         return goals
 
     @staticmethod
-    def detect_affordance_panels(
+    def detect_affordance_clusters(
         entities: Sequence[SpatialEntity],
         grid: np.ndarray,
         bg: int = 0,
     ) -> list[dict[str, Any]]:
+        """Identify spatially grouped entities sharing bounding-box morphology (interactive arrays)."""
         by_dim: dict[tuple[int, int], list[SpatialEntity]] = defaultdict(list)
         for e in entities:
             if getattr(e, "role", None) in (EntityRole.OBSTACLE, EntityRole.AGENT):
@@ -688,7 +836,7 @@ class GestaltAffordanceDetector:
             h, w = r1 - r0 + 1, c1 - c0 + 1
             by_dim[(h, w)].append(e)
 
-        panels: list[dict[str, Any]] = []
+        clusters: list[dict[str, Any]] = []
         for (h, w), group in by_dim.items():
             if len(group) < 2 or len(group) > 16:
                 continue
@@ -699,7 +847,7 @@ class GestaltAffordanceDetector:
             majority_feat = max(feat_counts.keys(), key=lambda k: feat_counts[k])
             minority_items = [e for e in group if e.feature_id != majority_feat]
 
-            panels.append(
+            clusters.append(
                 {
                     "shape": (h, w),
                     "items": group,
@@ -708,7 +856,10 @@ class GestaltAffordanceDetector:
                     "item_coords": [e.grid_pos for e in group],
                 }
             )
-        return panels
+        return clusters
+
+    _ORIENTED_THREAT_CACHE: OrderedDict[tuple[Any, ...], list[OrientedThreat]] = OrderedDict()
+    _ORIENTED_THREAT_CACHE_MAX: int = 64
 
     @staticmethod
     def detect_oriented_threats(
@@ -724,6 +875,39 @@ class GestaltAffordanceDetector:
         av_feats = avatar_features or set()
         goal_set = goals or set()
         cargos = cargo_features or set()
+
+        # Fast short-circuit if no entity has a plausible multi-cell body bounding box
+        candidate_sig: list[tuple[int, int, tuple[int, int, int, int]]] = []
+        for e in entities:
+            if e.area < 2 or e.area > 36:
+                continue
+            if getattr(e, "role", None) == EntityRole.MANIPULABLE:
+                continue
+            r0, r1, c0, c1 = e.bounding_box
+            if not (1 <= r1 - r0 <= 6 and 1 <= c1 - c0 <= 6):
+                continue
+            candidate_sig.append((e.feature_id, e.area, e.bounding_box))
+        if not candidate_sig:
+            return []
+
+        cache = GestaltAffordanceDetector._ORIENTED_THREAT_CACHE
+        cache_key = (
+            grid.shape,
+            grid.dtype.str,
+            grid.tobytes(),
+            int(bg),
+            int(step_size),
+            avatar_pos,
+            frozenset(av_feats),
+            frozenset(goal_set),
+            frozenset(cargos),
+            tuple(candidate_sig),
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cache.move_to_end(cache_key)
+            return list(cached)
+
         oriented_threats: list[OrientedThreat] = []
 
         for e in entities:
@@ -767,6 +951,9 @@ class GestaltAffordanceDetector:
                             feature_id=body_val,
                         )
                     )
+        cache[cache_key] = list(oriented_threats)
+        if len(cache) > GestaltAffordanceDetector._ORIENTED_THREAT_CACHE_MAX:
+            cache.popitem(last=False)
         return oriented_threats
 
 
@@ -783,24 +970,113 @@ class PerceptionEngine:
         barrier_features: set[int] | None = None,
         avatar_features: set[int] | None = None,
         bg_feature: int = 0,
+        walkable_features: set[int] | None = None,
     ) -> int:
         return FigureGroundSegregator.estimate_background(
             grid=grid,
             barrier_features=barrier_features,
             avatar_features=avatar_features,
             bg_feature=bg_feature,
+            walkable_features=walkable_features,
         )
 
-    @staticmethod
-    def compute_foveal_saccade(
-        curr_grid: np.ndarray,
-        prev_grid: np.ndarray | None = None,
-    ) -> Any:
-        """Compute active visual saccade focus and gaze centroid from sensory diffs."""
-        from hbllm.hcir.world.foveal_saccade_attention import FovealSaccadeAttention
+    _COMPONENT_GEOM_CACHE: OrderedDict[
+        tuple[tuple[int, ...], str, int, bytes],
+        tuple[
+            tuple[
+                int,
+                int,
+                tuple[int, int, int, int],
+                tuple[float, float],
+                tuple[int, int],
+                tuple[tuple[int, int], ...],
+            ],
+            ...,
+        ],
+    ] = OrderedDict()
+    _COMPONENT_GEOM_CACHE_MAX = 128
 
-        att = FovealSaccadeAttention()
-        return att.compute_saccade(curr_grid, prev_grid)
+    @classmethod
+    def _get_cached_component_geometry(
+        cls,
+        grid: np.ndarray,
+        bg: int,
+        unique_vals: list[int],
+    ) -> tuple[
+        tuple[
+            int,
+            int,
+            tuple[int, int, int, int],
+            tuple[float, float],
+            tuple[int, int],
+            tuple[tuple[int, int], ...],
+        ],
+        ...,
+    ]:
+        """Compute or reuse pure geometric connected components for `(grid, bg)`."""
+        cache_key = (grid.shape, str(grid.dtype), int(bg), grid.tobytes())
+        cached = cls._COMPONENT_GEOM_CACHE.get(cache_key)
+        if cached is not None:
+            cls._COMPONENT_GEOM_CACHE.move_to_end(cache_key)
+            return cached
+
+        H, W = grid.shape
+        components: list[
+            tuple[
+                int,
+                int,
+                tuple[int, int, int, int],
+                tuple[float, float],
+                tuple[int, int],
+                tuple[tuple[int, int], ...],
+            ]
+        ] = []
+        for val in unique_vals:
+            mask = grid == val
+            nz_r, nz_c = np.nonzero(mask)
+            n_px = int(nz_r.size)
+            if n_px == 0:
+                continue
+            if n_px == 1:
+                r0 = int(nz_r[0])
+                c0 = int(nz_c[0])
+                components.append(
+                    (val, 1, (r0, r0, c0, c0), (float(r0), float(c0)), (r0, c0), ((r0, c0),))
+                )
+                continue
+            labeled_mask, num_components = label(mask, structure=_STRUCT_4)
+            _flat_labels = labeled_mask.ravel()
+            _nz = np.nonzero(_flat_labels)[0]
+            _order = np.argsort(_flat_labels[_nz], kind="stable")
+            _nz = _nz[_order]
+            _nz_labels = _flat_labels[_nz]
+            _splits = np.flatnonzero(np.diff(_nz_labels)) + 1
+            _groups = np.split(_nz, _splits)
+            for comp_idx in range(1, num_components + 1):
+                flat = _groups[comp_idx - 1]
+                rows_arr = flat // W
+                cols_arr = flat % W
+                area = int(flat.size)
+                if area == 0:
+                    continue
+                cells = tuple(zip(rows_arr.tolist(), cols_arr.tolist()))
+                min_r = int(rows_arr.min())
+                max_r = int(rows_arr.max())
+                min_c = int(cols_arr.min())
+                max_c = int(cols_arr.max())
+                mean_r = float(rows_arr.mean())
+                mean_c = float(cols_arr.mean())
+                centroid = (mean_r, mean_c)
+                grid_pos = (int(round(mean_r)), int(round(mean_c)))
+                components.append(
+                    (val, area, (min_r, max_r, min_c, max_c), centroid, grid_pos, cells)
+                )
+
+        result = tuple(components)
+        cls._COMPONENT_GEOM_CACHE[cache_key] = result
+        if len(cls._COMPONENT_GEOM_CACHE) > cls._COMPONENT_GEOM_CACHE_MAX:
+            cls._COMPONENT_GEOM_CACHE.popitem(last=False)
+        return result
 
     @staticmethod
     def extract_entities(
@@ -823,67 +1099,45 @@ class PerceptionEngine:
         receptacle_pos = learned_receptacle_positions or set()
         entities: list[SpatialEntity] = []
 
-        unique_vals = [int(v) for v in np.unique(grid) if int(v) != bg]
-        # 4-connectivity structuring element
-        struct = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+        unique_vals = [int(v) for v in _fast_unique_counts(grid)[0].tolist() if int(v) != bg]
+        geom_comps = PerceptionEngine._get_cached_component_geometry(grid, bg, unique_vals)
+        for val, area, bbox, centroid, grid_pos, cells in geom_comps:
+            cells_list = list(cells)
+            min_r, max_r, min_c, max_c = bbox
 
-        for val in unique_vals:
-            mask = grid == val
-            labeled_mask, num_components = label(mask, structure=struct)
-            # Single-pass coordinate lifting: bin all labeled pixels by component
-            # id once instead of rescanning the lattice per component (argwhere
-            # returns row-major coordinates, identical to this ordering).
-            _flat_labels = labeled_mask.ravel()
-            _nz = np.nonzero(_flat_labels)[0]
-            _order = np.argsort(_flat_labels[_nz], kind="stable")
-            _nz = _nz[_order]
-            _nz_labels = _flat_labels[_nz]
-            _splits = np.flatnonzero(np.diff(_nz_labels)) + 1
-            _groups = np.split(_nz, _splits)
-            for comp_idx in range(1, num_components + 1):
-                flat = _groups[comp_idx - 1]
-                coords = np.stack((flat // W, flat % W), axis=1)
-                area = int(len(coords))
-                if area == 0:
-                    continue
+            role = SpatialRoleClassifier.classify_role(
+                val=val,
+                area=area,
+                bounding_box=bbox,
+                grid_pos=grid_pos,
+                H=H,
+                W=W,
+                symbolic_theory=symbolic_theory,
+                av_feats=av_feats,
+                mutations=mutations,
+                goal_pos=goal_pos,
+                receptacle_pos=receptacle_pos,
+                avatar_pos=avatar_pos,
+                cells=cells_list,
+                bg=bg,
+            )
 
-                cells = [(int(r), int(c)) for r, c in coords]
-                min_r = int(np.min(coords[:, 0]))
-                max_r = int(np.max(coords[:, 0]))
-                min_c = int(np.min(coords[:, 1]))
-                max_c = int(np.max(coords[:, 1]))
-                mean_r = float(np.mean(coords[:, 0]))
-                mean_c = float(np.mean(coords[:, 1]))
-                centroid = (mean_r, mean_c)
-                grid_pos = (int(round(mean_r)), int(round(mean_c)))
-
-                role = SpatialRoleClassifier.classify_role(
-                    val=val,
-                    area=area,
-                    bounding_box=(min_r, max_r, min_c, max_c),
-                    grid_pos=grid_pos,
-                    H=H,
-                    W=W,
-                    symbolic_theory=symbolic_theory,
-                    av_feats=av_feats,
-                    mutations=mutations,
-                    goal_pos=goal_pos,
-                    receptacle_pos=receptacle_pos,
-                    avatar_pos=avatar_pos,
-                    cells=cells,
-                )
-
-                ent = SpatialEntity(
-                    id=f"ent_{val}_{len(entities)}_{min_r}_{min_c}",
-                    role=role,
-                    centroid=centroid,
-                    grid_pos=grid_pos,
-                    area=area,
-                    bounding_box=(min_r, max_r, min_c, max_c),
-                    feature_id=val,
-                    properties={"cells": cells, "feature": val, "feature_id": val},
-                )
-                entities.append(ent)
+            ent = SpatialEntity(
+                id=f"ent_{val}_{len(entities)}_{min_r}_{min_c}",
+                role=role,
+                centroid=centroid,
+                grid_pos=grid_pos,
+                area=area,
+                bounding_box=bbox,
+                feature_id=val,
+                properties={"cells": cells_list, "feature": val, "feature_id": val},
+            )
+            if role == EntityRole.OBSTACLE and symbolic_theory is not None:
+                if val in symbolic_theory.candidate_goal_features:
+                    symbolic_theory.retract_candidate_goal(val, reason="perimeter_border_obstacle")
+                if not symbolic_theory.is_barrier(val):
+                    symbolic_theory.induce_barrier(val, evidence="topology:border")
+            entities.append(ent)
 
         # Disambiguate when multiple distinct entities share avatar features (e.g. templates, twins, sockets)
         agent_entities = [e for e in entities if e.feature_id in av_feats]
@@ -967,15 +1221,19 @@ class PerceptionEngine:
         for r, c in zip(rows, cols):
             mutated.append((int(r), int(c), int(prev_grid[r, c]), int(curr_grid[r, c])))
 
-        prev_features = set(int(v) for v in np.unique(prev_grid))
-        curr_features = set(int(v) for v in np.unique(curr_grid))
+        prev_vals, prev_counts = _fast_unique_counts(prev_grid)
+        curr_vals, _ = _fast_unique_counts(curr_grid)
+        prev_features = set(int(v) for v in prev_vals.tolist())
+        curr_features = set(int(v) for v in curr_vals.tolist())
 
-        bg = int(np.bincount(prev_grid.flatten()).argmax())
+        bg = int(prev_vals[np.argmax(prev_counts)]) if prev_vals.size else 0
         translation_candidates: list[tuple[int, int, int, int]] = []
+        changed_feats = {old_v for _, _, old_v, _ in mutated} | {
+            new_v for _, _, _, new_v in mutated
+        }
 
-        for feat in np.unique(prev_grid):
-            feat_int = int(feat)
-            if feat_int == bg:
+        for feat_int in changed_feats:
+            if feat_int == bg or feat_int not in prev_features:
                 continue
             prev_pts = np.where(prev_grid == feat_int)
             curr_pts = np.where(curr_grid == feat_int)
@@ -1050,12 +1308,12 @@ class PerceptionEngine:
         )
 
     @staticmethod
-    def detect_affordance_panels(
+    def detect_affordance_clusters(
         entities: Sequence[SpatialEntity],
         grid: np.ndarray,
         bg: int = 0,
     ) -> list[dict[str, Any]]:
-        return GestaltAffordanceDetector.detect_affordance_panels(
+        return GestaltAffordanceDetector.detect_affordance_clusters(
             entities=entities,
             grid=grid,
             bg=bg,
@@ -1125,13 +1383,19 @@ class PerceptionEngine:
         return pruned
 
     @classmethod
-    def to_causal_predicate(cls) -> CausalPredicate:
-        """Export perception engine capability as a declarative causal predicate."""
+    def to_causal_predicate(cls, view: Any = None) -> CausalPredicate:
+        """Export perception engine capability and runtime sensory state as a declarative causal predicate."""
+        val = "ACTIVE"
+        rel = "thalamocortical_segmentation"
+        if view is not None:
+            bg = getattr(view, "bg_feature", None)
+            av = getattr(view, "avatar_pos", None)
+            rel = f"thalamocortical_segmentation:bg:{bg}:avatar:{av}"
         return CausalPredicate(
             variable="cortex_perception_engine",
             operator="==",
-            value="ACTIVE",
-            relation="thalamocortical_segmentation",
+            value=val,
+            relation=rel,
             target_entity="cortex_perception",
         )
 
@@ -1153,220 +1417,41 @@ class PerceptionEngine:
         ]
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Gibsonian Ecological Affordance Extractor & Topological Contours
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class AffordanceRole(StrEnum):
-    """Gibsonian invariant ecological affordances for 2D spatial lattices."""
-
-    TRAVERSABLE = "traversable"
-    STATIC_BARRIER = "static_barrier"
-    MOVABLE_CARGO = "movable_cargo"
-    ACTUATABLE_SWITCH = "actuatable_switch"
-    LETHAL_HAZARD = "lethal_hazard"
-    COLLECTIBLE_GOAL = "collectible_goal"
-    UNKNOWN = "unknown"
-
-
 @dataclass
-class TopologicalContour:
-    """A closed exterior or interior topological boundary contour."""
-
-    feature_id: int
-    exterior_boundary: list[tuple[int, int]]
-    cavity_loops: list[list[tuple[int, int]]]
-    perimeter_length: int
-    is_enclosed: bool
-    area: int
-
-    def to_causal_predicate(self) -> CausalPredicate:
-        """Export contour as a declarative causal predicate."""
-        return CausalPredicate(
-            variable=f"contour:feature_{self.feature_id}",
-            operator="==",
-            value=f"perimeter:{self.perimeter_length}:area:{self.area}",
-            relation=f"cavities:{len(self.cavity_loops)}:enclosed:{self.is_enclosed}",
-            target_entity=f"feature_{self.feature_id}",
-        )
-
-    def to_transaction_operations(self) -> list[TransactionOperation]:
-        """Propose atomic HCIR transaction recording topological contour."""
-        return [
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=f"contour_feat_{self.feature_id}",
-                node_data={
-                    "feature_id": self.feature_id,
-                    "perimeter_length": self.perimeter_length,
-                    "area": self.area,
-                    "is_enclosed": self.is_enclosed,
-                    "cavity_count": len(self.cavity_loops),
-                },
-            )
-        ]
-
-
-class GibsonianAffordanceExtractor:
-    """Extracts dense ecological affordance fields and closed topological contours from 2D spatial lattices."""
-
-    def __init__(self) -> None:
-        pass
-
-    def extract_affordance_map(
-        self,
-        grid: np.ndarray,
-        bg_color: int = 0,
-        goal_features: set[int] | None = None,
-        barrier_features: set[int] | None = None,
-        lethal_features: set[int] | None = None,
-        cargo_features: set[int] | None = None,
-        switch_features: set[int] | None = None,
-    ) -> np.ndarray:
-        """Generate a dense affordance matrix mapping each coordinate to an AffordanceRole string.
-
-        Returns:
-            np.ndarray: String array of shape (H, W) containing AffordanceRole values.
-        """
-        H, W = grid.shape
-        affordances = np.full((H, W), AffordanceRole.TRAVERSABLE.value, dtype=object)
-
-        goals = goal_features or set()
-        barriers = barrier_features or set()
-        lethals = lethal_features or set()
-        cargos = cargo_features or set()
-        switches = switch_features or set()
-
-        for r in range(H):
-            for c in range(W):
-                val = int(grid[r, c])
-                if val == bg_color:
-                    affordances[r, c] = AffordanceRole.TRAVERSABLE.value
-                elif val in lethals:
-                    affordances[r, c] = AffordanceRole.LETHAL_HAZARD.value
-                elif val in goals:
-                    affordances[r, c] = AffordanceRole.COLLECTIBLE_GOAL.value
-                elif val in switches:
-                    affordances[r, c] = AffordanceRole.ACTUATABLE_SWITCH.value
-                elif val in cargos:
-                    affordances[r, c] = AffordanceRole.MOVABLE_CARGO.value
-                elif val in barriers:
-                    affordances[r, c] = AffordanceRole.STATIC_BARRIER.value
-                else:
-                    affordances[r, c] = AffordanceRole.STATIC_BARRIER.value
-
-        return affordances
-
-    def extract_topological_contours(
-        self,
-        grid: np.ndarray,
-        bg_color: int = 0,
-    ) -> list[TopologicalContour]:
-        """Extract exterior perimeter coordinates and internal cavity holes for all non-background entities."""
-        H, W = grid.shape
-        unique_feats = [int(f) for f in np.unique(grid) if int(f) != bg_color]
-        contours: list[TopologicalContour] = []
-
-        for feat in unique_feats:
-            mask = grid == feat
-            pts = [(int(r), int(c)) for r, c in np.argwhere(mask)]
-            if not pts:
-                continue
-
-            pt_set = set(pts)
-            exterior: list[tuple[int, int]] = []
-
-            for r, c in pts:
-                is_boundary = False
-                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    nr, nc = r + dr, c + dc
-                    if not (0 <= nr < H and 0 <= nc < W) or (nr, nc) not in pt_set:
-                        is_boundary = True
-                        break
-                if is_boundary:
-                    exterior.append((r, c))
-
-            min_r = min(r for r, _ in pts)
-            max_r = max(r for r, _ in pts)
-            min_c = min(c for _, c in pts)
-            max_c = max(c for _, c in pts)
-
-            cavities: list[list[tuple[int, int]]] = []
-            is_enclosed = False
-
-            if max_r - min_r >= 2 and max_c - min_c >= 2:
-                sub_grid = ~(mask[min_r : max_r + 1, min_c : max_c + 1])
-                labeled_sub, num_sub = label(sub_grid)
-
-                for comp_idx in range(1, num_sub + 1):
-                    comp_pts = np.argwhere(labeled_sub == comp_idx)
-                    touches_box_edge = any(
-                        cr == 0 or cr == (max_r - min_r) or cc == 0 or cc == (max_c - min_c)
-                        for cr, cc in comp_pts
-                    )
-                    if not touches_box_edge and len(comp_pts) > 0:
-                        cavity = [(int(cr + min_r), int(cc + min_c)) for cr, cc in comp_pts]
-                        cavities.append(cavity)
-                        is_enclosed = True
-
-            contours.append(
-                TopologicalContour(
-                    feature_id=feat,
-                    exterior_boundary=exterior,
-                    cavity_loops=cavities,
-                    perimeter_length=len(exterior),
-                    is_enclosed=is_enclosed,
-                    area=len(pts),
-                )
-            )
-
-        return contours
-
-
-@dataclass
-class PerceptionStage(CorticalStage):
+class PerceptionStage:
     """Cortical Stage 1: Sensory Perception & Coordinate Lifting.
 
     Transforms raw sensory arrays into SpatialEntity objects and coordinate frames.
     """
 
     name: str = "perception_stage"
+    engine: Any | None = None
+
+    def bind_engine(self, engine: Any) -> None:
+        self.engine = engine
 
     def observe(self, ctx: CognitiveContext) -> StageResult:
-        engine = ctx.signals.get("_engine")
-        if engine is not None:
-            # WP1: real perception — warm the memoised entity cache for this
-            # grid so the downstream DeliberationStage call is a cache hit.
-            # Pure cache warm => behaviour-identical.
-            grid = ctx.signals.get("_curr_grid")
-            warmed_entities: list[Any] = []
-            if grid is not None:
-                try:
-                    import numpy as _np
-
-                    g = _np.asarray(grid)
-                    warmed_entities = engine.extract_entities(g, engine.bg_feature)
-                except Exception:
-                    warmed_entities = []
-            avatar_candidate = engine.avatar_pos
-            return StageResult(
-                author=self.name,
-                signals={
-                    "entity_count": len(warmed_entities),
-                    "avatar_candidate": avatar_candidate,
-                },
-            )
-        grid = ctx.curr_grid if ctx.curr_grid is not None else ctx.prev_grid
+        grid = ctx.curr_grid if ctx.curr_grid is not None else ctx.signals.get("_curr_grid")
+        if grid is None:
+            grid = ctx.prev_grid
         entities: list[SpatialEntity] = []
         if grid is not None:
-            entities = ctx.extract_entities(grid)
-        ops: list[TransactionOperation] = [
+            try:
+                import numpy as _np
+
+                g = _np.asarray(grid)
+                entities = ctx.extract_entities(g, ctx.bg_feature)
+            except Exception:
+                entities = []
+        avatar_candidate = ctx.avatar_pos
+        ops = [
             TransactionOperation(
                 op=TransactionOp.UPSERT_NODE,
                 node_id="perception_observation",
                 node_data={
-                    "stage": self.name,
+                    "id": "perception_observation",
+                    "node_type": "observation",
+                    "category": "perception",
                     "entity_count": len(entities),
                     "step": ctx.step_counter,
                 },
@@ -1375,6 +1460,11 @@ class PerceptionStage(CorticalStage):
         return StageResult(
             author=self.name,
             operations=ops,
-            signals={"extracted_entities": entities, "step": ctx.step_counter},
+            signals={
+                "extracted_entities": entities,
+                "entity_count": len(entities),
+                "avatar_candidate": avatar_candidate,
+                "step": ctx.step_counter,
+            },
             proposed_action=None,
         )
