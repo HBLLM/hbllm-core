@@ -138,7 +138,7 @@ class NativeAccelerationRegistry:
             ),
             (
                 "compute_kernel",
-                "hbllm_compute_kernel",
+                "hbllm_compute",
                 "Vectorized tensor and matrix arithmetic compute kernels",
             ),
             (
@@ -148,7 +148,7 @@ class NativeAccelerationRegistry:
             ),
             (
                 "perception",
-                "hbllm_perception",
+                "hbllm_perception_rs",
                 "Fast 2D/3D visual and spatial perception rasterization kernels",
             ),
             (
@@ -158,7 +158,7 @@ class NativeAccelerationRegistry:
             ),
             (
                 "data_tools",
-                "hbllm_data_tools",
+                "hbllm_data_tools_rs",
                 "Zero-copy streaming JSON/Arrow serialization and data ingest",
             ),
             (

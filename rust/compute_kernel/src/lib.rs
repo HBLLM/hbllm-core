@@ -52,8 +52,21 @@ impl UniversalEngine {
         let scale = scale.as_array();
         let bias = bias.as_array();
 
+        if group_size == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "group_size must be > 0",
+            ));
+        }
         let out_features = packed.shape()[0];
         let packed_in = packed.shape()[1];
+        if scale.shape()[0] < out_features || bias.shape()[0] < out_features {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "scale and bias must have at least out_features rows",
+            ));
+        }
+        let packed = packed.as_standard_layout();
+        let scale = scale.as_standard_layout();
+        let bias = bias.as_standard_layout();
         let in_features = packed_in * 2; // 4-bit: 2 weights per byte
         let total = out_features * in_features;
 
@@ -69,10 +82,10 @@ impl UniversalEngine {
                 #[cfg(target_arch = "aarch64")]
                 unsafe {
                     Self::dequantize_row_neon(
-                        row_packed.as_slice().unwrap(),
+                        row_packed.as_slice().unwrap_or(&[]),
                         &mut out[out_offset..out_offset + in_features],
-                        row_scale.as_slice().unwrap(),
-                        row_bias.as_slice().unwrap(),
+                        row_scale.as_slice().unwrap_or(&[]),
+                        row_bias.as_slice().unwrap_or(&[]),
                         group_size,
                     );
                 }
@@ -80,10 +93,10 @@ impl UniversalEngine {
                 #[cfg(target_arch = "x86_64")]
                 unsafe {
                     Self::dequantize_row_x86(
-                        row_packed.as_slice().unwrap(),
+                        row_packed.as_slice().unwrap_or(&[]),
                         &mut out[out_offset..out_offset + in_features],
-                        row_scale.as_slice().unwrap(),
-                        row_bias.as_slice().unwrap(),
+                        row_scale.as_slice().unwrap_or(&[]),
+                        row_bias.as_slice().unwrap_or(&[]),
                         group_size,
                     );
                 }
@@ -91,10 +104,10 @@ impl UniversalEngine {
                 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
                 {
                     Self::dequantize_row_scalar(
-                        row_packed.as_slice().unwrap(),
+                        row_packed.as_slice().unwrap_or(&[]),
                         &mut out[out_offset..out_offset + in_features],
-                        row_scale.as_slice().unwrap(),
-                        row_bias.as_slice().unwrap(),
+                        row_scale.as_slice().unwrap_or(&[]),
+                        row_bias.as_slice().unwrap_or(&[]),
                         group_size,
                     );
                 }
@@ -133,6 +146,11 @@ impl UniversalEngine {
         let scale = scale.as_array();
         let bias = bias.as_array();
 
+        if group_size == 0 {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "group_size must be > 0",
+            ));
+        }
         let out_features = packed.shape()[0];
         let packed_in = packed.shape()[1];
         let in_features = packed_in * 2; // 4-bit: 2 weights per byte
@@ -144,9 +162,19 @@ impl UniversalEngine {
                 in_features
             )));
         }
+        if scale.shape()[0] < out_features || bias.shape()[0] < out_features {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "scale and bias must have at least out_features rows",
+            ));
+        }
+        let x = x.as_standard_layout();
+        let packed = packed.as_standard_layout();
+        let scale = scale.as_standard_layout();
+        let bias = bias.as_standard_layout();
 
         let out = py.allow_threads(|| {
             let mut out = vec![0.0f32; out_features];
+            let x_slice = x.as_slice().unwrap_or(&[]);
 
             for (row, out_val) in out.iter_mut().enumerate() {
                 let row_packed = packed.row(row);
@@ -157,10 +185,10 @@ impl UniversalEngine {
                     #[cfg(target_arch = "aarch64")]
                     unsafe {
                         Self::gemv_row_neon(
-                            x.as_slice().unwrap(),
-                            row_packed.as_slice().unwrap(),
-                            row_scale.as_slice().unwrap(),
-                            row_bias.as_slice().unwrap(),
+                            x_slice,
+                            row_packed.as_slice().unwrap_or(&[]),
+                            row_scale.as_slice().unwrap_or(&[]),
+                            row_bias.as_slice().unwrap_or(&[]),
                             group_size,
                         )
                     }
@@ -168,10 +196,10 @@ impl UniversalEngine {
                     #[cfg(target_arch = "x86_64")]
                     unsafe {
                         Self::gemv_row_x86(
-                            x.as_slice().unwrap(),
-                            row_packed.as_slice().unwrap(),
-                            row_scale.as_slice().unwrap(),
-                            row_bias.as_slice().unwrap(),
+                            x_slice,
+                            row_packed.as_slice().unwrap_or(&[]),
+                            row_scale.as_slice().unwrap_or(&[]),
+                            row_bias.as_slice().unwrap_or(&[]),
                             group_size,
                         )
                     }
@@ -179,10 +207,10 @@ impl UniversalEngine {
                     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
                     {
                         Self::gemv_row_scalar(
-                            x.as_slice().unwrap(),
-                            row_packed.as_slice().unwrap(),
-                            row_scale.as_slice().unwrap(),
-                            row_bias.as_slice().unwrap(),
+                            x_slice,
+                            row_packed.as_slice().unwrap_or(&[]),
+                            row_scale.as_slice().unwrap_or(&[]),
+                            row_bias.as_slice().unwrap_or(&[]),
                             group_size,
                         )
                     }

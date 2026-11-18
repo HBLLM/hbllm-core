@@ -16,10 +16,8 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.disagreement_analyzer import PredictorDisagreementAnalyzer
 from hbllm.hcir.world.prediction_types import EnsemblePrediction, PredictionProvenance
 from hbllm.hcir.world.predictor_weights import PredictorWeightManager
-from hbllm.hcir.world.predictors.neural import NeuralWorldModel
 from hbllm.hcir.world.predictors.physics import PhysicsPredictor
 from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
-from hbllm.hcir.world.predictors.statistical import StatisticalPredictor
 from hbllm.hcir.world.predictors.whole_grid import WholeGridPredictor
 from hbllm.hcir.world.world_context import WorldModelScope
 from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
@@ -32,28 +30,15 @@ class PredictiveRealityModel:
 
     def __init__(
         self,
-        enable_llm: bool = False,
         enable_whole_grid: bool = False,
         weight_manager: PredictorWeightManager | None = None,
     ) -> None:
         self.physics = PhysicsPredictor()
-        self.statistical = StatisticalPredictor()
         self.snn = SNNTemporalPredictor()
-        self.neural = NeuralWorldModel()
         self.whole_grid = WholeGridPredictor()
-        self.enable_llm = enable_llm
         self.enable_whole_grid = enable_whole_grid
-        self._llm: Any | None = None
         self.disagreement_analyzer = PredictorDisagreementAnalyzer()
         self.weight_manager = weight_manager or PredictorWeightManager()
-
-    @property
-    def llm(self) -> Any:
-        if self._llm is None:
-            from hbllm.hcir.world.predictors.llm import LLMReasoningPredictor
-
-            self._llm = LLMReasoningPredictor()
-        return self._llm
 
     def predict(
         self,
@@ -69,14 +54,8 @@ class PredictiveRealityModel:
         p_state, p_conf = self.physics.predict_state(snapshot, action_intent, horizon_ms)
         comp_results["physics"] = (p_state, p_conf)
 
-        st_state, st_conf = self.statistical.predict_state(snapshot, action_intent, horizon_ms)
-        comp_results["statistical"] = (st_state, st_conf)
-
         snn_state, snn_conf = self.snn.predict_state(snapshot, action_intent, horizon_ms)
         comp_results["snn"] = (snn_state, snn_conf)
-
-        neu_state, neu_conf = self.neural.predict_state(snapshot, action_intent, horizon_ms)
-        comp_results["neural"] = (neu_state, neu_conf)
 
         has_grid = (
             self.enable_whole_grid
@@ -87,15 +66,9 @@ class PredictiveRealityModel:
             wg_state, wg_conf = self.whole_grid.predict_state(snapshot, action_intent, horizon_ms)
             comp_results["whole_grid"] = (wg_state, wg_conf)
 
-        if self.enable_llm:
-            llm_state, llm_conf = self.llm.predict_state(snapshot, action_intent, horizon_ms)
-            comp_results["llm"] = (llm_state, llm_conf)
-
-        predictors_used = ["physics", "statistical", "snn", "neural"]
+        predictors_used = ["physics", "snn"]
         if has_grid:
             predictors_used.append("whole_grid")
-        if self.enable_llm:
-            predictors_used.append("llm")
 
         model_scope = scope or WorldModelScope(world_id=snapshot.world_id)
         raw_scores = {

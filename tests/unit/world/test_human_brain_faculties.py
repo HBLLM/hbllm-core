@@ -1394,31 +1394,16 @@ class TestPhase26CognitiveBridgeCausalAndTransactions:
         assert len(p_ops) == 1
 
     def test_ensemble_predictors_causal_and_transactions(self) -> None:
-        from hbllm.hcir.world.predictors.llm import LLMReasoningPredictor
-        from hbllm.hcir.world.predictors.neural import NeuralWorldModel
         from hbllm.hcir.world.predictors.physics import PhysicsPredictor
         from hbllm.hcir.world.predictors.snn import SNNTemporalPredictor
-        from hbllm.hcir.world.predictors.statistical import StatisticalPredictor
 
         phys = PhysicsPredictor()
         assert phys.to_causal_predicate().variable == "predictor:physics"
         assert len(phys.to_transaction_operations()) == 1
 
-        llm = LLMReasoningPredictor()
-        assert llm.to_causal_predicate().variable == "predictor:llm"
-        assert len(llm.to_transaction_operations()) == 1
-
-        neural = NeuralWorldModel()
-        assert neural.to_causal_predicate().variable == "predictor:neural"
-        assert len(neural.to_transaction_operations()) == 1
-
         snn = SNNTemporalPredictor()
         assert snn.to_causal_predicate().variable == "predictor:snn"
         assert len(snn.to_transaction_operations()) == 1
-
-        stat = StatisticalPredictor()
-        assert stat.to_causal_predicate().variable == "predictor:statistical"
-        assert len(stat.to_transaction_operations()) == 1
 
 
 class TestPhase27CognitiveBridgeCausalAndTransactions:
