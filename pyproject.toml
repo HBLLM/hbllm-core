@@ -14,8 +14,9 @@ authors = [
 readme = "README.md"
 
 dependencies = [
-    # Data
+    # Data & Scientific Computing
     "numpy>=1.26.0",
+    "scipy>=1.11.0",
     "pyarrow>=15.0.0",
     "zstandard>=0.22.0",
 
@@ -164,6 +165,7 @@ required_plugins = ["pytest-asyncio", "pytest-timeout", "pytest-xdist"]
 testpaths = ["tests", "plugins"]
 pythonpath = ["."]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 timeout = 300
 timeout_method = "thread"
 addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal --ignore=tests/scratch"
@@ -175,6 +177,7 @@ markers = [
     "slow: Tests with long runtimes",
 ]
 filterwarnings = [
+    "ignore:The configuration option .asyncio_default_fixture_loop_scope. is unset:pytest.PytestDeprecationWarning",
     "ignore:The PyTorch API of nested tensors is in prototype stage:UserWarning",
     "ignore:`np.bool8` is a deprecated alias:DeprecationWarning",
 ]

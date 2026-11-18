@@ -22,7 +22,39 @@ from enum import IntEnum, StrEnum
 from typing import Any
 
 import numpy as np
-from scipy.ndimage import label as _scipy_label
+
+try:
+    from scipy.ndimage import label as _scipy_label
+except ImportError:  # pragma: no cover
+
+    def _scipy_label(input_arr: np.ndarray, structure: Any = None) -> tuple[np.ndarray, int]:
+        """4-connectivity connected-component labeling fallback when scipy is not installed."""
+        h, w = input_arr.shape
+        labeled = np.zeros((h, w), dtype=np.int32)
+        current_label = 0
+        visited = np.zeros((h, w), dtype=bool)
+        for r in range(h):
+            for c in range(w):
+                if input_arr[r, c] and not visited[r, c]:
+                    current_label += 1
+                    q = [(r, c)]
+                    visited[r, c] = True
+                    labeled[r, c] = current_label
+                    while q:
+                        cr, cc = q.pop()
+                        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                            nr, nc = cr + dr, cc + dc
+                            if (
+                                0 <= nr < h
+                                and 0 <= nc < w
+                                and input_arr[nr, nc]
+                                and not visited[nr, nc]
+                            ):
+                                visited[nr, nc] = True
+                                labeled[nr, nc] = current_label
+                                q.append((nr, nc))
+        return labeled, current_label
+
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.world.causal_discovery import CausalPredicate

@@ -20,7 +20,30 @@ from enum import StrEnum
 from typing import Any
 
 import numpy as np
-from scipy.optimize import linear_sum_assignment
+
+try:
+    from scipy.optimize import linear_sum_assignment
+except ImportError:  # pragma: no cover
+
+    def linear_sum_assignment(cost_matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Greedy minimum-weight bipartite matching fallback when scipy is not installed."""
+        rows, cols = cost_matrix.shape
+        matched_rows: list[int] = []
+        matched_cols: list[int] = []
+        used_cols: set[int] = set()
+        for r in range(rows):
+            best_c = -1
+            best_val = float("inf")
+            for c in range(cols):
+                if c not in used_cols and cost_matrix[r, c] < best_val:
+                    best_val = cost_matrix[r, c]
+                    best_c = c
+            if best_c != -1:
+                matched_rows.append(r)
+                matched_cols.append(best_c)
+                used_cols.add(best_c)
+        return np.array(matched_rows, dtype=np.int64), np.array(matched_cols, dtype=np.int64)
+
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
