@@ -33,7 +33,8 @@ import json
 import logging
 import warnings
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from types import MappingProxyType
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -389,14 +390,14 @@ class CognitiveGraph:
         return len(self._nodes)
 
     @property
-    def nodes(self) -> dict[str, HCIRNode]:
-        """Dictionary access to nodes."""
-        return self._nodes
+    def nodes(self) -> Mapping[str, HCIRNode]:
+        """Read-only mapping view of nodes (mutate via TransactionManager)."""
+        return MappingProxyType(self._nodes)
 
     @property
-    def edges(self) -> dict[str, HCIREdge]:
-        """Dictionary access to edges."""
-        return self._edges
+    def edges(self) -> Mapping[str, HCIREdge]:
+        """Read-only mapping view of edges (mutate via TransactionManager)."""
+        return MappingProxyType(self._edges)
 
     def all_nodes(self) -> Iterator[HCIRNode]:
         """Iterate over all nodes."""

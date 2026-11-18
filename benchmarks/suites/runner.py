@@ -432,8 +432,11 @@ def run_closed_loop_task(
                 xs_succ.append(ok)
                 xs_steps.append(st)
                 prev_ok = ok
-            lib = getattr(xs_engine, "library_learner", None)
-            skills = len(getattr(lib, "macro_skills", {})) if lib is not None else 0
+            wm = getattr(xs_engine, "working_memory", None)
+            proc_lib = getattr(wm, "procedural_library", None) or {}
+            opt_eng = getattr(xs_engine, "option_discovery", None)
+            disc_opts = getattr(opt_eng, "discovered_options", None) or {}
+            skills = len(set(proc_lib.keys()) | set(disc_opts.keys()))
         n_xs = len(xs_succ)
         k_xs = sum(xs_succ)
         k_tr = sum(xs_succ[1:])
