@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import subprocess
+import re
 import tempfile
 from pathlib import Path
 
@@ -182,14 +182,24 @@ def test_scenario_b_no_false_goal_induction() -> None:
 def test_codebase_ontology_mutation_invariants() -> None:
     """Verify that no file outside cortex_causal.py mutates goal/barrier/walkable sets directly."""
     core_dir = Path(__file__).resolve().parents[3]
-    cmd = [
-        "rg",
-        "-n",
-        r"goal_features\.add|barrier_features\.add|walkable_features\.add",
-        "hbllm/",
-    ]
-    proc = subprocess.run(cmd, cwd=str(core_dir), capture_output=True, text=True)
-    assert proc.returncode == 0
-    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-    for ln in lines:
-        assert "cortex_causal.py" in ln, f"Forbidden direct mutation outside cortex_causal.py: {ln}"
+    hbllm_dir = core_dir / "hbllm"
+    pattern = re.compile(r"(?:goal_features|barrier_features|walkable_features)\.add")
+
+    violations: list[str] = []
+    for path in hbllm_dir.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as f:
+                for line_no, line in enumerate(f, start=1):
+                    if pattern.search(line):
+                        if path.name != "cortex_causal.py":
+                            violations.append(
+                                f"{path.relative_to(core_dir)}:{line_no}: {line.strip()}"
+                            )
+        except Exception:
+            continue
+
+    assert not violations, "Forbidden direct mutation outside cortex_causal.py:\n" + "\n".join(
+        violations
+    )
