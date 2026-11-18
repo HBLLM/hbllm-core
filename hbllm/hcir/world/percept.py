@@ -98,34 +98,47 @@ def apply_boundary_retention(owner: Any, boundary: Any) -> None:
     """Generic per-field retention for faculties (WP0.5/F1).
 
     Reads ``owner.FIELD_RETENTION`` — a class-level mapping of field name to
-    ``RetentionPolicy`` — and clears every field declared ``EPISODE_LOCAL`` on
-    episode transitions (fresh empty default by current type),
-    leaving ``CONTEXT_LOCAL``/``LIFELONG`` fields untouched.
+    ``RetentionPolicy`` — and clears fields according to the boundary kind:
+
+    - ``EPISODE_LOCAL``: cleared on every episode/context transition.
+    - ``CONTEXT_LOCAL``: retained across episode/seed transitions within a world
+      context; cleared only on ``CONTEXT_RESET`` or ``retain_dynamics=False``.
+    - ``LIFELONG``: never cleared by boundaries.
     """
     retention: dict[str, RetentionPolicy] = getattr(owner, "FIELD_RETENTION", {}) or {}
     if not retention:
         return
     kind = getattr(boundary, "kind", boundary)
-    if kind in (
+    is_context_reset = kind in (
+        EpisodeBoundaryKind.CONTEXT_RESET,
+        "context_reset",
+        "reset",
+    ) or not getattr(boundary, "retain_dynamics", True)
+    is_episode_transition = is_context_reset or kind in (
         EpisodeBoundaryKind.GOAL_REACHED,
         EpisodeBoundaryKind.LEVEL_COMPLETE,
         "goal_reached",
         "level_complete",
         EpisodeBoundaryKind.DEATH,
         "death",
-    ):
-        for field_name, policy in retention.items():
-            if policy != RetentionPolicy.EPISODE_LOCAL or not hasattr(owner, field_name):
-                continue
-            cur = getattr(owner, field_name)
-            if isinstance(cur, (set, dict, list)):
-                cur.clear()
-            elif isinstance(cur, deque):
-                cur.clear()
-            elif isinstance(cur, (int, float)):
-                setattr(owner, field_name, type(cur)())
-            else:
-                setattr(owner, field_name, None)
+    )
+    if not is_episode_transition:
+        return
+    for field_name, policy in retention.items():
+        should_clear = policy == RetentionPolicy.EPISODE_LOCAL or (
+            policy == RetentionPolicy.CONTEXT_LOCAL and is_context_reset
+        )
+        if not should_clear or not hasattr(owner, field_name):
+            continue
+        cur = getattr(owner, field_name)
+        if isinstance(cur, (set, dict, list)):
+            cur.clear()
+        elif isinstance(cur, deque):
+            cur.clear()
+        elif isinstance(cur, (int, float)):
+            setattr(owner, field_name, type(cur)())
+        else:
+            setattr(owner, field_name, None)
 
 
 @dataclass(frozen=True)

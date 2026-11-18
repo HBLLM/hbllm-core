@@ -5,45 +5,45 @@
     "no_grounding": {
       "mode": "no_grounding",
       "seeds": 20,
-      "ep2_solve_rate": 0.3,
-      "ep2_hazard_death_rate": 0.7,
+      "ep2_solve_rate": 0.05,
+      "ep2_hazard_death_rate": 0.95,
       "ep2_timeout_rate": 0.0,
-      "ep2_mean_steps": 9.45,
-      "step_p50_ms": 29.2,
-      "step_p95_ms": 49.0,
-      "conditional_solve_rate_when_hazard_learned": 0.3333
+      "ep2_mean_steps": 6.05,
+      "step_p50_ms": 81.42,
+      "step_p95_ms": 197.94,
+      "conditional_solve_rate_when_hazard_learned": 0.05
     },
     "handcrafted": {
       "mode": "handcrafted",
       "seeds": 20,
-      "ep2_solve_rate": 0.3,
-      "ep2_hazard_death_rate": 0.7,
+      "ep2_solve_rate": 0.05,
+      "ep2_hazard_death_rate": 0.95,
       "ep2_timeout_rate": 0.0,
-      "ep2_mean_steps": 9.45,
-      "step_p50_ms": 66.41,
-      "step_p95_ms": 94.41,
-      "conditional_solve_rate_when_hazard_learned": 0.3333
+      "ep2_mean_steps": 6.05,
+      "step_p50_ms": 336.14,
+      "step_p95_ms": 773.25,
+      "conditional_solve_rate_when_hazard_learned": 0.05
     },
     "learned": {
       "mode": "learned",
       "seeds": 20,
-      "ep2_solve_rate": 0.9,
-      "ep2_hazard_death_rate": 0.1,
+      "ep2_solve_rate": 0.85,
+      "ep2_hazard_death_rate": 0.15,
       "ep2_timeout_rate": 0.0,
-      "ep2_mean_steps": 11.25,
-      "step_p50_ms": 58.91,
-      "step_p95_ms": 88.5,
-      "conditional_solve_rate_when_hazard_learned": 1.0
+      "ep2_mean_steps": 11.05,
+      "step_p50_ms": 254.81,
+      "step_p95_ms": 445.77,
+      "conditional_solve_rate_when_hazard_learned": 0.85
     },
     "snn": {
       "mode": "snn",
       "seeds": 20,
-      "ep2_solve_rate": 0.9,
-      "ep2_hazard_death_rate": 0.1,
+      "ep2_solve_rate": 1.0,
+      "ep2_hazard_death_rate": 0.0,
       "ep2_timeout_rate": 0.0,
-      "ep2_mean_steps": 10.85,
-      "step_p50_ms": 61.27,
-      "step_p95_ms": 98.94,
+      "ep2_mean_steps": 11,
+      "step_p50_ms": 180.46,
+      "step_p95_ms": 450.38,
       "conditional_solve_rate_when_hazard_learned": 1.0
     }
   },
@@ -58,8 +58,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 23.233650799375027
+        "ep2_steps": 3,
+        "mean_step_ms": 198.12221299798694
       },
       {
         "seed": 2,
@@ -70,8 +70,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 28.530403703916818
+        "ep2_steps": 4,
+        "mean_step_ms": 89.9127824959578
       },
       {
         "seed": 3,
@@ -82,32 +82,32 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 24.980466201668605
+        "ep2_steps": 3,
+        "mean_step_ms": 71.03007399321844
       },
       {
         "seed": 4,
         "mode": "no_grounding",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 7,
-        "mean_step_ms": 23.155171282789006
+        "mean_step_ms": 58.73282671590069
       },
       {
         "seed": 5,
         "mode": "no_grounding",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 7,
-        "mean_step_ms": 31.642722714293217
+        "mean_step_ms": 53.14730185533075
       },
       {
         "seed": 6,
@@ -118,20 +118,20 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 8,
-        "mean_step_ms": 26.206534497760003
+        "ep2_steps": 10,
+        "mean_step_ms": 114.7672674007481
       },
       {
         "seed": 7,
         "mode": "no_grounding",
-        "ep1_attempts": 3,
+        "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 8,
-        "mean_step_ms": 25.48083225337905
+        "ep2_steps": 4,
+        "mean_step_ms": 130.40559199725976
       },
       {
         "seed": 8,
@@ -139,11 +139,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 11,
-        "mean_step_ms": 84.59857481648214
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 13,
+        "mean_step_ms": 63.46004699970273
       },
       {
         "seed": 9,
@@ -151,11 +151,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 15,
-        "mean_step_ms": 29.586870663721736
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 3,
+        "mean_step_ms": 63.60820600336107
       },
       {
         "seed": 10,
@@ -167,7 +167,7 @@
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 8,
-        "mean_step_ms": 26.49226112407632
+        "mean_step_ms": 55.19794949759671
       },
       {
         "seed": 11,
@@ -175,11 +175,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 12,
-        "mean_step_ms": 40.85867007718965
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 3,
+        "mean_step_ms": 125.4379933331317
       },
       {
         "seed": 12,
@@ -190,8 +190,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 6,
-        "mean_step_ms": 32.461486504568406
+        "ep2_steps": 5,
+        "mean_step_ms": 86.66894099733327
       },
       {
         "seed": 13,
@@ -199,11 +199,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 8,
-        "mean_step_ms": 35.933604871388525
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 7,
+        "mean_step_ms": 30.413796574326366
       },
       {
         "seed": 14,
@@ -214,8 +214,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 36.92233570036478
+        "ep2_steps": 3,
+        "mean_step_ms": 197.93978067173157
       },
       {
         "seed": 15,
@@ -226,8 +226,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 42.05339959880803
+        "ep2_steps": 4,
+        "mean_step_ms": 150.16535950053367
       },
       {
         "seed": 16,
@@ -239,7 +239,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 12,
-        "mean_step_ms": 48.998173335955165
+        "mean_step_ms": 65.94359599936676
       },
       {
         "seed": 17,
@@ -247,11 +247,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 22.8140776976943
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 11,
+        "mean_step_ms": 99.31059999772432
       },
       {
         "seed": 18,
@@ -262,8 +262,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 41.0484283027472
+        "ep2_steps": 4,
+        "mean_step_ms": 63.34606900418294
       },
       {
         "seed": 19,
@@ -274,8 +274,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 26.595212201937102
+        "ep2_steps": 3,
+        "mean_step_ms": 88.73791366446919
       },
       {
         "seed": 20,
@@ -287,7 +287,7 @@
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 7,
-        "mean_step_ms": 29.20471871454668
+        "mean_step_ms": 81.41938685314797
       }
     ],
     "handcrafted": [
@@ -300,8 +300,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 80.47862680105027
+        "ep2_steps": 3,
+        "mean_step_ms": 403.1487846659729
       },
       {
         "seed": 2,
@@ -312,8 +312,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 81.11224239110015
+        "ep2_steps": 4,
+        "mean_step_ms": 284.49755725159775
       },
       {
         "seed": 3,
@@ -324,32 +324,32 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 69.25041360082105
+        "ep2_steps": 3,
+        "mean_step_ms": 506.1610973255786
       },
       {
         "seed": 4,
         "mode": "handcrafted",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 7,
-        "mean_step_ms": 65.20264556664708
+        "mean_step_ms": 243.593758283948
       },
       {
         "seed": 5,
         "mode": "handcrafted",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 7,
-        "mean_step_ms": 66.33651671498748
+        "mean_step_ms": 570.6920971424552
       },
       {
         "seed": 6,
@@ -360,20 +360,20 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 8,
-        "mean_step_ms": 66.40664775113692
+        "ep2_steps": 10,
+        "mean_step_ms": 355.3737757989438
       },
       {
         "seed": 7,
         "mode": "handcrafted",
-        "ep1_attempts": 3,
+        "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 8,
-        "mean_step_ms": 88.48245074841543
+        "ep2_steps": 4,
+        "mean_step_ms": 300.15545249625575
       },
       {
         "seed": 8,
@@ -381,11 +381,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 11,
-        "mean_step_ms": 94.41165236057714
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 13,
+        "mean_step_ms": 254.89971784610623
       },
       {
         "seed": 9,
@@ -393,11 +393,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 15,
-        "mean_step_ms": 44.79178293258883
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 3,
+        "mean_step_ms": 363.27570166516426
       },
       {
         "seed": 10,
@@ -409,7 +409,7 @@
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 8,
-        "mean_step_ms": 47.71718262054492
+        "mean_step_ms": 392.71987974825606
       },
       {
         "seed": 11,
@@ -417,11 +417,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 12,
-        "mean_step_ms": 97.15812674645956
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 3,
+        "mean_step_ms": 676.7705520032905
       },
       {
         "seed": 12,
@@ -432,8 +432,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 6,
-        "mean_step_ms": 65.89613650673225
+        "ep2_steps": 5,
+        "mean_step_ms": 543.818568601273
       },
       {
         "seed": 13,
@@ -441,11 +441,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 8,
-        "mean_step_ms": 60.738543503248366
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 7,
+        "mean_step_ms": 126.46501628582233
       },
       {
         "seed": 14,
@@ -456,8 +456,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 51.86296429892536
+        "ep2_steps": 3,
+        "mean_step_ms": 216.96314900085176
       },
       {
         "seed": 15,
@@ -468,8 +468,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 43.72390420467127
+        "ep2_steps": 4,
+        "mean_step_ms": 137.17972624726826
       },
       {
         "seed": 16,
@@ -481,7 +481,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 12,
-        "mean_step_ms": 42.791317333467305
+        "mean_step_ms": 53.275990085239755
       },
       {
         "seed": 17,
@@ -489,11 +489,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 73.29344440076966
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 11,
+        "mean_step_ms": 336.13919536186256
       },
       {
         "seed": 18,
@@ -504,8 +504,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 86.00741480186116
+        "ep2_steps": 4,
+        "mean_step_ms": 309.90703100542305
       },
       {
         "seed": 19,
@@ -516,8 +516,8 @@
         "ep2_solved": false,
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
-        "ep2_steps": 10,
-        "mean_step_ms": 66.45262340316549
+        "ep2_steps": 3,
+        "mean_step_ms": 881.6698066705916
       },
       {
         "seed": 20,
@@ -529,7 +529,7 @@
         "ep2_hazard_contact": true,
         "ep2_reason": "hazard_contact",
         "ep2_steps": 7,
-        "mean_step_ms": 74.35922500111961
+        "mean_step_ms": 773.2535292826859
       }
     ],
     "learned": [
@@ -542,8 +542,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 52.13243670295924
+        "ep2_steps": 13,
+        "mean_step_ms": 186.6185893091964
       },
       {
         "seed": 2,
@@ -551,11 +551,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 12,
-        "mean_step_ms": 44.861160584938865
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 4,
+        "mean_step_ms": 254.81159249829943
       },
       {
         "seed": 3,
@@ -566,32 +566,32 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 74.14154830621555
+        "ep2_steps": 13,
+        "mean_step_ms": 184.04879969043228
       },
       {
         "seed": 4,
         "mode": "learned",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": false,
-        "ep2_hazard_contact": true,
-        "ep2_reason": "hazard_contact",
-        "ep2_steps": 7,
-        "mean_step_ms": 69.33563086204231
+        "ep2_solved": true,
+        "ep2_hazard_contact": false,
+        "ep2_reason": "goal_reached",
+        "ep2_steps": 17,
+        "mean_step_ms": 211.88128576357164
       },
       {
         "seed": 5,
         "mode": "learned",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": false,
-        "ep2_hazard_contact": true,
-        "ep2_reason": "hazard_contact",
-        "ep2_steps": 7,
-        "mean_step_ms": 58.079516431981965
+        "ep2_solved": true,
+        "ep2_hazard_contact": false,
+        "ep2_reason": "goal_reached",
+        "ep2_steps": 11,
+        "mean_step_ms": 250.6801562717142
       },
       {
         "seed": 6,
@@ -602,20 +602,20 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 12,
-        "mean_step_ms": 71.7231076656996
+        "ep2_steps": 18,
+        "mean_step_ms": 181.88890777754648
       },
       {
         "seed": 7,
         "mode": "learned",
-        "ep1_attempts": 3,
+        "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 16,
-        "mean_step_ms": 53.33417100700899
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 4,
+        "mean_step_ms": 343.433750251279
       },
       {
         "seed": 8,
@@ -626,8 +626,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 17,
-        "mean_step_ms": 47.96638759024277
+        "ep2_steps": 13,
+        "mean_step_ms": 445.7689367700368
       },
       {
         "seed": 9,
@@ -638,8 +638,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 15,
-        "mean_step_ms": 58.905849198345095
+        "ep2_steps": 13,
+        "mean_step_ms": 339.49308861450004
       },
       {
         "seed": 10,
@@ -650,8 +650,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 9,
-        "mean_step_ms": 89.12458878411498
+        "ep2_steps": 13,
+        "mean_step_ms": 329.59494853947456
       },
       {
         "seed": 11,
@@ -663,7 +663,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 10,
-        "mean_step_ms": 88.50330480490811
+        "mean_step_ms": 379.0539787019952
       },
       {
         "seed": 12,
@@ -674,8 +674,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 14,
-        "mean_step_ms": 75.41083950491156
+        "ep2_steps": 10,
+        "mean_step_ms": 274.7775947005721
       },
       {
         "seed": 13,
@@ -687,7 +687,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 8,
-        "mean_step_ms": 59.852900627447525
+        "mean_step_ms": 511.21610062909895
       },
       {
         "seed": 14,
@@ -698,8 +698,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 65.28550179791637
+        "ep2_steps": 13,
+        "mean_step_ms": 214.23706653765223
       },
       {
         "seed": 15,
@@ -710,8 +710,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 63.315185499959625
+        "ep2_steps": 7,
+        "mean_step_ms": 189.96009256807156
       },
       {
         "seed": 16,
@@ -723,7 +723,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 12,
-        "mean_step_ms": 59.8060043315248
+        "mean_step_ms": 112.52286108234937
       },
       {
         "seed": 17,
@@ -734,8 +734,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 16,
-        "mean_step_ms": 36.026796189617016
+        "ep2_steps": 12,
+        "mean_step_ms": 373.17160599923227
       },
       {
         "seed": 18,
@@ -743,11 +743,11 @@
         "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": true,
-        "ep2_hazard_contact": false,
-        "ep2_reason": "goal_reached",
-        "ep2_steps": 12,
-        "mean_step_ms": 42.85881466542681
+        "ep2_solved": false,
+        "ep2_hazard_contact": true,
+        "ep2_reason": "hazard_contact",
+        "ep2_steps": 4,
+        "mean_step_ms": 420.27529175175005
       },
       {
         "seed": 19,
@@ -758,8 +758,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 48.639588299556635
+        "ep2_steps": 14,
+        "mean_step_ms": 145.276423357635
       },
       {
         "seed": 20,
@@ -770,8 +770,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 8,
-        "mean_step_ms": 50.520085118478164
+        "ep2_steps": 12,
+        "mean_step_ms": 274.6653105823498
       }
     ],
     "snn": [
@@ -784,8 +784,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 60.85868189984467
+        "ep2_steps": 13,
+        "mean_step_ms": 450.3773959228196
       },
       {
         "seed": 2,
@@ -796,8 +796,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 11,
-        "mean_step_ms": 55.232662546173245
+        "ep2_steps": 6,
+        "mean_step_ms": 285.6679575003606
       },
       {
         "seed": 3,
@@ -808,32 +808,32 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 61.308786406880245
+        "ep2_steps": 13,
+        "mean_step_ms": 212.9541116927822
       },
       {
         "seed": 4,
         "mode": "snn",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": false,
-        "ep2_hazard_contact": true,
-        "ep2_reason": "hazard_contact",
-        "ep2_steps": 7,
-        "mean_step_ms": 80.57392085902393
+        "ep2_solved": true,
+        "ep2_hazard_contact": false,
+        "ep2_reason": "goal_reached",
+        "ep2_steps": 17,
+        "mean_step_ms": 217.44103817549973
       },
       {
         "seed": 5,
         "mode": "snn",
-        "ep1_attempts": 1,
-        "ep1_learned_hazard": false,
+        "ep1_attempts": 2,
+        "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
-        "ep2_solved": false,
-        "ep2_hazard_contact": true,
-        "ep2_reason": "hazard_contact",
-        "ep2_steps": 7,
-        "mean_step_ms": 71.04819857548657
+        "ep2_solved": true,
+        "ep2_hazard_contact": false,
+        "ep2_reason": "goal_reached",
+        "ep2_steps": 11,
+        "mean_step_ms": 167.07308336415073
       },
       {
         "seed": 6,
@@ -844,20 +844,20 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 12,
-        "mean_step_ms": 36.98145633097738
+        "ep2_steps": 18,
+        "mean_step_ms": 118.73073388576611
       },
       {
         "seed": 7,
         "mode": "snn",
-        "ep1_attempts": 3,
+        "ep1_attempts": 2,
         "ep1_learned_hazard": true,
         "ep1_learned_goal": true,
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 16,
-        "mean_step_ms": 34.43204912400688
+        "ep2_steps": 5,
+        "mean_step_ms": 160.41303419915494
       },
       {
         "seed": 8,
@@ -868,8 +868,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 17,
-        "mean_step_ms": 57.62274241458405
+        "ep2_steps": 11,
+        "mean_step_ms": 130.8132395444607
       },
       {
         "seed": 9,
@@ -880,8 +880,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 15,
-        "mean_step_ms": 51.68257046607323
+        "ep2_steps": 13,
+        "mean_step_ms": 143.11499646394694
       },
       {
         "seed": 10,
@@ -893,7 +893,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 9,
-        "mean_step_ms": 58.716098668002005
+        "mean_step_ms": 161.6823888891506
       },
       {
         "seed": 11,
@@ -904,8 +904,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 12,
-        "mean_step_ms": 51.68628775087806
+        "ep2_steps": 10,
+        "mean_step_ms": 260.6264715010184
       },
       {
         "seed": 12,
@@ -917,7 +917,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 10,
-        "mean_step_ms": 46.03782250196673
+        "mean_step_ms": 194.89379790175008
       },
       {
         "seed": 13,
@@ -929,7 +929,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 8,
-        "mean_step_ms": 79.67713825564715
+        "mean_step_ms": 121.55543725384632
       },
       {
         "seed": 14,
@@ -940,8 +940,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 61.26643539755605
+        "ep2_steps": 13,
+        "mean_step_ms": 143.21932453402462
       },
       {
         "seed": 15,
@@ -952,8 +952,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 10,
-        "mean_step_ms": 71.05727310408838
+        "ep2_steps": 7,
+        "mean_step_ms": 280.59539157090643
       },
       {
         "seed": 16,
@@ -965,7 +965,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 12,
-        "mean_step_ms": 64.95560333617807
+        "mean_step_ms": 101.44286616681104
       },
       {
         "seed": 17,
@@ -977,7 +977,7 @@
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
         "ep2_steps": 12,
-        "mean_step_ms": 69.38429966491337
+        "mean_step_ms": 180.460645337007
       },
       {
         "seed": 18,
@@ -988,8 +988,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 11,
-        "mean_step_ms": 101.13878346005963
+        "ep2_steps": 6,
+        "mean_step_ms": 299.8002169964214
       },
       {
         "seed": 19,
@@ -1000,8 +1000,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 11,
-        "mean_step_ms": 98.93826581802304
+        "ep2_steps": 14,
+        "mean_step_ms": 246.89651478547603
       },
       {
         "seed": 20,
@@ -1012,8 +1012,8 @@
         "ep2_solved": true,
         "ep2_hazard_contact": false,
         "ep2_reason": "goal_reached",
-        "ep2_steps": 7,
-        "mean_step_ms": 82.63627843033257
+        "ep2_steps": 12,
+        "mean_step_ms": 713.3600185018926
       }
     ]
   }

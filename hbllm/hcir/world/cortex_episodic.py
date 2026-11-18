@@ -1192,7 +1192,11 @@ class HippocampalEpisodicCortex:
             if new_context:
                 view.symbolic_theory.clear_barriers()
 
-        _epoch = 0 if target_epoch is None else target_epoch
+        _epoch = (
+            ((view.context_epoch or 0) + 1 if new_context else (view.context_epoch or 0))
+            if target_epoch is None
+            else target_epoch
+        )
         if not retain_dynamics:
             delta.mutate("context_failed_transitions", view.context_failed_transitions).clear()
             delta.mutate("context_barriers", view.context_barriers).clear()
@@ -1215,14 +1219,15 @@ class HippocampalEpisodicCortex:
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
         elif new_context:
-            # Level transition: point episodic spatial memory to the target level
+            # Level transition: advance/point episodic spatial memory to the target level epoch
+            view.symbolic_theory.begin_context_epoch()
+            delta.set("_context_epoch", _epoch)
             _lft = delta.mutate("context_failed_transitions", view.context_failed_transitions)
             delta.set("failed_transitions", _lft.setdefault(_epoch, set()))
             _llb = delta.mutate("context_barriers", view.context_barriers)
             delta.set("learned_barriers", _llb.setdefault(_epoch, set()))
-            view.hazard_tracker.static_lethal_positions = view.context_hazards.setdefault(
-                view.context_epoch, set()
-            )
+            _lhz = delta.mutate("context_hazards", view.context_hazards)
+            view.hazard_tracker.static_lethal_positions = _lhz.setdefault(_epoch, set())
             view.hazard_tracker.reset_episode()
             delta.mutate("exhausted_candidate_goals", view.exhausted_candidate_goals).clear()
             delta.mutate("tested_action_positions", view.tested_action_positions).clear()
@@ -1272,9 +1277,7 @@ class HippocampalEpisodicCortex:
             acc_mon = getattr(view.working_memory, "acc_conflict", None)
             if acc_mon is not None and hasattr(acc_mon, "reset_episode"):
                 acc_mon.reset_episode(retain_long_term=False)
-            if view.symbolic_theory.labels_non_stationary and not getattr(
-                view.working_memory, "concept_role_priors", None
-            ):
+            if view.symbolic_theory.labels_non_stationary:
                 from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
 
                 invalidate_stale_context_ontology(

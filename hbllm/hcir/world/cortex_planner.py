@@ -22,7 +22,6 @@ def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
 
 import heapq
 import logging
-import math
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -520,7 +519,12 @@ class EpistemicGoalScheduler:
     ) -> EpistemicGoalProposal:
         H, W = curr_grid.shape
         avatar_pos = engine.avatar_pos
-        has_discrete_interact = any(
+        has_4d_disp = (
+            H > 1
+            and W > 1
+            and any(d.is_displacement_action() for d in engine.action_dynamics.values())
+        )
+        has_discrete_interact = (len(available_actions) > 4 or not has_4d_disp) and any(
             not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
             for a in available_actions
         )
@@ -563,6 +567,11 @@ class EpistemicGoalScheduler:
             if (
                 e.feature_id in engine.mobile_threat_features
                 or e.feature_id in engine.hazard_tracker.known_lethal_features
+                or (
+                    e.feature_id in engine.hazard_tracker.mobile_entities
+                    and e.feature_id not in engine.symbolic_theory.cargo_features
+                    and e.feature_id not in engine.learned_cargo_features
+                )
             ):
                 continue
             if e.feature_id in av_feats:
@@ -592,7 +601,15 @@ class EpistemicGoalScheduler:
                     1 <= e.area <= max_entity_area
                     or not engine.symbolic_theory.is_walkable(e.feature_id)
                 )
-            ) or (e.role == EntityRole.GOAL and not has_discrete_interact)
+            ) or (
+                e.role == EntityRole.GOAL
+                and not has_discrete_interact
+                and not (
+                    engine.symbolic_theory.is_locus_explored(e.grid_pos)
+                    and e.feature_id not in engine.symbolic_theory.goal_features
+                )
+                and e.grid_pos not in engine.exhausted_candidate_goals
+            )
             if is_goal_candidate:
                 if e.grid_pos not in confirmed_goals:
                     confirmed_goals.append(e.grid_pos)
@@ -1202,6 +1219,10 @@ class EpistemicGoalScheduler:
                 if (
                     e.feature_id in engine.hazard_tracker.known_lethal_features
                     or e.feature_id in engine.mobile_threat_features
+                    or (
+                        e.feature_id in engine.hazard_tracker.mobile_entities
+                        and not is_cargo_entity
+                    )
                     or int(e.feature_id) in prior_hazard_feats
                 ):
                     continue
@@ -1633,8 +1654,7 @@ class EpistemicGoalScheduler:
             not goals
             and avatar_pos is not None
             and engine.symbolic_theory.has_prior_context_transition
-            and not engine.symbolic_theory.labels_non_stationary
-            and not engine.working_memory.concept_role_priors
+            and engine.working_memory.consecutive_simulation_failures >= 2
         ):
             th = engine.symbolic_theory
             verified_lethal = th.context_verified_features("lethal")
@@ -1797,99 +1817,23 @@ class ContinuousKinematicPlanner:
         max_expansions: int = 512,
     ) -> list[MentalSimulationStep] | None:
         """Plan a multi-step kinematic trajectory in continuous metric space using grounded velocity vectors."""
-        wm = getattr(engine, "working_memory", None)
-        if wm is None:
-            return None
-        c_pos = getattr(wm, "continuous_agent_pos", None)
-        c_goal = getattr(wm, "continuous_goal_pos", None)
-        rf = getattr(wm, "reference_frame", None)
-        if c_pos is None or len(c_pos) < 2:
-            return None
-
-        # Gather grounded continuous velocity vectors
-        vel_map: dict[Any, tuple[float, float]] = {}
-        for act in available_actions:
-            dyn = engine.action_dynamics.get(act) if hasattr(engine, "action_dynamics") else None
-            if dyn is not None and hasattr(dyn, "get_continuous_velocity"):
-                vx, vy = dyn.get_continuous_velocity()
-                if (vx * vx + vy * vy) > 1e-6:
-                    vel_map[act] = (float(vx), float(vy))
-
-        if not vel_map or c_goal is None or len(c_goal) < 2:
-            return None
-
-        bounds = getattr(rf, "bounds", ((0.0, 10.0), (0.0, 10.0)))
-        x_min, x_max = (
-            (float(bounds[0][0]), float(bounds[0][1])) if len(bounds) >= 1 else (0.0, 10.0)
+        raw_steps = GeodesicManifoldRouter.route_continuous_kinematic(
+            engine=engine,
+            available_actions=available_actions,
+            curr_grid=curr_grid,
+            goal_radius=goal_radius,
+            max_expansions=max_expansions,
         )
-        y_min, y_max = (
-            (float(bounds[1][0]), float(bounds[1][1])) if len(bounds) >= 2 else (0.0, 10.0)
-        )
-        origin_desc = (
-            getattr(rf, "origin_description", "bottom_left_metric") if rf else "bottom_left_metric"
-        )
-
-        gx, gy = float(c_goal[0]), float(c_goal[1])
-        sx, sy = float(c_pos[0]), float(c_pos[1])
-
-        def _to_lattice(x: float, y: float) -> tuple[int, int]:
-            if curr_grid is None or curr_grid.ndim < 2:
-                return (0, 0)
-            H, W = curr_grid.shape
-            c_idx = int(np.clip(round((x - x_min) / max(1e-6, x_max - x_min) * W - 0.5), 0, W - 1))
-            if "bottom_left" in origin_desc:
-                r_idx = int(
-                    np.clip(round((y_max - y) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
-                )
-            else:
-                r_idx = int(
-                    np.clip(round((y - y_min) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
-                )
-            return (r_idx, c_idx)
-
-        def _is_blocked(x: float, y: float) -> bool:
-            if not (x_min + 0.4 <= x <= x_max - 0.4 and y_min + 0.4 <= y <= y_max - 0.4):
-                return True
-            if curr_grid is not None and curr_grid.ndim >= 2:
-                lr, lc = _to_lattice(x, y)
-                feat = int(curr_grid[lr, lc])
-                if engine.symbolic_theory.is_barrier(feat) or (lr, lc) in engine.learned_barriers:
-                    return True
-            return False
-
-        # Continuous A* with 0.25m spatial hashing
-        start_key = (round(sx * 4), round(sy * 4))
-        pq: list[tuple[float, int, float, float, list[MentalSimulationStep]]] = [
-            (math.hypot(gx - sx, gy - sy), 0, sx, sy, [])
+        if not raw_steps:
+            return None
+        return [
+            MentalSimulationStep(
+                action=act,
+                predicted_avatar_pos=lat_p,
+                expected_mutation="continuous_kinematic_step",
+            )
+            for act, lat_p in raw_steps
         ]
-        visited: dict[tuple[int, int], int] = {start_key: 0}
-        expansions = 0
-
-        while pq and expansions < max_expansions:
-            _, cost, cx, cy, path = heapq.heappop(pq)
-            expansions += 1
-            if math.hypot(gx - cx, gy - cy) <= goal_radius and path:
-                return path
-
-            for act, (vx, vy) in vel_map.items():
-                nx, ny = cx + vx, cy + vy
-                if _is_blocked(nx, ny):
-                    continue
-                nkey = (round(nx * 4), round(ny * 4))
-                ncost = cost + 1
-                if nkey in visited and visited[nkey] <= ncost:
-                    continue
-                visited[nkey] = ncost
-                lat_p = _to_lattice(nx, ny)
-                step_obj = MentalSimulationStep(
-                    action=int(act) if isinstance(act, (int, np.integer)) else act,
-                    predicted_avatar_pos=lat_p,
-                    expected_mutation="continuous_kinematic_step",
-                )
-                h = math.hypot(gx - nx, gy - ny) / max(0.25, math.hypot(vx, vy))
-                heapq.heappush(pq, (ncost + h, ncost, nx, ny, [*path, step_obj]))
-
-        return None
 
 
 class MentalSimulationPlanner:
@@ -2378,7 +2322,11 @@ class MentalSimulationPlanner:
         for gp in proposal.new_learned_goal_positions:
             engine.record_learned_goal(gp)
         for feat in proposal.new_candidate_features:
-            engine.symbolic_theory.induce_candidate_goal(feat, evidence="planner:proposal")
+            if (
+                feat not in engine.hazard_tracker.mobile_entities
+                or feat in engine.symbolic_theory.cargo_features
+            ):
+                engine.symbolic_theory.induce_candidate_goal(feat, evidence="planner:proposal")
         if proposal.subgoal_to_pop:
             engine.subgoal_stack.pop_subgoal()
         if proposal.clear_exhausted_goals:
@@ -2981,6 +2929,17 @@ class MentalSimulationPlanner:
             swr_penalties = MentalSimulationPlanner.compute_swr_backward_penalties(
                 engine.episodic_cortex.failed_trajectories
             )
+        _primary_goal_excl: set[tuple[int, int]] = set(goals[:1])
+        if goals and goals[0] in satisfied_when and "entity_pos" in satisfied_when[goals[0]]:
+            _primary_goal_excl.add(satisfied_when[goals[0]]["entity_pos"])
+        _astar_soft_avoid = GeodesicManifoldRouter.compute_soft_avoidance_and_shroud(
+            engine,
+            curr_grid,
+            set(_barrier_feats),
+            bg,
+            unknown_entity_cells - _primary_goal_excl,
+            _grid_walls,
+        )
 
         def _search_spacetime_astar(
             _relaxed_safety: bool,
@@ -3419,6 +3378,8 @@ class MentalSimulationPlanner:
                                 epistemic_cost += engine.UNVERIFIED_FEATURE_COST * 3.0
                             if (kr, kc) in unknown_entity_cells and (kr, kc) not in goals:
                                 epistemic_cost += 20.0
+                            if (kr, kc) in _astar_soft_avoid and (kr, kc) not in goals:
+                                epistemic_cost += 18.0
                     if epistemic_cost == float("inf"):
                         continue
 
@@ -4154,6 +4115,21 @@ class MentalSimulationPlanner:
         4. Push a high-priority FrontopolarSubgoal and return path to candidate key/trigger.
         """
         H, W = curr_grid.shape
+        cal_dirs_teleo = {
+            ((1 if dr > 0 else -1 if dr < 0 else 0), (1 if dc > 0 else -1 if dc < 0 else 0))
+            for _, dr, dc in movable_actions
+            if dr != 0 or dc != 0
+        }
+        if (
+            H > 1
+            and W > 1
+            and any(
+                a not in engine.action_dynamics and a not in engine.immobile_entity_actions
+                for a in available_actions
+            )
+            and len(cal_dirs_teleo) < 4
+        ):
+            return None
         bg = engine.estimate_background(curr_grid)
         lethal_positions = engine.current_context_hazards
         lethal_features = engine.hazard_tracker.known_lethal_features
@@ -4212,6 +4188,12 @@ class MentalSimulationPlanner:
         if blocking_barrier_pos in living_gaze or blocking_barrier_pos in threat_cells:
             return None
 
+        av_feats = engine.avatar_features or (
+            {engine.avatar_feature} if engine.avatar_feature is not None else set()
+        )
+        cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
+            engine.learned_cargo_features
+        )
         # 3. Discover reachable spatial manifold from start_pos avoiding static_barriers
         reachable_cells = {start_pos}
         reach_q = deque([start_pos])
@@ -4231,9 +4213,14 @@ class MentalSimulationPlanner:
                     continue
                 if np_pos in living_gaze or np_pos in threat_cells:
                     continue
-                if engine.symbolic_theory.is_barrier(int(curr_grid[np_pos[0], np_pos[1]])):
+                cell_v = int(curr_grid[np_pos[0], np_pos[1]])
+                if engine.symbolic_theory.is_barrier(cell_v) or cell_v in lethal_features:
                     continue
-                if int(curr_grid[np_pos[0], np_pos[1]]) in lethal_features:
+                if (
+                    cell_v != bg
+                    and cell_v not in av_feats
+                    and not engine.symbolic_theory.is_walkable(cell_v)
+                ):
                     continue
                 reachable_cells.add(np_pos)
                 parent_map[np_pos] = (cp, act)
@@ -4284,17 +4271,19 @@ class MentalSimulationPlanner:
 
         # 4. Search for teleological unlocking keys or interactable entities
         entities = engine.extract_entities(curr_grid, bg)
-        av_feats = engine.avatar_features or (
-            {engine.avatar_feature} if engine.avatar_feature is not None else set()
-        )
 
         candidate_subgoal_targets: list[
             tuple[tuple[int, int], float, str, list[MentalSimulationStep]]
         ] = []
 
+        cal_dirs = {
+            (int(np.sign(d.delta_r)), int(np.sign(d.delta_c)))
+            for d in engine.action_dynamics.values()
+            if d.is_displacement_action()
+        }
         discrete_acts_teleo = [
             a
-            for a in engine.action_dynamics
+            for a in (available_actions if len(cal_dirs) >= 4 else engine.action_dynamics)
             if not engine.is_displacement_action(a) and not engine.is_spatial_effector(a)
         ]
 
@@ -4322,7 +4311,12 @@ class MentalSimulationPlanner:
                 continue
             if e.grid_pos in living_gaze or e.grid_pos in threat_cells:
                 continue
-            if e.feature_id in lethal_features:
+            if e.feature_id in lethal_features or e.feature_id in engine.mobile_threat_features:
+                continue
+            if (
+                e.feature_id in engine.hazard_tracker.mobile_entities
+                and e.feature_id not in cargo_feats
+            ):
                 continue
             if e.grid_pos in boundary_barriers:
                 continue
@@ -4338,11 +4332,14 @@ class MentalSimulationPlanner:
                     adj_p = (e.grid_pos[0] - dr, e.grid_pos[1] - dc)
                     if adj_p in reachable_cells:
                         p_to_adj = reconstruct_path(adj_p)
-                        if discrete_acts_teleo and not engine.symbolic_theory.is_walkable(
-                            e.feature_id
-                        ):
+                        valid_disc = [
+                            a_d
+                            for a_d in discrete_acts_teleo
+                            if adj_p not in engine.entity_action_failed_positions.get(a_d, ())
+                        ]
+                        if valid_disc and not engine.symbolic_theory.is_walkable(e.feature_id):
                             interact_step = MentalSimulationStep(
-                                action=int(discrete_acts_teleo[0]),
+                                action=int(valid_disc[0]),
                                 predicted_avatar_pos=adj_p,
                                 expected_mutation="INTERACT_TRIGGER",
                             )
@@ -4377,23 +4374,52 @@ class MentalSimulationPlanner:
                 candidate_subgoal_targets.append(
                     (e.grid_pos, 100.0, f"interactive_entity_{e.feature_id}", target_path)
                 )
-            # C. Minority pop-out or isolated token
+            # C. Minority pop-out or isolated token (singleton preferred over scattered cluster)
             elif 1 <= e.area <= 9:
+                f_cnt = int(np.count_nonzero(curr_grid == e.feature_id))
+                tok_score = 75.0 if f_cnt == 1 else (55.0 if f_cnt == 2 else 25.0)
                 candidate_subgoal_targets.append(
-                    (e.grid_pos, 60.0, f"salient_token_{e.feature_id}", target_path)
+                    (e.grid_pos, tok_score, f"salient_token_{e.feature_id}", target_path)
                 )
 
-        # Stance immediately adjacent to the blocking barrier
+        # Stance immediately adjacent to (or unlock probe into) the blocking barrier
+        blk_feat = int(curr_grid[blocking_barrier_pos[0], blocking_barrier_pos[1]])
+        is_pending_gate = (
+            bool(engine.working_memory.pending_gate_check)
+            and 1 <= int(np.count_nonzero(curr_grid == blk_feat)) <= 2
+        )
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             adj = (blocking_barrier_pos[0] + dr, blocking_barrier_pos[1] + dc)
-            if (
-                adj in reachable_cells
-                and adj != start_pos
-                and adj not in living_gaze
-                and adj not in threat_cells
-            ):
+            if adj in reachable_cells and adj not in living_gaze and adj not in threat_cells:
                 st_path = reconstruct_path(adj)
-                if st_path:
+                probe_act = (
+                    next(
+                        (
+                            a_m
+                            for a_m, dr_m, dc_m in movable_actions
+                            if (adj[0] + dr_m, adj[1] + dc_m) == blocking_barrier_pos
+                        ),
+                        None,
+                    )
+                    if is_pending_gate
+                    else None
+                )
+                if probe_act is not None and (adj, probe_act) not in engine.failed_transitions:
+                    candidate_subgoal_targets.append(
+                        (
+                            blocking_barrier_pos,
+                            180.0,
+                            f"gate_unlock_probe_{blocking_barrier_pos}",
+                            [
+                                *st_path,
+                                MentalSimulationStep(
+                                    action=probe_act,
+                                    predicted_avatar_pos=blocking_barrier_pos,
+                                ),
+                            ],
+                        )
+                    )
+                elif st_path and adj != start_pos:
                     candidate_subgoal_targets.append(
                         (adj, 40.0, f"barrier_approach_stance_{blocking_barrier_pos}", st_path)
                     )

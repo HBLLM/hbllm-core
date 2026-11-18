@@ -68,7 +68,7 @@ class ActionDynamicsModel:
     def slip_rate(self) -> float:
         """Empirical fraction of displacement trials deviating from the modal direction."""
         tot = sum(self.delta_counts.values())
-        if tot < 3 or not self.delta_counts:
+        if tot < 2 or not self.delta_counts:
             return 0.0
         best = max(self.delta_counts.values())
         return max(0.0, 1.0 - (best / float(tot)))
@@ -209,6 +209,20 @@ class ActionDynamicsModel:
                     and target_c != 0
                     and (target_c % self.delta_c == 0 or self.delta_c % target_c == 0)
                 )
+                is_unit_step = (target_r != 0 or target_c != 0) and max(
+                    abs(target_r), abs(target_c)
+                ) == 1
+                if is_unit_step:
+                    if (
+                        not self.delta_counts
+                        and self.probes_tested > 1
+                        and (self.delta_r != 0 or self.delta_c != 0)
+                    ):
+                        self.delta_counts[(self.delta_r, self.delta_c)] = self.probes_tested - 1
+                    self.delta_counts[(target_r, target_c)] = (
+                        self.delta_counts.get((target_r, target_c), 0) + 1
+                    )
+
                 if not is_quantum_multiple and self.confidence >= 0.7 and self.probes_tested >= 2:
                     dist_dev = abs(target_r - self.delta_r) + abs(target_c - self.delta_c)
                     if dist_dev >= 1:
@@ -235,12 +249,13 @@ class ActionDynamicsModel:
                             self.conditional_branches[cond_key].update_from_trial(
                                 observed_delta, success=True, learning_rate=learning_rate
                             )
+                        if is_unit_step:
+                            modal_d, _ = max(self.delta_counts.items(), key=lambda kv: kv[1])
+                            self.delta_r, self.delta_c = modal_d[0], modal_d[1]
+                            self.displacement = (float(self.delta_r), float(self.delta_c))
                         return
 
-                if (target_r != 0 or target_c != 0) and max(abs(target_r), abs(target_c)) == 1:
-                    self.delta_counts[(target_r, target_c)] = (
-                        self.delta_counts.get((target_r, target_c), 0) + 1
-                    )
+                if is_unit_step:
                     modal_d, modal_cnt = max(self.delta_counts.items(), key=lambda kv: kv[1])
                     self.delta_r, self.delta_c = modal_d[0], modal_d[1]
                     self.displacement = (float(self.delta_r), float(self.delta_c))

@@ -989,6 +989,77 @@ class PrefrontalWorkingMemory:
                 retain_inhibitions=retain_inhibitions,
             )
 
+    def update_continuous_goal_from_lattice(
+        self,
+        grid: np.ndarray | None,
+        theory: Any,
+        avatar_features: Any,
+        avatar_feature: int | None,
+        bg_feature: int | None,
+    ) -> None:
+        """Lift active lattice goal or singleton waypoint into continuous metric coordinates."""
+        if self.reference_frame is None or self.continuous_agent_pos is None or grid is None:
+            return
+        if grid.ndim < 2:
+            return
+        H, W = grid.shape
+        rf = self.reference_frame
+        origin_desc = rf.origin_description or "bottom_left_metric"
+        x_b = rf.bounds
+        x_min = float(x_b[0][0]) if (x_b and len(x_b) >= 1) else 0.0
+        x_max = float(x_b[0][1]) if (x_b and len(x_b) >= 1) else float(W)
+        y_min = float(x_b[1][0]) if (x_b and len(x_b) >= 2) else 0.0
+        y_max = float(x_b[1][1]) if (x_b and len(x_b) >= 2) else float(H)
+
+        target_rc: tuple[int, int] | None = None
+        for gf in theory.goal_features:
+            coords = np.argwhere(grid == gf)
+            if len(coords) > 0:
+                target_rc = (int(coords[0][0]), int(coords[0][1]))
+                break
+        if target_rc is None:
+            bg_v = int(bg_feature) if bg_feature is not None else int(grid[1, 1])
+            av_s = set(avatar_features or ())
+            if avatar_feature is not None:
+                av_s.add(int(avatar_feature))
+            av_s.add(int(grid[0, 0]))
+            vals, cnts = np.unique(grid, return_counts=True)
+            for v_np, c_np in sorted(
+                zip(vals.tolist(), cnts.tolist(), strict=False), key=lambda vc: vc[1]
+            ):
+                vf = int(v_np)
+                if (
+                    vf != bg_v
+                    and vf not in av_s
+                    and 1 <= int(c_np) <= 2
+                    and not theory.is_barrier(vf)
+                ):
+                    coords = np.argwhere(grid == vf)
+                    if len(coords) > 0:
+                        target_rc = (int(coords[0][0]), int(coords[0][1]))
+                        break
+        if target_rc is not None:
+            gr, gc = target_rc
+            cell_w = (x_max - x_min) / max(1, W)
+            cell_h = (y_max - y_min) / max(1, H)
+            cont_x = x_min + (float(gc) + 0.5) * cell_w
+            cont_y = (
+                y_max - (float(gr) + 0.5) * cell_h
+                if "bottom_left" in origin_desc
+                else y_min + (float(gr) + 0.5) * cell_h
+            )
+            self.continuous_goal_pos = np.array([cont_x, cont_y], dtype=float)
+        elif (
+            self.continuous_goal_pos is None
+            or float(
+                np.linalg.norm(
+                    np.asarray(self.continuous_goal_pos) - np.asarray(self.continuous_agent_pos)
+                )
+            )
+            <= 0.35
+        ):
+            self.continuous_goal_pos = None
+
     def register_cardinality_constraint(
         self,
         center: tuple[int, int],

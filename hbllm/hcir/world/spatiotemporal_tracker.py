@@ -269,10 +269,12 @@ class SpatiotemporalHazardTracker:
             prev_g = self.grid_history[-2]
             curr_g = self.grid_history[-1]
             av_ignore = set(avatar_features or ()) | {int(background_feature)}
-            if walkable_features:
-                av_ignore.update(int(w) for w in walkable_features)
             if cargo_features:
                 av_ignore.update(int(c) for c in cargo_features)
+                for cf in cargo_features:
+                    self.mobile_entities.pop(int(cf), None)
+            for av in set(avatar_features or ()):
+                self.mobile_entities.pop(int(av), None)
             u_vals, u_cnts = np.unique(curr_g, return_counts=True)
             for v_np, c_np in zip(u_vals.tolist(), u_cnts.tolist(), strict=False):
                 f_id = int(v_np)
@@ -395,13 +397,20 @@ class SpatiotemporalHazardTracker:
         grid: np.ndarray,
         barrier_features: set[int],
         background_feature: int = 0,
+        cargo_features: set[int] | None = None,
+        avatar_features: set[int] | None = None,
     ) -> set[tuple[int, int]]:
         """Return current and 1-step predicted cells occupied by autonomous non-self mobile entities."""
         avoid: set[tuple[int, int]] = set()
         if not self.mobile_entities:
             return avoid
         H, W = grid.shape
+        cargo = {int(c) for c in (cargo_features or ())}
+        av_set = {int(a) for a in (avatar_features or ())}
         for f_id, tracks in list(self.mobile_entities.items()):
+            if int(f_id) in cargo or int(f_id) in av_set:
+                self.mobile_entities.pop(f_id, None)
+                continue
             live_pts = [(int(r), int(c)) for r, c in np.argwhere(grid == f_id)]
             if not live_pts:
                 continue
@@ -411,9 +420,11 @@ class SpatiotemporalHazardTracker:
                 avoid.add((cr, cc))
                 dr, dc = vel_map.get((cr, cc), tracks[0][1])
                 nr, nc = cr + dr, cc + dc
+                rr, rc = cr - dr, cc - dc
                 if not (0 <= nr < H and 0 <= nc < W) or int(grid[nr, nc]) in barrier_features:
-                    nr, nc = cr - dr, cc - dc
-                if 0 <= nr < H and 0 <= nc < W:
+                    if 0 <= rr < H and 0 <= rc < W:
+                        avoid.add((rr, rc))
+                else:
                     avoid.add((nr, nc))
                 if is_lethal_mob:
                     for dr4, dc4 in ((-1, 0), (1, 0), (0, -1), (0, 1)):

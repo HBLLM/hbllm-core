@@ -129,31 +129,60 @@ class CausalTheoryPlanner:
                 if feat in theory.barrier_features:
                     barrier_positions.add((r, c))
 
+        lethal_features = set(engine.episodic_cortex.discovered_lethal_features) | set(
+            engine.hazard_tracker.known_lethal_features
+        )
+        mob_feats = set(engine.mobile_threat_features) | (
+            set(engine.hazard_tracker.mobile_entities)
+            - set(theory.cargo_features)
+            - set(engine.learned_cargo_features)
+        )
+        shroud_f = engine.working_memory.shroud_feature
+
         # Fallback to candidate goal features if no concrete goal cells located
         if not goal_positions and theory.candidate_goal_features:
             for r in range(curr_grid.shape[0]):
                 for c in range(curr_grid.shape[1]):
                     feat = int(curr_grid[r, c])
-                    if feat in theory.candidate_goal_features:
+                    if (
+                        feat in theory.candidate_goal_features
+                        and feat not in lethal_features
+                        and feat not in mob_feats
+                        and feat != shroud_f
+                    ):
                         goal_positions.add((r, c))
 
         # Fallback to structural perception goals if still empty
-        if not goal_positions and hasattr(engine, "detect_structural_goals"):
+        if not goal_positions:
             try:
                 struct_goals = engine.detect_structural_goals(curr_grid)
                 for sg in struct_goals:
+                    sg_f = sg.get("feature")
+                    if sg_f is not None and (
+                        int(sg_f) in lethal_features
+                        or int(sg_f) in mob_feats
+                        or int(sg_f) == shroud_f
+                    ):
+                        continue
                     if sg.get("cells"):
                         for cp in sg["cells"]:
                             if cp != engine.avatar_pos:
                                 goal_positions.add(cp)
                     elif sg.get("position") and sg["position"] != engine.avatar_pos:
                         goal_positions.add(sg["position"])
-                    if sg.get("feature") is not None:
-                        theory.induce_candidate_goal(
-                            int(sg["feature"]), evidence="structural_goal_detector"
-                        )
+                    if sg_f is not None and int(np.count_nonzero(curr_grid == int(sg_f))) == 1:
+                        theory.induce_candidate_goal(int(sg_f), evidence="structural_goal_detector")
             except Exception as exc:
                 logger.debug("Structural goal induction at reset skipped: %s", exc)
+
+        if goal_positions and not theory.goal_features:
+            singleton_goals = {
+                gp
+                for gp in goal_positions
+                if int(np.count_nonzero(curr_grid == int(curr_grid[gp[0], gp[1]]))) == 1
+            }
+            if singleton_goals:
+                goal_positions = singleton_goals
 
         # Discard avatar position and exhausted goals
         if engine.avatar_pos is not None:
@@ -167,9 +196,6 @@ class CausalTheoryPlanner:
         for act_id, dyn in engine.action_dynamics.items():
             if dyn.is_displacement_action():
                 action_displacements[act_id] = (dyn.delta_r, dyn.delta_c)
-
-        # Extract lethal features from episodic memory
-        lethal_features = set(engine.episodic_cortex.discovered_lethal_features)
 
         return CausalPlanningContext(
             goal_positions=goal_positions,
@@ -217,6 +243,8 @@ class CausalTheoryPlanner:
             if pos in context.barrier_positions:
                 return False
             if feat in context.barrier_features:
+                return False
+            if context.walkable_features and feat not in context.walkable_features:
                 return False
         return True
 

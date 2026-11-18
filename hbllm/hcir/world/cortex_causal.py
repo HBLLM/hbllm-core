@@ -2079,16 +2079,11 @@ def invalidate_stale_context_ontology(
     avatar/background identity, and motor dynamics while clearing feature-ID-keyed
     caches that were not confirmed in the current context.
     """
-    if (
-        getattr(working_memory, "concept_role_priors", None)
-        and not theory.has_prior_context_transition
-    ):
-        return
-
     theory.mark_cross_context_label_shift(reason=reason)
     theory.clear_context_feature_ontology(
         bg_feature=bg_feature, preserve_current_context=preserve_current_context
     )
+    theory.tool_barrier_affinities.clear()
 
     keep_lethal = theory.context_verified_features("lethal") if preserve_current_context else set()
     if hazard_tracker is not None:
@@ -2117,6 +2112,15 @@ def invalidate_stale_context_ontology(
         if remote_causal is not None and hasattr(remote_causal, "reset_episode"):
             remote_causal.reset_episode(retain_long_term=False)
         for wm_attr in (
+            "concept_role_priors",
+            "tool_barrier_affinities",
+            "mental_plan",
+            "subgoal_stack",
+            "topological_subgoals",
+            "candidate_goals",
+            "exhausted_candidate_goals",
+            "unlocked_barriers",
+            "activated_triggers",
             "quiescent_features",
             "effective_features",
             "feature_quiescent_counts",
@@ -2124,19 +2128,42 @@ def invalidate_stale_context_ontology(
             coll = getattr(working_memory, wm_attr, None)
             if hasattr(coll, "clear"):
                 coll.clear()
+        if not preserve_current_context:
+            v_wm = getattr(working_memory, "visuospatial", None)
+            if v_wm is not None:
+                for v_attr in ("learned_barriers", "learned_goal_positions"):
+                    v_coll = getattr(v_wm, v_attr, None)
+                    if hasattr(v_coll, "clear"):
+                        v_coll.clear()
 
-    if engine_or_view is not None:
-        mobile = getattr(engine_or_view, "mobile_threat_features", None)
+    eng = (
+        getattr(engine_or_view, "_wrapped_engine", engine_or_view)
+        if engine_or_view is not None
+        else None
+    )
+    if eng is not None:
+        mobile = getattr(eng, "mobile_threat_features", None)
         if isinstance(mobile, set):
             mobile.clear()
+        m_plan = getattr(eng, "mental_plan", None)
+        if hasattr(m_plan, "clear"):
+            m_plan.clear()
+        if hasattr(eng, "active_arbitrated_goal"):
+            eng.active_arbitrated_goal = None
+        eng_state = getattr(eng, "state", None)
+        if eng_state is not None:
+            if hasattr(eng_state, "active_arbitrated_goal"):
+                eng_state.active_arbitrated_goal = None
+            if hasattr(eng_state, "mental_plan") and hasattr(eng_state.mental_plan, "clear"):
+                eng_state.mental_plan.clear()
         if not preserve_current_context:
-            for attr in ("learned_barriers", "learned_goal_positions"):
-                coll = getattr(engine_or_view, attr, None)
+            for attr in ("learned_barriers", "learned_goal_positions", "learned_cargo_features"):
+                coll = getattr(eng, attr, None)
                 if isinstance(coll, set):
                     coll.clear()
         else:
             keep_goal = theory.context_verified_features("goal")
             if not keep_goal:
-                l_goals = getattr(engine_or_view, "learned_goal_positions", None)
+                l_goals = getattr(eng, "learned_goal_positions", None)
                 if isinstance(l_goals, set):
                     l_goals.clear()

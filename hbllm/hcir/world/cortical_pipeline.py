@@ -103,7 +103,7 @@ class CorticalPipeline:
                 shifted = theory.observe_grid_structure(
                     current_ctx.curr_grid, bg_feature=bg_feat, avatar_features=av_feats
                 )
-                if shifted and not getattr(wm, "concept_role_priors", None):
+                if shifted:
                     from hbllm.hcir.world.cortex_causal import (
                         invalidate_stale_context_ontology,
                     )
@@ -151,29 +151,34 @@ class CorticalPipeline:
                         extracted_entities=extracted if isinstance(extracted, list) else None,
                     )
                     current_ctx = current_ctx.with_signals(p_signals)
-                    if self.engine is not None and self.engine.working_memory is not None:
-                        wm_ref = self.engine.working_memory
-                        merged_priors: dict[int, dict[str, float]] = dict(
-                            p_signals.get("sge_role_priors", {})
+                else:
+                    p_signals = {}
+                if self.engine is not None and self.engine.working_memory is not None:
+                    wm_ref = self.engine.working_memory
+                    merged_priors: dict[int, dict[str, float]] = (
+                        dict(p_signals.get("sge_role_priors", {}))
+                        if bridge
+                        else dict(wm_ref.concept_role_priors)
+                    )
+                    obs_meta = wm_ref.last_observation_metadata
+                    if isinstance(obs_meta, dict):
+                        hint = (
+                            obs_meta.get("rule_hint")
+                            or obs_meta.get("instruction")
+                            or obs_meta.get("mission")
                         )
-                        obs_meta = wm_ref.last_observation_metadata
-                        if isinstance(obs_meta, dict):
-                            hint = (
-                                obs_meta.get("rule_hint")
-                                or obs_meta.get("instruction")
-                                or obs_meta.get("mission")
+                        if isinstance(hint, str) and hint.strip():
+                            clean_hint = hint.strip()
+                            av_s = set(self.engine.avatar_features or ())
+                            if self.engine.avatar_feature is not None:
+                                av_s.add(self.engine.avatar_feature)
+                            bg_f = (
+                                int(self.engine.bg_feature)
+                                if self.engine.bg_feature is not None
+                                else 0
                             )
-                            if isinstance(hint, str) and hint.strip():
-                                clean_hint = hint.strip()
-                                av_s = set(self.engine.avatar_features or ())
-                                if self.engine.avatar_feature is not None:
-                                    av_s.add(self.engine.avatar_feature)
+                            if bridge:
                                 if clean_hint not in wm_ref.compiled_linguistic_hints:
-                                    bg_f = (
-                                        int(self.engine.bg_feature)
-                                        if self.engine.bg_feature is not None
-                                        else 0
-                                    )
                                     d_priors = bridge.ground_mission_instruction(
                                         clean_hint,
                                         current_ctx.curr_grid,
@@ -184,12 +189,69 @@ class CorticalPipeline:
                                     wm_ref.compiled_linguistic_hints.add(clean_hint)
                                 else:
                                     d_priors = bridge.state.dialogue_role_priors
-                                for av_f in av_s:
-                                    d_priors.pop(av_f, None)
-                                    merged_priors.pop(av_f, None)
-                                for rc_d, rp_d in d_priors.items():
-                                    dst_d = merged_priors.setdefault(rc_d, {})
-                                    dst_d.update(rp_d)
+                            elif clean_hint not in wm_ref.compiled_linguistic_hints:
+                                import numpy as np
+
+                                from hbllm.hcir.compiler import HCIRCompiler
+
+                                comp = HCIRCompiler()
+                                th = self.engine.symbolic_theory
+                                low_h = clean_hint.lower()
+                                g_verbs = (
+                                    "go ",
+                                    "reach ",
+                                    "navigate ",
+                                    "move ",
+                                    "find ",
+                                    "touch ",
+                                    "select ",
+                                    "collect ",
+                                )
+                                is_g = low_h.startswith(g_verbs) or any(
+                                    f" {v}" in low_h for v in g_verbs
+                                )
+                                tf = (
+                                    comp._resolve_feature_for_label(clean_hint, th)
+                                    if is_g
+                                    else None
+                                )
+                                d_priors = {}
+                                if isinstance(tf, int):
+                                    d_priors[tf] = {"goal": 0.96}
+                                    if th is not None:
+                                        for gf in list(th.goal_features):
+                                            if gf != tf:
+                                                th.retract_goal(gf, reason="mission_override")
+                                        th.induce_candidate_goal(tf, evidence="grounded_dialogue")
+                                    if current_ctx.curr_grid is not None:
+                                        arr = np.asarray(current_ctx.curr_grid)
+                                        if arr.ndim == 2:
+                                            for v_np, c_np in zip(
+                                                *np.unique(arr, return_counts=True), strict=False
+                                            ):
+                                                v_i = int(v_np)
+                                                if (
+                                                    v_i != tf
+                                                    and v_i != bg_f
+                                                    and v_i not in av_s
+                                                    and int(c_np) <= 4
+                                                    and (th is None or not th.is_barrier(v_i))
+                                                ):
+                                                    d_priors[v_i] = {"hazard": 0.78}
+                                elif th is not None:
+                                    comp.compile_utterance_to_causal_hypothesis(
+                                        clean_hint, theory=th
+                                    )
+                                wm_ref.compiled_linguistic_hints.add(clean_hint)
+                            else:
+                                d_priors = {}
+                            for av_f in av_s:
+                                d_priors.pop(av_f, None)
+                                merged_priors.pop(av_f, None)
+                            for rc_d, rp_d in d_priors.items():
+                                dst_d = merged_priors.setdefault(rc_d, {})
+                                dst_d.update(rp_d)
+                    if bridge or merged_priors:
                         wm_ref.concept_role_priors = merged_priors
 
                 if self.engine is not None:

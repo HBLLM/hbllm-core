@@ -247,11 +247,19 @@ class GeodesicManifoldRouter:
         grid_walls: set[tuple[int, int]],
     ) -> set[tuple[int, int]]:
         """Compute dynamic mobile-agent and stochastic-slip soft avoidance zones + shroud walls."""
+        cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
+            engine.learned_cargo_features
+        )
         soft_avoid = set(
-            engine.hazard_tracker.get_mobile_avoidance_cells(curr_grid, barrier_feats, bg)
+            engine.hazard_tracker.get_mobile_avoidance_cells(
+                curr_grid, barrier_feats, bg, cargo_features=cargo_feats
+            )
         )
         hz_seeds = set(engine.hazard_tracker.static_lethal_positions)
-        if any(d.slip_rate > 0.05 for d in engine.action_dynamics.values()):
+        if any(
+            float(getattr(d, "slip_rate", 0.0) or 0.0) > 0.05
+            for d in engine.action_dynamics.values()
+        ):
             hz_seeds |= set(unknown_entity_cells)
         hz_feats = set(engine.hazard_tracker.known_lethal_features)
         rp_map = engine.working_memory.concept_role_priors
@@ -551,3 +559,119 @@ class GeodesicManifoldRouter:
                 node_data={"status": "active"},
             )
         ]
+
+    @staticmethod
+    def route_continuous_kinematic(
+        engine: Any,
+        available_actions: Sequence[Any],
+        curr_grid: np.ndarray | None = None,
+        goal_radius: float = 0.55,
+        max_expansions: int = 512,
+    ) -> list[tuple[Any, tuple[int, int]]] | None:
+        """Plan a multi-step kinematic trajectory in continuous metric space using grounded velocity vectors."""
+        import heapq
+        import math
+
+        wm = engine.working_memory
+        if wm is None:
+            return None
+        c_pos = wm.continuous_agent_pos
+        c_goal = wm.continuous_goal_pos
+        rf = wm.reference_frame
+        if c_pos is None or len(c_pos) < 2:
+            return None
+
+        vel_map: dict[Any, tuple[float, float]] = {}
+        for act in available_actions:
+            dyn = engine.action_dynamics.get(act)
+            if dyn is not None:
+                vx, vy = dyn.get_continuous_velocity()
+                if (vx * vx + vy * vy) > 1e-6:
+                    vel_map[act] = (float(vx), float(vy))
+
+        if not vel_map or c_goal is None or len(c_goal) < 2:
+            return None
+
+        bounds = rf.bounds if rf is not None and rf.bounds else ((0.0, 10.0), (0.0, 10.0))
+        x_min, x_max = (
+            (float(bounds[0][0]), float(bounds[0][1])) if len(bounds) >= 1 else (0.0, 10.0)
+        )
+        y_min, y_max = (
+            (float(bounds[1][0]), float(bounds[1][1])) if len(bounds) >= 2 else (0.0, 10.0)
+        )
+        origin_desc = (
+            rf.origin_description
+            if rf is not None and rf.origin_description
+            else "bottom_left_metric"
+        )
+
+        gx, gy = float(c_goal[0]), float(c_goal[1])
+        sx, sy = float(c_pos[0]), float(c_pos[1])
+
+        def _to_lattice(x: float, y: float) -> tuple[int, int]:
+            if curr_grid is None or curr_grid.ndim < 2:
+                return (0, 0)
+            H, W = curr_grid.shape
+            c_idx = int(np.clip(round((x - x_min) / max(1e-6, x_max - x_min) * W - 0.5), 0, W - 1))
+            if "bottom_left" in origin_desc:
+                r_idx = int(
+                    np.clip(round((y_max - y) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
+                )
+            else:
+                r_idx = int(
+                    np.clip(round((y - y_min) / max(1e-6, y_max - y_min) * H - 0.5), 0, H - 1)
+                )
+            return (r_idx, c_idx)
+
+        border_f: int | None = None
+        if curr_grid is not None and curr_grid.ndim >= 2 and curr_grid.shape[0] >= 3:
+            b0 = int(curr_grid[0, 0])
+            if b0 == int(curr_grid[-1, -1]) and b0 == int(curr_grid[0, -1]):
+                border_f = b0
+
+        def _is_blocked(x: float, y: float, margin: float = 0.0) -> bool:
+            if not (x_min + 0.4 <= x <= x_max - 0.4 and y_min + 0.4 <= y <= y_max - 0.4):
+                return True
+            if curr_grid is not None and curr_grid.ndim >= 2:
+                pts = (
+                    [(x, y), (x - margin, y), (x + margin, y), (x, y - margin), (x, y + margin)]
+                    if margin > 0.0
+                    else [(x, y)]
+                )
+                for px, py in pts:
+                    lr, lc = _to_lattice(px, py)
+                    feat = int(curr_grid[lr, lc])
+                    if (
+                        feat == border_f
+                        or engine.symbolic_theory.is_barrier(feat)
+                        or (lr, lc) in engine.learned_barriers
+                    ):
+                        return True
+            return False
+
+        for pad in (0.28, 0.0):
+            start_key = (round(sx * 4), round(sy * 4))
+            pq: list[tuple[float, int, float, float, list[tuple[Any, tuple[int, int]]]]] = [
+                (math.hypot(gx - sx, gy - sy), 0, sx, sy, [])
+            ]
+            visited: dict[tuple[int, int], int] = {start_key: 0}
+            expansions = 0
+            while pq and expansions < max_expansions:
+                _, cost, cx, cy, path = heapq.heappop(pq)
+                expansions += 1
+                if math.hypot(gx - cx, gy - cy) <= goal_radius and path:
+                    return path
+                for act, (vx, vy) in vel_map.items():
+                    nx, ny = cx + vx, cy + vy
+                    if _is_blocked(nx, ny, pad):
+                        continue
+                    nkey = (round(nx * 4), round(ny * 4))
+                    ncost = cost + 1
+                    if nkey in visited and visited[nkey] <= ncost:
+                        continue
+                    visited[nkey] = ncost
+                    lat_p = _to_lattice(nx, ny)
+                    act_out = int(act) if isinstance(act, (int, np.integer)) else act
+                    h = math.hypot(gx - nx, gy - ny) / max(0.25, math.hypot(vx, vy))
+                    heapq.heappush(pq, (ncost + h, ncost, nx, ny, [*path, (act_out, lat_p)]))
+        return None

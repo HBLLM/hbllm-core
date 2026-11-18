@@ -76,6 +76,14 @@ class ThreeTierEntityTracker:
         self._audit_log: list[IdentityOperation] = []
         self._lock = threading.RLock()
 
+    def reset(self) -> None:
+        """Reset all tracked entities and candidates across episode/context boundaries."""
+        with self._lock:
+            self._tracklets.clear()
+            self._candidates.clear()
+            self._tracklet_to_candidate.clear()
+            self._audit_log.clear()
+
     def update_tracklet(
         self,
         tracklet_ref: TrackletRef,

@@ -183,9 +183,21 @@ class CorticalGroundingBridge:
         self.state.last_scene_sig = None
         self.state.episode_feature_memory.clear()
         self.state.adapted_role_pairs.clear()
+        self.tracker.reset()
+        self._committed_beliefs.clear()
+        if (
+            not boundary.is_same_context
+            and self.symbolic_theory is not None
+            and self.symbolic_theory.labels_non_stationary
+        ):
+            self.concept_store._concepts.clear()
         for ext in self.feature_registry.extractors:
             if hasattr(ext, "reset_traces"):
                 ext.reset_traces()
+
+    def on_boundary(self, boundary: Any) -> None:
+        """Lifecycle boundary handler called by AutonomousEpistemicEngine."""
+        self.boundary_retention(boundary)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Stage 1: SGE -> Cortical Perception
@@ -467,14 +479,21 @@ class CorticalGroundingBridge:
         concept_assignments: list[ConceptAssignment] = []
         feature_concept_ids: dict[int, str] = {}
         role_priors: dict[int, dict[str, float]] = {}
+        infer_priors = (
+            self.perception_mode in ("learned", "snn")
+            or (
+                self.symbolic_theory is not None
+                and self.symbolic_theory.has_prior_context_transition
+            )
+        ) and not (self.symbolic_theory is not None and self.symbolic_theory.labels_non_stationary)
         for fv in feature_vectors:
             try:
                 entity_id: str | None = fv.feature_metadata.get("entity_id")
                 if not entity_id and active_cands:
                     entity_id = active_cands[0].candidate_ref.id
-                if "raw_color" in fv.feature_metadata:
+                if infer_priors and "raw_color" in fv.feature_metadata:
                     priors = self.concept_learner.infer_role_priors(
-                        fv, max_distance=0.65, distance_scale=0.42
+                        fv, max_distance=0.35, distance_scale=0.30
                     )
                     if priors:
                         rc = int(fv.feature_metadata["raw_color"])
@@ -490,43 +509,6 @@ class CorticalGroundingBridge:
                     self.state.episode_feature_memory[rc_feat] = fv
             except Exception as exc:
                 logger.debug("ConceptLearner.learn failed for %s: %s", fv.feature_id, exc)
-
-        # Structural cardinality / topology epistemic priors when unverified singletons & scattered clusters coexist
-        th_ref = self.symbolic_theory
-        singleton_interior_exists = False
-        scattered_candidates: set[int] = set()
-        singleton_candidates: set[int] = set()
-        for fv in feature_vectors:
-            meta_fv = fv.feature_metadata
-            if "raw_color" not in meta_fv or "topology_10" not in meta_fv:
-                continue
-            rc_c = int(meta_fv["raw_color"])
-            if th_ref is not None and (
-                th_ref.is_avatar_feature(rc_c)
-                or th_ref.is_barrier(rc_c)
-                or th_ref.is_walkable(rc_c)
-                or rc_c in th_ref.goal_features
-            ):
-                continue
-            topo = meta_fv["topology_10"]
-            f_cnt = int(meta_fv.get("feature_count", 1))
-            open_deg4 = float(topo[0])
-            same_deg4 = float(topo[1])
-            hf_adj4 = float(topo[4])
-            if f_cnt == 1 and open_deg4 >= 0.25 and hf_adj4 < 0.75:
-                singleton_interior_exists = True
-                singleton_candidates.add(rc_c)
-            elif 2 <= f_cnt <= 5 and same_deg4 == 0.0 and open_deg4 >= 0.25:
-                scattered_candidates.add(rc_c)
-        if singleton_interior_exists and scattered_candidates:
-            for sc_f in scattered_candidates:
-                rp_sc = role_priors.setdefault(sc_f, {})
-                if rp_sc.get("goal", 0.0) < 0.65 and rp_sc.get("cargo", 0.0) < 0.65:
-                    rp_sc["hazard"] = max(rp_sc.get("hazard", 0.0), 0.68)
-            for sg_f in singleton_candidates:
-                rp_sg = role_priors.setdefault(sg_f, {})
-                if rp_sg.get("hazard", 0.0) < 0.50 and rp_sg.get("goal", 0.0) < 0.58:
-                    rp_sg.setdefault("actuator", 0.58)
 
         # Run concept maintenance (split/merge detection) periodically
         split_count = 0
@@ -562,9 +544,7 @@ class CorticalGroundingBridge:
 
         has_composite = any(c.is_composite for c in self.concept_store.get_all_concepts())
         composite_matches: list[dict[str, Any]] = []
-        if self.state.episode_feature_memory and (
-            has_composite or len(self.state.episode_feature_memory) >= 2
-        ):
+        if has_composite and self.state.episode_feature_memory:
             composite_matches = self.concept_learner.infer_composite_role_priors(
                 self.state.episode_feature_memory
             )
@@ -1044,6 +1024,9 @@ class CorticalGroundingBridge:
         if isinstance(target_feat, int):
             self.state.dialogue_role_priors[target_feat] = {"goal": 0.96}
             if theory is not None:
+                for gf in list(theory.goal_features):
+                    if gf != target_feat:
+                        theory.retract_goal(gf, reason="mission_override")
                 theory.induce_candidate_goal(target_feat, evidence="grounded_dialogue")
             if curr_grid is not None:
                 arr = np.asarray(curr_grid)

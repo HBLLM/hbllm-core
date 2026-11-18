@@ -251,25 +251,49 @@ exactly why — two defects, both now visible only because of provenance:
 ## Appendix A — Five-episode probe
 
 ```python
-import logging, tempfile; logging.disable(logging.CRITICAL)
+import logging, tempfile
+
+logging.disable(logging.CRITICAL)
 from benchmarks.envs.grid_nav import GridNavEnvironment
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+
 def run(engine, env, seed, driver, budget=100):
     obs = env.reset(seed=seed)
     for i in range(budget):
         a, _ = engine.step(obs)
-        if driver == "oracle": a = env.get_oracle_action()
+        if driver == "oracle":
+            a = env.get_oracle_action()
         obs, r, done, info = env.step(a)
-        if done: engine.step(obs); return info.get("success", False), i + 1
+        if done:
+            engine.step(obs)
+            return info.get("success", False), i + 1
     return False, budget
+
+
 def theory(e):
     th = e.symbolic_theory
-    return dict(goal=sorted(th.goal_features), barrier=sorted(th.barrier_features),
-                walk=sorted(th.walkable_features), lgp=sorted(e.learned_goal_positions), phase=str(e.phase))
+    return dict(
+        goal=sorted(th.goal_features),
+        barrier=sorted(th.barrier_features),
+        walk=sorted(th.walkable_features),
+        lgp=sorted(e.learned_goal_positions),
+        phase=str(e.phase),
+    )
+
+
 with tempfile.TemporaryDirectory() as d:
-    e = build_cognitive_system(CognitiveSystemConfig(world_id="diag", memory_dir=d, enable_logging=False)).engine
+    e = build_cognitive_system(
+        CognitiveSystemConfig(world_id="diag", memory_dir=d, enable_logging=False)
+    ).engine
     env = GridNavEnvironment()
-    for label, seed, driver in (("A",100010,"self"),("B",100010,"self"),("C",100010,"oracle"),("D",100010,"self"),("E",100011,"self")):
+    for label, seed, driver in (
+        ("A", 100010, "self"),
+        ("B", 100010, "self"),
+        ("C", 100010, "oracle"),
+        ("D", 100010, "self"),
+        ("E", 100011, "self"),
+    ):
         print(label, run(e, env, seed, driver), theory(e))
 ```
 

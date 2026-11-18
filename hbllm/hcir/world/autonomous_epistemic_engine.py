@@ -2507,10 +2507,12 @@ class AutonomousEpistemicEngine:
             "goal_reached",
             "level_complete",
         ):
-            # Hippocampal sleep consolidation MUST precede the episodic reset, which
-            # clears the active episode buffer that carries the winning trace. Also cover
-            # traces already archived into successful_trajectories by SWR replay inside
-            # AssimilationStage before on_boundary fires.
+            if (
+                not self._feedback_assimilated
+                and self.prev_grid is not None
+                and self.last_action is not None
+            ):
+                self.assimilate_feedback(self.prev_grid, [], is_success=True)
             ep = self.episodic_cortex
             has_unconsolidated_win = bool(ep.current_episode) or (
                 len(ep.successful_trajectories) > getattr(ep, "consolidated_trajectory_count", 0)
@@ -2522,9 +2524,28 @@ class AutonomousEpistemicEngine:
                     logger.debug("Episodic consolidation failed at boundary: %s", exc)
             self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
+            if (
+                not self._feedback_assimilated
+                and self.prev_grid is not None
+                and self.last_action is not None
+            ):
+                self.assimilate_feedback(self.prev_grid, [], is_failure=True)
             self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
         else:
             self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
+        if not is_same_context and self.symbolic_theory.labels_non_stationary:
+            from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
+
+            invalidate_stale_context_ontology(
+                self.symbolic_theory,
+                hazard_tracker=self.hazard_tracker,
+                episodic_cortex=self.episodic_cortex,
+                working_memory=self.working_memory,
+                engine_or_view=self,
+                bg_feature=self.bg_feature,
+                preserve_current_context=False,
+                reason="non_stationary_episode_boundary",
+            )
         # Fan out to every faculty exposing a boundary handler (WP0.5).
         for attr in vars(self).values():
             handler = getattr(attr, "on_boundary", None)
@@ -2603,11 +2624,12 @@ class AutonomousEpistemicEngine:
         if self.transaction_manager is not None and all_ops:
             from hbllm.hcir.transactions import HCIRTransaction
 
-            tx = HCIRTransaction(
-                author="HippocampalReplayConsolidator",
-                operations=all_ops,
-            )
-            self.transaction_manager.commit(tx)
+            for i in range(0, len(all_ops), 400):
+                tx = HCIRTransaction(
+                    author="HippocampalReplayConsolidator",
+                    operations=all_ops[i : i + 400],
+                )
+                self.transaction_manager.commit(tx)
 
         return res
 
@@ -3419,40 +3441,13 @@ class AutonomousEpistemicEngine:
                     self.working_memory.continuous_delta = (0.0, 0.0)
                 self.working_memory.continuous_agent_pos = curr_cont.copy()
 
-        # Derive continuous goal position from lattice goal feature when reference frame is available
-        # (no privileged oracle metadata — discover goal from the rendered sensory lattice)
-        if (
-            self.working_memory.reference_frame is not None
-            and self.working_memory.continuous_agent_pos is not None
-            and obs.lattice is not None
-        ):
-            rf = self.working_memory.reference_frame
-            goal_feats = self.symbolic_theory.goal_features
-            if goal_feats:
-                # Find goal cell in the lattice
-                grid = obs.lattice
-                for gf in goal_feats:
-                    coords = np.argwhere(grid == gf)
-                    if len(coords) > 0:
-                        gr, gc = int(coords[0][0]), int(coords[0][1])
-                        H, W = grid.shape
-                        origin_desc = (
-                            getattr(rf, "origin_description", "bottom_left_metric")
-                            if rf
-                            else "bottom_left_metric"
-                        )
-                        y_b = getattr(rf, "bounds", None)
-                        y_max = float(y_b[1][1]) if (y_b and len(y_b) >= 2) else float(H)
-                        cont_y = (
-                            y_max - 0.5 - float(gr)
-                            if "bottom_left" in origin_desc
-                            else float(gr) + 0.5
-                        )
-                        cont_x = float(gc) + 0.5
-                        self.working_memory.continuous_goal_pos = np.array(
-                            [cont_x, cont_y], dtype=float
-                        )
-                        break
+        self.working_memory.update_continuous_goal_from_lattice(
+            obs.lattice,
+            self.symbolic_theory,
+            self.avatar_features,
+            self.avatar_feature,
+            self.bg_feature,
+        )
 
         return self.decide(
             curr_grid=obs.lattice,
@@ -3594,8 +3589,9 @@ class AutonomousEpistemicEngine:
         if terminal is not None or is_success or is_failure:
             from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
 
+            self._feedback_assimilated = True
             b_kind = EpisodeBoundaryKind.GOAL_REACHED if is_success else EpisodeBoundaryKind.DEATH
-            self.on_boundary(EpisodeBoundary(kind=b_kind))
+            self.on_boundary(EpisodeBoundary(kind=b_kind, same_level=not is_success))
 
         return act, meta
 

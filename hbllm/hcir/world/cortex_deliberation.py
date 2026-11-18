@@ -165,8 +165,15 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 avatar_pos=view.avatar_pos,
                 avatar_features=av_feats,
             )
+            cargo_feats = set(view.symbolic_theory.cargo_features) | set(
+                view.learned_cargo_features
+            )
             mob_avoid = view.hazard_tracker.get_mobile_avoidance_cells(
-                curr_grid, set(view.symbolic_theory.barrier_features), bg
+                curr_grid,
+                set(view.symbolic_theory.barrier_features),
+                bg,
+                cargo_features=cargo_feats,
+                avatar_features=av_feats,
             )
             if (
                 next_step.predicted_avatar_pos is not None
@@ -1540,7 +1547,7 @@ class PrefrontalDeliberationEngine:
                         )
                         sim_pos = next_pos
                     view.state.phase = self._target_phase(view)
-                    view.state.mental_plan = deque(rel_plan)
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(rel_plan)))
                     next_step = view.mental_plan.popleft()
                     logger.info(
                         "Relational Macro Recall: Dynamically planned %d-step path for '%s'",
@@ -1555,9 +1562,55 @@ class PrefrontalDeliberationEngine:
                         grid=curr_grid,
                     )
 
-        can_synthesize = view.is_motor_grounded() or not view.has_displacement_capabilities(
-            available_actions
-        )
+        has_uncalibrated_cardinal = False
+        if (
+            curr_grid.ndim >= 2
+            and curr_grid.shape[0] > 1
+            and curr_grid.shape[1] > 1
+            and view.avatar_pos is not None
+        ):
+            cal_cardinal_dirs = {
+                (
+                    (1 if d.delta_r > 0 else (-1 if d.delta_r < 0 else 0)),
+                    (1 if d.delta_c > 0 else (-1 if d.delta_c < 0 else 0)),
+                )
+                for d in view.action_dynamics.values()
+                if d.is_displacement_action()
+            }
+            cal_cardinal_dirs.discard((0, 0))
+            if 0 < len(cal_cardinal_dirs) < 4 and any(
+                not view.is_spatial_effector(a)
+                and not view.is_action_calibrated(a)
+                and a not in view.immobile_entity_actions
+                and view.inhibited_actions.get(a, 0) == 0
+                and (a, view.avatar_pos) not in view.tested_action_positions
+                and a not in view.undo_actions
+                for a in available_actions
+            ):
+                ar_u, ac_u = view.avatar_pos
+                H_u, W_u = curr_grid.shape[0], curr_grid.shape[1]
+                stride_u = max(1, int(getattr(view.state, "spatial_lattice_stride", 1) or 1))
+                bg_u = (
+                    view.bg_feature
+                    if view.bg_feature is not None
+                    else view.estimate_background(curr_grid)
+                )
+                has_uncalibrated_cardinal = any(
+                    0 <= ar_u + dr_u * stride_u < H_u
+                    and 0 <= ac_u + dc_u * stride_u < W_u
+                    and (
+                        int(curr_grid[ar_u + dr_u * stride_u, ac_u + dc_u * stride_u]) == bg_u
+                        or view.symbolic_theory.is_walkable(
+                            int(curr_grid[ar_u + dr_u * stride_u, ac_u + dc_u * stride_u])
+                        )
+                    )
+                    for dr_u, dc_u in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    if (dr_u, dc_u) not in cal_cardinal_dirs
+                )
+
+        can_synthesize = (
+            view.is_motor_grounded() and not has_uncalibrated_cardinal
+        ) or not view.has_displacement_capabilities(available_actions)
 
         if (
             (objects or micro_actions)
@@ -1781,9 +1834,7 @@ class PrefrontalDeliberationEngine:
                                             "lethal", cell_f
                                         )
                                         view.hazard_tracker.known_lethal_features.add(cell_f)
-                                        if was_unverified_prior and not getattr(
-                                            view.working_memory, "concept_role_priors", None
-                                        ):
+                                        if was_unverified_prior:
                                             invalidate_stale_context_ontology(
                                                 view.symbolic_theory,
                                                 hazard_tracker=view.hazard_tracker,
@@ -1871,7 +1922,13 @@ class PrefrontalDeliberationEngine:
             for gp in proposal.new_learned_goal_positions:
                 view.record_learned_goal(gp)
             for feat in proposal.new_candidate_features:
-                view.symbolic_theory.induce_candidate_goal(feat, evidence="deliberation:proposal")
+                if (
+                    feat not in view.hazard_tracker.mobile_entities
+                    or feat in view.symbolic_theory.cargo_features
+                ):
+                    view.symbolic_theory.induce_candidate_goal(
+                        feat, evidence="deliberation:proposal"
+                    )
 
         # Faculty E: Basal Ganglia Motor Gating & Phase Entrainment
         if view.pending_phase_wait_steps > 0:
@@ -1945,7 +2002,8 @@ class PrefrontalDeliberationEngine:
 
         # Continuous Metric Kinematic Servoing (Local Proportional Guidance into Goal Capture Basin)
         elif (
-            (c_goal := getattr(view.working_memory, "continuous_goal_pos", None)) is not None
+            not has_uncalibrated_cardinal
+            and (c_goal := getattr(view.working_memory, "continuous_goal_pos", None)) is not None
             and (c_agent := getattr(view.working_memory, "continuous_agent_pos", None)) is not None
             and float(np.linalg.norm(c_goal - c_agent)) <= 1.5
             and any(
@@ -1964,12 +2022,15 @@ class PrefrontalDeliberationEngine:
             dy = float(c_goal[1] - c_agent[1])
 
             best_act = None
-            best_dot = -1e9
+            best_dot = 0.0
             for act in available_actions:
                 dyn = view.action_dynamics.get(act)
                 if dyn is not None and dyn.is_displacement_action():
-                    vx = float(dyn.delta_c)
-                    vy = float(-dyn.delta_r * y_sign)
+                    if dyn.continuous_deltas:
+                        vx, vy = dyn.get_continuous_velocity()
+                    else:
+                        vx = float(dyn.delta_c)
+                        vy = float(-dyn.delta_r * y_sign)
                     dot = dx * vx + dy * vy
                     if dot > best_dot and view.inhibited_actions.get(act, 0) == 0:
                         best_dot = dot
@@ -1983,8 +2044,10 @@ class PrefrontalDeliberationEngine:
                 chosen_action = None
 
         # 2. Check active mental plan during EXPLOITATION or MENTAL_SIMULATION phase
-        elif view.phase in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION) and (
-            view.mental_plan or active_step is not None
+        elif (
+            not has_uncalibrated_cardinal
+            and view.phase in (EpistemicPhase.EXPLOITATION, EpistemicPhase.MENTAL_SIMULATION)
+            and (view.mental_plan or active_step is not None)
         ):
             # Active Inference & Efference Copy Divergence:
             # If the organism is physically stuck or the previous step produced zero movement,
@@ -2160,10 +2223,15 @@ class PrefrontalDeliberationEngine:
             chosen_data = None
             predicted_pos = None
 
+            if has_uncalibrated_cardinal:
+                view.mental_plan.clear()
+                view.working_memory.active_plan_step = None
+
             # 3A. Primary: Forward Mental Simulation over learned dynamics & verified exits
             # (Executive Directive 1 & 2: Check if exit is open, if open go through it)
             if (
                 view.is_motor_grounded()
+                and not has_uncalibrated_cardinal
                 and not in_simulation_cooldown
                 and view.simulation_cooldown == 0
             ):
@@ -2239,7 +2307,30 @@ class PrefrontalDeliberationEngine:
             # 3A-bis. Causal Theory Planning (Phase B):
             # If mental simulation failed/cooled down, try constructing a plan
             # from discovered causal predicates and action dynamics.
-            if chosen_action is None and view.is_motor_grounded():
+            has_unprobed_axis = (
+                curr_grid.shape[0] > 1
+                and curr_grid.shape[1] > 1
+                and any(
+                    a not in view.action_dynamics and a not in view.immobile_entity_actions
+                    for a in available_actions
+                )
+                and not (
+                    any(
+                        d.is_displacement_action() and d.delta_r != 0
+                        for d in view.action_dynamics.values()
+                    )
+                    and any(
+                        d.is_displacement_action() and d.delta_c != 0
+                        for d in view.action_dynamics.values()
+                    )
+                )
+            )
+            if (
+                chosen_action is None
+                and view.is_motor_grounded()
+                and not has_uncalibrated_cardinal
+                and not has_unprobed_axis
+            ):
                 try:
                     from hbllm.hcir.world.autonomous_learning import CausalTheoryPlanner
 
@@ -2280,7 +2371,9 @@ class PrefrontalDeliberationEngine:
                                     )
                                     sim_pos = next_pos
                                 view.state.phase = self._target_phase(view)
-                                view.state.mental_plan = deque(causal_plan)
+                                view.apply_wm_delta(
+                                    WorkingMemoryDelta("mental_plan", deque(causal_plan))
+                                )
                                 next_step = view.mental_plan.popleft()
                                 chosen_action = next_step.action
                                 chosen_data = next_step.action_data
@@ -2298,6 +2391,7 @@ class PrefrontalDeliberationEngine:
             # Must not preempt initial motor calibration when uncalibrated actions remain.
             has_uncalibrated = any(
                 not view.is_action_calibrated(a)
+                and a not in view.immobile_entity_actions
                 and view.inhibited_actions.get(a, 0) == 0
                 and (a, view.avatar_pos) not in view.tested_action_positions
                 for a in available_actions

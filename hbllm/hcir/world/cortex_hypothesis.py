@@ -1015,7 +1015,12 @@ class CompositionalProgramObserver(HypothesisObserver):
                 for delta in context.get_entity_deltas()[:16]:
                     old_f = int(delta.prev_feature)
                     new_f = int(delta.curr_feature)
-                    if old_f != bg and new_f != old_f and delta.locus != context.prev_avatar_pos:
+                    if (
+                        old_f != bg
+                        and new_f != old_f
+                        and delta.locus == context.curr_avatar_pos
+                        and contact_f == old_f
+                    ):
                         target_locus = _shift_numeric_locus(delta.locus, displacement)
                         if (
                             target_locus is not None
@@ -1486,7 +1491,6 @@ class InductiveHypothesisEngine:
                         ast_obj.effect_operator == "translate_entity"
                         and hyp.premise_feature is not None
                         and hyp.premise_feature not in av_feats
-                        and hasattr(theory, "induce_cargo")
                     ):
                         theory.induce_cargo(hyp.premise_feature, evidence="program_translate")
 

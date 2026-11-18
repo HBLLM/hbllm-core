@@ -44,14 +44,16 @@ tested. That number must be retracted before anything else is built on it.
 `benchmarks/suites/grid/heldout.py:14-79` — the avatar is moved by the *harness*, not the engine:
 
 ```python
-_ = engine.step(obs)            # line 58 — action discarded
+_ = engine.step(obs)  # line 58 — action discarded
 ...
 if not has_key:
-    if avatar_r < key_r: avatar_r += 1      # lines 62-68 — scripted walk
-    elif avatar_c < key_c: avatar_c += 1
+    if avatar_r < key_r:
+        avatar_r += 1  # lines 62-68 — scripted walk
+    elif avatar_c < key_c:
+        avatar_c += 1
 ...
 if avatar_r == goal_r and avatar_c == goal_c:
-    success = True                           # always reached at step 18
+    success = True  # always reached at step 18
 ```
 
 `benchmarks/suites/symbolic/heldout.py:52` and `benchmarks/suites/continuous/heldout.py:55`:
@@ -590,21 +592,29 @@ on 3 against dev → run held-out once → commit JSON. Do not touch `heldout.ya
 ## Appendix C — Closed-loop probe with correct action unpacking
 
 ```python
-import logging, tempfile; logging.disable(logging.CRITICAL)
+import logging, tempfile
+
+logging.disable(logging.CRITICAL)
 from benchmarks.envs.grid_nav import GridNavEnvironment
 from benchmarks.envs.symbolic_rules import SymbolicRulesEnvironment
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
 for Env, budget in ((GridNavEnvironment, 100), (SymbolicRulesEnvironment, 80)):
     for seed in range(3):
-        env = Env(); obs = env.reset(seed=seed)
+        env = Env()
+        obs = env.reset(seed=seed)
         with tempfile.TemporaryDirectory() as d:
-            s = build_cognitive_system(CognitiveSystemConfig(world_id=f"p{seed}", memory_dir=d, enable_logging=False))
+            s = build_cognitive_system(
+                CognitiveSystemConfig(world_id=f"p{seed}", memory_dir=d, enable_logging=False)
+            )
             success, n = False, 0
             for i in range(budget):
                 n = i + 1
-                a, _meta = s.engine.step(obs)          # <-- unpack; runner.py currently does not
+                a, _meta = s.engine.step(obs)  # <-- unpack; runner.py currently does not
                 obs, r, done, info = env.step(a)
-                if done: success = info.get("success", False); break
+                if done:
+                    success = info.get("success", False)
+                    break
         print(Env.__name__, seed, success, n)
 # GridNav: False 100 / False 100 / False 100
 # SymbolicRules: False 80 / True 56 / True 56
@@ -659,18 +669,25 @@ rg -n '"_engine"|view\.phase\s*=[^=]' hbllm/hcir/world                        # 
 ## Appendix B — Composed-system probe (reproducible)
 
 ```python
-import logging; logging.disable(logging.CRITICAL)
+import logging
+
+logging.disable(logging.CRITICAL)
 import numpy as np
 from hbllm.runtime.bootstrap import build_cognitive_system, CognitiveSystemConfig
 from hbllm.hcir.world.percept import EmbodiedObservation
+
 s = build_cognitive_system(CognitiveSystemConfig(world_id="probe", enable_logging=False))
-g = np.zeros((6, 6), dtype=int); g[1, 1] = 1; g[4, 4] = 8
+g = np.zeros((6, 6), dtype=int)
+g[1, 1] = 1
+g[4, 4] = 8
 for _ in range(3):
     s.engine.step(EmbodiedObservation(lattice=g, available_actions=[1, 2, 3, 4]))
-print(s.services.workspace is s.tiered_workspace.working)        # False
+print(s.services.workspace is s.tiered_workspace.working)  # False
 print(type(s.tiered_workspace.persistent.event_store).__name__)  # InMemoryEventStore
-print(s.services.workspace.graph.node_count,                      # 2
-      s.tiered_workspace.brain.graph.node_count,                  # 0
-      s.tiered_workspace.persistent.graph.node_count)             # 0
-print(s.runtime._autonomous_task)                                 # None
+print(
+    s.services.workspace.graph.node_count,  # 2
+    s.tiered_workspace.brain.graph.node_count,  # 0
+    s.tiered_workspace.persistent.graph.node_count,
+)  # 0
+print(s.runtime._autonomous_task)  # None
 ```

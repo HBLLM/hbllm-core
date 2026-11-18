@@ -1873,7 +1873,10 @@ class MacroPlanSynthesizer:
                                     )
                                 engine.learned_barriers.discard(pos)
                             else:
-                                if feat:
+                                if feat and (
+                                    feat not in engine.hazard_tracker.mobile_entities
+                                    or feat in engine.symbolic_theory.cargo_features
+                                ):
                                     engine.symbolic_theory.induce_candidate_goal(
                                         feat, evidence="sync_known_objects:candidate"
                                     )

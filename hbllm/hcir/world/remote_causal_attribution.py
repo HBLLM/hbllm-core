@@ -155,8 +155,8 @@ class RemoteCausalAttributor:
 
         av_set = avatar_features or set()
         trigger_feat = int(prev_grid[tr, tc])
-        # An empty background locus cannot be a mechanism (no object to actuate).
-        if trigger_feat == background_feature:
+        # An empty background locus or the avatar's own previous body cell cannot be a mechanism.
+        if trigger_feat == background_feature or trigger_feat in av_set:
             return []
 
         # Compute all cell mutations between frames
@@ -181,6 +181,30 @@ class RemoteCausalAttributor:
             # Ignore changes caused solely by avatar movement
             if orig_feat in av_set or mut_feat in av_set:
                 continue
+
+            # Spelke Continuity: Ignore local 1-step translation of conserved autonomous entities
+            if orig_feat == background_feature or mut_feat == background_feature:
+                mov_f = mut_feat if orig_feat == background_feature else orig_feat
+                if int(np.count_nonzero(curr_grid == mov_f)) == int(
+                    np.count_nonzero(prev_grid == mov_f)
+                ) and any(
+                    0 <= rr + nr_d < H
+                    and 0 <= rc + nc_d < W
+                    and (
+                        (
+                            orig_feat == background_feature
+                            and int(prev_grid[rr + nr_d, rc + nc_d]) == mov_f
+                            and int(curr_grid[rr + nr_d, rc + nc_d]) == background_feature
+                        )
+                        or (
+                            mut_feat == background_feature
+                            and int(prev_grid[rr + nr_d, rc + nc_d]) == background_feature
+                            and int(curr_grid[rr + nr_d, rc + nc_d]) == mov_f
+                        )
+                    )
+                    for nr_d, nc_d in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                ):
+                    continue
 
             pair_key = (action_pos, (rr, rc))
             self.co_occurrence_evidence[pair_key] += 1

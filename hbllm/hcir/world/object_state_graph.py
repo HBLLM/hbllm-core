@@ -544,9 +544,9 @@ def compute_stance_priority(
     ):
         target_feat = (
             int(meta["target_feature"])
-            if (meta and "target_feature" in meta)
+            if (meta and meta.get("target_feature") is not None)
             else int(meta["feature"])
-            if (meta and "feature" in meta)
+            if (meta and meta.get("feature") is not None)
             else p_feat_cell
         )
         cnt_t = int(np.count_nonzero(curr_grid == target_feat)) if target_feat != bg else 1
@@ -566,32 +566,50 @@ def compute_stance_priority(
                 return (8, max(hazard_score, est_r), dist)
             if barrier_score >= 0.72 and pref_score < 0.40:
                 return (7, barrier_score, dist)
-            walk_n = sum(
-                1
-                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-                if 0 <= ep[0] + dr < H
-                and 0 <= ep[1] + dc < W
-                and (
-                    curr_grid[ep[0] + dr, ep[1] + dc] == bg
-                    or th.is_walkable(int(curr_grid[ep[0] + dr, ep[1] + dc]))
-                    or (ep[0] + dr, ep[1] + dc) == avatar_pos
+
+            def _walk_deg(pt: tuple[int, int]) -> int:
+                return sum(
+                    1
+                    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    if 0 <= pt[0] + dr < H
+                    and 0 <= pt[1] + dc < W
+                    and (
+                        curr_grid[pt[0] + dr, pt[1] + dc] == bg
+                        or th.is_walkable(int(curr_grid[pt[0] + dr, pt[1] + dc]))
+                        or (pt[0] + dr, pt[1] + dc) == avatar_pos
+                    )
                 )
-            )
+
+            walk_n = _walk_deg(ep)
             is_interior_switch = walk_n == 4
+            is_dividing_wall_gate = 2 <= ep[0] <= H - 3 and 2 <= ep[1] <= W - 3 and walk_n <= 2
             cnt = int(np.count_nonzero(curr_grid == ef))
             if cnt == 2 and is_interior_switch:
                 locs = [(int(r), int(c)) for r, c in zip(*np.where(curr_grid == ef), strict=False)]
-                if hasattr(th, "induce_relational_cue_pair"):
+                other = locs[1] if locs[0] == ep else locs[0]
+                u_vals, u_cnts = np.unique(curr_grid, return_counts=True)
+                n_singletons = sum(
+                    1
+                    for uv, uc in zip(u_vals.tolist(), u_cnts.tolist(), strict=False)
+                    if int(uc) == 1
+                    and int(uv) != bg
+                    and not th.is_avatar_feature(int(uv))
+                    and not th.is_barrier(int(uv))
+                )
+                if _walk_deg(other) < 4 and n_singletons >= 2:
                     th.induce_relational_cue_pair(ef, locs)
+                    return (2, -round(pref_score - est_r, 3), dist)
+            if cnt == 1 and is_dividing_wall_gate and engine.working_memory.pending_gate_check:
                 return (2, -round(pref_score - est_r, 3), dist)
-            if is_interior_switch:
+            if cnt == 1 and not is_dividing_wall_gate:
                 return (3, -round(pref_score - est_r, 3), dist)
             if pref_score >= 0.55:
                 return (4, -round(pref_score - est_r, 3), dist)
             return (5 if cnt == 1 else 6, -round(pref_score - est_r, 3), dist)
 
     p_feat = int(curr_grid[p[0], p[1]])
-    target_feat = int(meta["target_feature"]) if (meta and "target_feature" in meta) else p_feat
+    raw_tf = meta.get("target_feature") if meta else None
+    target_feat = int(raw_tf) if raw_tf is not None else p_feat
     pref_score, barrier_score, hazard_score = (
         role_scores_fn(target_feat) if target_feat != bg else (0.0, 0.0, 0.0)
     )
@@ -607,7 +625,7 @@ def compute_stance_priority(
     ):
         return (8, max(hazard_score, est_risk), dist)
     if barrier_score >= 0.72 and pref_score < 0.40 and target_feat not in th.goal_features:
-        return (7, barrier_score, dist)
+        return (8, barrier_score, dist)
     p_cnt = int(np.count_nonzero(curr_grid == p_feat)) if p_feat != bg else 0
     if p_feat in th.goal_features or p in engine.learned_goal_positions:
         return (1, -round(pref_score, 3), dist)
@@ -622,7 +640,9 @@ def compute_stance_priority(
             for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
         )
     ):
-        return (7, round(est_risk, 3), dist)
+        if p_cnt == 1:
+            return (5, round(1.0 + est_risk - pref_score, 3), dist)
+        return (8, round(est_risk, 3), dist)
     if pref_score >= 0.55:
         return (4, -round(pref_score - est_risk, 3), dist)
     return (5 if p_cnt == 1 else 6, -round(pref_score - est_risk, 3), dist)

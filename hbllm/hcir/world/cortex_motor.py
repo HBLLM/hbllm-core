@@ -377,6 +377,7 @@ class EpistemicCuriosityExplorer:
             a
             for a in available_actions
             if not engine.is_action_calibrated(a)
+            and a not in engine.immobile_entity_actions
             and engine.inhibited_actions.get(a, 0) == 0
             and a not in undo_acts
         ]
@@ -392,7 +393,28 @@ class EpistemicCuriosityExplorer:
                 chosen = disp_acts[0] if disp_acts else untested_at_pos[0]
             else:
                 spatial_effs = [a for a in untested_at_pos if engine.is_spatial_effector(a)]
-                chosen = spatial_effs[0] if spatial_effs else untested_at_pos[0]
+                if spatial_effs:
+                    chosen = spatial_effs[0]
+                else:
+                    # Spatial kinematics: prefer testing displacement actions into OPEN SPACE
+                    # rather than colliding with or displacing adjacent non-background obstacles.
+                    bg = engine.estimate_background(curr_grid)
+                    H, W = curr_grid.shape
+                    av_r, av_c = engine.avatar_pos
+                    open_space_acts: list[int] = []
+                    occupied_acts: list[int] = []
+                    for a in untested_at_pos:
+                        dr, dc = engine.action_deltas.get(a, (0, 0))
+                        tr, tc = av_r + dr, av_c + dc
+                        if 0 <= tr < H and 0 <= tc < W:
+                            val = int(curr_grid[tr, tc])
+                            if val == bg or val == 0 or engine.symbolic_theory.is_walkable(val):
+                                open_space_acts.append(a)
+                            else:
+                                occupied_acts.append(a)
+                        else:
+                            occupied_acts.append(a)
+                    chosen = open_space_acts[0] if open_space_acts else untested_at_pos[0]
             action_data = None
             if engine.is_spatial_effector(chosen):
                 action_data = engine.ground_effector_action(curr_grid, chosen)
@@ -583,7 +605,7 @@ class EpistemicCuriosityExplorer:
             _osc_feat = int(curr_grid[nr, nc])
             if _osc_feat in engine.hazard_tracker.known_lethal_features:
                 continue
-            uncertainty_pen = engine._epistemic_uncertainty_cost(_osc_feat, bg)
+            uncertainty_pen = engine._epistemic_uncertainty_cost(_osc_feat, bg) * 3.0
             visits = engine.position_visit_counts.get((nr, nc), 0)
             recency_pen = 20.0 if (nr, nc) in list(engine.recent_positions)[-6:] else 0.0
             total_score = visits + recency_pen + uncertainty_pen
