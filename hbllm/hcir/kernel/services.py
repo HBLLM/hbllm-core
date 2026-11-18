@@ -170,6 +170,10 @@ class KernelServices:
         """Create a fully provisioned KernelServices instance with verified pipeline, executor, and telemetry."""
         from hbllm.hcir.capabilities.planning_capabilities import PlanningCapabilityExecutor
         from hbllm.hcir.capabilities.routing_capabilities import RoutingCapabilityExecutor
+        from hbllm.hcir.capabilities.tool_capabilities import (
+            TOOL_CAPABILITIES,
+            ToolCapabilityExecutor,
+        )
         from hbllm.hcir.capabilities.world_capabilities import WorldKernelCapabilityExecutor
         from hbllm.hcir.kernel.capability_sandboxing import (
             CapabilityPermissions,
@@ -334,6 +338,38 @@ class KernelServices:
                     else IsolationMode.IN_PROCESS,
                     permissions=cap_perms,
                     required_permissions={"subprocess"} if is_sandbox_run else set(),
+                )
+            )
+
+        for t_cap in TOOL_CAPABILITIES:
+            impl_id = f"kernel_{t_cap}"
+            tool_exec = ToolCapabilityExecutor(default_capability=t_cap)
+            is_git = t_cap == "git.status"
+            tool_perms = CapabilityPermissions(
+                allow_filesystem=True,
+                allow_network=False,
+                allow_subprocess=is_git,
+                allow_db_write=False,
+            )
+            resolver.register(
+                CapabilityImplementation(
+                    capability_name=t_cap,
+                    implementation_id=impl_id,
+                    executor=tool_exec,
+                    priority=5,
+                    description=f"Kernel-governed sandboxed {t_cap} capability",
+                    tags=["safe", "internal", "tool"],
+                    required_permissions={"filesystem", "subprocess"} if is_git else {"filesystem"},
+                )
+            )
+            sandbox_mgr.register_policy(
+                SandboxedCapabilityPolicy(
+                    capability_name=t_cap,
+                    provider_id=impl_id,
+                    trust_level=TrustLevel.SYSTEM,
+                    isolation_mode=IsolationMode.IN_PROCESS,
+                    permissions=tool_perms,
+                    required_permissions={"filesystem", "subprocess"} if is_git else {"filesystem"},
                 )
             )
 

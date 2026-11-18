@@ -58,20 +58,73 @@ class CognitiveSystem:
     hydrated_count: int = 0
 
     def process_dialogue(self, dialogue: Any, speaker_id: str = "user") -> Any:
-        """Processes a natural language dialogue command or request through the grounded cognitive bridge."""
-        if self.bridge is not None:
-            return self.bridge.process_dialogue(dialogue, speaker_id=speaker_id)
-        from hbllm.hcir.compiler import HCIRCompiler
+        """Process natural language dialogue via Pure-HCIR first, with optional scaffold fallback."""
         from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
 
-        compiler = HCIRCompiler()
-        if isinstance(dialogue, ObservationEnvelope):
-            text = str(dialogue.metadata.get("text", ""))
-            speaker = str(dialogue.metadata.get("speaker_id", speaker_id))
+        if isinstance(dialogue, ObservationEnvelope) and self.bridge is not None:
+            return self.bridge.process_dialogue(dialogue, speaker_id=speaker_id)
+
+        text = (
+            str(dialogue.metadata.get("text", ""))
+            if isinstance(dialogue, ObservationEnvelope)
+            else str(dialogue)
+        )
+        speaker = (
+            str(dialogue.metadata.get("speaker_id", speaker_id))
+            if isinstance(dialogue, ObservationEnvelope)
+            else speaker_id
+        )
+
+        # 1. Native non-LLM HCIR Language Runtime (A16/A17)
+        from hbllm.hcir.language.runtime import MultilingualLanguageRuntime
+
+        lang_rt = self.services.extensions.get("language_runtime")
+        if lang_rt is None:
+            lang_rt = MultilingualLanguageRuntime(
+                self.workspace.graph,
+                workspace=self.workspace,
+            )
+            self.services.extensions["language_runtime"] = lang_rt
+
+        turn = lang_rt.process_utterance(text, speaker=speaker)
+        metrics = self.services.extensions.setdefault(
+            "autonomy_metrics",
+            {
+                "parse_attempts": 0,
+                "parse_hcir_success": 0,
+                "realize_attempts": 0,
+                "realize_hcir_success": 0,
+                "shadow_invocations": 0,
+                "distilled_lessons": 0,
+            },
+        )
+        if hasattr(metrics, "record_parse"):
+            metrics.record_parse(turn.is_success)
+            metrics.record_realize(bool(turn.is_success and turn.response_text))
         else:
-            text = str(dialogue)
-            speaker = speaker_id
-        return compiler.interpret_dialogue(text, speaker_id=speaker)
+            metrics["parse_attempts"] += 1
+            if turn.is_success:
+                metrics["parse_hcir_success"] += 1
+            metrics["realize_attempts"] += 1
+            if turn.is_success and turn.response_text:
+                metrics["realize_hcir_success"] += 1
+
+        if turn.is_success:
+            return turn
+
+        # 2. Optional isolated LLM teacher scaffold (strictly outside hbllm/hcir/)
+        scaffold = self.services.extensions.get("llm_scaffold")
+        if scaffold is not None and (self.config.enable_brain_llm or not turn.is_success):
+            scaffold_res = scaffold.advise_and_distill(text, self.workspace, speaker_id=speaker)
+            if not hasattr(metrics, "record_parse"):
+                metrics["shadow_invocations"] += 1
+                if scaffold_res.get("distilled"):
+                    metrics["distilled_lessons"] += 1
+            return scaffold_res
+
+        if self.bridge is not None:
+            return self.bridge.process_dialogue(dialogue, speaker_id=speaker_id)
+        return turn
 
 
 def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> CognitiveSystem:

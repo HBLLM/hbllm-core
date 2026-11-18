@@ -44,8 +44,26 @@ class HCIRGateway:
         goal_node = gateway.process_command(grounded_frame)
     """
 
-    def __init__(self, graph: CognitiveGraph) -> None:
+    def __init__(self, graph: CognitiveGraph, workspace: Any | None = None) -> None:
         self._graph = graph
+        self._workspace = workspace
+
+    def _commit_node(self, node: EvidenceNode | GoalNode) -> None:
+        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+            self._workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node.id,
+                        node_data=node.model_dump(),
+                    )
+                ],
+                author="hcir_language_gateway",
+            )
+            return
+        self._graph.add_node(node)
 
     # ── Assertion: Language as Evidence ───────────────────────────────
 
@@ -91,7 +109,7 @@ class HCIRGateway:
                 subject_name,
             ],
         )
-        self._graph.add_node(evidence)
+        self._commit_node(evidence)
 
         # If entity exists, update observed property / spatial relation if supported
         if target_entity_id:
@@ -337,5 +355,5 @@ class HCIRGateway:
             priority=0.8,
             tags=["language_command", frame.metadata.language, action_verb],
         )
-        self._graph.add_node(goal)
+        self._commit_node(goal)
         return goal

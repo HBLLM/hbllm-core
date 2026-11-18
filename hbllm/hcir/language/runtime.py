@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 from hbllm.hcir.graph import CognitiveGraph
 from hbllm.hcir.language.core.epistemic_policy import (
@@ -84,11 +85,13 @@ class MultilingualLanguageRuntime:
         graph: CognitiveGraph,
         reference_resolver: ReferenceResolver | None = None,
         epistemic_policy: EpistemicRealizationPolicy | None = None,
+        workspace: Any | None = None,
     ) -> None:
         self._graph = graph
+        self._workspace = workspace
         self._ref_resolver = reference_resolver or ReferenceResolver()
         self._grounding_resolver = GroundingResolver(graph, self._ref_resolver)
-        self._gateway = HCIRGateway(graph)
+        self._gateway = HCIRGateway(graph, workspace=workspace)
         self._epistemic_policy = epistemic_policy or EpistemicRealizationPolicy()
 
         # Register language engines
