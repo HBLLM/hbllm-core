@@ -898,7 +898,7 @@ class BrainFactory:
                     ckpt_loaded = True
                     break
                 elif ckpt_dir.is_dir():
-                    pts = sorted(ckpt_dir.rglob("step_*.pt"))
+                    pts = sorted(ckpt_dir.rglob("step_*.pt")) or sorted(ckpt_dir.rglob("model.pt"))
                     if pts:
                         logger.info("Loading latest checkpoint: %s", pts[-1])
                         from hbllm.utils.checkpoint import extract_model_state, load_checkpoint

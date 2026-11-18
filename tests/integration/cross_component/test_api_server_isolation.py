@@ -93,9 +93,21 @@ def test_global_exception_handler_maps_403(client, jwt_secret):
     assert "Access denied: Mock isolation violation" in response.json()["detail"]
 
 
-def test_unauthenticated_request_fallback_in_dev(jwt_secret, monkeypatch):
-    """Verify that in non-production, unauthenticated requests fall back to sovereign identity."""
+def test_unauthenticated_request_fails_closed_by_default_in_dev(jwt_secret, monkeypatch):
+    """Verify that even in non-production, unauthenticated requests fail closed without opt-in."""
     monkeypatch.setenv("HBLLM_ENV", "development")
+    monkeypatch.delenv("HBLLM_UNSAFE_DEV_AUTH", raising=False)
+    monkeypatch.setenv("HBLLM_JWT_SECRET", jwt_secret)
+
+    client_dev = TestClient(app)
+    response = client_dev.get("/v1/mock-isolation")
+    assert response.status_code == 401
+
+
+def test_unauthenticated_request_fallback_in_dev_with_opt_in(jwt_secret, monkeypatch):
+    """Verify that in non-production with HBLLM_UNSAFE_DEV_AUTH=1, fallback uses sovereign identity."""
+    monkeypatch.setenv("HBLLM_ENV", "development")
+    monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
     monkeypatch.setenv("HBLLM_JWT_SECRET", jwt_secret)
     monkeypatch.setenv("HBLLM_TENANT_GUARD_MODE", "strict")
 
@@ -108,6 +120,14 @@ def test_unauthenticated_request_fallback_in_dev(jwt_secret, monkeypatch):
     response = client_dev.get(f"/v1/mock-isolation?tenant_id={expected_tenant}")
     assert response.status_code == 200
     assert response.json()["tenant_id"] == expected_tenant
+
+
+def test_health_probes_accessible_in_production(jwt_secret, monkeypatch):
+    """Verify Kubernetes liveness/readiness probes bypass JWT auth in production."""
+    monkeypatch.setenv("HBLLM_ENV", "production")
+    monkeypatch.setenv("HBLLM_JWT_SECRET", jwt_secret)
+    client_prod = TestClient(app)
+    assert client_prod.get("/health/live").status_code == 200
 
 
 def test_chat_websocket_requires_auth(client):

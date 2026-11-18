@@ -21,9 +21,11 @@ services:
           cpus: "0.5"
           memory: 1G
     environment:
+      - HBLLM_ENV=production
+      - HBLLM_JWT_SECRET=${HBLLM_JWT_SECRET:?HBLLM_JWT_SECRET must be set}
       - HBLLM_BUS_BACKEND=redis
       - HBLLM_REDIS_URL=redis://redis:6379/0
-      - HBLLM_DATABASE_URL=postgresql://hbllm:hbllm_password@postgres:5432/hbllm_brain
+      - HBLLM_DATABASE_URL=postgresql://hbllm:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/hbllm_brain
       - HBLLM_LOG_LEVEL=INFO
       - HBLLM_SECRET_BACKEND=env
     ports: []  # Override: don't expose directly, use nginx

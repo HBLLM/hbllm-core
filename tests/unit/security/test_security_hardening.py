@@ -488,6 +488,11 @@ class TestBodySizeMiddleware:
 
         from fastapi.testclient import TestClient
 
+        monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
+        monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
+
+        from fastapi.testclient import TestClient
+
         from hbllm.serving.api import app
 
         client = TestClient(app, raise_server_exceptions=False)
@@ -505,6 +510,7 @@ class TestBodySizeMiddleware:
 
     def test_oversized_body_rejected(self, monkeypatch):
         monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
+        monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
 
         from fastapi.testclient import TestClient
 
