@@ -27,14 +27,19 @@ def main() -> None:
     parser.add_argument(
         "--dirs",
         nargs="+",
-        default=["docs", "data/gutenberg_cache"],
+        default=[
+            "plugins/developmental_adapter/curriculum_data",
+            "data/curriculum",
+            "docs",
+            "data/gutenberg_cache",
+        ],
         help="Directories of .md/.txt files to read.",
     )
     parser.add_argument("--world-id", default="pure_hcir_t4")
     parser.add_argument("--memory-dir", default="checkpoints/t4_reading")
     parser.add_argument("--ontology-db", default=str(DEFAULT_ONTOLOGY_DB))
-    parser.add_argument("--max-files", type=int, default=80)
-    parser.add_argument("--max-propositions", type=int, default=250)
+    parser.add_argument("--max-files", type=int, default=550)
+    parser.add_argument("--max-propositions", type=int, default=3000)
     parser.add_argument("--report-path", default="reports/training/t4_reading_report.json")
     args = parser.parse_args()
 

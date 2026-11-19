@@ -37,9 +37,67 @@ _REQUIRES_RE = re.compile(
     r"^(?:the\s+|a\s+|an\s+)?([a-zA-Z][a-zA-Z0-9_-]{2,28})\s+(?:requires|depends\s+on|needs)\s+(?:the\s+|a\s+|an\s+)?([a-zA-Z][a-zA-Z0-9_-]{2,28})\b",
     re.IGNORECASE,
 )
+_GLOSSARY_IS_A_RE = re.compile(
+    r"^\*?\s*\*\*([a-zA-Z][a-zA-Z0-9_\s-]{2,28})\*\*:\s+(?:the\s+|a\s+|an\s+)?(?:[a-zA-Z-]+\s+)?([a-zA-Z][a-zA-Z0-9_-]{2,28})\b",
+    re.IGNORECASE,
+)
+_INTRO_STRIP_RE = re.compile(
+    r"^(?:however|furthermore|moreover|therefore|in\s+addition|in\s+fact|typically|generally)\s*,\s*",
+    re.IGNORECASE,
+)
 
 _SKIP_SUBJECTS = frozenset(
-    {"this", "that", "there", "here", "which", "what", "when", "where", "they", "these", "those"}
+    {
+        "this",
+        "that",
+        "there",
+        "here",
+        "which",
+        "what",
+        "when",
+        "where",
+        "they",
+        "these",
+        "those",
+        "it",
+        "he",
+        "she",
+        "we",
+        "you",
+        "who",
+        "whom",
+        "whose",
+        "i",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "and",
+        "or",
+        "but",
+        "with",
+        "from",
+        "for",
+        "to",
+        "at",
+        "by",
+        "about",
+        "more",
+        "some",
+        "many",
+        "such",
+        "each",
+        "every",
+        "all",
+        "both",
+        "either",
+        "neither",
+        "very",
+        "also",
+        "then",
+        "thus",
+    }
 )
 
 
@@ -80,16 +138,45 @@ def extract_propositions_from_text(text: str, source_file: str = "") -> list[Ext
     seen: set[tuple[str, str, str]] = set()
 
     for raw_sent in _SENT_SPLIT_RE.split(text):
-        sent = raw_sent.strip().lstrip("#>-*` ")
+        raw_trimmed = raw_sent.strip()
+        # 1. Check structured glossary definition pattern first
+        gm = _GLOSSARY_IS_A_RE.match(raw_trimmed)
+        if gm:
+            subj = _clean_term(gm.group(1))
+            obj = _clean_term(gm.group(2))
+            if (
+                subj
+                and obj
+                and subj != obj
+                and subj not in _SKIP_SUBJECTS
+                and obj not in _SKIP_SUBJECTS
+            ):
+                key = (subj, "is_a", obj)
+                if key not in seen:
+                    seen.add(key)
+                    found.append(
+                        ExtractedProposition(
+                            subject=subj,
+                            relation="is_a",
+                            obj=obj,
+                            source_file=source_file,
+                            sentence=raw_trimmed[:120],
+                        )
+                    )
+            continue
+
+        sent = raw_trimmed.lstrip("#>-*` ")
         if len(sent) < 12 or len(sent) > 220:
             continue
+
+        sent_clean = _INTRO_STRIP_RE.sub("", sent)
 
         for rel, pattern in (
             ("is_a", _IS_A_RE),
             ("causes", _CAUSES_RE),
             ("requires", _REQUIRES_RE),
         ):
-            m = pattern.match(sent)
+            m = pattern.match(sent_clean)
             if not m:
                 continue
             subj = _clean_term(m.group(1))
