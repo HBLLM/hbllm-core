@@ -95,8 +95,14 @@ class MultilingualLanguageRuntime:
         self._epistemic_policy = epistemic_policy or EpistemicRealizationPolicy()
 
         # Register language engines
+        en_parser = EnglishParser()
+        if graph.node_count > 0:
+            from hbllm.hcir.language.ontology_bootstrap import OntologyBootstrapper
+
+            OntologyBootstrapper.hydrate_lexicon(graph, en_parser._lexicon, language="en")
+
         self._parsers: dict[str, LanguageParser] = {
-            "en": EnglishParser(),
+            "en": en_parser,
             "si": SinhalaParser(),
             "ta": TamilParser(),
         }
