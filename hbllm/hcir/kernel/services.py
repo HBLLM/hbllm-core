@@ -416,6 +416,48 @@ class KernelServices:
                 )
             )
 
+        # ── Web Capabilities ──────────────────────────────────────────
+        from hbllm.hcir.capabilities.web_capabilities import (
+            WEB_CAPABILITIES,
+            WebCapabilityExecutor,
+        )
+
+        web_perms = CapabilityPermissions(
+            allow_filesystem=False,
+            allow_network=True,
+            allow_subprocess=False,
+            allow_db_write=False,
+        )
+
+        for w_cap in WEB_CAPABILITIES:
+            impl_id = f"kernel_{w_cap}"
+            web_exec = WebCapabilityExecutor(
+                default_capability=w_cap,
+                tiered_workspace=tiered_workspace,
+                ontology_store=ont_store,
+            )
+            resolver.register(
+                CapabilityImplementation(
+                    capability_name=w_cap,
+                    implementation_id=impl_id,
+                    executor=web_exec,
+                    priority=5,
+                    description=f"Kernel-governed sandboxed {w_cap} capability",
+                    tags=["safe", "internal", "web"],
+                    required_permissions={"network"},
+                )
+            )
+            sandbox_mgr.register_policy(
+                SandboxedCapabilityPolicy(
+                    capability_name=w_cap,
+                    provider_id=impl_id,
+                    trust_level=TrustLevel.SYSTEM,
+                    isolation_mode=IsolationMode.IN_PROCESS,
+                    permissions=web_perms,
+                    required_permissions={"network"},
+                )
+            )
+
         return cls(
             workspace=workspace,
             transaction_manager=tx_mgr,

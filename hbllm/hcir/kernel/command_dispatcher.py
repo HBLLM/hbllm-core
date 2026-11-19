@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -92,6 +93,11 @@ VERB_CAPABILITY_MAP: dict[str, str] = {
     "tell": "knowledge.explain",
     "detail": "knowledge.explain",
     "summarize": "knowledge.explain",
+    # Web & Internet operations
+    "websearch": "web.search",
+    "google": "web.search",
+    "browse": "web.fetch",
+    "fetch": "web.fetch",
 }
 
 
@@ -174,7 +180,7 @@ class CommandDispatcher:
         t0 = time.monotonic()
 
         # 1. Resolve capability
-        capability = self._resolve_capability(verb)
+        capability = self._resolve_capability(verb, frame=frame)
         if capability is None:
             latency = (time.monotonic() - t0) * 1000
             return CommandExecutionReceipt(
@@ -268,10 +274,28 @@ class CommandDispatcher:
 
     # ── Verb → Capability Resolution ──────────────────────────────────
 
-    def _resolve_capability(self, verb: str) -> str | None:
+    def _resolve_capability(self, verb: str, frame: SemanticFrame | None = None) -> str | None:
         """Resolve a verb lemma to a registered capability name."""
+        verb_lower = verb.lower()
+
+        # Context-aware disambiguation:
+        # e.g. "search the web for X" -> web.search rather than fs.search
+        if frame is not None:
+            raw = getattr(frame.metadata, "raw_text", "").lower()
+            target = self._extract_target(frame).lower()
+            if verb_lower == "search" and any(
+                w in raw or w in target for w in ("web", "internet", "online")
+            ):
+                if self._resolver.has_capability("web.search"):
+                    return "web.search"
+            if verb_lower in ("fetch", "browse", "get") and any(
+                prefix in raw or prefix in target for prefix in ("http://", "https://")
+            ):
+                if self._resolver.has_capability("web.fetch"):
+                    return "web.fetch"
+
         # Direct lookup
-        cap = self._verb_map.get(verb.lower())
+        cap = self._verb_map.get(verb_lower)
         if cap is not None:
             # Verify capability actually exists in the resolver
             if self._resolver.has_capability(cap):
@@ -284,7 +308,7 @@ class CommandDispatcher:
             return cap  # Still return it; resolve_and_execute will give clear error
 
         # Fallback: check if verb itself matches a capability name pattern
-        for pattern in [verb, f"fs.{verb}", f"code.{verb}", f"world.{verb}"]:
+        for pattern in [verb, f"fs.{verb}", f"code.{verb}", f"world.{verb}", f"web.{verb}"]:
             if self._resolver.has_capability(pattern):
                 return pattern
 
@@ -363,6 +387,32 @@ class CommandDispatcher:
                     params["content"] = words[1]
         elif capability == "knowledge.ingest":
             params["path"] = target or "."
+        elif capability == "web.search":
+            raw = getattr(frame.metadata, "raw_text", "").strip()
+            text = raw
+            patterns = [
+                r"^(?:websearch|google|search)\s+(?:the\s+web\s+for|web\s+for|the\s+internet\s+for|online\s+for|for)\s+",
+                r"^(?:websearch|google|search)\s+",
+            ]
+            for p in patterns:
+                m = re.match(p, text, flags=re.IGNORECASE)
+                if m:
+                    text = text[m.end() :].strip()
+                    break
+            if not text or text.lower() in ("web", "internet", "online"):
+                text = target
+            params["query"] = text
+            params["content"] = text
+        elif capability == "web.fetch":
+            raw = getattr(frame.metadata, "raw_text", "").strip()
+            m = re.search(r"https?://[^\s\"'<>]+", raw)
+            if m:
+                url = m.group(0).rstrip(".,;:)[]")
+            else:
+                m_target = re.search(r"https?://[^\s\"'<>]+", target)
+                url = m_target.group(0).rstrip(".,;:)[]") if m_target else target
+            params["url"] = url
+            params["content"] = url
         else:
             # Generic: pass target as-is
             if target:
