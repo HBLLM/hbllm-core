@@ -19,6 +19,8 @@ MEMORY_CAPABILITIES: tuple[str, ...] = (
     "memory.forget",
     "knowledge.ingest",
     "knowledge.explain",
+    "knowledge.explain_why",
+    "knowledge.explain_how",
 )
 
 
@@ -63,7 +65,41 @@ class MemoryCapabilityExecutor:
             return await self._exec_knowledge_ingest(params)
         if cap == "knowledge.explain":
             return await self._exec_knowledge_explain(params)
+        if cap == "knowledge.explain_why":
+            return await self._exec_knowledge_explain_why(params)
+        if cap == "knowledge.explain_how":
+            return await self._exec_knowledge_explain_how(params)
         return {"ok": False, "error": f"Unknown memory capability: {cap}"}
+
+    async def _exec_knowledge_explain_why(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Explain why a concept/phenomenon occurs via backwards causal traversal."""
+        concept = str(params.get("content", params.get("target", ""))).strip()
+        if not concept:
+            return {"ok": False, "error": "knowledge.explain_why requires 'content' or 'target'"}
+
+        explainer = self._get_or_create_explainer()
+        text = explainer.explain_why(concept)
+        return {
+            "ok": True,
+            "action": "explained_why",
+            "concept": concept,
+            "content": text,
+        }
+
+    async def _exec_knowledge_explain_how(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Explain how a concept/mechanism operates via forward dependency traversal."""
+        concept = str(params.get("content", params.get("target", ""))).strip()
+        if not concept:
+            return {"ok": False, "error": "knowledge.explain_how requires 'content' or 'target'"}
+
+        explainer = self._get_or_create_explainer()
+        text = explainer.explain_how(concept)
+        return {
+            "ok": True,
+            "action": "explained_how",
+            "concept": concept,
+            "content": text,
+        }
 
     async def _exec_knowledge_explain(self, params: dict[str, Any]) -> dict[str, Any]:
         """Synthesize a structured multi-sentence discourse/explanation for a concept."""

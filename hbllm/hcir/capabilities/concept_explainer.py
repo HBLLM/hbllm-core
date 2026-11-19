@@ -317,3 +317,192 @@ class ConceptExplainer:
         """End-to-end convenience method: gather knowledge and synthesize explanation."""
         snapshot = self.gather_knowledge(concept_query)
         return self.synthesize_discourse(snapshot)
+
+    def explain_why(
+        self,
+        concept_query: str,
+        max_depth: int = 3,
+        snapshot: ConceptKnowledgeSnapshot | None = None,
+    ) -> str:
+        """Compose a structured causal 'why' explanation via backward CAUSES traversal.
+
+        Traverses upstream causal antecedents:
+          1. Direct cause: What directly produces/triggers concept?
+          2. Multi-hop root cause: What causes the direct cause?
+          3. Downstream consequences: What does concept in turn cause?
+        """
+        if snapshot is None:
+            snapshot = self.gather_knowledge(concept_query)
+        name = snapshot.concept
+        article = _indefinite_article(name)
+
+        # Multi-hop backwards traversal across persistent graph
+        causal_chains: list[list[str]] = []
+        p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
+
+        if p_graph is not None and snapshot.caused_by:
+            for direct_cause in snapshot.caused_by[:3]:
+                chain = [direct_cause]
+                curr = direct_cause
+                for _ in range(max_depth - 1):
+                    curr_ids = {curr, f"t4_concept_{curr}", f"concept_{curr}"}
+                    parent_cause: str | None = None
+                    for edge in p_graph.edges.values():
+                        if edge.edge_type == HCIREdgeType.CAUSES:
+                            if any(cid in t.lower() for t in edge.targets for cid in curr_ids):
+                                for s in edge.sources:
+                                    s_clean = _clean_concept_name(s)
+                                    if s_clean not in chain:
+                                        parent_cause = s_clean
+                                        break
+                        if parent_cause:
+                            break
+                    if parent_cause:
+                        chain.append(parent_cause)
+                        curr = parent_cause
+                    else:
+                        break
+                causal_chains.append(chain)
+
+        paragraphs: list[str] = []
+
+        # 1. Direct Antecedent Cause
+        if snapshot.caused_by:
+            causes_str = (
+                snapshot.caused_by[0]
+                if len(snapshot.caused_by) == 1
+                else " and ".join(snapshot.caused_by[:2])
+            )
+            paragraphs.append(
+                f"{name.capitalize()} occurs primarily because it is triggered or produced by {causes_str}."
+            )
+        elif snapshot.definition:
+            paragraphs.append(
+                f"{article} {name} is defined as {snapshot.definition.rstrip('.')}, "
+                f"though no direct upstream causal trigger is currently recorded in memory."
+            )
+        else:
+            paragraphs.append(
+                f"I do not have recorded causal antecedents explaining why '{name}' occurs."
+            )
+
+        # 2. Multi-Hop Causal Chain
+        deep_chains = [c for c in causal_chains if len(c) > 1]
+        if deep_chains:
+            longest = max(deep_chains, key=len)
+            chain_str = " -> ".join(reversed(longest)) + f" -> {name}"
+            paragraphs.append(
+                f"Tracing the multi-hop causal chain upstream: {chain_str}. "
+                f"Specifically, {longest[-1]} leads to {longest[0]}, which directly triggers {name}."
+            )
+
+        # 3. Downstream Consequences
+        if snapshot.causes:
+            effects_str = (
+                snapshot.causes[0]
+                if len(snapshot.causes) == 1
+                else ", ".join(snapshot.causes[:-1]) + f", and {snapshot.causes[-1]}"
+            )
+            paragraphs.append(
+                f"In turn, {name} acts as an active causal agent that produces or causes {effects_str}."
+            )
+
+        # 4. Contextual beliefs
+        if snapshot.beliefs:
+            paragraphs.append(f"Recorded causal evidence: {snapshot.beliefs[0].rstrip('.')}.")
+
+        return "\n\n".join(paragraphs)
+
+    def explain_how(
+        self,
+        concept_query: str,
+        max_depth: int = 3,
+        snapshot: ConceptKnowledgeSnapshot | None = None,
+    ) -> str:
+        """Compose a structured procedural 'how' explanation via forward REQUIRES traversal.
+
+        Traverses prerequisite and dependency requirements:
+          1. Direct requirements: What does concept directly require?
+          2. Multi-hop prerequisites: What do those requirements in turn depend on?
+          3. Step-by-step procedural realization.
+        """
+        if snapshot is None:
+            snapshot = self.gather_knowledge(concept_query)
+        name = snapshot.concept
+        article = _indefinite_article(name)
+
+        # Multi-hop forward dependency traversal
+        dep_chains: list[list[str]] = []
+        p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
+
+        if p_graph is not None and snapshot.requires:
+            for direct_req in snapshot.requires[:3]:
+                chain = [direct_req]
+                curr = direct_req
+                for _ in range(max_depth - 1):
+                    curr_ids = {curr, f"t4_concept_{curr}", f"concept_{curr}"}
+                    next_req: str | None = None
+                    for edge in p_graph.edges.values():
+                        if edge.edge_type == HCIREdgeType.REQUIRES:
+                            if any(cid in s.lower() for s in edge.sources for cid in curr_ids):
+                                for t in edge.targets:
+                                    t_clean = _clean_concept_name(t)
+                                    if t_clean not in chain:
+                                        next_req = t_clean
+                                        break
+                        if next_req:
+                            break
+                    if next_req:
+                        chain.append(next_req)
+                        curr = next_req
+                    else:
+                        break
+                dep_chains.append(chain)
+
+        paragraphs: list[str] = []
+
+        # 1. Functional Nature & Requirements
+        if snapshot.requires:
+            reqs_str = (
+                snapshot.requires[0]
+                if len(snapshot.requires) == 1
+                else ", ".join(snapshot.requires[:-1]) + f" and {snapshot.requires[-1]}"
+            )
+            paragraphs.append(f"To operate or function, {name} fundamentally requires {reqs_str}.")
+        elif snapshot.definition:
+            paragraphs.append(
+                f"{article} {name} operates according to its definition: {snapshot.definition.rstrip('.')}."
+            )
+        else:
+            paragraphs.append(
+                f"I do not have recorded operational prerequisites explaining how '{name}' works."
+            )
+
+        # 2. Step-by-step procedural realization
+        steps: list[str] = []
+        if snapshot.requires:
+            steps.append(
+                f"Step 1 (Prerequisites): Ensure availability of {', '.join(snapshot.requires)}."
+            )
+        if snapshot.hypernyms:
+            steps.append(
+                f"Step 2 (Classification): Utilize as a functional {snapshot.hypernyms[0]}."
+            )
+        if snapshot.causes:
+            steps.append(
+                f"Step 3 (Execution): Engage mechanism to produce {', '.join(snapshot.causes)}."
+            )
+        else:
+            steps.append("Step 3 (Execution): Apply standard operational interactions.")
+
+        if steps:
+            paragraphs.append("Operational Procedure:\n" + "\n".join(steps))
+
+        # 3. Multi-Hop Dependency Chain
+        deep_chains = [c for c in dep_chains if len(c) > 1]
+        if deep_chains:
+            longest = max(deep_chains, key=len)
+            chain_str = f"{name} -> " + " -> ".join(longest)
+            paragraphs.append(f"Tracing the multi-level dependency tree: {chain_str}.")
+
+        return "\n\n".join(paragraphs)

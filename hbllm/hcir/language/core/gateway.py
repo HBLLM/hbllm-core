@@ -211,7 +211,9 @@ class HCIRGateway:
 
         # If entity could not be grounded, try epistemic prior before giving up
         if not entity_id:
-            prior = self._lookup_epistemic_prior(subject_name)
+            prior = self._lookup_epistemic_prior(
+                subject_name, query_target=frame.query_target or "definition"
+            )
             if prior is not None:
                 return prior
             return CognitiveEpistemicState(
@@ -413,7 +415,9 @@ class HCIRGateway:
 
     # ── Epistemic Prior Lookup ────────────────────────────────────────
 
-    def _lookup_epistemic_prior(self, subject_name: str) -> CognitiveEpistemicState | None:
+    def _lookup_epistemic_prior(
+        self, subject_name: str, query_target: str = "definition"
+    ) -> CognitiveEpistemicState | None:
         """Consult ConceptExplainer, LexicalOntologyStore, and persistent memory.
 
         Returns a definition/explanation CognitiveEpistemicState if found, else None.
@@ -428,9 +432,18 @@ class HCIRGateway:
             )
             snapshot = explainer.gather_knowledge(subject_name)
             if snapshot.has_knowledge:
-                discourse = explainer.synthesize_discourse(snapshot)
+                if query_target == "cause":
+                    discourse = explainer.explain_why(subject_name)
+                    pred_name = "causes"
+                elif query_target == "procedure":
+                    discourse = explainer.explain_how(subject_name)
+                    pred_name = "requires"
+                else:
+                    discourse = explainer.synthesize_discourse(snapshot)
+                    pred_name = "definition"
+
                 return CognitiveEpistemicState(
-                    target_predicate="definition",
+                    target_predicate=pred_name,
                     target_subject=subject_name,
                     target_object=discourse,
                     confidence=0.90 if snapshot.definition else 0.75,

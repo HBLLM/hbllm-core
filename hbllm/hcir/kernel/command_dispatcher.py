@@ -93,6 +93,8 @@ VERB_CAPABILITY_MAP: dict[str, str] = {
     "tell": "knowledge.explain",
     "detail": "knowledge.explain",
     "summarize": "knowledge.explain",
+    "why": "knowledge.explain_why",
+    "how": "knowledge.explain_how",
     # Web & Internet operations
     "websearch": "web.search",
     "google": "web.search",
@@ -286,19 +288,30 @@ class CommandDispatcher:
             if verb_lower == "search" and any(
                 w in raw or w in target for w in ("web", "internet", "online")
             ):
-                if self._resolver.has_capability("web.search"):
+                if self._resolver is None or self._resolver.has_capability("web.search"):
                     return "web.search"
             if verb_lower in ("fetch", "browse", "get") and any(
                 prefix in raw or prefix in target for prefix in ("http://", "https://")
             ):
-                if self._resolver.has_capability("web.fetch"):
+                if self._resolver is None or self._resolver.has_capability("web.fetch"):
                     return "web.fetch"
+            if verb_lower in ("explain", "tell", "describe"):
+                if raw.startswith("explain why ") or " why " in raw:
+                    if self._resolver is None or self._resolver.has_capability(
+                        "knowledge.explain_why"
+                    ):
+                        return "knowledge.explain_why"
+                elif raw.startswith("explain how ") or " how " in raw:
+                    if self._resolver is None or self._resolver.has_capability(
+                        "knowledge.explain_how"
+                    ):
+                        return "knowledge.explain_how"
 
         # Direct lookup
         cap = self._verb_map.get(verb_lower)
         if cap is not None:
             # Verify capability actually exists in the resolver
-            if self._resolver.has_capability(cap):
+            if self._resolver is None or self._resolver.has_capability(cap):
                 return cap
             logger.debug(
                 "CommandDispatcher: verb '%s' maps to '%s' but capability not registered",
@@ -309,7 +322,7 @@ class CommandDispatcher:
 
         # Fallback: check if verb itself matches a capability name pattern
         for pattern in [verb, f"fs.{verb}", f"code.{verb}", f"world.{verb}", f"web.{verb}"]:
-            if self._resolver.has_capability(pattern):
+            if self._resolver is not None and self._resolver.has_capability(pattern):
                 return pattern
 
         return None
@@ -377,6 +390,27 @@ class CommandDispatcher:
                 params["content"] = words[1]
             else:
                 params["content"] = target or raw
+        elif capability == "knowledge.explain_why":
+            raw = getattr(frame.metadata, "raw_text", "").strip()
+            text = re.sub(r"^(?:explain\s+why|why\s+does|why\s+is|why)\s+", "", raw, flags=re.I)
+            text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
+            text = re.sub(
+                r"\s+(?:works?|occurs?|happens?|operates?|functions?)\s*$", "", text, flags=re.I
+            ).strip()
+            params["content"] = text or target or raw
+        elif capability == "knowledge.explain_how":
+            raw = getattr(frame.metadata, "raw_text", "").strip()
+            text = re.sub(
+                r"^(?:explain\s+how|how\s+does|how\s+do|how\s+is|how\s+to|how)\s+",
+                "",
+                raw,
+                flags=re.I,
+            )
+            text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
+            text = re.sub(
+                r"\s+(?:works?|occurs?|happens?|operates?|functions?)\s*$", "", text, flags=re.I
+            ).strip()
+            params["content"] = text or target or raw
         elif capability == "knowledge.explain":
             # For explanation commands (explain X, describe X, tell me about X)
             params["content"] = target or ""

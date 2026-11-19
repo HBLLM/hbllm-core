@@ -49,10 +49,10 @@ class EnglishRealizer:
         elif pred in ("near",):
             prep = "near"
 
-        # 0. Definition answers ("What is X?" → definition from epistemic prior)
-        if pred == "definition" and obj:
-            # If obj is already a synthesized multi-sentence discourse, return it directly
-            if obj.startswith(("A ", "An ", "The ")) and ("." in obj):
+        # 0. Definition, Causal, and Procedural discourse answers
+        if pred in ("definition", "causes", "requires") and obj:
+            # If obj is a multi-sentence explanation or paragraph, return it directly
+            if ("." in obj or "\n" in obj) and len(obj) > 30:
                 return obj
             article = self._indefinite_article(subj)
             if level == EpistemicVerbalizationLevel.CERTAIN:

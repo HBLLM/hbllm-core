@@ -109,16 +109,52 @@ class EnglishParser:
         if len(content) < 2:
             return None
         first = content[0]
-        # Accept leading verb (either tagged VERB or having a VERB entry in lexicon/ontology)
+        # Accept leading verb (either tagged VERB, in known command verbs, or in lexicon/ontology)
+        _KNOWN_COMMAND_VERBS = frozenset(
+            {
+                "explain",
+                "describe",
+                "tell",
+                "detail",
+                "summarize",
+                "why",
+                "how",
+                "read",
+                "show",
+                "display",
+                "list",
+                "search",
+                "find",
+                "verify",
+                "check",
+                "analyze",
+                "remember",
+                "store",
+                "recall",
+                "forget",
+                "ingest",
+                "fetch",
+                "browse",
+                "google",
+                "websearch",
+            }
+        )
         first_entries = self._lexicon.lookup(first.lemma)
-        is_verb = first.pos == EnglishPOS.VERB or any(
-            e.pos == EnglishPOS.VERB for e in first_entries
+        is_verb = (
+            first.pos == EnglishPOS.VERB
+            or first.lemma in _KNOWN_COMMAND_VERBS
+            or any(e.pos == EnglishPOS.VERB for e in first_entries)
         )
         if not is_verb:
             return None
 
         rest = [t for t in content[1:] if t.pos != EnglishPOS.DET]
         verb_pred = first.lemma
+
+        # Normalize "explain why X" -> predicate="why", "explain how X" -> predicate="how"
+        if verb_pred == "explain" and len(content) > 2 and content[1].lemma in ("why", "how"):
+            verb_pred = content[1].lemma
+            rest = [t for t in content[2:] if t.pos != EnglishPOS.DET]
 
         # Normalize "tell me about X" -> predicate="explain", target="X"
         if verb_pred == "tell":
@@ -130,6 +166,24 @@ class EnglishParser:
             if about_idx != -1 and about_idx + 1 < len(content):
                 verb_pred = "explain"
                 rest = [t for t in content[about_idx + 1 :] if t.pos != EnglishPOS.DET]
+
+        # Strip trailing functional verbs in "how X works" or "why X occurs"
+        _TRAILING_VERBS = frozenset(
+            {
+                "work",
+                "works",
+                "occur",
+                "occurs",
+                "happen",
+                "happens",
+                "operate",
+                "operates",
+                "function",
+                "functions",
+            }
+        )
+        if rest and rest[-1].lemma in _TRAILING_VERBS:
+            rest = rest[:-1]
 
         if not rest:
             return None
@@ -177,6 +231,28 @@ class EnglishParser:
                     frame_type=FrameType.QUERY,
                     predicate=f"property_{prop_name}",
                     query_target="property",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                return frame
+
+            elif wh_word == "why":
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate="causes",
+                    query_target="cause",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                return frame
+
+            elif wh_word == "how":
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate="requires",
+                    query_target="procedure",
                     metadata=meta,
                 )
                 if subject_ref:

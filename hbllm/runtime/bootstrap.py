@@ -212,7 +212,11 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     # 1. State hierarchy & storage (Persistent Tier binding defaults to ~/.hbllm/worlds/<world_id>)
     resolved_mem_dir: Path | None = None
     if cfg.memory_dir is _DEFAULT_DIR_MARKER:
-        resolved_mem_dir = Path.home() / ".hbllm" / "worlds" / cfg.world_id
+        local_t4 = Path("checkpoints/t4_reading")
+        if local_t4.exists() and (local_t4 / "persistent.db").exists():
+            resolved_mem_dir = local_t4
+        else:
+            resolved_mem_dir = Path.home() / ".hbllm" / "worlds" / cfg.world_id
     elif cfg.memory_dir is not None:
         resolved_mem_dir = Path(cfg.memory_dir)
 
