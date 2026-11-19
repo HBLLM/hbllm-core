@@ -312,7 +312,21 @@ class CommandDispatcher:
         if capability in ("fs.read", "code.python_ast"):
             params["path"] = target
         elif capability == "fs.list":
-            params["path"] = target or "."
+            # Map generic words like "directory", "folder", "files" to current directory "."
+            if target.lower() in ("directory", "dir", "folder", "files", ""):
+                params["path"] = "."
+            else:
+                params["path"] = target
+        elif capability == "fs.search":
+            params["pattern"] = target or "*"
+        elif capability == "shell.exec":
+            # Extract shell command: strip leading imperative verb if present
+            raw = getattr(frame.metadata, "raw_text", "").strip()
+            words = raw.split(maxsplit=1)
+            if len(words) > 1 and words[0].lower() == (frame.predicate or "").lower():
+                params["command"] = words[1]
+            else:
+                params["command"] = target or raw
         elif capability == "git.status":
             pass  # No specific target needed
         else:

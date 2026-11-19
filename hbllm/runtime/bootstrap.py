@@ -133,8 +133,12 @@ class CognitiveSystem:
                 import asyncio
 
                 try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+
+                    if loop is not None and loop.is_running():
                         import concurrent.futures
 
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
