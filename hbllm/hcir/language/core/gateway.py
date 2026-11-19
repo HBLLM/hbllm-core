@@ -24,6 +24,7 @@ from hbllm.hcir.language.core.semantic_frame import (
     GroundedSemanticFrame,
     ThematicRole,
 )
+from hbllm.hcir.nodes import HCIREdgeType
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,48 @@ class HCIRGateway:
                 if object_ref and object_ref.properties:
                     target_dict.update(object_ref.properties)
                 self._graph.upsert_node(ent)
+
+        # Create spatial edge if both subject and object are grounded entities
+        location_entity_id = grounded.grounded_entities.get(
+            ThematicRole.LOCATION
+        ) or grounded.grounded_entities.get(ThematicRole.PATIENT)
+        if target_entity_id and location_entity_id and target_entity_id != location_entity_id:
+            predicate = frame.predicate or "located_on"
+            edge_type = self._predicate_to_edge_type(predicate)
+            if edge_type is not None:
+                from hbllm.hcir.graph import HCIREdge
+                from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+                edge = HCIREdge(
+                    edge_type=edge_type,
+                    sources=[target_entity_id],
+                    targets=[location_entity_id],
+                    properties={"predicate": predicate, "speaker": speaker},
+                )
+                # Check for duplicate edges
+                existing_edges = {e.id for e in self._graph.edges_from(target_entity_id)}
+                if edge.id not in existing_edges:
+                    if self._workspace is not None and hasattr(
+                        self._workspace, "commit_operations"
+                    ):
+                        self._workspace.commit_operations(
+                            [
+                                TransactionOperation(
+                                    op=TransactionOp.UPSERT_EDGE,
+                                    edge_id=edge.id,
+                                    edge_data=edge.model_dump(),
+                                )
+                            ],
+                            author="hcir_language_gateway",
+                        )
+                    else:
+                        self._graph.add_edge(edge)
+                    logger.debug(
+                        "HCIRGateway: Created %s edge %s → %s",
+                        edge_type.value,
+                        target_entity_id,
+                        location_entity_id,
+                    )
 
         logger.debug(
             "HCIRGateway: Ingested language assertion as EvidenceNode %s (%s)",
@@ -357,3 +400,25 @@ class HCIRGateway:
         )
         self._commit_node(goal)
         return goal
+
+    # ── Helpers ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _predicate_to_edge_type(predicate: str) -> HCIREdgeType | None:
+        """Map a semantic predicate to an HCIREdgeType for spatial/relational edges."""
+        _MAP: dict[str, HCIREdgeType] = {
+            "located_on": HCIREdgeType.LOCATED_IN,
+            "located_in": HCIREdgeType.LOCATED_IN,
+            "located_at": HCIREdgeType.LOCATED_AT,
+            "located_inside": HCIREdgeType.LOCATED_IN,
+            "located_within": HCIREdgeType.LOCATED_IN,
+            "located_under": HCIREdgeType.BELOW,
+            "located_beneath": HCIREdgeType.BELOW,
+            "located_above": HCIREdgeType.ABOVE,
+            "located_beside": HCIREdgeType.NEAR,
+            "located_near": HCIREdgeType.NEAR,
+            "supports": HCIREdgeType.SUPPORTS,
+            "part_of": HCIREdgeType.PART_OF,
+            "contains": HCIREdgeType.CONTAINS,
+        }
+        return _MAP.get(predicate)

@@ -6,6 +6,15 @@ and grounded concepts (A15) stored in the HCIR CognitiveGraph.
 Detects explicit epistemic error states:
 - GROUNDING_FAILED: No entity in HCIR matches the reference criteria.
 - AMBIGUOUS_REFERENCE: Multiple candidate entities match a definite reference.
+
+Auto-creation policy (open-world assumption):
+- ASSERTION frames: If a definite entity reference ("the ball") has no match,
+  a new PhysicalEntityNode is created on-the-fly. Language is treated as a
+  perception modality that can introduce new entities.
+- COMMAND frames: Grounding is best-effort — ungrounded targets are passed
+  through as raw concept names for the CommandDispatcher to interpret as tool
+  parameters (e.g. "List the directory" → fs.list path="directory").
+- QUERY frames: Strict grounding — missing entities → GROUNDING_FAILED.
 """
 
 from __future__ import annotations
@@ -22,6 +31,7 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.language.core.reference import ReferenceResolver
 from hbllm.hcir.language.core.semantic_frame import (
     EntityReference,
+    FrameType,
     GroundedSemanticFrame,
     LanguageErrorType,
     SemanticFrame,
@@ -44,9 +54,11 @@ class GroundingResolver:
         self,
         graph: CognitiveGraph,
         reference_resolver: ReferenceResolver | None = None,
+        workspace: Any | None = None,
     ) -> None:
         self._graph = graph
         self._ref_resolver = reference_resolver or ReferenceResolver()
+        self._workspace = workspace
 
     def ground_frame(self, frame: SemanticFrame) -> GroundedSemanticFrame:
         """Ground all entity references within a SemanticFrame against HCIR state."""
@@ -113,12 +125,25 @@ class GroundingResolver:
             # 4. Evaluate Definite vs Indefinite matching
             if ref.specifier == "definite":  # "the red ball"
                 if len(matching_entities) == 0:
-                    grounded.grounding_success = False
-                    grounded.grounding_error = LanguageErrorType.GROUNDING_FAILED
-                    grounded.grounding_error_detail = (
-                        f"No entity matching '{ref.raw_text}' found in world state."
-                    )
-                    return grounded
+                    # ── Open-world auto-creation policy ──
+                    # ASSERTION: Create new entity on-the-fly (language as perception)
+                    if frame.frame_type == FrameType.ASSERTION and ref.concept_name:
+                        new_entity = self._auto_create_entity(ref)
+                        grounded.grounded_entities[role] = new_entity.id
+                        new_mentions.append((new_entity.id, ref.concept_name, ref.properties))
+                    # COMMAND: Relaxed grounding — pass raw concept through
+                    elif frame.frame_type == FrameType.COMMAND:
+                        # Mark as ungrounded but don't fail — CommandDispatcher
+                        # will interpret the concept name as a tool parameter
+                        pass
+                    else:
+                        # QUERY: Strict grounding
+                        grounded.grounding_success = False
+                        grounded.grounding_error = LanguageErrorType.GROUNDING_FAILED
+                        grounded.grounding_error_detail = (
+                            f"No entity matching '{ref.raw_text}' found in world state."
+                        )
+                        return grounded
                 elif len(matching_entities) > 1:
                     # Ambiguous reference
                     grounded.grounding_success = False
@@ -181,3 +206,45 @@ class GroundingResolver:
                 return False
 
         return True
+
+    # ── Open-World Entity Auto-Creation ───────────────────────────────
+
+    def _auto_create_entity(self, ref: EntityReference) -> PhysicalEntityNode:
+        """Create a new PhysicalEntityNode from a linguistic reference.
+
+        Called when an ASSERTION references a definite entity that doesn't exist
+        in the graph. Language is treated as a perception modality that can
+        introduce new entity hypotheses into the world model.
+        """
+        from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+        concept_name = ref.concept_name or "entity"
+        entity = PhysicalEntityNode(
+            entity_type=concept_name,
+            entity_name=concept_name,
+            name=concept_name,
+            properties=dict(ref.properties) if ref.properties else {},
+            tags=["language_introduced", concept_name],
+        )
+
+        # Commit through workspace if available, else direct graph add
+        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
+            self._workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=entity.id,
+                        node_data=entity.model_dump(),
+                    )
+                ],
+                author="grounding_resolver",
+            )
+        else:
+            self._graph.add_node(entity)
+
+        logger.info(
+            "GroundingResolver: auto-created PhysicalEntityNode '%s' (id=%s) from assertion",
+            concept_name,
+            entity.id,
+        )
+        return entity

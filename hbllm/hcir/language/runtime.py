@@ -91,7 +91,7 @@ class MultilingualLanguageRuntime:
         self._graph = graph
         self._workspace = workspace
         self._ref_resolver = reference_resolver or ReferenceResolver()
-        self._grounding_resolver = GroundingResolver(graph, self._ref_resolver)
+        self._grounding_resolver = GroundingResolver(graph, self._ref_resolver, workspace=workspace)
         self._gateway = HCIRGateway(graph, workspace=workspace)
         self._epistemic_policy = epistemic_policy or EpistemicRealizationPolicy()
 
@@ -182,6 +182,20 @@ class MultilingualLanguageRuntime:
         # 2. Grounding & Reference Resolution against A13/A15 HCIR state
         grounded = self._grounding_resolver.ground_frame(frame)
         if not grounded.grounding_success:
+            # COMMAND frames with tool verbs bypass grounding failure —
+            # the CommandDispatcher interprets raw concept names as tool params
+            if frame.frame_type == FrameType.COMMAND:
+                goal_node = self._gateway.process_command(grounded)
+                return LanguageTurnResult(
+                    raw_input=text,
+                    language=language,
+                    semantic_frame=frame,
+                    grounded_frame=grounded,
+                    is_success=True,
+                    hcir_node_id=goal_node.id,
+                    response_text="Goal accepted.",
+                )
+
             err_type = grounded.grounding_error or LanguageErrorType.GROUNDING_FAILED
             err_detail = grounded.grounding_error_detail
             resp = "I could not identify the entity you are referring to."
