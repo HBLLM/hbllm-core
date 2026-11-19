@@ -150,6 +150,16 @@ class LexicalOntologyStore:
                    hypernyms_json, synonyms_json, thematic_roles_json, domain, source
             FROM lexical_entries
             WHERE language = ? AND lemma = ?
+            ORDER BY CASE pos
+                WHEN 'noun' THEN 0
+                WHEN 'n' THEN 0
+                WHEN 'adj' THEN 1
+                WHEN 'a' THEN 1
+                WHEN 's' THEN 1
+                WHEN 'verb' THEN 2
+                WHEN 'v' THEN 2
+                ELSE 3
+            END
             """,
             (language, key),
         )

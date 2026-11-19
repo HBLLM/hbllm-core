@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from hbllm.hcir.nodes import BeliefNode
+from hbllm.hcir.language.ontology_bootstrap import LexicalOntologyRecord
+from hbllm.hcir.nodes import BeliefNode, PhysicalEntityNode
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance
 
@@ -34,6 +35,8 @@ class AutonomyTracker:
     realize_hcir_success: int = 0
     shadow_invocations: int = 0
     distilled_lessons: int = 0
+    distilled_entities: int = 0
+    distilled_lexicon_entries: int = 0
     rejected_lessons: int = 0
     retirement_threshold: float = 0.98
     min_turns_for_retirement: int = 50
@@ -83,12 +86,15 @@ class AutonomyTracker:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "parse_attempts": self.parse_attempts,
             "hcir_parse_autonomy_rate": round(self.hcir_parse_autonomy_rate, 4),
             "hcir_plan_autonomy_rate": round(self.hcir_plan_autonomy_rate, 4),
             "hcir_realize_autonomy_rate": round(self.hcir_realize_autonomy_rate, 4),
             "overall_autonomy_rate": round(self.overall_autonomy_rate, 4),
             "shadow_invocations": self.shadow_invocations,
             "distilled_lessons": self.distilled_lessons,
+            "distilled_entities": self.distilled_entities,
+            "distilled_lexicon_entries": self.distilled_lexicon_entries,
             "rejected_lessons": self.rejected_lessons,
             "can_retire_llm": self.can_retire_llm,
         }
@@ -102,11 +108,33 @@ class LLMTeacherScaffold:
         checkpoint_path: Path | str = DEFAULT_LOCAL_CHECKPOINT,
         tracker: AutonomyTracker | None = None,
         teacher_fn: Callable[[str], dict[str, Any]] | None = None,
+        ontology_store: Any | None = None,
     ) -> None:
         self.checkpoint_path = Path(checkpoint_path)
         self.tracker = tracker or AutonomyTracker()
         self._teacher_fn = teacher_fn
+        self._ontology_store = ontology_store
         self.retired = False
+
+    @classmethod
+    def from_local_checkpoint(
+        cls,
+        checkpoint_path: Path | str = DEFAULT_LOCAL_CHECKPOINT,
+        *,
+        tracker: AutonomyTracker | None = None,
+        ontology_store: Any | None = None,
+        max_new_tokens: int = 160,
+    ) -> LLMTeacherScaffold:
+        """Create a scaffold backed by a local HuggingFace checkpoint (offline)."""
+        from plugins.llm_scaffold.local_teacher import LocalHFTeacher
+
+        teacher = LocalHFTeacher(checkpoint_path=checkpoint_path, max_new_tokens=max_new_tokens)
+        return cls(
+            checkpoint_path=checkpoint_path,
+            tracker=tracker,
+            teacher_fn=teacher,
+            ontology_store=ontology_store,
+        )
 
     @property
     def checkpoint_available(self) -> bool:
@@ -129,21 +157,76 @@ class LLMTeacherScaffold:
         if self._teacher_fn is not None:
             suggestion = self._teacher_fn(utterance)
         else:
-            # Deterministic offline placeholder when no live teacher callable is bound
             suggestion = {
                 "response_text": "",
                 "claim": "",
+                "entities": [],
+                "lexicon": [],
                 "confidence": 0.0,
                 "verified": False,
             }
 
         claim = str(suggestion.get("claim", "")).strip()
+        entities = suggestion.get("entities") or []
+        lexicon_items = suggestion.get("lexicon") or []
         confidence = float(suggestion.get("confidence", 0.0))
         verified = bool(suggestion.get("verified", False))
         distilled = False
 
-        if claim and verified and confidence >= confidence_floor and workspace is not None:
-            node = BeliefNode(
+        if not verified or confidence < confidence_floor:
+            if claim or entities or lexicon_items:
+                self.tracker.rejected_lessons += 1
+            return {
+                "retired": False,
+                "response_text": str(suggestion.get("response_text", "")),
+                "distilled": False,
+                "checkpoint": str(self.checkpoint_path),
+            }
+
+        # 1. Distill verified open-vocabulary lexicon entries into LexicalOntologyStore
+        if lexicon_items and self._ontology_store is not None:
+            records = [
+                LexicalOntologyRecord(
+                    lemma=str(item["lemma"]).strip().lower(),
+                    pos=str(item.get("pos", "noun")).strip().lower(),
+                    language="en",
+                    definition=str(item.get("definition", "")),
+                    hypernyms=tuple(item.get("hypernyms") or ()),
+                    domain="t3_shadow_distilled",
+                )
+                for item in lexicon_items
+                if isinstance(item, dict) and item.get("lemma")
+            ]
+            if records:
+                upserted, _ = self._ontology_store.upsert_many(records, source="t3_llm_scaffold")
+                self.tracker.distilled_lexicon_entries += upserted
+
+        # 2. Distill verified PhysicalEntityNodes + BeliefNode atomically via TransactionManager
+        ops: list[TransactionOperation] = []
+        entity_count = 0
+        for ent in entities:
+            if not isinstance(ent, dict) or not ent.get("name"):
+                continue
+            ename = str(ent["name"]).strip().lower()
+            etype = str(ent.get("type", ename)).strip().lower()
+            eid = f"scaffold_ent_{etype}_{ename}"
+            ent_node = PhysicalEntityNode(
+                id=eid,
+                entity_name=ename,
+                entity_type=etype,
+                properties=dict(ent.get("properties") or {}),
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=ent_node.id,
+                    node_data=ent_node.model_dump(),
+                )
+            )
+            entity_count += 1
+
+        if claim:
+            belief = BeliefNode(
                 id=f"scaffold_lesson_{uuid.uuid4().hex[:10]}",
                 statement=claim,
                 confidence=min(1.0, confidence),
@@ -153,21 +236,24 @@ class LLMTeacherScaffold:
                     evidence=[f"speaker:{speaker_id}", f"utterance:{utterance[:80]}"],
                 ),
             )
-            op = TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=node.id,
-                node_data=node.model_dump(),
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=belief.id,
+                    node_data=belief.model_dump(),
+                )
             )
+
+        if ops and workspace is not None:
             commit_fn = getattr(workspace, "commit_operations", None)
             if callable(commit_fn):
-                receipt = commit_fn([op], author="llm_scaffold")
+                receipt = commit_fn(ops, author="llm_scaffold")
                 distilled = bool(getattr(receipt, "is_committed", False))
             if distilled:
                 self.tracker.distilled_lessons += 1
+                self.tracker.distilled_entities += entity_count
             else:
                 self.tracker.rejected_lessons += 1
-        elif claim:
-            self.tracker.rejected_lessons += 1
 
         return {
             "retired": False,
