@@ -168,6 +168,10 @@ class KernelServices:
         commit_authority_registry: CommitAuthorityRegistry | None = None,
     ) -> KernelServices:
         """Create a fully provisioned KernelServices instance with verified pipeline, executor, and telemetry."""
+        from hbllm.hcir.capabilities.memory_capabilities import (
+            MEMORY_CAPABILITIES,
+            MemoryCapabilityExecutor,
+        )
         from hbllm.hcir.capabilities.planning_capabilities import PlanningCapabilityExecutor
         from hbllm.hcir.capabilities.routing_capabilities import RoutingCapabilityExecutor
         from hbllm.hcir.capabilities.tool_capabilities import (
@@ -374,6 +378,34 @@ class KernelServices:
                     required_permissions={"filesystem", "subprocess"}
                     if needs_subprocess
                     else {"filesystem"},
+                )
+            )
+
+        # ── Memory Capabilities ───────────────────────────────────────
+        for m_cap in MEMORY_CAPABILITIES:
+            impl_id = f"kernel_{m_cap}"
+            mem_exec = MemoryCapabilityExecutor(
+                default_capability=m_cap,
+                tiered_workspace=tiered_workspace,
+            )
+            resolver.register(
+                CapabilityImplementation(
+                    capability_name=m_cap,
+                    implementation_id=impl_id,
+                    executor=mem_exec,
+                    priority=5,
+                    description=f"Kernel-governed HCIR-native {m_cap} capability",
+                    tags=["safe", "internal", "memory"],
+                    required_permissions=set(),
+                )
+            )
+            sandbox_mgr.register_policy(
+                SandboxedCapabilityPolicy(
+                    capability_name=m_cap,
+                    provider_id=impl_id,
+                    trust_level=TrustLevel.SYSTEM,
+                    isolation_mode=IsolationMode.IN_PROCESS,
+                    permissions=least_privilege_in_memory,
                 )
             )
 

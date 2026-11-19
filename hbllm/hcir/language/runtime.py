@@ -92,7 +92,12 @@ class MultilingualLanguageRuntime:
         self._workspace = workspace
         self._ref_resolver = reference_resolver or ReferenceResolver()
         self._grounding_resolver = GroundingResolver(graph, self._ref_resolver, workspace=workspace)
-        self._gateway = HCIRGateway(graph, workspace=workspace)
+        self._gateway = HCIRGateway(
+            graph,
+            workspace=workspace,
+            ontology_store=None,  # Set after ontology_store init below
+            tiered_workspace=getattr(workspace, "_tiered_workspace", None),
+        )
         self._epistemic_policy = epistemic_policy or EpistemicRealizationPolicy()
 
         if ontology_store is None:
@@ -104,6 +109,9 @@ class MultilingualLanguageRuntime:
             if DEFAULT_ONTOLOGY_DB.exists():
                 ontology_store = LexicalOntologyStore(DEFAULT_ONTOLOGY_DB)
         self._ontology_store = ontology_store
+
+        # Wire ontology_store into gateway for epistemic prior lookups
+        self._gateway._ontology_store = ontology_store
 
         # Register language engines
         en_parser = EnglishParser()

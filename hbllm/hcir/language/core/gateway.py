@@ -45,9 +45,17 @@ class HCIRGateway:
         goal_node = gateway.process_command(grounded_frame)
     """
 
-    def __init__(self, graph: CognitiveGraph, workspace: Any | None = None) -> None:
+    def __init__(
+        self,
+        graph: CognitiveGraph,
+        workspace: Any | None = None,
+        ontology_store: Any | None = None,
+        tiered_workspace: Any | None = None,
+    ) -> None:
         self._graph = graph
         self._workspace = workspace
+        self._ontology_store = ontology_store
+        self._tiered_workspace = tiered_workspace
 
     def _commit_node(self, node: EvidenceNode | GoalNode) -> None:
         if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
@@ -183,8 +191,16 @@ class HCIRGateway:
         frame = grounded.frame
         target_role = (
             ThematicRole.THEME
-            if ThematicRole.THEME in grounded.grounded_entities
-            else ThematicRole.AGENT
+            if frame.get_role(ThematicRole.THEME) is not None
+            else (
+                ThematicRole.AGENT
+                if frame.get_role(ThematicRole.AGENT) is not None
+                else (
+                    ThematicRole.THEME
+                    if ThematicRole.THEME in grounded.grounded_entities
+                    else ThematicRole.AGENT
+                )
+            )
         )
         entity_id = grounded.grounded_entities.get(target_role)
 
@@ -193,8 +209,11 @@ class HCIRGateway:
             subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
         )
 
-        # If entity could not be grounded, return insufficient evidence
+        # If entity could not be grounded, try epistemic prior before giving up
         if not entity_id:
+            prior = self._lookup_epistemic_prior(subject_name)
+            if prior is not None:
+                return prior
             return CognitiveEpistemicState(
                 target_predicate=frame.predicate,
                 target_subject=subject_name,
@@ -311,6 +330,15 @@ class HCIRGateway:
                     is_known=True,
                     raw_belief_value=str(prop_val),
                 )
+
+            # ── Epistemic Prior Fallback: "What is X?" definition queries ──
+            # When prop_key is "property" (from "property_property" predicate, i.e.
+            # "What is X?"), consult LexicalOntologyStore and persistent memory.
+            if prop_key == "property":
+                prior = self._lookup_epistemic_prior(subject_name)
+                if prior is not None:
+                    return prior
+
             return CognitiveEpistemicState(
                 target_predicate=prop_key,
                 target_subject=subject_name,
@@ -372,11 +400,90 @@ class HCIRGateway:
                     raw_belief_value=False,
                 )
 
+        # ── General fallback: consult epistemic priors before giving up ──
+        prior = self._lookup_epistemic_prior(subject_name)
+        if prior is not None:
+            return prior
+
         return CognitiveEpistemicState(
             target_predicate=frame.predicate,
             target_subject=subject_name,
             is_known=False,
         )
+
+    # ── Epistemic Prior Lookup ────────────────────────────────────────
+
+    def _lookup_epistemic_prior(self, subject_name: str) -> CognitiveEpistemicState | None:
+        """Consult LexicalOntologyStore and persistent memory for prior knowledge.
+
+        Returns a definition-type CognitiveEpistemicState if found, else None.
+        Fallback order:
+          1. LexicalOntologyStore (110K+ definitions, O(1) indexed lookup)
+          2. TieredWorkspace.persistent (ConceptNode / BeliefNode full-text search)
+        """
+        # 1. LexicalOntologyStore — fast indexed definition lookup
+        if self._ontology_store is not None:
+            try:
+                entries = self._ontology_store.lookup(subject_name)
+                for entry in entries:
+                    if entry.definition:
+                        return CognitiveEpistemicState(
+                            target_predicate="definition",
+                            target_subject=subject_name,
+                            target_object=entry.definition,
+                            confidence=0.85,
+                            uncertainty=0.15,
+                            support_count=1,
+                            is_known=True,
+                            raw_belief_value=entry.definition,
+                            provenance=f"ontology:{entry.source or 'lexical_store'}",
+                        )
+            except Exception:
+                logger.debug("HCIRGateway: ontology lookup failed for %r", subject_name)
+
+        # 2. TieredWorkspace persistent memory — ConceptNode / BeliefNode search
+        if self._tiered_workspace is not None:
+            try:
+                from hbllm.hcir.graph import BeliefNode, ConceptNode
+                from hbllm.hcir.query import GraphQuery
+
+                query = GraphQuery(text_contains=subject_name, limit=5)
+                result = self._tiered_workspace.query_across_tiers(
+                    query,
+                    tiers=None,  # search all tiers
+                )
+                for node in result.nodes:
+                    if isinstance(node, ConceptNode) and node.definition:
+                        return CognitiveEpistemicState(
+                            target_predicate="definition",
+                            target_subject=subject_name,
+                            target_object=node.definition,
+                            confidence=0.80,
+                            uncertainty=0.20,
+                            support_count=1,
+                            is_known=True,
+                            raw_belief_value=node.definition,
+                            provenance="persistent_memory:concept",
+                        )
+                    if isinstance(node, BeliefNode) and node.claim:
+                        return CognitiveEpistemicState(
+                            target_predicate="definition",
+                            target_subject=subject_name,
+                            target_object=node.claim,
+                            confidence=0.75,
+                            uncertainty=0.25,
+                            support_count=1,
+                            is_known=True,
+                            raw_belief_value=node.claim,
+                            provenance="persistent_memory:belief",
+                        )
+            except Exception:
+                logger.debug(
+                    "HCIRGateway: persistent memory lookup failed for %r",
+                    subject_name,
+                )
+
+        return None
 
     # ── Command: Goal & Action Proposals ──────────────────────────────
 

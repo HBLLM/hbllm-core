@@ -76,6 +76,17 @@ VERB_CAPABILITY_MAP: dict[str, str] = {
     "plan": "planning.generate_candidates",
     "expand": "planning.expand",
     "validate": "planning.validate",
+    # Memory operations
+    "remember": "memory.store",
+    "store": "memory.store",
+    "memorize": "memory.store",
+    "save": "memory.store",
+    "recall": "memory.recall",
+    "retrieve": "memory.recall",
+    "forget": "memory.forget",
+    # Knowledge ingestion
+    "ingest": "knowledge.ingest",
+    "index": "knowledge.ingest",
 }
 
 
@@ -329,6 +340,16 @@ class CommandDispatcher:
                 params["command"] = target or raw
         elif capability == "git.status":
             pass  # No specific target needed
+        elif capability in ("memory.store", "memory.recall", "memory.forget"):
+            # Extract the content after the imperative verb for memory operations
+            raw = getattr(frame.metadata, "raw_text", "").strip()
+            words = raw.split(maxsplit=1)
+            if len(words) > 1 and words[0].lower() == (frame.predicate or "").lower():
+                params["content"] = words[1]
+            else:
+                params["content"] = target or raw
+        elif capability == "knowledge.ingest":
+            params["path"] = target or "."
         else:
             # Generic: pass target as-is
             if target:

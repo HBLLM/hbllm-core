@@ -85,6 +85,9 @@ class CognitiveSystem:
                 self.workspace.graph,
                 workspace=self.workspace,
             )
+            # Wire tiered_workspace into the gateway for epistemic prior lookups
+            if self.tiered_workspace is not None:
+                lang_rt._gateway._tiered_workspace = self.tiered_workspace
             self.services.extensions["language_runtime"] = lang_rt
 
         turn = lang_rt.process_utterance(text, speaker=speaker)

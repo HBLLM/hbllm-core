@@ -141,6 +141,20 @@ class HCIRMemoryBackend:
             MigrationPhase.LEGACY_REMOVED,
         )
 
+    def _commit_persistent(
+        self,
+        operations: list[TransactionOperation],
+        *,
+        author: str = "hcir_memory_backend",
+    ) -> Any:
+        """Commit operations to persistent tier with system grant if available."""
+        grant = getattr(self._workspace, "_system_grant", None)
+        return self._workspace.persistent.commit_operations(
+            operations,
+            author=author,
+            grant=grant,
+        )
+
     # ── Episodic Memory ──────────────────────────────────────────────
 
     async def store_episode(
@@ -172,7 +186,7 @@ class HCIRMemoryBackend:
             ),
             tags=["episodic", "hcir_native"],
         )
-        self._workspace.persistent.commit_operations(
+        self._commit_persistent(
             [
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -241,7 +255,7 @@ class HCIRMemoryBackend:
             ),
             tags=["semantic", "hcir_native"],
         )
-        self._workspace.persistent.commit_operations(
+        self._commit_persistent(
             [
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -305,7 +319,7 @@ class HCIRMemoryBackend:
             ),
             tags=["procedural", "hcir_native"],
         )
-        self._workspace.persistent.commit_operations(
+        self._commit_persistent(
             [
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -367,7 +381,7 @@ class HCIRMemoryBackend:
             ),
             tags=["value", "hcir_native"],
         )
-        self._workspace.persistent.commit_operations(
+        self._commit_persistent(
             [
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -406,7 +420,7 @@ class HCIRMemoryBackend:
             ),
             tags=["knowledge_graph", "belief", "hcir_native"],
         )
-        self._workspace.persistent.commit_operations(
+        self._commit_persistent(
             [
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -433,7 +447,7 @@ class HCIRMemoryBackend:
             targets=[target_id],
             edge_type=edge_type,
         )
-        self._workspace.persistent.commit_operations(
+        self._commit_persistent(
             [
                 TransactionOperation(
                     op=TransactionOp.ADD_EDGE,

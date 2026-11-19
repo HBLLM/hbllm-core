@@ -49,6 +49,18 @@ class EnglishRealizer:
         elif pred in ("near",):
             prep = "near"
 
+        # 0. Definition answers ("What is X?" → definition from epistemic prior)
+        if pred == "definition" and obj:
+            article = self._indefinite_article(subj)
+            if level == EpistemicVerbalizationLevel.CERTAIN:
+                return f"{article} {subj} is {obj}."
+            elif level == EpistemicVerbalizationLevel.PROBABLE:
+                return f"{article} {subj} is generally described as {obj}."
+            elif level == EpistemicVerbalizationLevel.PLAUSIBLE:
+                return f"I believe {article.lower()} {subj} is {obj}."
+            else:
+                return f"From what I know, {article.lower()} {subj} may be described as {obj}."
+
         # 1. Unknown / Insufficient Evidence
         if level == EpistemicVerbalizationLevel.INSUFFICIENT_EVIDENCE:
             if original_frame and original_frame.query_target == "location":
@@ -91,6 +103,13 @@ class EnglishRealizer:
             return f"I think the {subj} may be {prep} the {obj}."
         else:
             return f"I am not certain, but the {subj} might be {prep} the {obj}."
+
+    @staticmethod
+    def _indefinite_article(word: str) -> str:
+        """Return 'A' or 'An' for the given word (title-cased)."""
+        if word and word[0].lower() in "aeiou":
+            return "An"
+        return "A"
 
     def realize_frame(self, frame: SemanticFrame) -> str:
         """Realize a SemanticFrame directly into declarative English (for interlingual translation)."""
