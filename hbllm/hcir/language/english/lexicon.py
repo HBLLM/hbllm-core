@@ -122,9 +122,13 @@ class EnglishLexicon:
         preps = {
             "on": "located_on",
             "in": "located_in",
+            "inside": "located_in",
+            "within": "located_in",
             "under": "below",
+            "beneath": "below",
             "above": "above",
             "near": "near",
+            "beside": "near",
             "from": "from",
             "to": "to",
             "into": "into",

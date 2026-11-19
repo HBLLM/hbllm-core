@@ -59,6 +59,9 @@ class EnglishParser:
         # 2. Syntactic parsing
         ast = self._syntax.parse(tokens)
         if not ast:
+            imp_frame = self._try_parse_imperative_command(tokens, meta)
+            if imp_frame is not None:
+                return imp_frame
             return SemanticFrame(
                 frame_type=FrameType.ERROR,
                 error_type=LanguageErrorType.UNRESOLVED_LANGUAGE,
@@ -77,6 +80,62 @@ class EnglishParser:
                 error_detail=str(e),
                 metadata=meta,
             )
+
+    def parse_discourse(self, text: str) -> list[SemanticFrame]:
+        """Parse multi-sentence / multi-clause English discourse into ordered SemanticFrames."""
+        import re
+
+        clauses: list[str] = []
+        for sent in re.split(r"[.!?;]+", text):
+            sent = sent.strip()
+            if not sent:
+                continue
+            # Split sequential clauses on 'and then', 'then', or clause-level 'and'
+            parts = re.split(r"\b(?:and\s+then|then)\b", sent, flags=re.IGNORECASE)
+            for part in parts:
+                subparts = re.split(r"\band\b", part, flags=re.IGNORECASE)
+                if len(subparts) > 1 and all(len(p.strip().split()) >= 2 for p in subparts):
+                    clauses.extend(p.strip() for p in subparts if p.strip())
+                elif part.strip():
+                    clauses.append(part.strip())
+
+        return [self.parse(clause) for clause in clauses]
+
+    def _try_parse_imperative_command(
+        self, tokens: list[Any], meta: LanguageMetadata
+    ) -> SemanticFrame | None:
+        """Parse concise imperative tool/action commands (e.g. 'Read the file', 'Verify code')."""
+        content = [t for t in tokens if t.pos != EnglishPOS.PUNCT]
+        if len(content) < 2:
+            return None
+        first = content[0]
+        # Accept leading verb (either tagged VERB or having a VERB entry in lexicon/ontology)
+        first_entries = self._lexicon.lookup(first.lemma)
+        is_verb = first.pos == EnglishPOS.VERB or any(
+            e.pos == EnglishPOS.VERB for e in first_entries
+        )
+        if not is_verb:
+            return None
+
+        rest = [t for t in content[1:] if t.pos != EnglishPOS.DET]
+        if not rest:
+            return None
+        head = rest[-1]
+        props: dict[str, Any] = {}
+        if len(rest) > 1:
+            props["modifier"] = " ".join(t.lemma for t in rest[:-1])
+
+        patient = EntityReference(
+            concept_name=head.lemma,
+            properties=props,
+        )
+        frame = SemanticFrame(
+            frame_type=FrameType.COMMAND,
+            predicate=first.lemma,
+            metadata=meta,
+        )
+        frame.set_role(ThematicRole.PATIENT, patient)
+        return frame
 
     # ── AST to SemanticFrame Translation ──────────────────────────────
 

@@ -22,7 +22,7 @@ _SYSTEM_PROMPT = (
     "Given a user utterance, output ONLY a single JSON object with keys: "
     '"response_text" (short factual reply), '
     '"claim" (concise canonical proposition), '
-    '"entities" (list of {"name": str, "type": str}), '
+    '"entities" (list of {"name": str, "type": str} containing EVERY concrete noun in the utterance using its exact singular lowercase lemma as "name"), '
     '"lexicon" (list of {"lemma": str, "pos": "noun"|"verb"|"adj", "definition": str, "hypernyms": [str]}), '
     '"confidence" (float 0.0-1.0).'
 )
