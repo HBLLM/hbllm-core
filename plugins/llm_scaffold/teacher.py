@@ -136,6 +136,33 @@ class LLMTeacherScaffold:
             ontology_store=ontology_store,
         )
 
+    @classmethod
+    def from_nvidia_endpoint(
+        cls,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        tracker: AutonomyTracker | None = None,
+        ontology_store: Any | None = None,
+        timeout_s: float = 30.0,
+    ) -> LLMTeacherScaffold:
+        """Create a scaffold backed by an NVIDIA NIM OpenAI-compatible endpoint."""
+        from plugins.llm_scaffold.nvidia_teacher import NvidiaNIMTeacher
+
+        teacher = NvidiaNIMTeacher(
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            timeout_s=timeout_s,
+        )
+        return cls(
+            checkpoint_path=f"nvidia:{teacher.model}",
+            tracker=tracker,
+            teacher_fn=teacher,
+            ontology_store=ontology_store,
+        )
+
     @property
     def checkpoint_available(self) -> bool:
         return self.checkpoint_path.exists()

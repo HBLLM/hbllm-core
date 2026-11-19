@@ -99,3 +99,52 @@ def test_t3_shadow_distillation_enables_pure_hcir_native_autonomy(tmp_path: Path
     assert tracker.hcir_parse_autonomy_rate >= 0.8
     assert tracker.can_retire_llm is True
     store.close()
+
+
+def test_nvidia_nim_teacher_parses_chat_completion_response(monkeypatch: object) -> None:
+    import io
+    import json
+    import urllib.request
+
+    from plugins.llm_scaffold import NvidiaNIMTeacher
+
+    class _FakeResp(io.BytesIO):
+        def __enter__(self) -> _FakeResp:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self.close()
+
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req: urllib.request.Request, timeout: float = 30.0) -> _FakeResp:
+        captured["url"] = req.full_url
+        captured["auth"] = req.get_header("Authorization")
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "response_text": "The satellite is in orbit.",
+                                "claim": "satellite located_in orbit",
+                                "entities": [{"name": "satellite", "type": "satellite"}],
+                                "lexicon": [],
+                                "confidence": 0.91,
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+        return _FakeResp(json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)  # type: ignore[attr-defined]
+    teacher = NvidiaNIMTeacher(api_key="nvapi-test-key", model="meta/llama-3.1-8b-instruct")
+    result = teacher("The satellite is in orbit.")
+
+    assert captured["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
+    assert captured["auth"] == "Bearer nvapi-test-key"
+    assert result["verified"] is True
+    assert result["claim"] == "satellite located_in orbit"
+    assert result["entities"] == [{"name": "satellite", "type": "satellite"}]

@@ -181,7 +181,14 @@ async def run_training(args: argparse.Namespace) -> dict[str, Any]:
     )
     system.services.extensions["autonomy_metrics"] = tracker
 
-    if args.mode == "live":
+    if args.mode == "nvidia":
+        scaffold = LLMTeacherScaffold.from_nvidia_endpoint(
+            model=args.model,
+            base_url=args.base_url,
+            tracker=tracker,
+            ontology_store=store,
+        )
+    elif args.mode == "live":
         scaffold = LLMTeacherScaffold.from_local_checkpoint(
             checkpoint_path=args.checkpoint,
             tracker=tracker,
@@ -241,8 +248,16 @@ async def run_training(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Track T3: Parallel Shadow Distillation into HCIR")
-    parser.add_argument("--mode", choices=["curriculum", "live"], default="curriculum")
+    parser.add_argument("--mode", choices=["curriculum", "nvidia", "live"], default="curriculum")
     parser.add_argument("--checkpoint", default=str(DEFAULT_LOCAL_CHECKPOINT))
+    parser.add_argument(
+        "--model", default=None, help="NVIDIA NIM model (default: meta/llama-3.1-8b-instruct)"
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="NVIDIA NIM base URL (default: https://integrate.api.nvidia.com/v1)",
+    )
     parser.add_argument("--world-id", default="pure_hcir_t3")
     parser.add_argument("--memory-dir", default="checkpoints/t3_shadow")
     parser.add_argument("--ontology-db", default=str(DEFAULT_ONTOLOGY_DB))
