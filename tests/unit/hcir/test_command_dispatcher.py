@@ -286,3 +286,72 @@ class TestBootstrapIntegration:
         # Whether parse succeeds depends on lexicon state;
         # the key invariant is no crash
         assert result is not None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# T5 Enhancement Tests — fs.search, shell.exec, verb mapping updates
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestT5Enhancements:
+    """Tests for T5 capability enhancements: fs.search, shell.exec."""
+
+    def test_verb_map_has_search_verbs(self) -> None:
+        for verb in ("search", "find", "locate", "grep"):
+            assert VERB_CAPABILITY_MAP[verb] == "fs.search"
+
+    def test_verb_map_has_shell_verbs(self) -> None:
+        for verb in ("run", "execute", "start", "launch"):
+            assert VERB_CAPABILITY_MAP[verb] == "shell.exec"
+
+    def test_verb_count_at_least_31(self) -> None:
+        assert len(VERB_CAPABILITY_MAP) >= 31
+
+    def test_tool_capabilities_includes_new(self) -> None:
+        from hbllm.hcir.capabilities.tool_capabilities import TOOL_CAPABILITIES
+
+        assert "fs.search" in TOOL_CAPABILITIES
+        assert "shell.exec" in TOOL_CAPABILITIES
+
+    @pytest.mark.asyncio
+    async def test_fs_search_executor(self, tmp_path) -> None:
+        from hbllm.hcir.capabilities.tool_capabilities import ToolCapabilityExecutor
+
+        # Create test files
+        (tmp_path / "foo.py").write_text("pass")
+        (tmp_path / "bar.py").write_text("pass")
+        (tmp_path / "baz.txt").write_text("hello")
+
+        executor = ToolCapabilityExecutor(default_capability="fs.search", root_dir=tmp_path)
+        result = await executor.execute({"pattern": "*.py"})
+        assert result["ok"] is True
+        assert result["total"] >= 2
+        names = [m["name"] for m in result["matches"]]
+        assert any("foo.py" in n for n in names)
+
+    @pytest.mark.asyncio
+    async def test_shell_exec_echo(self, tmp_path) -> None:
+        from hbllm.hcir.capabilities.tool_capabilities import ToolCapabilityExecutor
+
+        executor = ToolCapabilityExecutor(default_capability="shell.exec", root_dir=tmp_path)
+        result = await executor.execute({"command": "echo hello"})
+        assert result["ok"] is True
+        assert "hello" in result["stdout"]
+
+    @pytest.mark.asyncio
+    async def test_shell_exec_timeout(self, tmp_path) -> None:
+        from hbllm.hcir.capabilities.tool_capabilities import ToolCapabilityExecutor
+
+        executor = ToolCapabilityExecutor(default_capability="shell.exec", root_dir=tmp_path)
+        result = await executor.execute({"command": "sleep 60", "timeout": 0.1})
+        assert result["ok"] is False
+        assert "timed out" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_shell_exec_missing_command(self, tmp_path) -> None:
+        from hbllm.hcir.capabilities.tool_capabilities import ToolCapabilityExecutor
+
+        executor = ToolCapabilityExecutor(default_capability="shell.exec", root_dir=tmp_path)
+        result = await executor.execute({})
+        assert result["ok"] is False
+        assert "requires" in result["error"]
