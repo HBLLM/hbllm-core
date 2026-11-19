@@ -700,23 +700,35 @@ class OntologyBootstrapper:
     def commit_records(
         self,
         records: Sequence[LexicalOntologyRecord],
-        workspace: Any,
+        workspace: Any | None,
         *,
         source: str = "custom",
         batch_size: int = 200,
         author: str = "t1_ontology_bootstrap",
         lexicon: EnglishLexicon | None = None,
         grant: Any | None = None,
+        ontology_store: Any | None = None,
+        workspace_limit: int | None = None,
     ) -> BootstrapStats:
-        """Commit lexical ontology records atomically via ``workspace.commit_operations``."""
+        """Commit lexical ontology records to ``ontology_store`` and/or ``workspace``."""
         t0 = time.perf_counter()
         stats = BootstrapStats(source=source, records_processed=len(records))
+
+        if ontology_store is not None:
+            stored_entries, stored_edges = ontology_store.upsert_many(records, source=source)
+            stats.extra["store_entries_upserted"] = stored_entries
+            stats.extra["store_hypernym_edges"] = stored_edges
+
+        ws_records = records[:workspace_limit] if workspace_limit is not None else records
+        if workspace is None or not ws_records:
+            stats.elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+            return stats
 
         ops: list[TransactionOperation] = []
         created_ids: dict[tuple[str, str], str] = {}
 
         # Pass 1: ConceptNodes
-        for rec in records:
+        for rec in ws_records:
             lemma = rec.lemma.strip().lower()
             if not lemma:
                 continue
@@ -749,17 +761,19 @@ class OntologyBootstrapper:
             )
 
         # Pass 2: Taxonomic GENERALIZES edges (child -> hypernym)
+        existing_edges = getattr(getattr(workspace, "graph", None), "edges", {})
         edge_ops: list[TransactionOperation] = []
-        for rec in records:
+        for rec in ws_records:
             lemma = rec.lemma.strip().lower()
             pos = rec.pos.strip().lower() or "noun"
             src_id = _concept_id(rec.language, pos, lemma)
             for hyp in rec.hypernyms:
                 hyp_clean = hyp.strip().lower()
                 dst_id = created_ids.get((rec.language, hyp_clean))
-                if dst_id and dst_id != src_id:
+                edge_id = f"gen_{src_id}__{dst_id}"
+                if dst_id and dst_id != src_id and edge_id not in existing_edges:
                     edge = HCIREdge(
-                        id=f"gen_{src_id}__{dst_id}",
+                        id=edge_id,
                         edge_type=HCIREdgeType.GENERALIZES,
                         sources=[src_id],
                         targets=[dst_id],
@@ -794,10 +808,11 @@ class OntologyBootstrapper:
 
     def ingest_core_ontology(
         self,
-        workspace: Any,
+        workspace: Any | None,
         *,
         lexicon: EnglishLexicon | None = None,
         grant: Any | None = None,
+        ontology_store: Any | None = None,
     ) -> BootstrapStats:
         """Ingest the built-in open-domain + software/OS/reasoning starter ontology."""
         return self.commit_records(
@@ -806,17 +821,20 @@ class OntologyBootstrapper:
             source="core_ontology",
             lexicon=lexicon,
             grant=grant,
+            ontology_store=ontology_store,
         )
 
     def ingest_kaikki_jsonl(
         self,
         path: Path | str,
-        workspace: Any,
+        workspace: Any | None,
         *,
         language: str = "en",
         limit: int = 10_000,
         lexicon: EnglishLexicon | None = None,
         grant: Any | None = None,
+        ontology_store: Any | None = None,
+        workspace_limit: int | None = None,
     ) -> BootstrapStats:
         """Ingest a Kaikki / Wiktionary JSONL dump for any language (en/si/ta)."""
         file_path = Path(path)
@@ -874,15 +892,19 @@ class OntologyBootstrapper:
             source=f"kaikki:{file_path.name}",
             lexicon=lexicon,
             grant=grant,
+            ontology_store=ontology_store,
+            workspace_limit=workspace_limit,
         )
 
     def ingest_wordnet(
         self,
-        workspace: Any,
+        workspace: Any | None,
         *,
-        limit: int = 20_000,
+        limit: int = 120_000,
         lexicon: EnglishLexicon | None = None,
         grant: Any | None = None,
+        ontology_store: Any | None = None,
+        workspace_limit: int | None = 0,
     ) -> BootstrapStats:
         """Ingest Open English WordNet via ``wn`` or ``nltk.corpus.wordnet``."""
         records: list[LexicalOntologyRecord] = []
@@ -919,7 +941,13 @@ class OntologyBootstrapper:
                     )
                 )
             return self.commit_records(
-                records, workspace, source="open_english_wordnet", lexicon=lexicon, grant=grant
+                records,
+                workspace,
+                source="open_english_wordnet",
+                lexicon=lexicon,
+                grant=grant,
+                ontology_store=ontology_store,
+                workspace_limit=workspace_limit,
             )
         except ImportError:
             pass
@@ -953,7 +981,13 @@ class OntologyBootstrapper:
                     )
                 )
             return self.commit_records(
-                records, workspace, source="nltk_wordnet", lexicon=lexicon, grant=grant
+                records,
+                workspace,
+                source="nltk_wordnet",
+                lexicon=lexicon,
+                grant=grant,
+                ontology_store=ontology_store,
+                workspace_limit=workspace_limit,
             )
         except (ImportError, LookupError) as exc:
             raise RuntimeError(
@@ -964,13 +998,15 @@ class OntologyBootstrapper:
     def ingest_corpus_directory(
         self,
         directory: Path | str,
-        workspace: Any,
+        workspace: Any | None,
         *,
         limit: int = 5_000,
         min_freq: int = 3,
         max_files: int = 100,
         lexicon: EnglishLexicon | None = None,
         grant: Any | None = None,
+        ontology_store: Any | None = None,
+        workspace_limit: int | None = None,
     ) -> BootstrapStats:
         """Extract high-frequency open vocabulary from local text/markdown files."""
         root = Path(directory)
@@ -1009,6 +1045,8 @@ class OntologyBootstrapper:
             source=f"corpus:{root.name}",
             lexicon=lexicon,
             grant=grant,
+            ontology_store=ontology_store,
+            workspace_limit=workspace_limit,
         )
         stats.extra["files_scanned"] = files_scanned
         return stats

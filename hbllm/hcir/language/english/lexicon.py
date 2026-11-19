@@ -44,9 +44,14 @@ class EnglishLexicon:
     relations, and action predicates.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ontology_store: Any | None = None) -> None:
         self._entries: dict[str, list[EnglishLexicalEntry]] = {}
+        self._ontology_store = ontology_store
         self._init_vocabulary()
+
+    def attach_ontology_store(self, store: Any) -> None:
+        """Attach an indexed ``LexicalOntologyStore`` for O(1) open-vocabulary fallback."""
+        self._ontology_store = store
 
     def add_entry(self, entry: EnglishLexicalEntry) -> None:
         word = entry.lemma.lower()
@@ -55,10 +60,49 @@ class EnglishLexicon:
         self._entries[word].append(entry)
 
     def lookup(self, word: str) -> list[EnglishLexicalEntry]:
-        return self._entries.get(word.lower(), [])
+        key = word.lower()
+        local = self._entries.get(key)
+        if local:
+            return local
+        if self._ontology_store is not None:
+            pos_map = {
+                "n": EnglishPOS.NOUN,
+                "noun": EnglishPOS.NOUN,
+                "v": EnglishPOS.VERB,
+                "verb": EnglishPOS.VERB,
+                "a": EnglishPOS.ADJ,
+                "s": EnglishPOS.ADJ,
+                "adj": EnglishPOS.ADJ,
+                "adjective": EnglishPOS.ADJ,
+                "r": EnglishPOS.ADV,
+                "adv": EnglishPOS.ADV,
+                "adverb": EnglishPOS.ADV,
+                "prep": EnglishPOS.PREP,
+                "preposition": EnglishPOS.PREP,
+            }
+            stored = self._ontology_store.lookup(key, language="en")
+            if stored:
+                return [
+                    EnglishLexicalEntry(
+                        lemma=s.lemma,
+                        pos=pos_map.get(s.pos, EnglishPOS.NOUN),
+                        semantic_predicate=s.lemma,
+                        properties={
+                            "thematic_roles": list(s.thematic_roles),
+                            "hypernyms": list(s.hypernyms),
+                        },
+                    )
+                    for s in stored
+                ]
+        return []
 
     def has_word(self, word: str) -> bool:
-        return word.lower() in self._entries
+        key = word.lower()
+        if key in self._entries:
+            return True
+        if self._ontology_store is not None:
+            return bool(self._ontology_store.has_word(key, language="en"))
+        return False
 
     def _init_vocabulary(self) -> None:
         # Determiners

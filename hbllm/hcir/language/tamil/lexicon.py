@@ -35,9 +35,13 @@ class TamilLexicalEntry:
 class TamilLexicon:
     """Dictionary of Tamil words with POS tags and semantic mappings."""
 
-    def __init__(self) -> None:
+    def __init__(self, ontology_store: Any | None = None) -> None:
         self._entries: dict[str, list[TamilLexicalEntry]] = {}
+        self._ontology_store = ontology_store
         self._init_vocabulary()
+
+    def attach_ontology_store(self, store: Any) -> None:
+        self._ontology_store = store
 
     def add_entry(self, entry: TamilLexicalEntry) -> None:
         word = entry.lemma.strip()
@@ -46,7 +50,28 @@ class TamilLexicon:
         self._entries[word].append(entry)
 
     def lookup(self, word: str) -> list[TamilLexicalEntry]:
-        return self._entries.get(word.strip(), [])
+        key = word.strip()
+        local = self._entries.get(key)
+        if local:
+            return local
+        if self._ontology_store is not None:
+            pos_map = {
+                "noun": TamilPOS.NOUN,
+                "verb": TamilPOS.VERB,
+                "adj": TamilPOS.ADJ,
+                "postp": TamilPOS.POSTP,
+            }
+            stored = self._ontology_store.lookup(key, language="ta")
+            if stored:
+                return [
+                    TamilLexicalEntry(
+                        lemma=s.lemma,
+                        pos=pos_map.get(s.pos, TamilPOS.NOUN),
+                        semantic_predicate=s.lemma,
+                    )
+                    for s in stored
+                ]
+        return []
 
     def _init_vocabulary(self) -> None:
         # Nouns (Physical objects & concepts)

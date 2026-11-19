@@ -86,6 +86,7 @@ class MultilingualLanguageRuntime:
         reference_resolver: ReferenceResolver | None = None,
         epistemic_policy: EpistemicRealizationPolicy | None = None,
         workspace: Any | None = None,
+        ontology_store: Any | None = None,
     ) -> None:
         self._graph = graph
         self._workspace = workspace
@@ -94,8 +95,24 @@ class MultilingualLanguageRuntime:
         self._gateway = HCIRGateway(graph, workspace=workspace)
         self._epistemic_policy = epistemic_policy or EpistemicRealizationPolicy()
 
+        if ontology_store is None:
+            from hbllm.hcir.language.ontology_store import (
+                DEFAULT_ONTOLOGY_DB,
+                LexicalOntologyStore,
+            )
+
+            if DEFAULT_ONTOLOGY_DB.exists():
+                ontology_store = LexicalOntologyStore(DEFAULT_ONTOLOGY_DB)
+        self._ontology_store = ontology_store
+
         # Register language engines
         en_parser = EnglishParser()
+        si_parser = SinhalaParser()
+        ta_parser = TamilParser()
+        if ontology_store is not None:
+            en_parser._lexicon.attach_ontology_store(ontology_store)
+            si_parser._lexicon.attach_ontology_store(ontology_store)
+            ta_parser._lexicon.attach_ontology_store(ontology_store)
         if graph.node_count > 0:
             from hbllm.hcir.language.ontology_bootstrap import OntologyBootstrapper
 
@@ -103,8 +120,8 @@ class MultilingualLanguageRuntime:
 
         self._parsers: dict[str, LanguageParser] = {
             "en": en_parser,
-            "si": SinhalaParser(),
-            "ta": TamilParser(),
+            "si": si_parser,
+            "ta": ta_parser,
         }
         self._realizers: dict[str, LanguageRealizer] = {
             "en": EnglishRealizer(self._epistemic_policy),

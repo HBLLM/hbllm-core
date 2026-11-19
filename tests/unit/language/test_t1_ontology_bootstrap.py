@@ -125,3 +125,23 @@ def test_t1_runtime_auto_hydrates_from_workspace() -> None:
     turn = system.process_dialogue("The server is in the cluster.")
     assert turn.is_success is True
     assert turn.hcir_node_id is not None
+
+
+def test_t1_ontology_store_o1_lookup_and_transitive_taxonomy(tmp_path: Path) -> None:
+    from hbllm.hcir.language.ontology_store import LexicalOntologyStore
+
+    store = LexicalOntologyStore(tmp_path / "lexical_ontology.db")
+    bootstrapper = OntologyBootstrapper()
+    stats = bootstrapper.ingest_core_ontology(None, ontology_store=store)
+    assert stats.extra["store_entries_upserted"] >= 70
+    assert store.is_a("bug", "error") is True
+    assert store.is_a("server", "entity") is True
+    assert store.is_a("server", "agent") is False
+
+    lexicon = EnglishLexicon(ontology_store=store)
+    assert lexicon.has_word("server") is True
+    assert lexicon.has_word("cluster") is True
+    parser = EnglishParser(lexicon=lexicon)
+    frame = parser.parse("The server is in the cluster.")
+    assert frame.predicate == "located_in"
+    store.close()

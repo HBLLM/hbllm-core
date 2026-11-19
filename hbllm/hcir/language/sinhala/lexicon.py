@@ -36,9 +36,13 @@ class SinhalaLexicalEntry:
 class SinhalaLexicon:
     """Dictionary of Sinhala words with POS tags and semantic mappings."""
 
-    def __init__(self) -> None:
+    def __init__(self, ontology_store: Any | None = None) -> None:
         self._entries: dict[str, list[SinhalaLexicalEntry]] = {}
+        self._ontology_store = ontology_store
         self._init_vocabulary()
+
+    def attach_ontology_store(self, store: Any) -> None:
+        self._ontology_store = store
 
     def add_entry(self, entry: SinhalaLexicalEntry) -> None:
         word = entry.lemma.strip()
@@ -47,7 +51,28 @@ class SinhalaLexicon:
         self._entries[word].append(entry)
 
     def lookup(self, word: str) -> list[SinhalaLexicalEntry]:
-        return self._entries.get(word.strip(), [])
+        key = word.strip()
+        local = self._entries.get(key)
+        if local:
+            return local
+        if self._ontology_store is not None:
+            pos_map = {
+                "noun": SinhalaPOS.NOUN,
+                "verb": SinhalaPOS.VERB,
+                "adj": SinhalaPOS.ADJ,
+                "postp": SinhalaPOS.POSTP,
+            }
+            stored = self._ontology_store.lookup(key, language="si")
+            if stored:
+                return [
+                    SinhalaLexicalEntry(
+                        lemma=s.lemma,
+                        pos=pos_map.get(s.pos, SinhalaPOS.NOUN),
+                        semantic_predicate=s.lemma,
+                    )
+                    for s in stored
+                ]
+        return []
 
     def _init_vocabulary(self) -> None:
         # Nouns (Physical objects & concepts)
