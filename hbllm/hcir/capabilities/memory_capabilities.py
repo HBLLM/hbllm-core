@@ -18,6 +18,7 @@ MEMORY_CAPABILITIES: tuple[str, ...] = (
     "memory.recall",
     "memory.forget",
     "knowledge.ingest",
+    "knowledge.explain",
 )
 
 
@@ -39,10 +40,15 @@ class MemoryCapabilityExecutor:
         self._tiered_workspace = tiered_workspace
         self._memory_backend = memory_backend
         self._ontology_store = ontology_store
+        self._explainer: Any | None = None
 
     @property
     def is_available(self) -> bool:
-        return self._memory_backend is not None or self._tiered_workspace is not None
+        return (
+            self._memory_backend is not None
+            or self._tiered_workspace is not None
+            or self._ontology_store is not None
+        )
 
     async def execute(self, params: dict[str, Any]) -> dict[str, Any]:
         cap = str(params.get("capability", self._default_capability))
@@ -55,7 +61,24 @@ class MemoryCapabilityExecutor:
             return await self._exec_memory_forget(params)
         if cap == "knowledge.ingest":
             return await self._exec_knowledge_ingest(params)
+        if cap == "knowledge.explain":
+            return await self._exec_knowledge_explain(params)
         return {"ok": False, "error": f"Unknown memory capability: {cap}"}
+
+    async def _exec_knowledge_explain(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Synthesize a structured multi-sentence discourse/explanation for a concept."""
+        concept = str(params.get("content", params.get("target", ""))).strip()
+        if not concept:
+            return {"ok": False, "error": "knowledge.explain requires 'content' or 'target'"}
+
+        explainer = self._get_or_create_explainer()
+        text = explainer.explain(concept)
+        return {
+            "ok": True,
+            "action": "explained",
+            "concept": concept,
+            "content": text,
+        }
 
     async def _exec_memory_store(self, params: dict[str, Any]) -> dict[str, Any]:
         """Store a concept or belief into persistent memory via HCIRMemoryBackend."""
@@ -241,3 +264,14 @@ class MemoryCapabilityExecutor:
             self._memory_backend = HCIRMemoryBackend(tiered_workspace=self._tiered_workspace)
             return self._memory_backend
         return None
+
+    def _get_or_create_explainer(self) -> Any:
+        """Lazily create ConceptExplainer for structured multi-sentence discourse."""
+        if self._explainer is None:
+            from hbllm.hcir.capabilities.concept_explainer import ConceptExplainer
+
+            self._explainer = ConceptExplainer(
+                tiered_workspace=self._tiered_workspace,
+                ontology_store=self._ontology_store,
+            )
+        return self._explainer

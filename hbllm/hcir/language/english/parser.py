@@ -118,6 +118,19 @@ class EnglishParser:
             return None
 
         rest = [t for t in content[1:] if t.pos != EnglishPOS.DET]
+        verb_pred = first.lemma
+
+        # Normalize "tell me about X" -> predicate="explain", target="X"
+        if verb_pred == "tell":
+            about_idx = -1
+            for idx, t in enumerate(content):
+                if t.lemma == "about":
+                    about_idx = idx
+                    break
+            if about_idx != -1 and about_idx + 1 < len(content):
+                verb_pred = "explain"
+                rest = [t for t in content[about_idx + 1 :] if t.pos != EnglishPOS.DET]
+
         if not rest:
             return None
         head = rest[-1]
@@ -131,7 +144,7 @@ class EnglishParser:
         )
         frame = SemanticFrame(
             frame_type=FrameType.COMMAND,
-            predicate=first.lemma,
+            predicate=verb_pred,
             metadata=meta,
         )
         frame.set_role(ThematicRole.PATIENT, patient)

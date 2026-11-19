@@ -414,74 +414,34 @@ class HCIRGateway:
     # ── Epistemic Prior Lookup ────────────────────────────────────────
 
     def _lookup_epistemic_prior(self, subject_name: str) -> CognitiveEpistemicState | None:
-        """Consult LexicalOntologyStore and persistent memory for prior knowledge.
+        """Consult ConceptExplainer, LexicalOntologyStore, and persistent memory.
 
-        Returns a definition-type CognitiveEpistemicState if found, else None.
-        Fallback order:
-          1. LexicalOntologyStore (110K+ definitions, O(1) indexed lookup)
-          2. TieredWorkspace.persistent (ConceptNode / BeliefNode full-text search)
+        Returns a definition/explanation CognitiveEpistemicState if found, else None.
+        Multi-hop traversal synthesizes definition, taxonomy, requirements, causes, and beliefs.
         """
-        # 1. LexicalOntologyStore — fast indexed definition lookup
-        if self._ontology_store is not None:
-            try:
-                entries = self._ontology_store.lookup(subject_name)
-                for entry in entries:
-                    if entry.definition:
-                        return CognitiveEpistemicState(
-                            target_predicate="definition",
-                            target_subject=subject_name,
-                            target_object=entry.definition,
-                            confidence=0.85,
-                            uncertainty=0.15,
-                            support_count=1,
-                            is_known=True,
-                            raw_belief_value=entry.definition,
-                            provenance=f"ontology:{entry.source or 'lexical_store'}",
-                        )
-            except Exception:
-                logger.debug("HCIRGateway: ontology lookup failed for %r", subject_name)
+        try:
+            from hbllm.hcir.capabilities.concept_explainer import ConceptExplainer
 
-        # 2. TieredWorkspace persistent memory — ConceptNode / BeliefNode search
-        if self._tiered_workspace is not None:
-            try:
-                from hbllm.hcir.graph import BeliefNode, ConceptNode
-                from hbllm.hcir.query import GraphQuery
-
-                query = GraphQuery(text_contains=subject_name, limit=5)
-                result = self._tiered_workspace.query_across_tiers(
-                    query,
-                    tiers=None,  # search all tiers
+            explainer = ConceptExplainer(
+                tiered_workspace=self._tiered_workspace,
+                ontology_store=self._ontology_store,
+            )
+            snapshot = explainer.gather_knowledge(subject_name)
+            if snapshot.has_knowledge:
+                discourse = explainer.synthesize_discourse(snapshot)
+                return CognitiveEpistemicState(
+                    target_predicate="definition",
+                    target_subject=subject_name,
+                    target_object=discourse,
+                    confidence=0.90 if snapshot.definition else 0.75,
+                    uncertainty=0.10 if snapshot.definition else 0.25,
+                    support_count=max(1, len(snapshot.hypernyms) + len(snapshot.causes)),
+                    is_known=True,
+                    raw_belief_value=discourse,
+                    provenance=snapshot.provenance or "concept_explainer",
                 )
-                for node in result.nodes:
-                    if isinstance(node, ConceptNode) and node.definition:
-                        return CognitiveEpistemicState(
-                            target_predicate="definition",
-                            target_subject=subject_name,
-                            target_object=node.definition,
-                            confidence=0.80,
-                            uncertainty=0.20,
-                            support_count=1,
-                            is_known=True,
-                            raw_belief_value=node.definition,
-                            provenance="persistent_memory:concept",
-                        )
-                    if isinstance(node, BeliefNode) and node.claim:
-                        return CognitiveEpistemicState(
-                            target_predicate="definition",
-                            target_subject=subject_name,
-                            target_object=node.claim,
-                            confidence=0.75,
-                            uncertainty=0.25,
-                            support_count=1,
-                            is_known=True,
-                            raw_belief_value=node.claim,
-                            provenance="persistent_memory:belief",
-                        )
-            except Exception:
-                logger.debug(
-                    "HCIRGateway: persistent memory lookup failed for %r",
-                    subject_name,
-                )
+        except Exception as exc:
+            logger.debug("HCIRGateway: concept explainer error for %r: %s", subject_name, exc)
 
         return None
 

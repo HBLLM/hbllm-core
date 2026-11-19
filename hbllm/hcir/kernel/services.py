@@ -382,11 +382,18 @@ class KernelServices:
             )
 
         # ── Memory Capabilities ───────────────────────────────────────
+        ont_store = None
+        from hbllm.hcir.language.ontology_store import DEFAULT_ONTOLOGY_DB, LexicalOntologyStore
+
+        if DEFAULT_ONTOLOGY_DB.exists():
+            ont_store = LexicalOntologyStore(DEFAULT_ONTOLOGY_DB)
+
         for m_cap in MEMORY_CAPABILITIES:
             impl_id = f"kernel_{m_cap}"
             mem_exec = MemoryCapabilityExecutor(
                 default_capability=m_cap,
                 tiered_workspace=tiered_workspace,
+                ontology_store=ont_store,
             )
             resolver.register(
                 CapabilityImplementation(

@@ -150,16 +150,22 @@ class LexicalOntologyStore:
                    hypernyms_json, synonyms_json, thematic_roles_json, domain, source
             FROM lexical_entries
             WHERE language = ? AND lemma = ?
-            ORDER BY CASE pos
-                WHEN 'noun' THEN 0
-                WHEN 'n' THEN 0
-                WHEN 'adj' THEN 1
-                WHEN 'a' THEN 1
-                WHEN 's' THEN 1
-                WHEN 'verb' THEN 2
-                WHEN 'v' THEN 2
-                ELSE 3
-            END
+            ORDER BY
+                CASE
+                    WHEN definition LIKE 'Corpus-grounded%' THEN 2
+                    WHEN source = 'core_ontology' THEN 0
+                    ELSE 1
+                END,
+                CASE pos
+                    WHEN 'noun' THEN 0
+                    WHEN 'n' THEN 0
+                    WHEN 'verb' THEN 1
+                    WHEN 'v' THEN 1
+                    WHEN 'adj' THEN 2
+                    WHEN 'a' THEN 2
+                    WHEN 's' THEN 2
+                    ELSE 3
+                END
             """,
             (language, key),
         )

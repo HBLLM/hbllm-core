@@ -51,6 +51,9 @@ class EnglishRealizer:
 
         # 0. Definition answers ("What is X?" → definition from epistemic prior)
         if pred == "definition" and obj:
+            # If obj is already a synthesized multi-sentence discourse, return it directly
+            if obj.startswith(("A ", "An ", "The ")) and ("." in obj):
+                return obj
             article = self._indefinite_article(subj)
             if level == EpistemicVerbalizationLevel.CERTAIN:
                 return f"{article} {subj} is {obj}."

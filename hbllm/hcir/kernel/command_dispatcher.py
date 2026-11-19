@@ -84,9 +84,14 @@ VERB_CAPABILITY_MAP: dict[str, str] = {
     "recall": "memory.recall",
     "retrieve": "memory.recall",
     "forget": "memory.forget",
-    # Knowledge ingestion
+    # Knowledge ingestion & explanation
     "ingest": "knowledge.ingest",
     "index": "knowledge.ingest",
+    "explain": "knowledge.explain",
+    "describe": "knowledge.explain",
+    "tell": "knowledge.explain",
+    "detail": "knowledge.explain",
+    "summarize": "knowledge.explain",
 }
 
 
@@ -348,6 +353,14 @@ class CommandDispatcher:
                 params["content"] = words[1]
             else:
                 params["content"] = target or raw
+        elif capability == "knowledge.explain":
+            # For explanation commands (explain X, describe X, tell me about X)
+            params["content"] = target or ""
+            if not params["content"]:
+                raw = getattr(frame.metadata, "raw_text", "").strip()
+                words = raw.split(maxsplit=1)
+                if len(words) > 1:
+                    params["content"] = words[1]
         elif capability == "knowledge.ingest":
             params["path"] = target or "."
         else:
