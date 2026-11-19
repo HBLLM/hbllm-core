@@ -344,11 +344,11 @@ class KernelServices:
         for t_cap in TOOL_CAPABILITIES:
             impl_id = f"kernel_{t_cap}"
             tool_exec = ToolCapabilityExecutor(default_capability=t_cap)
-            is_git = t_cap == "git.status"
+            needs_subprocess = t_cap in ("git.status", "shell.exec")
             tool_perms = CapabilityPermissions(
                 allow_filesystem=True,
                 allow_network=False,
-                allow_subprocess=is_git,
+                allow_subprocess=needs_subprocess,
                 allow_db_write=False,
             )
             resolver.register(
@@ -359,7 +359,9 @@ class KernelServices:
                     priority=5,
                     description=f"Kernel-governed sandboxed {t_cap} capability",
                     tags=["safe", "internal", "tool"],
-                    required_permissions={"filesystem", "subprocess"} if is_git else {"filesystem"},
+                    required_permissions={"filesystem", "subprocess"}
+                    if needs_subprocess
+                    else {"filesystem"},
                 )
             )
             sandbox_mgr.register_policy(
@@ -369,7 +371,9 @@ class KernelServices:
                     trust_level=TrustLevel.SYSTEM,
                     isolation_mode=IsolationMode.IN_PROCESS,
                     permissions=tool_perms,
-                    required_permissions={"filesystem", "subprocess"} if is_git else {"filesystem"},
+                    required_permissions={"filesystem", "subprocess"}
+                    if needs_subprocess
+                    else {"filesystem"},
                 )
             )
 

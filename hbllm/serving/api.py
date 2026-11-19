@@ -2553,6 +2553,9 @@ import time
 async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -> Any:
     """
     OpenAI-compatible chat completions endpoint for AI coding assistants like Cursor, Claude Code, etc.
+
+    Routes through Pure-HCIR first (zero LLM); falls back to brain pipeline if HCIR
+    parsing fails or is unavailable.
     """
     from hbllm.brain.core.factory import BrainConfig
 
@@ -2563,6 +2566,64 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
     session_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
 
+    # ── Pure-HCIR fast path (non-streaming only) ─────────────────────
+    if not request.stream:
+        last_user_msg = next(
+            (m.content for m in reversed(request.messages) if m.role == "user"),
+            None,
+        )
+        if last_user_msg:
+            try:
+                from hbllm.runtime.bootstrap import CognitiveSystem
+
+                cognitive_system = _state.get("cognitive_system")
+                if cognitive_system is None:
+                    cognitive_system = CognitiveSystem()
+                    _state["cognitive_system"] = cognitive_system
+
+                hcir_result = cognitive_system.process_dialogue(last_user_msg)
+                if hcir_result.is_success:
+                    logger.info(
+                        "HCIR autonomy: success for input: %s",
+                        last_user_msg[:80],
+                    )
+                    return JSONResponse(
+                        content={
+                            "id": f"chatcmpl-{correlation_id}",
+                            "object": "chat.completion",
+                            "created": int(time.time()),
+                            "model": "hbllm-pure-hcir",
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": hcir_result.response_text,
+                                    },
+                                    "finish_reason": "stop",
+                                }
+                            ],
+                            "usage": {
+                                "prompt_tokens": len(last_user_msg.split()),
+                                "completion_tokens": len(hcir_result.response_text.split()),
+                                "total_tokens": 0,
+                            },
+                        },
+                        headers={"X-HBLLM-Engine": "pure-hcir"},
+                    )
+                else:
+                    logger.debug(
+                        "HCIR fallback to brain pipeline: %s — %s",
+                        hcir_result.error_type,
+                        last_user_msg[:80],
+                    )
+            except Exception:
+                logger.debug(
+                    "HCIR unavailable, falling through to brain pipeline",
+                    exc_info=True,
+                )
+
+    # ── Brain pipeline path (existing) ───────────────────────────────
     # Flatten the messages list into a single prompt for HBLLM
     text_prompt = ""
     for msg in request.messages:

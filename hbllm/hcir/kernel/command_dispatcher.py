@@ -58,10 +58,16 @@ VERB_CAPABILITY_MAP: dict[str, str] = {
     "lint": "code.python_ast",
     # Git
     "status": "git.status",
-    # Search (maps to fs.list with pattern filtering)
-    "search": "fs.list",
-    "find": "fs.list",
-    "locate": "fs.list",
+    # Search (glob/regex pattern matching)
+    "search": "fs.search",
+    "find": "fs.search",
+    "locate": "fs.search",
+    "grep": "fs.search",
+    # Shell execution (sandboxed)
+    "run": "shell.exec",
+    "execute": "shell.exec",
+    "start": "shell.exec",
+    "launch": "shell.exec",
     # World model queries
     "predict": "world.predict_outcome",
     "evaluate": "world.evaluate_prediction_error",

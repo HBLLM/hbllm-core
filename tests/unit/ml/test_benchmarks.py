@@ -119,7 +119,9 @@ async def test_run_invalid_suite():
         await run_suite("nonexistent")
 
 
-def test_benchmarks_api_endpoint():
+def test_benchmarks_api_endpoint(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
+
     from fastapi.testclient import TestClient
 
     from hbllm.serving.api import app

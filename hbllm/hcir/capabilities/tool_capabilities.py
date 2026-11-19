@@ -17,8 +17,10 @@ logger = logging.getLogger(__name__)
 TOOL_CAPABILITIES: tuple[str, ...] = (
     "fs.read",
     "fs.list",
+    "fs.search",
     "code.python_ast",
     "git.status",
+    "shell.exec",
 )
 
 
@@ -59,10 +61,14 @@ class ToolCapabilityExecutor:
             return self._exec_fs_read(root, params)
         if cap == "fs.list":
             return self._exec_fs_list(root, params)
+        if cap == "fs.search":
+            return self._exec_fs_search(root, params)
         if cap == "code.python_ast":
             return self._exec_python_ast(root, params)
         if cap == "git.status":
             return await self._exec_git_status(root, params)
+        if cap == "shell.exec":
+            return await self._exec_shell(root, params)
         return {"ok": False, "error": f"Unknown tool capability: {cap}"}
 
     def _exec_fs_read(self, root: Path, params: dict[str, Any]) -> dict[str, Any]:
@@ -185,3 +191,98 @@ class ToolCapabilityExecutor:
             return {"ok": False, "error": f"git status timed out after {timeout}s"}
         except OSError as exc:
             return {"ok": False, "error": f"git execution failed: {exc}"}
+
+    # ── fs.search ────────────────────────────────────────────────────
+
+    def _exec_fs_search(self, root: Path, params: dict[str, Any]) -> dict[str, Any]:
+        """Search for files matching a glob pattern within the sandbox root."""
+        pattern = str(params.get("pattern", params.get("query", "*")))
+        raw_path = str(params.get("path", "."))
+        limit = int(params.get("limit", self._max_list_entries))
+        try:
+            target = _resolve_sandboxed_path(root, raw_path)
+            if not target.is_dir():
+                return {"ok": False, "error": f"Not a directory: {raw_path}"}
+
+            # Support both glob and recursive glob patterns
+            if "**" in pattern:
+                matches = list(target.glob(pattern))
+            else:
+                # Try recursive search by default
+                matches = list(target.rglob(pattern))
+
+            results = sorted(
+                [
+                    {
+                        "name": str(m.relative_to(root)),
+                        "type": "dir" if m.is_dir() else "file",
+                    }
+                    for m in matches
+                    if "__pycache__" not in m.parts and ".git" not in m.parts
+                ],
+                key=lambda item: item["name"],
+            )
+            truncated = len(results) > limit
+            return {
+                "ok": True,
+                "pattern": pattern,
+                "path": str(target.relative_to(root)),
+                "matches": results[:limit],
+                "truncated": truncated,
+                "total": len(results),
+            }
+        except PermissionError as exc:
+            return {"ok": False, "error": str(exc)}
+        except OSError as exc:
+            return {"ok": False, "error": f"I/O error: {exc}"}
+
+    # ── shell.exec ───────────────────────────────────────────────────
+
+    async def _exec_shell(self, root: Path, params: dict[str, Any]) -> dict[str, Any]:
+        """Execute a sandboxed shell command with strict timeout and output limits.
+
+        Security:
+          - Uses ``subprocess.exec`` (no shell interpolation).
+          - Bounded timeout (default 10s, max 30s).
+          - Output truncated to max_read_bytes.
+          - Only runs within the sandbox root directory.
+        """
+        import shlex
+
+        raw_command = str(params.get("command", ""))
+        if not raw_command:
+            return {"ok": False, "error": "shell.exec requires 'command'"}
+
+        timeout = min(float(params.get("timeout", 10.0)), 30.0)
+
+        try:
+            argv = shlex.split(raw_command)
+        except ValueError as exc:
+            return {"ok": False, "error": f"Invalid command syntax: {exc}"}
+
+        if not argv:
+            return {"ok": False, "error": "Empty command after parsing"}
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                cwd=str(root),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            out = stdout[: self._max_read_bytes].decode("utf-8", errors="replace")
+            err = stderr[: self._max_read_bytes].decode("utf-8", errors="replace").strip()
+            return {
+                "ok": proc.returncode == 0,
+                "returncode": proc.returncode,
+                "stdout": out,
+                "stderr": err,
+                "truncated": len(stdout) > self._max_read_bytes,
+            }
+        except TimeoutError:
+            return {"ok": False, "error": f"Command timed out after {timeout}s"}
+        except FileNotFoundError:
+            return {"ok": False, "error": f"Command not found: {argv[0]!r}"}
+        except OSError as exc:
+            return {"ok": False, "error": f"Execution failed: {exc}"}

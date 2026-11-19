@@ -182,9 +182,14 @@ class MultilingualLanguageRuntime:
         # 2. Grounding & Reference Resolution against A13/A15 HCIR state
         grounded = self._grounding_resolver.ground_frame(frame)
         if not grounded.grounding_success:
-            # COMMAND frames with tool verbs bypass grounding failure —
-            # the CommandDispatcher interprets raw concept names as tool params
-            if frame.frame_type == FrameType.COMMAND:
+            # COMMAND frames with tool verbs bypass NOT-FOUND grounding failures —
+            # the CommandDispatcher interprets raw concept names as tool params.
+            # However, AMBIGUOUS_REFERENCE must still be reported: the user must
+            # disambiguate before we can commit a GoalNode.
+            if (
+                frame.frame_type == FrameType.COMMAND
+                and grounded.grounding_error != LanguageErrorType.AMBIGUOUS_REFERENCE
+            ):
                 goal_node = self._gateway.process_command(grounded)
                 return LanguageTurnResult(
                     raw_input=text,
@@ -200,8 +205,26 @@ class MultilingualLanguageRuntime:
             err_detail = grounded.grounding_error_detail
             resp = "I could not identify the entity you are referring to."
             if err_type == LanguageErrorType.AMBIGUOUS_REFERENCE:
+                # Build a helpful disambiguation response listing candidates
+                candidates_info = ""
+                if grounded.candidate_entities:
+                    for role, ids in grounded.candidate_entities.items():
+                        if len(ids) > 1:
+                            names = []
+                            for eid in ids:
+                                node = self._graph.get_node(eid)
+                                if node is not None:
+                                    props = getattr(node, "properties", {})
+                                    label = props.get("color", "") or props.get("name", "")
+                                    etype = getattr(node, "entity_type", "object")
+                                    names.append(f"{label} {etype}".strip() if label else etype)
+                                else:
+                                    names.append(eid)
+                            candidates_info = " (candidates: " + ", ".join(names) + ")"
+                            break
                 resp = (
-                    "There are multiple objects matching your description; please be more specific."
+                    f"There are multiple objects matching your description"
+                    f"{candidates_info}; please be more specific."
                 )
 
             return LanguageTurnResult(
