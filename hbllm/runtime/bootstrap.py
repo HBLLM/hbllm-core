@@ -17,6 +17,7 @@ from hbllm.hcir.kernel.commit_authority import CommitAuthorityRegistry
 from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.kernel.verification import create_default_pipeline
+from hbllm.hcir.language.core.semantic_frame import FrameType
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TieredWorkspace
 
@@ -113,6 +114,59 @@ class CognitiveSystem:
             neuromod = self.services.extensions.get("neuromodulation")
             if neuromod is not None and hasattr(neuromod, "signal_reward"):
                 neuromod.signal_reward(0.2)
+
+            # If COMMAND frame parsed successfully, dispatch through governed capabilities
+            if (
+                turn.semantic_frame.frame_type == FrameType.COMMAND
+                and turn.semantic_frame.predicate
+            ):
+                from hbllm.hcir.kernel.command_dispatcher import CommandDispatcher
+
+                dispatcher = self.services.extensions.get("command_dispatcher")
+                if dispatcher is None:
+                    dispatcher = CommandDispatcher(
+                        self.services.capability_resolver,
+                        workspace=self.workspace,
+                    )
+                    self.services.extensions["command_dispatcher"] = dispatcher
+
+                import asyncio
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        import concurrent.futures
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            receipt = pool.submit(
+                                asyncio.run, dispatcher.dispatch(turn.semantic_frame)
+                            ).result(timeout=30.0)
+                    else:
+                        receipt = asyncio.run(dispatcher.dispatch(turn.semantic_frame))
+
+                    # Augment the turn result with execution receipt
+                    if receipt.success:
+                        result_summary = receipt.result.get("content", "")
+                        if not result_summary:
+                            entries = receipt.result.get("entries", [])
+                            if entries:
+                                result_summary = "\n".join(
+                                    e.get("name", str(e)) for e in entries[:20]
+                                )
+                        if not result_summary:
+                            result_summary = str(receipt.result)
+
+                        turn.response_text = (
+                            f"Command executed: {receipt.verb} → {receipt.capability}\n"
+                            f"{result_summary}"
+                        )
+                    else:
+                        turn.response_text = f"Command '{receipt.verb}' failed: {receipt.error}"
+                        turn.is_success = False
+                except Exception as exc:
+                    turn.response_text = f"Command dispatch error: {exc}"
+                    turn.is_success = False
+
             return turn
 
         neuromod = self.services.extensions.get("neuromodulation")
