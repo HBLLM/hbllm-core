@@ -87,6 +87,10 @@ def test_cognitive_system_native_hcir_dialogue_commits_via_transactions() -> Non
     metrics = system.services.extensions["autonomy_metrics"]
     assert metrics["parse_attempts"] == 1
     assert metrics["parse_hcir_success"] == 1
+    assert "neuromodulation" in system.services.extensions
+    assert "lexicon_acquisition" in system.services.extensions
+    reasoning_rt = system.services.extensions["reasoning_runtime"]
+    assert "snn_reasoning" in reasoning_rt.registry.operator_ids
 
 
 def test_llm_teacher_scaffold_verifier_gated_and_self_retiring() -> None:

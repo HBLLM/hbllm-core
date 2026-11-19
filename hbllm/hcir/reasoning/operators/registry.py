@@ -312,6 +312,7 @@ def create_default_operator_registry() -> OperatorRegistry:
     from hbllm.hcir.reasoning.operators.induction import InductionOperator
     from hbllm.hcir.reasoning.operators.prediction import PredictionOperator
     from hbllm.hcir.reasoning.operators.simulation import SimulationOperator
+    from hbllm.hcir.reasoning.operators.snn_reasoning import SNNReasoningOperator
     from hbllm.hcir.reasoning.operators.spatial import SpatialOperator
     from hbllm.hcir.reasoning.operators.temporal import TemporalOperator
 
@@ -329,4 +330,5 @@ def create_default_operator_registry() -> OperatorRegistry:
     registry.register(SimulationOperator())
     registry.register(ActiveInferenceOperator())
     registry.register(EmbodiedCausalOperator())
+    registry.register(SNNReasoningOperator())
     return registry

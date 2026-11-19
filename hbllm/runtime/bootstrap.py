@@ -110,7 +110,14 @@ class CognitiveSystem:
                 metrics["realize_hcir_success"] += 1
 
         if turn.is_success:
+            neuromod = self.services.extensions.get("neuromodulation")
+            if neuromod is not None and hasattr(neuromod, "signal_reward"):
+                neuromod.signal_reward(0.2)
             return turn
+
+        neuromod = self.services.extensions.get("neuromodulation")
+        if neuromod is not None and hasattr(neuromod, "signal_novelty"):
+            neuromod.signal_novelty(0.3)
 
         # 2. Optional isolated LLM teacher scaffold (strictly outside hbllm/hcir/)
         scaffold = self.services.extensions.get("llm_scaffold")
@@ -212,13 +219,17 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         )
         engine.attach_grounding_bridge(bridge)
 
-    # 6. Instantiate Executive Runtime and wire dual rhythms + classical reasoning CPU
+    # 6. Instantiate Executive Runtime and wire dual rhythms + classical reasoning CPU + SNN/Language subsystems
     from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
+    from hbllm.hcir.language.acquisition import LexiconAcquisitionLoop
     from hbllm.hcir.reasoning.operators.registry import create_default_operator_registry
     from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
+    from hbllm.hcir.snn.neuromodulation import NeuromodulationEngine
 
     reasoning_rt = UnifiedReasoningRuntime(create_default_operator_registry())
     services.extensions["reasoning_runtime"] = reasoning_rt
+    services.extensions["neuromodulation"] = NeuromodulationEngine()
+    services.extensions["lexicon_acquisition"] = LexiconAcquisitionLoop(workspace.graph)
     runtime = ExecutiveRuntime(services=services)
     runtime.controller.attach_reasoning_runtime(reasoning_rt)
     runtime.attach_engine(engine)

@@ -86,7 +86,7 @@ class CognitivePipeline:
         self.context_fusion = getattr(self.config, "context_fusion", None)
         if self.context_fusion is None and getattr(self.config, "inject_context_fusion", True):
             try:
-                from hbllm.brain.reasoning.context_fusion import ContextFusionEngine
+                from hbllm.hcir.reasoning.context_fusion import ContextFusionEngine
 
                 self.context_fusion = ContextFusionEngine()
             except Exception as e:
