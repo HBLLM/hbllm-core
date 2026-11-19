@@ -236,12 +236,15 @@ class LLMTeacherScaffold:
                 continue
             ename = str(ent["name"]).strip().lower()
             etype = str(ent.get("type", ename)).strip().lower()
-            eid = f"scaffold_ent_{etype}_{ename}"
+            eid = f"scaffold_ent_{ename}"
+            ent_props = dict(ent.get("properties") or {})
+            if etype and etype != ename:
+                ent_props.setdefault("semantic_type", etype)
             ent_node = PhysicalEntityNode(
                 id=eid,
                 entity_name=ename,
-                entity_type=etype,
-                properties=dict(ent.get("properties") or {}),
+                entity_type=ename,
+                properties=ent_props,
             )
             ops.append(
                 TransactionOperation(

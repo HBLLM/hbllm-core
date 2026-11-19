@@ -231,7 +231,7 @@ async def run_training(args: argparse.Namespace) -> dict[str, Any]:
 
     report = {
         "mode": args.mode,
-        "checkpoint": str(args.checkpoint),
+        "teacher": str(scaffold.checkpoint_path),
         "world_id": args.world_id,
         "epochs": epoch_reports,
         "final_metrics": tracker.to_dict(),

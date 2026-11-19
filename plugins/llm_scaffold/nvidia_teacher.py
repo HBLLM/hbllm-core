@@ -13,6 +13,7 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from plugins.llm_scaffold.local_teacher import _SYSTEM_PROMPT, parse_teacher_json
@@ -20,7 +21,23 @@ from plugins.llm_scaffold.local_teacher import _SYSTEM_PROMPT, parse_teacher_jso
 logger = logging.getLogger(__name__)
 
 DEFAULT_NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-8b-instruct"
+DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+
+def _load_dotenv_key(var_name: str, env_path: Path = Path(".env")) -> str:
+    if not env_path.exists():
+        return ""
+    try:
+        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            k, v = stripped.split("=", 1)
+            if k.strip() == var_name:
+                return v.strip().strip('"').strip("'")
+    except OSError:
+        return ""
+    return ""
 
 
 class NvidiaNIMTeacher:
@@ -32,11 +49,18 @@ class NvidiaNIMTeacher:
         model: str | None = None,
         base_url: str | None = None,
         timeout_s: float = 30.0,
-        max_tokens: int = 256,
+        max_tokens: int = 320,
         temperature: float = 0.0,
     ) -> None:
-        self.api_key = api_key or os.getenv("NVIDIA_API_KEY", "")
-        self.model = model or os.getenv("NVIDIA_MODEL", DEFAULT_NVIDIA_MODEL)
+        self.api_key = (
+            api_key or os.getenv("NVIDIA_API_KEY", "") or _load_dotenv_key("NVIDIA_API_KEY")
+        )
+        self.model = (
+            model
+            or os.getenv("NVIDIA_MODEL")
+            or _load_dotenv_key("NVIDIA_MODEL")
+            or DEFAULT_NVIDIA_MODEL
+        )
         self.base_url = (
             base_url or os.getenv("NVIDIA_BASE_URL") or DEFAULT_NVIDIA_BASE_URL
         ).rstrip("/")
@@ -60,6 +84,7 @@ class NvidiaNIMTeacher:
             ],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         body = json.dumps(payload).encode("utf-8")
         return urllib.request.Request(
