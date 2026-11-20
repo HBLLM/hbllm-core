@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-
 from hbllm.hcir.world.autonomous_epistemic_engine import (
     AutonomousEpistemicEngine,
     EpistemicObservation,
@@ -104,5 +102,4 @@ __all__ = [
     "WorldKernelTransaction",
     "WorldModelScope",
     "WorldStateSnapshot",
-    "annotations",
 ]
