@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from hbllm.hcir.graph import (
@@ -29,6 +30,7 @@ from hbllm.hcir.language.core.epistemic_policy import (
 )
 from hbllm.hcir.language.core.gateway import HCIRGateway
 from hbllm.hcir.language.core.grounding import GroundingResolver
+from hbllm.hcir.language.core.profile import LanguageProfile
 from hbllm.hcir.language.core.protocol import LanguageParser, LanguageRealizer
 from hbllm.hcir.language.core.reference import ReferenceResolver
 from hbllm.hcir.language.core.semantic_frame import (
@@ -36,6 +38,10 @@ from hbllm.hcir.language.core.semantic_frame import (
     GroundedSemanticFrame,
     LanguageErrorType,
     SemanticFrame,
+)
+from hbllm.hcir.language.core.universal_engine import (
+    UniversalLanguageParser,
+    UniversalLanguageRealizer,
 )
 from hbllm.hcir.language.english.parser import EnglishParser
 from hbllm.hcir.language.english.realizer import EnglishRealizer
@@ -45,6 +51,8 @@ from hbllm.hcir.language.tamil.parser import TamilParser
 from hbllm.hcir.language.tamil.realizer import TamilRealizer
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PROFILES_DIR: Path = Path(__file__).resolve().parent / "profiles"
 
 
 @dataclass
@@ -151,6 +159,53 @@ class MultilingualLanguageRuntime:
             "si": SinhalaRealizer(self._epistemic_policy),
             "ta": TamilRealizer(self._epistemic_policy),
         }
+
+        # Auto-discover declarative LanguageProfiles (Universal Cognitive Grammar)
+        self._profiles: dict[str, LanguageProfile] = {}
+        self._load_default_profiles()
+
+    def _load_default_profiles(self) -> None:
+        """Auto-discover and load declarative LanguageProfiles from profiles/."""
+        if not DEFAULT_PROFILES_DIR.exists():
+            return
+        for json_file in sorted(DEFAULT_PROFILES_DIR.glob("*.json")):
+            try:
+                prof = LanguageProfile.from_file(json_file)
+                self.register_profile(prof)
+            except Exception as exc:
+                logger.debug("Failed to load language profile %s: %s", json_file, exc)
+
+    def register_profile(self, profile: LanguageProfile) -> None:
+        """Register a declarative LanguageProfile and instantiate its universal parser & realizer."""
+        self._profiles[profile.iso_code] = profile
+        if profile.iso_code not in self._parsers:
+            self._parsers[profile.iso_code] = UniversalLanguageParser(
+                profile, ontology_store=self._ontology_store
+            )
+        if profile.iso_code not in self._realizers:
+            self._realizers[profile.iso_code] = UniversalLanguageRealizer(
+                profile, epistemic_policy=self._epistemic_policy
+            )
+
+    def load_profile(self, path_or_code: str | Path) -> LanguageProfile:
+        """Load and register a LanguageProfile from a file path or known ISO code."""
+        p = Path(path_or_code)
+        if not p.exists() and isinstance(path_or_code, str):
+            p = DEFAULT_PROFILES_DIR / f"{path_or_code}.json"
+        if not p.exists():
+            raise FileNotFoundError(f"Language profile not found: {path_or_code}")
+        prof = LanguageProfile.from_file(p)
+        self.register_profile(prof)
+        return prof
+
+    def get_profile(self, lang_code: str) -> LanguageProfile | None:
+        """Get the registered LanguageProfile for *lang_code* if available."""
+        return self._profiles.get(lang_code)
+
+    @property
+    def supported_languages(self) -> list[str]:
+        """Return list of all supported ISO language codes."""
+        return sorted(self._parsers.keys())
 
     def register_language(
         self,

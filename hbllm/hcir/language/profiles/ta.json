@@ -1,0 +1,113 @@
+{
+  "iso_code": "ta",
+  "name": "Tamil",
+  "typology": {
+    "word_order": "SOV",
+    "adposition_type": "postposition",
+    "wh_movement": "in_situ",
+    "yes_no_strategy": "particle",
+    "copula_style": "postpositional_particle",
+    "has_articles": false,
+    "case_marking": true
+  },
+  "closed_class": {
+    "specifiers": {
+      "இந்த": "proximal",
+      "அந்த": "distal",
+      "அந்தக்": "distal"
+    },
+    "adpositions": {
+      "மேல்": "located_on",
+      "உள்": "located_in",
+      "உள்ளே": "located_in",
+      "கீழ்": "located_under",
+      "அடியில்": "located_under",
+      "அருகில்": "located_near",
+      "பக்கத்தில்": "located_near"
+    },
+    "question_markers": {
+      "எங்கே": {
+        "target": "location",
+        "predicate": "located_on"
+      },
+      "என்ன": {
+        "target": "definition",
+        "predicate": "is_a"
+      },
+      "ஏன்": {
+        "target": "cause",
+        "predicate": "causes"
+      },
+      "எப்படி": {
+        "target": "procedure",
+        "predicate": "requires"
+      }
+    },
+    "question_particles": [
+      "ஆ",
+      "இருக்கிறதா",
+      "உள்ளதா"
+    ],
+    "copula_forms": [
+      "இருக்கிறது",
+      "உள்ளது",
+      "இருக்கின்றன",
+      "ஆகும்"
+    ],
+    "command_verbs": {
+      "திற": "open",
+      "பூட்டு நீக்கு": "unlock",
+      "தள்ளு": "push",
+      "நகர்த்து": "move",
+      "வை": "put",
+      "மூடு": "close",
+      "பூட்டு": "lock",
+      "விளக்கு": "knowledge.explain"
+    },
+    "polite_wrappers": [
+      "தயவுசெய்து",
+      "எனக்கு சொல்"
+    ],
+    "expository_markers": {
+      "exemplification": [
+        "போன்ற",
+        "உதாரணமாக"
+      ],
+      "cause": [
+        "காரணமாகிறது"
+      ],
+      "require": [
+        "தேவைப்படுகிறது"
+      ],
+      "enable": [
+        "இயலச்செய்கிறது"
+      ],
+      "because": [
+        "ஏனெனில்"
+      ]
+    }
+  },
+  "morphology": {
+    "strip_suffixes": [
+      "ஐ",
+      "இல்",
+      "க்கு"
+    ],
+    "strip_prefixes": [],
+    "plural_endings": [
+      "கள்"
+    ],
+    "stemming_rules": []
+  },
+  "templates": {
+    "location_known": "{theme} {location} {adposition} இருக்கிறது.",
+    "location_unknown": "{theme} எங்கே என்று எனக்குத் தெரியாது.",
+    "verification_true": "ஆம், {theme} {location} {adposition} இருக்கிறது.",
+    "verification_false": "இல்லை, {theme} {location} {adposition} இல்லை.",
+    "definition_template": "{subject} என்பது {definition}.",
+    "cause_template": "{cause} என்பதால் {effect} ஏற்படுகிறது.",
+    "procedure_template": "{target} செய்ய {step} தேவைப்படுகிறது.",
+    "command_receipt": "புரிந்து கொள்ளப்பட்டது. இலக்கு ஏற்கப்பட்டது.",
+    "understood_assertion": "புரிந்து கொள்ளப்பட்டது."
+  }
+}
