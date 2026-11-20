@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from hbllm.hcir.world.spatial.coordinate_transform import (
+    ParietalCoordinateTransformer,
+    RetrosplenialCoordinateTransformer,
+)
 from hbllm.hcir.world.spatial.models import (
     DihedralTransform,
     EgocentricCoordinate,
@@ -12,10 +16,6 @@ from hbllm.hcir.world.spatial.models import (
     HeadingOrientation,
     SpatialBearing,
     SpatialEgoVector,
-)
-from hbllm.hcir.world.spatial.transformers import (
-    ParietalCoordinateTransformer,
-    RetrosplenialCoordinateTransformer,
 )
 from hbllm.hcir.world.spatial.transforms import (
     AffineTransform2D,
