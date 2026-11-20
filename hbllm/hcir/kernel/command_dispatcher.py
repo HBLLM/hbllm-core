@@ -391,17 +391,11 @@ class CommandDispatcher:
             else:
                 params["content"] = target or raw
         elif capability == "knowledge.explain_why":
-            raw = getattr(frame.metadata, "raw_text", "").strip()
-            text = re.sub(r"^(?:explain\s+why|why\s+does|why\s+is|why)\s+", "", raw, flags=re.I)
-            text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
+            from hbllm.hcir.language.core.reference import is_anaphoric_term
+
+            raw = getattr(frame.metadata, "raw_text", "").strip().rstrip("?.!")
             text = re.sub(
-                r"\s+(?:works?|occurs?|happens?|operates?|functions?)\s*$", "", text, flags=re.I
-            ).strip()
-            params["content"] = text or target or raw
-        elif capability == "knowledge.explain_how":
-            raw = getattr(frame.metadata, "raw_text", "").strip()
-            text = re.sub(
-                r"^(?:explain\s+how|how\s+does|how\s+do|how\s+is|how\s+to|how)\s+",
+                r"^(?:explain\s+why|why\s+does|why\s+do|why\s+did|why\s+is|why\s+are|why)\s+",
                 "",
                 raw,
                 flags=re.I,
@@ -410,6 +404,25 @@ class CommandDispatcher:
             text = re.sub(
                 r"\s+(?:works?|occurs?|happens?|operates?|functions?)\s*$", "", text, flags=re.I
             ).strip()
+            if is_anaphoric_term(text) and target and not is_anaphoric_term(target):
+                text = target
+            params["content"] = text or target or raw
+        elif capability == "knowledge.explain_how":
+            from hbllm.hcir.language.core.reference import is_anaphoric_term
+
+            raw = getattr(frame.metadata, "raw_text", "").strip().rstrip("?.!")
+            text = re.sub(
+                r"^(?:explain\s+how|how\s+does|how\s+do|how\s+did|how\s+is|how\s+are|how\s+to|how)\s+",
+                "",
+                raw,
+                flags=re.I,
+            )
+            text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
+            text = re.sub(
+                r"\s+(?:works?|occurs?|happens?|operates?|functions?)\s*$", "", text, flags=re.I
+            ).strip()
+            if is_anaphoric_term(text) and target and not is_anaphoric_term(target):
+                text = target
             params["content"] = text or target or raw
         elif capability == "knowledge.explain":
             # For explanation commands (explain X, describe X, tell me about X)

@@ -174,6 +174,9 @@ class MultilingualLanguageRuntime:
                 error_detail=f"Language '{language}' is not supported.",
             )
 
+        # 0. Advance conversational discourse turn (decays prior topic salience)
+        self._ref_resolver.next_turn()
+
         # 1. Parse into language-neutral SemanticFrame
         frame = parser.parse(text)
         if frame.is_error:
@@ -189,6 +192,8 @@ class MultilingualLanguageRuntime:
 
         # 2. Grounding & Reference Resolution against A13/A15 HCIR state
         grounded = self._grounding_resolver.ground_frame(frame)
+        # Register concrete conceptual topics for multi-turn coreference
+        self._register_frame_topics(frame)
         if not grounded.grounding_success:
             # COMMAND frames with tool verbs bypass NOT-FOUND grounding failures —
             # the CommandDispatcher interprets raw concept names as tool params.
@@ -294,6 +299,17 @@ class MultilingualLanguageRuntime:
             grounded_frame=grounded,
             is_success=True,
         )
+
+    def _register_frame_topics(self, frame: SemanticFrame) -> None:
+        """Register concrete conceptual topics from a parsed frame into ReferenceResolver."""
+        from hbllm.hcir.language.core.reference import is_anaphoric_term
+        from hbllm.hcir.language.core.semantic_frame import ThematicRole
+
+        for role in (ThematicRole.THEME, ThematicRole.PATIENT, ThematicRole.AGENT):
+            ref = frame.get_role(role)
+            if ref is not None and ref.concept_name and not is_anaphoric_term(ref.concept_name):
+                self._ref_resolver.register_topic(ref.concept_name)
+                return
 
     # ── Interlingual Semantic Transfer ────────────────────────────────
 

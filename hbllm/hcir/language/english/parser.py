@@ -167,6 +167,11 @@ class EnglishParser:
                 verb_pred = "explain"
                 rest = [t for t in content[about_idx + 1 :] if t.pos != EnglishPOS.DET]
 
+        # Strip leading auxiliary verbs in "why does X happen?" / "how do they work?"
+        _LEADING_AUX = frozenset({"do", "does", "did", "is", "are", "was", "were", "can", "will"})
+        if verb_pred in ("why", "how") and len(rest) > 1 and rest[0].lemma in _LEADING_AUX:
+            rest = rest[1:]
+
         # Strip trailing functional verbs in "how X works" or "why X occurs"
         _TRAILING_VERBS = frozenset(
             {
@@ -192,8 +197,11 @@ class EnglishParser:
         if len(rest) > 1:
             props["modifier"] = " ".join(t.lemma for t in rest[:-1])
 
+        is_anaphoric = head.lemma in {"it", "this", "that", "they", "them", "these", "those"}
         patient = EntityReference(
-            concept_name=head.lemma,
+            concept_name="" if is_anaphoric else head.lemma,
+            specifier="anaphoric" if is_anaphoric else "generic",
+            raw_text=head.surface,
             properties=props,
         )
         frame = SemanticFrame(

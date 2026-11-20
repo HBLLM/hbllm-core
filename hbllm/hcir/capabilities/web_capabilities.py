@@ -424,9 +424,15 @@ class WebCapabilityExecutor:
 
         node_ops: list[TransactionOperation] = []
         edge_ops: list[TransactionOperation] = []
+        revision_ops: list[TransactionOperation] = []
         created_concepts: set[str] = set()
-        existing_edges = getattr(getattr(workspace, "graph", None), "edges", {})
+        graph = getattr(workspace, "graph", None)
+        existing_edges = getattr(graph, "edges", {})
         store_records: list[LexicalOntologyRecord] = []
+
+        from hbllm.hcir.capabilities.belief_revision import BeliefConflictResolver
+
+        conflict_resolver = BeliefConflictResolver()
 
         edge_type_map = {
             "is_a": HCIREdgeType.GENERALIZES,
@@ -462,6 +468,20 @@ class WebCapabilityExecutor:
                 tags=["web_ingestion", prop.relation, prop.source_file],
                 properties={"source_file": prop.source_file, "sentence": prop.sentence[:120]},
             )
+            rev_report = conflict_resolver.evaluate_belief(belief, graph)
+            if rev_report.has_conflicts:
+                belief = belief.model_copy(
+                    update={
+                        "confidence": rev_report.adjusted_confidence,
+                        "properties": {
+                            **belief.properties,
+                            "contested": rev_report.contested,
+                            "contradiction_count": len(rev_report.conflicts),
+                        },
+                    }
+                )
+                revision_ops.extend(rev_report.operations)
+
             node_ops.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -505,7 +525,7 @@ class WebCapabilityExecutor:
             except Exception as exc:
                 logger.warning("WebCapabilityExecutor: failed to update ontology store: %s", exc)
 
-        all_ops = node_ops + edge_ops
+        all_ops = node_ops + edge_ops + revision_ops
         if all_ops:
             try:
                 workspace.commit_operations(all_ops, author="web_ingestion", grant=grant)

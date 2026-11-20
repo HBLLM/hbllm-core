@@ -39,6 +39,7 @@ class CognitiveSystemConfig:
     enable_grounding: bool = True
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
+    enable_autonomous_curiosity: bool = False
     custom_verification_stages: list[Any] | None = None
     max_events_per_store: int | None = 2000
 
@@ -117,6 +118,74 @@ class CognitiveSystem:
             neuromod = self.services.extensions.get("neuromodulation")
             if neuromod is not None and hasattr(neuromod, "signal_reward"):
                 neuromod.signal_reward(0.2)
+
+            # Autonomous epistemic curiosity fallback for unknown QUERY frames
+            curiosity = self.services.extensions.get("epistemic_curiosity")
+            if (
+                curiosity is not None
+                and turn.semantic_frame.frame_type == FrameType.QUERY
+                and turn.epistemic_state is not None
+                and not turn.epistemic_state.is_known
+                and turn.epistemic_state.target_subject
+            ):
+                import asyncio
+
+                q_target = turn.semantic_frame.query_target or "definition"
+                q_mode = (
+                    "why"
+                    if q_target == "cause"
+                    else ("how" if q_target == "procedure" else "definition")
+                )
+                try:
+                    try:
+                        q_loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        q_loop = None
+
+                    if q_loop is not None and q_loop.is_running():
+                        import concurrent.futures
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            cur_res = pool.submit(
+                                asyncio.run,
+                                curiosity.research_concept(
+                                    turn.epistemic_state.target_subject,
+                                    query_mode=q_mode,
+                                    uncertainty=float(turn.epistemic_state.uncertainty),
+                                ),
+                            ).result(timeout=30.0)
+                    else:
+                        cur_res = asyncio.run(
+                            curiosity.research_concept(
+                                turn.epistemic_state.target_subject,
+                                query_mode=q_mode,
+                                uncertainty=float(turn.epistemic_state.uncertainty),
+                            )
+                        )
+                    if cur_res.researched:
+                        # Re-query gateway from freshly populated persistent memory
+                        re_state = lang_rt._gateway._lookup_epistemic_prior(
+                            turn.epistemic_state.target_subject,
+                            query_target=q_target,
+                        )
+                        if re_state is not None and re_state.is_known:
+                            turn.epistemic_state = re_state
+                            realizer = lang_rt._realizers.get(turn.language)
+                            if realizer is not None:
+                                turn.response_text = realizer.realize(
+                                    re_state, original_frame=turn.semantic_frame
+                                )
+                        elif cur_res.summary:
+                            turn.response_text = cur_res.summary
+                        if cur_res.sources:
+                            turn.response_text = (
+                                f"{turn.response_text}\n\n"
+                                f"[Learned autonomously via web research "
+                                f"({cur_res.propositions_ingested} facts ingested); "
+                                f"source: {cur_res.sources[0]}]"
+                            )
+                except Exception as exc:
+                    logger.debug("Autonomous curiosity query fallback skipped: %s", exc)
 
             # If COMMAND frame parsed successfully, dispatch through governed capabilities
             if (
@@ -295,6 +364,21 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     services.extensions["reasoning_runtime"] = reasoning_rt
     services.extensions["neuromodulation"] = NeuromodulationEngine()
     services.extensions["lexicon_acquisition"] = LexiconAcquisitionLoop(workspace.graph)
+
+    if cfg.enable_autonomous_curiosity:
+        from hbllm.hcir.capabilities.epistemic_curiosity import EpistemicCuriosityController
+
+        curiosity_ctrl = EpistemicCuriosityController(
+            capability_resolver=services.capability_resolver,
+            tiered_workspace=tiered_workspace,
+        )
+        services.extensions["epistemic_curiosity"] = curiosity_ctrl
+        # Attach to registered knowledge.explain* MemoryCapabilityExecutors
+        for cap_name in ("knowledge.explain", "knowledge.explain_why", "knowledge.explain_how"):
+            for impl in services.capability_resolver.list_implementations(cap_name):
+                if hasattr(impl.executor, "_curiosity_controller"):
+                    impl.executor._curiosity_controller = curiosity_ctrl
+
     runtime = ExecutiveRuntime(services=services)
     runtime.controller.attach_reasoning_runtime(reasoning_rt)
     runtime.attach_engine(engine)

@@ -13,6 +13,17 @@ from hbllm.hcir.language.core.semantic_frame import EntityReference
 
 logger = logging.getLogger(__name__)
 
+ANAPHORIC_PRONOUNS: frozenset[str] = frozenset(
+    {"it", "this", "that", "they", "them", "these", "those"}
+)
+
+
+def is_anaphoric_term(term: str | None) -> bool:
+    """Return True if ``term`` is an anaphoric pronoun requiring discourse resolution."""
+    if not term:
+        return False
+    return term.strip().lower() in ANAPHORIC_PRONOUNS
+
 
 @dataclass
 class DiscourseEntity:
@@ -88,6 +99,31 @@ class ReferenceResolver:
 
         # Fallback to most salient entity if general pronoun ("it", "this", "that")
         return self._history[0] if self._history else None
+
+    def register_topic(
+        self,
+        concept_name: str,
+        entity_id: str | None = None,
+        properties: dict[str, str] | None = None,
+    ) -> None:
+        """Record an abstract or conceptual discourse topic (e.g. from explain/why/how)."""
+        clean = concept_name.strip().lower()
+        if not clean or is_anaphoric_term(clean):
+            return
+        eid = entity_id or f"topic:{clean}"
+        self.register_mention(entity_id=eid, concept_name=clean, properties=properties)
+
+    def active_topic(self) -> DiscourseEntity | None:
+        """Return the most salient entity or topic in recent discourse."""
+        return self._history[0] if self._history else None
+
+    def resolve_concept(self, term: str) -> str:
+        """Resolve an anaphoric term to the active discourse topic concept name."""
+        if is_anaphoric_term(term):
+            topic = self.active_topic()
+            if topic and topic.concept_name:
+                return topic.concept_name
+        return term
 
     def clear(self) -> None:
         """Clear discourse history."""

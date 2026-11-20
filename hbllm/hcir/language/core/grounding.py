@@ -87,11 +87,28 @@ class GroundingResolver:
             if ref is None:
                 continue
 
-            # 1. Check for anaphora ("it", "that", "this")
-            if ref.specifier == "anaphoric":
+            # 1. Check for anaphora ("it", "that", "this", "they", "them")
+            if ref.specifier == "anaphoric" or (
+                ref.concept_name
+                and ref.concept_name.lower() in {"it", "this", "that", "they", "them"}
+            ):
                 resolved_mention = self._ref_resolver.resolve_anaphor(ref)
                 if resolved_mention and self._graph.get_node(resolved_mention.entity_id):
                     grounded.grounded_entities[role] = resolved_mention.entity_id
+                    continue
+                elif resolved_mention and resolved_mention.concept_name:
+                    # Conceptual discourse topic (e.g., "photosynthesis" from prior turn)
+                    frame.set_role(
+                        role,
+                        EntityReference(
+                            concept_name=resolved_mention.concept_name,
+                            properties=dict(ref.properties),
+                            specifier="generic",
+                            raw_text=ref.raw_text,
+                            discourse_id=resolved_mention.entity_id,
+                        ),
+                    )
+                    grounded.grounded_concepts[role] = resolved_mention.entity_id
                     continue
                 else:
                     grounded.grounding_success = False

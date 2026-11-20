@@ -37,11 +37,13 @@ class MemoryCapabilityExecutor:
         tiered_workspace: Any | None = None,
         memory_backend: Any | None = None,
         ontology_store: Any | None = None,
+        curiosity_controller: Any | None = None,
     ) -> None:
         self._default_capability = default_capability
         self._tiered_workspace = tiered_workspace
         self._memory_backend = memory_backend
         self._ontology_store = ontology_store
+        self._curiosity_controller = curiosity_controller
         self._explainer: Any | None = None
 
     @property
@@ -71,19 +73,66 @@ class MemoryCapabilityExecutor:
             return await self._exec_knowledge_explain_how(params)
         return {"ok": False, "error": f"Unknown memory capability: {cap}"}
 
+    async def _maybe_research_and_explain(
+        self,
+        concept: str,
+        mode: str,
+    ) -> tuple[str, dict[str, Any]]:
+        """Run ConceptExplainer, invoking autonomous curiosity on knowledge gaps if enabled."""
+        explainer = self._get_or_create_explainer()
+        snapshot = explainer.gather_knowledge(concept)
+
+        def _render(snap: Any) -> str:
+            if mode == "why":
+                return str(explainer.explain_why(concept, snapshot=snap))
+            if mode == "how":
+                return str(explainer.explain_how(concept, snapshot=snap))
+            return str(explainer.synthesize_discourse(snap))
+
+        needs_research = (
+            (not snapshot.has_knowledge)
+            if mode == "definition"
+            else (
+                (not snapshot.caused_by and not snapshot.causes)
+                if mode == "why"
+                else (not snapshot.requires and not snapshot.definition)
+            )
+        )
+
+        meta: dict[str, Any] = {}
+        if needs_research and self._curiosity_controller is not None:
+            cur_res = await self._curiosity_controller.research_concept(
+                concept, query_mode=mode, uncertainty=1.0
+            )
+            if cur_res.researched:
+                meta["curiosity_researched"] = True
+                meta["propositions_ingested"] = cur_res.propositions_ingested
+                meta["sources"] = cur_res.sources
+                # Re-gather from freshly ingested persistent memory
+                snapshot = explainer.gather_knowledge(concept)
+                text = _render(snapshot)
+                if "do not have" in text.lower() and cur_res.summary:
+                    text = cur_res.summary
+                if cur_res.sources:
+                    src_note = f"\n\n[Learned autonomously via web research ({cur_res.propositions_ingested} facts ingested); source: {cur_res.sources[0]}]"
+                    text = f"{text}{src_note}"
+                return text, meta
+
+        return _render(snapshot), meta
+
     async def _exec_knowledge_explain_why(self, params: dict[str, Any]) -> dict[str, Any]:
         """Explain why a concept/phenomenon occurs via backwards causal traversal."""
         concept = str(params.get("content", params.get("target", ""))).strip()
         if not concept:
             return {"ok": False, "error": "knowledge.explain_why requires 'content' or 'target'"}
 
-        explainer = self._get_or_create_explainer()
-        text = explainer.explain_why(concept)
+        text, meta = await self._maybe_research_and_explain(concept, mode="why")
         return {
             "ok": True,
             "action": "explained_why",
             "concept": concept,
             "content": text,
+            **meta,
         }
 
     async def _exec_knowledge_explain_how(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -92,13 +141,13 @@ class MemoryCapabilityExecutor:
         if not concept:
             return {"ok": False, "error": "knowledge.explain_how requires 'content' or 'target'"}
 
-        explainer = self._get_or_create_explainer()
-        text = explainer.explain_how(concept)
+        text, meta = await self._maybe_research_and_explain(concept, mode="how")
         return {
             "ok": True,
             "action": "explained_how",
             "concept": concept,
             "content": text,
+            **meta,
         }
 
     async def _exec_knowledge_explain(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -107,13 +156,13 @@ class MemoryCapabilityExecutor:
         if not concept:
             return {"ok": False, "error": "knowledge.explain requires 'content' or 'target'"}
 
-        explainer = self._get_or_create_explainer()
-        text = explainer.explain(concept)
+        text, meta = await self._maybe_research_and_explain(concept, mode="definition")
         return {
             "ok": True,
             "action": "explained",
             "concept": concept,
             "content": text,
+            **meta,
         }
 
     async def _exec_memory_store(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -132,17 +181,57 @@ class MemoryCapabilityExecutor:
             claim = claim[5:]
 
         try:
+            # Check for structural contradictions against existing persistent beliefs
+            from hbllm.hcir.capabilities.belief_revision import BeliefConflictResolver
+            from hbllm.hcir.graph import BeliefNode
+
+            p_ws = (
+                getattr(self._tiered_workspace, "persistent", None)
+                if self._tiered_workspace is not None
+                else getattr(backend, "_workspace", None)
+            )
+            p_graph = getattr(p_ws, "graph", None)
+            confidence = float(params.get("confidence", 0.85))
+
             node_id = await backend.store_belief(
                 claim=claim,
                 belief_type="user_stated",
                 evidence_sources=["user_dialogue"],
+                confidence=confidence,
             )
+
+            conflicts_summary = ""
+            contradiction_count = 0
+            if p_graph is not None and p_ws is not None and hasattr(p_ws, "commit_operations"):
+                probe_belief = BeliefNode(
+                    id=node_id,
+                    statement=claim,
+                    confidence=confidence,
+                )
+                resolver = BeliefConflictResolver()
+                rev_report = resolver.evaluate_belief(probe_belief, p_graph)
+                if rev_report.has_conflicts:
+                    contradiction_count = len(rev_report.conflicts)
+                    grant = getattr(p_ws, "_system_grant", None)
+                    if rev_report.operations:
+                        p_ws.commit_operations(
+                            rev_report.operations,
+                            author="belief_revision",
+                            grant=grant,
+                        )
+                    first_c = rev_report.conflicts[0]
+                    conflicts_summary = (
+                        f" (Note: detected contradiction with existing belief "
+                        f"'{first_c.existing_statement}' — marked as {first_c.resolution}.)"
+                    )
+
             logger.info("MemoryCapability: stored belief %s: %s", node_id, claim[:60])
             return {
                 "ok": True,
                 "action": "stored",
                 "node_id": node_id,
-                "content": f"I will remember that {claim}.",
+                "contradictions_detected": contradiction_count,
+                "content": f"I will remember that {claim}.{conflicts_summary}",
             }
         except Exception as exc:
             return {"ok": False, "error": f"Memory store failed: {exc}"}
