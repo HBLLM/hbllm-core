@@ -230,7 +230,8 @@ class InductiveHypothesisEngine:
 
     def export_to_world_theory(self, theory: HCIRSymbolicWorldTheory) -> None:
         """Ground confirmed inductive rules into first-order HCIR CausalPredicates."""
-        av_feats = getattr(theory, "avatar_features", set())
+        av_feats = theory.avatar_features
+        walkable_feats = theory.walkable_features
         confirmed = sorted(
             self.get_confirmed_rules(),
             key=lambda h: (
@@ -280,7 +281,7 @@ class InductiveHypothesisEngine:
                 if (
                     hyp.premise_feature is not None
                     and hyp.premise_feature not in av_feats
-                    and hyp.premise_feature not in getattr(theory, "walkable_features", set())
+                    and hyp.premise_feature not in walkable_feats
                     and self.get_hazard_rule(hyp.premise_feature) is None
                 ):
                     theory.induce_actuator(hyp.premise_feature, evidence="remote_mechanism")
@@ -310,7 +311,7 @@ class InductiveHypothesisEngine:
                             evidence=f"program:{hyp.rule_id}",
                             prerequisite_feature=hyp.premise_feature,
                         )
-                        if hyp.premise_feature not in getattr(theory, "walkable_features", set()):
+                        if hyp.premise_feature not in walkable_feats:
                             theory.induce_actuator(hyp.premise_feature, evidence="program")
                     elif (
                         ast_obj.effect_operator == "translate_entity"

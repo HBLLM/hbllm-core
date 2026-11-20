@@ -18,7 +18,7 @@ HCIR_DIR = HBLLM_DIR / "hcir"
 
 # R6/R7/R8 ratchets (tightened monotonically downward after R8 bounded state & latency)
 MAX_WORLD_HASATTR = 154
-MAX_WORLD_GETATTR3 = 392
+MAX_WORLD_GETATTR3 = 390
 MAX_HCIR_BROAD_SILENT_EXCEPT = 0
 MAX_HBLLM_BROAD_SILENT_EXCEPT = 46
 MAX_SQLITE_CONNECT_CALLS = 22
@@ -29,6 +29,9 @@ MAX_DELIBERATION_LOC = 250
 MAX_ASSIMILATOR_LOC = 250
 MAX_MOTOR_LOC = 250
 MAX_PERCEPTION_LOC = 250
+MAX_HYPOTHESIS_LOC = 250
+MAX_CAUSAL_LOC = 250
+MAX_EPISODIC_LOC = 250
 
 
 def _iter_python_files(base: Path) -> list[Path]:
@@ -139,4 +142,16 @@ def test_decision_core_file_size_ratchet() -> None:
     perception_loc = sum(1 for _ in (WORLD_DIR / "cortex_perception.py").open(encoding="utf-8"))
     assert perception_loc <= MAX_PERCEPTION_LOC, (
         f"cortex_perception.py has {perception_loc} LOC > ratchet {MAX_PERCEPTION_LOC}"
+    )
+    hypothesis_loc = sum(1 for _ in (WORLD_DIR / "cortex_hypothesis.py").open(encoding="utf-8"))
+    assert hypothesis_loc <= MAX_HYPOTHESIS_LOC, (
+        f"cortex_hypothesis.py has {hypothesis_loc} LOC > ratchet {MAX_HYPOTHESIS_LOC}"
+    )
+    causal_loc = sum(1 for _ in (WORLD_DIR / "cortex_causal.py").open(encoding="utf-8"))
+    assert causal_loc <= MAX_CAUSAL_LOC, (
+        f"cortex_causal.py has {causal_loc} LOC > ratchet {MAX_CAUSAL_LOC}"
+    )
+    episodic_loc = sum(1 for _ in (WORLD_DIR / "cortex_episodic.py").open(encoding="utf-8"))
+    assert episodic_loc <= MAX_EPISODIC_LOC, (
+        f"cortex_episodic.py has {episodic_loc} LOC > ratchet {MAX_EPISODIC_LOC}"
     )
