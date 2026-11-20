@@ -12,6 +12,11 @@ from hbllm.hcir.capabilities.routing_capabilities import (
     RoutingCapabilityExecutor,
     execute_routing_capability,
 )
+from hbllm.hcir.capabilities.web_capabilities import (
+    WEB_CAPABILITIES,
+    WebCapabilityExecutor,
+    is_safe_url,
+)
 from hbllm.hcir.capabilities.world_capabilities import (
     WORLD_MANIFESTS,
     WorldKernelCapabilityExecutor,
@@ -31,4 +36,8 @@ __all__ = [
     "ROUTING_MANIFESTS",
     "RoutingCapabilityExecutor",
     "execute_routing_capability",
+    # Web
+    "WEB_CAPABILITIES",
+    "WebCapabilityExecutor",
+    "is_safe_url",
 ]

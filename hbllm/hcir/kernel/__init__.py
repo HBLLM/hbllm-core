@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from hbllm.hcir.kernel.attention_graph import AttentionManager
+from hbllm.hcir.kernel.autonomy_tracker import AutonomyTracker
 from hbllm.hcir.kernel.capability_health import CapabilityHealth, CapabilityHealthRegistry
 from hbllm.hcir.kernel.capability_registry import (
     CapabilityRegistry,
@@ -65,7 +66,9 @@ from hbllm.hcir.kernel.verification import (
 )
 
 __all__ = [
+    "ActionDeferralRequest",
     "AttentionManager",
+    "AutonomyTracker",
     "BranchModeVerifier",
     "CandidateBelief",
     "CapabilityHealth",

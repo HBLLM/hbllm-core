@@ -46,10 +46,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # Pass-through for health checks, static files, and CORS preflight
+        # Pass-through for health checks, P2P zero-trust federation mailbox, static files, and CORS preflight
         _bypass_paths = [
             "/health",
+            "/health/live",
+            "/health/ready",
             "/metrics",
+            "/v1/federation/mailbox",
         ]
         # Only expose /docs and /openapi.json in non-production environments
         if os.environ.get("HBLLM_ENV", "").lower() != "production":
@@ -75,8 +78,14 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
 
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            # If no auth header, and we are not in production, fall back to sovereign hardware identity
-            if os.environ.get("HBLLM_ENV", "").lower() != "production":
+            # Fail closed by default: unauthenticated sovereign fallback requires explicit opt-in
+            # via HBLLM_UNSAFE_DEV_AUTH=1 in non-production environments.
+            unsafe_dev_auth = os.environ.get("HBLLM_UNSAFE_DEV_AUTH", "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+            if os.environ.get("HBLLM_ENV", "").lower() != "production" and unsafe_dev_auth:
                 from hbllm.security.identity_resolver import resolve_sovereign_identity
                 from hbllm.security.tenant_guard import TenantContext
 

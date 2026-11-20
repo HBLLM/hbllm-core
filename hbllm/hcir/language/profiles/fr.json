@@ -1,0 +1,170 @@
+{
+  "iso_code": "fr",
+  "name": "French",
+  "typology": {
+    "word_order": "SVO",
+    "adposition_type": "preposition",
+    "wh_movement": "front",
+    "yes_no_strategy": "tag",
+    "copula_style": "explicit_verb",
+    "has_articles": true,
+    "case_marking": false
+  },
+  "closed_class": {
+    "specifiers": {
+      "le": "definite",
+      "la": "definite",
+      "les": "definite",
+      "l'": "definite",
+      "un": "indefinite",
+      "une": "indefinite",
+      "des": "indefinite",
+      "ce": "proximal",
+      "cette": "proximal",
+      "cet": "proximal",
+      "ces": "proximal"
+    },
+    "adpositions": {
+      "sur": "located_on",
+      "dans": "located_in",
+      "sous": "located_under",
+      "au-dessus": "located_above",
+      "près": "located_near",
+      "à": "located_at"
+    },
+    "question_markers": {
+      "où": {
+        "target": "location",
+        "predicate": "located_on"
+      },
+      "que": {
+        "target": "definition",
+        "predicate": "is_a"
+      },
+      "quoi": {
+        "target": "definition",
+        "predicate": "is_a"
+      },
+      "pourquoi": {
+        "target": "cause",
+        "predicate": "causes"
+      },
+      "comment": {
+        "target": "procedure",
+        "predicate": "requires"
+      },
+      "qui": {
+        "target": "agent"
+      }
+    },
+    "question_particles": [],
+    "copula_forms": [
+      "est",
+      "sont",
+      "était",
+      "étaient",
+      "soit",
+      "être"
+    ],
+    "command_verbs": {
+      "lister": "fs.list",
+      "liste": "fs.list",
+      "lire": "fs.read",
+      "lis": "fs.read",
+      "expliquer": "knowledge.explain",
+      "explique": "knowledge.explain",
+      "pourquoi": "knowledge.explain_why",
+      "comment": "knowledge.explain_how",
+      "rappeler": "memory.recall",
+      "mémoriser": "memory.store",
+      "oublier": "memory.forget",
+      "pousser": "push",
+      "pousse": "push",
+      "déplacer": "move",
+      "déplace": "move",
+      "ouvrir": "open",
+      "ouvre": "open",
+      "fermer": "close",
+      "ferme": "close"
+    },
+    "polite_wrappers": [
+      "s'il vous plaît",
+      "s'il te plaît",
+      "peux-tu me dire où est",
+      "pouvez-vous me dire où est",
+      "peux-tu m'expliquer",
+      "pouvez-vous m'expliquer",
+      "peux-tu",
+      "pouvez-vous",
+      "je veux savoir",
+      "dis-moi",
+      "dites-moi"
+    ],
+    "expository_markers": {
+      "exemplification": [
+        "tel que",
+        "tels que",
+        "comme",
+        "par exemple"
+      ],
+      "cause": [
+        "provoque",
+        "cause",
+        "entraîne",
+        "produit"
+      ],
+      "require": [
+        "nécessite",
+        "exige",
+        "a besoin de"
+      ],
+      "enable": [
+        "permet",
+        "facilite",
+        "améliore"
+      ],
+      "because": [
+        "parce que",
+        "car",
+        "puisque"
+      ]
+    }
+  },
+  "morphology": {
+    "strip_suffixes": [
+      "ement",
+      "ment",
+      "s",
+      "x",
+      "e",
+      "er",
+      "é"
+    ],
+    "strip_prefixes": [],
+    "plural_endings": [
+      "s",
+      "x"
+    ],
+    "stemming_rules": [
+      [
+        "eaux",
+        "eau"
+      ],
+      [
+        "aux",
+        "al"
+      ]
+    ]
+  },
+  "templates": {
+    "location_known": "Le {theme} est {adposition} la {location}.",
+    "location_unknown": "Je ne sais pas où est le {theme}.",
+    "verification_true": "Oui, le {theme} est {adposition} la {location}.",
+    "verification_false": "Non, le {theme} n'est pas {adposition} la {location}.",
+    "definition_template": "{subject} est {definition}.",
+    "cause_template": "{effect} se produit parce que {cause} se produit.",
+    "procedure_template": "{target} nécessite {step}.",
+    "command_receipt": "Compris. Objectif accepté.",
+    "understood_assertion": "Compris."
+  }
+}

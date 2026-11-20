@@ -168,8 +168,16 @@ class KernelServices:
         commit_authority_registry: CommitAuthorityRegistry | None = None,
     ) -> KernelServices:
         """Create a fully provisioned KernelServices instance with verified pipeline, executor, and telemetry."""
+        from hbllm.hcir.capabilities.memory_capabilities import (
+            MEMORY_CAPABILITIES,
+            MemoryCapabilityExecutor,
+        )
         from hbllm.hcir.capabilities.planning_capabilities import PlanningCapabilityExecutor
         from hbllm.hcir.capabilities.routing_capabilities import RoutingCapabilityExecutor
+        from hbllm.hcir.capabilities.tool_capabilities import (
+            TOOL_CAPABILITIES,
+            ToolCapabilityExecutor,
+        )
         from hbllm.hcir.capabilities.world_capabilities import WorldKernelCapabilityExecutor
         from hbllm.hcir.kernel.capability_sandboxing import (
             CapabilityPermissions,
@@ -334,6 +342,119 @@ class KernelServices:
                     else IsolationMode.IN_PROCESS,
                     permissions=cap_perms,
                     required_permissions={"subprocess"} if is_sandbox_run else set(),
+                )
+            )
+
+        for t_cap in TOOL_CAPABILITIES:
+            impl_id = f"kernel_{t_cap}"
+            tool_exec = ToolCapabilityExecutor(default_capability=t_cap)
+            needs_subprocess = t_cap in ("git.status", "shell.exec")
+            tool_perms = CapabilityPermissions(
+                allow_filesystem=True,
+                allow_network=False,
+                allow_subprocess=needs_subprocess,
+                allow_db_write=False,
+            )
+            resolver.register(
+                CapabilityImplementation(
+                    capability_name=t_cap,
+                    implementation_id=impl_id,
+                    executor=tool_exec,
+                    priority=5,
+                    description=f"Kernel-governed sandboxed {t_cap} capability",
+                    tags=["safe", "internal", "tool"],
+                    required_permissions={"filesystem", "subprocess"}
+                    if needs_subprocess
+                    else {"filesystem"},
+                )
+            )
+            sandbox_mgr.register_policy(
+                SandboxedCapabilityPolicy(
+                    capability_name=t_cap,
+                    provider_id=impl_id,
+                    trust_level=TrustLevel.SYSTEM,
+                    isolation_mode=IsolationMode.IN_PROCESS,
+                    permissions=tool_perms,
+                    required_permissions={"filesystem", "subprocess"}
+                    if needs_subprocess
+                    else {"filesystem"},
+                )
+            )
+
+        # ── Memory Capabilities ───────────────────────────────────────
+        ont_store = None
+        from hbllm.hcir.language.ontology_store import DEFAULT_ONTOLOGY_DB, LexicalOntologyStore
+
+        if DEFAULT_ONTOLOGY_DB.exists():
+            ont_store = LexicalOntologyStore(DEFAULT_ONTOLOGY_DB)
+
+        for m_cap in MEMORY_CAPABILITIES:
+            impl_id = f"kernel_{m_cap}"
+            mem_exec = MemoryCapabilityExecutor(
+                default_capability=m_cap,
+                tiered_workspace=tiered_workspace,
+                ontology_store=ont_store,
+            )
+            resolver.register(
+                CapabilityImplementation(
+                    capability_name=m_cap,
+                    implementation_id=impl_id,
+                    executor=mem_exec,
+                    priority=5,
+                    description=f"Kernel-governed HCIR-native {m_cap} capability",
+                    tags=["safe", "internal", "memory"],
+                    required_permissions=set(),
+                )
+            )
+            sandbox_mgr.register_policy(
+                SandboxedCapabilityPolicy(
+                    capability_name=m_cap,
+                    provider_id=impl_id,
+                    trust_level=TrustLevel.SYSTEM,
+                    isolation_mode=IsolationMode.IN_PROCESS,
+                    permissions=least_privilege_in_memory,
+                )
+            )
+
+        # ── Web Capabilities ──────────────────────────────────────────
+        from hbllm.hcir.capabilities.web_capabilities import (
+            WEB_CAPABILITIES,
+            WebCapabilityExecutor,
+        )
+
+        web_perms = CapabilityPermissions(
+            allow_filesystem=False,
+            allow_network=True,
+            allow_subprocess=False,
+            allow_db_write=False,
+        )
+
+        for w_cap in WEB_CAPABILITIES:
+            impl_id = f"kernel_{w_cap}"
+            web_exec = WebCapabilityExecutor(
+                default_capability=w_cap,
+                tiered_workspace=tiered_workspace,
+                ontology_store=ont_store,
+            )
+            resolver.register(
+                CapabilityImplementation(
+                    capability_name=w_cap,
+                    implementation_id=impl_id,
+                    executor=web_exec,
+                    priority=5,
+                    description=f"Kernel-governed sandboxed {w_cap} capability",
+                    tags=["safe", "internal", "web"],
+                    required_permissions={"network"},
+                )
+            )
+            sandbox_mgr.register_policy(
+                SandboxedCapabilityPolicy(
+                    capability_name=w_cap,
+                    provider_id=impl_id,
+                    trust_level=TrustLevel.SYSTEM,
+                    isolation_mode=IsolationMode.IN_PROCESS,
+                    permissions=web_perms,
+                    required_permissions={"network"},
                 )
             )
 

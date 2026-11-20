@@ -339,7 +339,21 @@ class ExecutiveRuntime:
             except Exception as exc:
                 logger.debug("Schema pruning error during offline consolidation: %s", exc)
 
-        # 4. Library learning sleep consolidation
+        # 4. Procedural skill & option consolidation (working_memory.procedural_library + option_discovery)
+        if self._engine is not None:
+            wm = getattr(self._engine, "working_memory", None)
+            opt_eng = getattr(self._engine, "option_discovery", None)
+            discovered = getattr(opt_eng, "discovered_options", None)
+            if wm is not None and isinstance(discovered, dict):
+                try:
+                    for opt_id, opt in discovered.items():
+                        if opt_id not in getattr(wm, "procedural_library", {}):
+                            to_skill = getattr(opt, "to_declarative_skill", None)
+                            if callable(to_skill):
+                                wm.register_procedural_skill(opt_id, to_skill())
+                except Exception as exc:
+                    logger.debug("Procedural skill consolidation error: %s", exc)
+
         learner = self._library_learner
         if learner is None and self._engine is not None:
             learner = getattr(self._engine, "library_learner", None)

@@ -172,10 +172,12 @@ async def test_studio_routes_registered():
 
 
 @pytest.mark.asyncio
-async def test_hcir_epistemics_studio_endpoints():
+async def test_hcir_epistemics_studio_endpoints(monkeypatch: pytest.MonkeyPatch):
     """Verify HCIR, Epistemics, and Execution OS endpoints return valid responses."""
     from starlette.testclient import TestClient
 
+    monkeypatch.setenv("HBLLM_ENV", "development")
+    monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
     client = TestClient(app)
 
     # 1. HCIR workspaces
@@ -209,12 +211,15 @@ async def test_hcir_epistemics_studio_endpoints():
 
 
 @pytest.mark.asyncio
-async def test_device_presence_and_handoff_endpoints():
+async def test_device_presence_and_handoff_endpoints(monkeypatch: pytest.MonkeyPatch):
     """Verify device listing, presence registration, heartbeat, best device, and handoff endpoints."""
     from starlette.testclient import TestClient
 
     from hbllm.serving.api import _state
     from hbllm.serving.device_bridge import DeviceBridge
+
+    monkeypatch.setenv("HBLLM_ENV", "development")
+    monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
 
     # Ensure device bridge is in state
     bridge = DeviceBridge()

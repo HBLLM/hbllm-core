@@ -348,12 +348,20 @@ async def sys_rollback(
         target_version, reason=ins.params.get("reason", "isa_rollback")
     )
     restored_hash = workspace.graph.content_hash()
+    matches_snapshot = restored_hash == snapshot.content_hash
+    if not matches_snapshot:
+        logger.warning(
+            "Rollback to version %s restored hash %s != snapshot hash %s",
+            target_version,
+            restored_hash,
+            snapshot.content_hash,
+        )
     return {
         "rolled_back": True,
         "target_version": target_version,
         "transactions_reverted": len(reverted),
         "rollback_tx_ids": [tx.id for tx in reverted],
-        "state_matches_snapshot": restored_hash == snapshot.content_hash,
+        "state_matches_snapshot": matches_snapshot,
     }
 
 

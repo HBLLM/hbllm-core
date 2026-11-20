@@ -18,6 +18,7 @@ class TestPlasticityServingEndpoints:
     @pytest.fixture
     def client(self, monkeypatch):
         monkeypatch.setenv("HBLLM_ENV", "development")
+        monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
         from hbllm.serving.state import _state
 
         monkeypatch.setitem(_state, "brain", None)
@@ -47,6 +48,7 @@ class TestSNNServingEndpoints:
     @pytest.fixture
     def client(self, monkeypatch):
         monkeypatch.setenv("HBLLM_ENV", "development")
+        monkeypatch.setenv("HBLLM_UNSAFE_DEV_AUTH", "1")
         from hbllm.serving.state import _state
 
         monkeypatch.setitem(_state, "brain", None)

@@ -114,3 +114,15 @@ class InstructionStream(BaseModel):
             default=str,
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+    def semantic_hash(self) -> str:
+        """Compute SHA256 checksum of instructions only (independent of id/author)."""
+        import hashlib
+        import json
+
+        payload = json.dumps(
+            [{"opcode": ins.opcode.value, "params": ins.params} for ins in self.instructions],
+            sort_keys=True,
+            default=str,
+        )
+        return hashlib.sha256(payload.encode()).hexdigest()[:16]

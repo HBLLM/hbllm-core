@@ -169,36 +169,7 @@ class IWorkspace(ABC):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class IPredictor(ABC):
-    """Online sequence predictor for cognitive anticipation.
-
-    Observes values over time and predicts future values.
-    Used for query prediction, goal transitions, tool use, etc.
-    """
-
-    @abstractmethod
-    async def observe(self, value: str, timestamp: float) -> None:
-        """Record an observed value in the sequence.
-
-        Args:
-            value: The observed value (e.g., event type, query domain).
-            timestamp: When the observation occurred.
-        """
-        ...
-
-    @abstractmethod
-    async def predict(self, top_k: int = 3) -> list[tuple[str, float]]:
-        """Predict the next values.
-
-        Args:
-            top_k: Number of top predictions to return.
-
-        Returns:
-            List of ``(predicted_value, confidence)`` tuples,
-            sorted by confidence descending.
-        """
-        ...
-
+from hbllm.hcir.reasoning.prediction import IPredictor  # noqa: F401
 
 # ═══════════════════════════════════════════════════════════════════════════
 # IMemory — store and retrieve memory cubes

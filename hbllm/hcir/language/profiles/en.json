@@ -1,0 +1,166 @@
+{
+  "iso_code": "en",
+  "name": "English",
+  "typology": {
+    "word_order": "SVO",
+    "adposition_type": "preposition",
+    "wh_movement": "front",
+    "yes_no_strategy": "inversion",
+    "copula_style": "explicit_verb",
+    "has_articles": true,
+    "case_marking": false
+  },
+  "closed_class": {
+    "specifiers": {
+      "the": "definite",
+      "a": "indefinite",
+      "an": "indefinite",
+      "this": "proximal",
+      "that": "distal"
+    },
+    "adpositions": {
+      "on": "located_on",
+      "in": "located_in",
+      "at": "located_at",
+      "under": "located_under",
+      "below": "located_under",
+      "above": "located_above",
+      "near": "located_near"
+    },
+    "question_markers": {
+      "where": {
+        "target": "location",
+        "predicate": "located_on"
+      },
+      "what": {
+        "target": "definition",
+        "predicate": "is_a"
+      },
+      "why": {
+        "target": "cause",
+        "predicate": "causes"
+      },
+      "how": {
+        "target": "procedure",
+        "predicate": "requires"
+      },
+      "who": {
+        "target": "agent"
+      }
+    },
+    "question_particles": [],
+    "copula_forms": [
+      "is",
+      "are",
+      "was",
+      "were",
+      "be"
+    ],
+    "command_verbs": {
+      "list": "fs.list",
+      "ls": "fs.list",
+      "dir": "fs.list",
+      "read": "fs.read",
+      "cat": "fs.read",
+      "explain": "knowledge.explain",
+      "describe": "knowledge.explain",
+      "why": "knowledge.explain_why",
+      "how": "knowledge.explain_how",
+      "remember": "memory.store",
+      "store": "memory.store",
+      "recall": "memory.recall",
+      "forget": "memory.forget",
+      "push": "push",
+      "move": "move",
+      "open": "open",
+      "close": "close",
+      "unlock": "unlock",
+      "lock": "lock"
+    },
+    "polite_wrappers": [
+      "please can you",
+      "can you tell me what is",
+      "can you tell me about",
+      "can you tell me",
+      "tell me about",
+      "tell me what is",
+      "me want know about",
+      "i want to know about",
+      "please",
+      "kindly"
+    ],
+    "expository_markers": {
+      "exemplification": [
+        "such as",
+        "like",
+        "for example"
+      ],
+      "cause": [
+        "causes",
+        "triggers",
+        "leads to",
+        "produces"
+      ],
+      "require": [
+        "requires",
+        "needs",
+        "demands"
+      ],
+      "enable": [
+        "enables",
+        "allows",
+        "improves"
+      ],
+      "because": [
+        "because",
+        "since",
+        "as"
+      ]
+    }
+  },
+  "morphology": {
+    "strip_suffixes": [
+      "ing",
+      "ed",
+      "s",
+      "es",
+      "ly"
+    ],
+    "strip_prefixes": [],
+    "plural_endings": [
+      "s",
+      "es"
+    ],
+    "stemming_rules": [
+      [
+        "ies",
+        "y"
+      ],
+      [
+        "es",
+        "e"
+      ],
+      [
+        "s",
+        ""
+      ]
+    ]
+  },
+  "templates": {
+    "location_known": "The {theme} is {adposition} the {location}.",
+    "location_probable": "The {theme} is probably {adposition} the {location}.",
+    "location_plausible": "I think the {theme} may be {adposition} the {location}.",
+    "location_unknown": "I do not know where the {theme} is.",
+    "insufficient_evidence": "I do not have enough evidence to determine where the {theme} is.",
+    "contradicted_evidence": "There is contradictory evidence regarding the {theme}.",
+    "verification_true": "Yes, the {theme} is {adposition} the {location}.",
+    "verification_true_probable": "Yes, the {theme} is probably {adposition} the {location}.",
+    "verification_true_plausible": "I think the {theme} may be {adposition} the {location}.",
+    "verification_false": "No, the {theme} is not {adposition} the {location}.",
+    "definition_template": "{subject} is {definition}.",
+    "cause_template": "{effect} occurs because {cause} occurs.",
+    "procedure_template": "{target} requires {step}.",
+    "command_receipt": "Understood. Goal accepted.",
+    "understood_assertion": "Understood."
+  }
+}

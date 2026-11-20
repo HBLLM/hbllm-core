@@ -1,0 +1,548 @@
+"""HCIR Gateway for A16.
+
+Connects Language SemanticFrames to HCIR cognitive operations:
+- Assertions -> Ingested as EvidenceNodes (Language is an evidence modality).
+- Queries -> Evaluated against A13 World Model & A11 Epistemics, returning CognitiveEpistemicState.
+- Commands -> Converted to GoalNode / Intent proposals for A12 Execution & Planning.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from hbllm.hcir.graph import (
+    CognitiveGraph,
+    EvidenceNode,
+    GoalNode,
+    GroundedConceptNode,
+    HCIRNodeType,
+    PhysicalEntityNode,
+)
+from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
+from hbllm.hcir.language.core.semantic_frame import (
+    GroundedSemanticFrame,
+    ThematicRole,
+)
+from hbllm.hcir.nodes import HCIREdgeType
+
+logger = logging.getLogger(__name__)
+
+
+class HCIRGateway:
+    """Bridges grounded linguistic frames with HCIR cognition.
+
+    Usage::
+
+        gateway = HCIRGateway(graph)
+        # Assertions
+        evidence_node = gateway.process_assertion(grounded_frame)
+
+        # Queries
+        epistemic_state = gateway.process_query(grounded_frame)
+
+        # Commands
+        goal_node = gateway.process_command(grounded_frame)
+    """
+
+    def __init__(
+        self,
+        graph: CognitiveGraph,
+        workspace: Any | None = None,
+        ontology_store: Any | None = None,
+        tiered_workspace: Any | None = None,
+    ) -> None:
+        self._graph = graph
+        self._workspace = workspace
+        self._ontology_store = ontology_store
+        self._tiered_workspace = tiered_workspace
+
+    def _commit_node(self, node: EvidenceNode | GoalNode) -> None:
+        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+            self._workspace.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node.id,
+                        node_data=node.model_dump(),
+                    )
+                ],
+                author="hcir_language_gateway",
+            )
+            return
+        self._graph.add_node(node)
+
+    # ── Assertion: Language as Evidence ───────────────────────────────
+
+    def process_assertion(
+        self,
+        grounded: GroundedSemanticFrame,
+        speaker: str = "human",
+    ) -> EvidenceNode:
+        """Ingest a linguistic assertion as an EvidenceNode in HCIR.
+
+        Language does NOT directly mutate truth; it is treated as a perception
+        modality with explicit linguistic provenance.
+        """
+        frame = grounded.frame
+        subject_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
+        object_ref = frame.get_role(ThematicRole.LOCATION) or frame.get_role(ThematicRole.PATIENT)
+
+        subject_name: str = (
+            subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
+        )
+        target_entity_id = grounded.grounded_entities.get(
+            ThematicRole.THEME
+        ) or grounded.grounded_entities.get(ThematicRole.AGENT)
+
+        obj_desc = ""
+        if object_ref:
+            if object_ref.concept_name:
+                obj_desc = object_ref.concept_name
+            elif object_ref.properties:
+                obj_desc = "_".join(f"{k}_{v}" for k, v in sorted(object_ref.properties.items()))
+
+        claim_str = f"{subject_name} {frame.predicate} {obj_desc}".strip()
+        evidence = EvidenceNode(
+            claim_id=claim_str,
+            methodology=f"language_assertion:{frame.metadata.language}:{claim_str}",
+            confidence=0.85,
+            source_uri=f"language://{frame.metadata.language}/{speaker}/{frame.metadata.utterance_id}",
+            tags=[
+                "language_evidence",
+                frame.metadata.language,
+                speaker,
+                frame.predicate,
+                subject_name,
+            ],
+        )
+        self._commit_node(evidence)
+
+        # If entity exists, update observed property / spatial relation if supported
+        if target_entity_id:
+            ent = self._graph.get_node(target_entity_id)
+            if isinstance(ent, PhysicalEntityNode):
+                target_dict = (
+                    ent.properties
+                    if hasattr(ent, "properties") and isinstance(ent.properties, dict)
+                    else ent.observed_properties
+                )
+                if subject_ref and subject_ref.properties:
+                    target_dict.update(subject_ref.properties)
+                if object_ref and object_ref.properties:
+                    target_dict.update(object_ref.properties)
+                self._graph.upsert_node(ent)
+
+        # Create spatial edge if both subject and object are grounded entities
+        location_entity_id = grounded.grounded_entities.get(
+            ThematicRole.LOCATION
+        ) or grounded.grounded_entities.get(ThematicRole.PATIENT)
+        if target_entity_id and location_entity_id and target_entity_id != location_entity_id:
+            predicate = frame.predicate or "located_on"
+            edge_type = self._predicate_to_edge_type(predicate)
+            if edge_type is not None:
+                from hbllm.hcir.graph import HCIREdge
+                from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+                edge = HCIREdge(
+                    edge_type=edge_type,
+                    sources=[target_entity_id],
+                    targets=[location_entity_id],
+                    properties={"predicate": predicate, "speaker": speaker},
+                )
+                # Check for duplicate edges
+                existing_edges = {e.id for e in self._graph.edges_from(target_entity_id)}
+                if edge.id not in existing_edges:
+                    if self._workspace is not None and hasattr(
+                        self._workspace, "commit_operations"
+                    ):
+                        self._workspace.commit_operations(
+                            [
+                                TransactionOperation(
+                                    op=TransactionOp.UPSERT_EDGE,
+                                    edge_id=edge.id,
+                                    edge_data=edge.model_dump(),
+                                )
+                            ],
+                            author="hcir_language_gateway",
+                        )
+                    else:
+                        self._graph.add_edge(edge)
+                    logger.debug(
+                        "HCIRGateway: Created %s edge %s → %s",
+                        edge_type.value,
+                        target_entity_id,
+                        location_entity_id,
+                    )
+
+        logger.debug(
+            "HCIRGateway: Ingested language assertion as EvidenceNode %s (%s)",
+            evidence.id,
+            evidence.methodology,
+        )
+
+        # Also materialize conceptual/causal/dependency relations into persistent tier
+        if (
+            frame.predicate in ("is_a", "causes", "requires", "enables")
+            and subject_name
+            and obj_desc
+            and self._tiered_workspace is not None
+        ):
+            try:
+                from hbllm.hcir.language.reading_curriculum import (
+                    ExtractedProposition,
+                    commit_propositions,
+                )
+
+                p_ws = getattr(self._tiered_workspace, "persistent", None) or self._workspace
+                if p_ws is not None and hasattr(p_ws, "commit_operations"):
+                    grant = getattr(self._tiered_workspace, "_system_grant", None)
+                    raw_sent = getattr(frame.metadata, "raw_text", "") or claim_str
+                    commit_propositions(
+                        [
+                            ExtractedProposition(
+                                subject=subject_name.lower().replace(" ", "_"),
+                                relation=frame.predicate,
+                                obj=obj_desc.lower().replace(" ", "_"),
+                                source_file="dialogue_assertion",
+                                sentence=raw_sent,
+                            )
+                        ],
+                        p_ws,
+                        ontology_store=self._ontology_store,
+                        grant=grant,
+                        author="hcir_language_gateway",
+                    )
+            except Exception as exc:
+                logger.debug("HCIRGateway: conceptual proposition commit skipped: %s", exc)
+
+        return evidence
+
+    # ── Query: Epistemic State Resolution ─────────────────────────────
+
+    def process_query(self, grounded: GroundedSemanticFrame) -> CognitiveEpistemicState:
+        """Query HCIR world model and epistemics for a grounded question."""
+        frame = grounded.frame
+        target_role = (
+            ThematicRole.THEME
+            if frame.get_role(ThematicRole.THEME) is not None
+            else (
+                ThematicRole.AGENT
+                if frame.get_role(ThematicRole.AGENT) is not None
+                else (
+                    ThematicRole.THEME
+                    if ThematicRole.THEME in grounded.grounded_entities
+                    else ThematicRole.AGENT
+                )
+            )
+        )
+        entity_id = grounded.grounded_entities.get(target_role)
+
+        subject_ref = frame.get_role(target_role)
+        subject_name: str = (
+            subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
+        )
+
+        # If entity could not be grounded, try epistemic prior before giving up
+        if not entity_id:
+            prior = self._lookup_epistemic_prior(
+                subject_name, query_target=frame.query_target or "definition"
+            )
+            if prior is not None:
+                return prior
+            return CognitiveEpistemicState(
+                target_predicate=frame.predicate,
+                target_subject=subject_name,
+                is_known=False,
+                confidence=0.0,
+                uncertainty=1.0,
+                support_count=0,
+                contradiction_count=0,
+            )
+
+        ent_node = self._graph.get_node(entity_id)
+        ent_props: dict[str, Any] = {}
+        if isinstance(ent_node, PhysicalEntityNode):
+            ent_props = (
+                ent_node.properties
+                if hasattr(ent_node, "properties") and isinstance(ent_node.properties, dict)
+                else ent_node.observed_properties
+            )
+
+        freshness_val = float(ent_props.get("freshness", 1.0))
+
+        # 1. Spatial / Location Query ("Where is the X?")
+        if frame.query_target == "location":
+            # Search outbound edges from entity
+            loc_found: str | None = None
+            edge_type_found: str = "located_on"
+
+            for edge in self._graph.edges_from(entity_id):
+                for target_id in edge.targets:
+                    target_node = self._graph.get_node(target_id)
+                    if isinstance(target_node, PhysicalEntityNode):
+                        loc_found = target_node.entity_type
+                        edge_type_found = edge.edge_type.value
+                        break
+                if loc_found:
+                    break
+
+            # Fallback: check properties dictionary
+            if not loc_found:
+                loc_found = ent_props.get("location")
+
+            if loc_found:
+                return CognitiveEpistemicState(
+                    target_predicate=edge_type_found,
+                    target_subject=subject_name,
+                    target_object=loc_found,
+                    confidence=0.96,
+                    uncertainty=0.04,
+                    support_count=5,
+                    freshness=freshness_val,
+                    is_known=True,
+                    raw_belief_value=loc_found,
+                )
+            else:
+                # Check if concepts provide a default location
+                concept_id = grounded.grounded_concepts.get(target_role)
+                if concept_id:
+                    concept_node = self._graph.get_node(concept_id)
+                    if (
+                        isinstance(concept_node, GroundedConceptNode)
+                        and "location" in concept_node.feature_prototype
+                    ):
+                        default_loc = str(concept_node.feature_prototype["location"])
+                        return CognitiveEpistemicState(
+                            target_predicate="located_on",
+                            target_subject=subject_name,
+                            target_object=default_loc,
+                            confidence=0.65,  # Plausible inference from concept
+                            uncertainty=0.35,
+                            support_count=1,
+                            freshness=freshness_val,
+                            is_known=True,
+                            raw_belief_value=default_loc,
+                        )
+
+                return CognitiveEpistemicState(
+                    target_predicate="located_on",
+                    target_subject=subject_name,
+                    is_known=False,
+                    confidence=0.10,
+                    uncertainty=0.90,
+                )
+
+        # 2. Property / Color Query ("What color is the X?")
+        elif frame.query_target == "property":
+            prop_key = frame.predicate.replace("color_of", "color").replace("property_", "")
+
+            # Check for conflicting language evidence in the graph
+            evidence_nodes = [
+                n
+                for n in self._graph.nodes_by_type(HCIRNodeType.EVIDENCE)
+                if isinstance(n, EvidenceNode)
+                and ("language_evidence" in n.tags and subject_name in n.tags)
+            ]
+            distinct_claims = {ev.methodology for ev in evidence_nodes if ev.methodology}
+            if len(distinct_claims) > 1:
+                return CognitiveEpistemicState(
+                    target_predicate=prop_key,
+                    target_subject=subject_name,
+                    is_known=True,
+                    support_count=1,
+                    contradiction_count=1,
+                )
+
+            prop_val = ent_props.get(prop_key)
+            if prop_val:
+                return CognitiveEpistemicState(
+                    target_predicate=prop_key,
+                    target_subject=subject_name,
+                    target_object=str(prop_val),
+                    confidence=0.98,
+                    uncertainty=0.02,
+                    support_count=4,
+                    is_known=True,
+                    raw_belief_value=str(prop_val),
+                )
+
+            # ── Epistemic Prior Fallback: "What is X?" definition queries ──
+            # When prop_key is "property" (from "property_property" predicate, i.e.
+            # "What is X?"), consult LexicalOntologyStore and persistent memory.
+            if prop_key == "property":
+                prior = self._lookup_epistemic_prior(subject_name)
+                if prior is not None:
+                    return prior
+
+            return CognitiveEpistemicState(
+                target_predicate=prop_key,
+                target_subject=subject_name,
+                is_known=False,
+            )
+
+        # 3. Verification / Yes-No Query ("Is the ball on the table?")
+        elif frame.query_target == "verification":
+            object_role = (
+                ThematicRole.LOCATION
+                if ThematicRole.LOCATION in grounded.grounded_entities
+                else ThematicRole.PATIENT
+            )
+            object_id = grounded.grounded_entities.get(object_role)
+            object_ref = frame.get_role(object_role)
+            expected_object_name = object_ref.concept_name if object_ref else ""
+
+            # Check if matching edge exists
+            is_connected = False
+            for edge in self._graph.edges_from(entity_id):
+                if object_id and object_id in edge.targets:
+                    is_connected = True
+                    break
+                for target_id in edge.targets:
+                    target_node = self._graph.get_node(target_id)
+                    if (
+                        isinstance(target_node, PhysicalEntityNode)
+                        and target_node.entity_type == expected_object_name
+                    ):
+                        is_connected = True
+                        break
+
+            # Also check properties
+            if not is_connected and expected_object_name:
+                if str(ent_props.get("location", "")).lower() == expected_object_name.lower():
+                    is_connected = True
+
+            if is_connected:
+                return CognitiveEpistemicState(
+                    target_predicate=frame.predicate or "located_on",
+                    target_subject=subject_name,
+                    target_object=expected_object_name,
+                    confidence=0.96,
+                    uncertainty=0.04,
+                    support_count=3,
+                    is_known=True,
+                    raw_belief_value=True,
+                )
+            else:
+                return CognitiveEpistemicState(
+                    target_predicate=frame.predicate or "located_on",
+                    target_subject=subject_name,
+                    target_object=expected_object_name,
+                    confidence=0.92,
+                    uncertainty=0.08,
+                    support_count=2,
+                    contradiction_count=0,
+                    is_known=True,
+                    raw_belief_value=False,
+                )
+
+        # ── General fallback: consult epistemic priors before giving up ──
+        prior = self._lookup_epistemic_prior(subject_name)
+        if prior is not None:
+            return prior
+
+        return CognitiveEpistemicState(
+            target_predicate=frame.predicate,
+            target_subject=subject_name,
+            is_known=False,
+        )
+
+    # ── Epistemic Prior Lookup ────────────────────────────────────────
+
+    def _lookup_epistemic_prior(
+        self, subject_name: str, query_target: str = "definition"
+    ) -> CognitiveEpistemicState | None:
+        """Consult ConceptExplainer, LexicalOntologyStore, and persistent memory.
+
+        Returns a definition/explanation CognitiveEpistemicState if found, else None.
+        Multi-hop traversal synthesizes definition, taxonomy, requirements, causes, and beliefs.
+        """
+        try:
+            from hbllm.hcir.capabilities.concept_explainer import ConceptExplainer
+
+            explainer = ConceptExplainer(
+                tiered_workspace=self._tiered_workspace,
+                ontology_store=self._ontology_store,
+            )
+            snapshot = explainer.gather_knowledge(subject_name)
+            if snapshot.has_knowledge:
+                if query_target == "cause":
+                    discourse = explainer.explain_why(subject_name)
+                    pred_name = "causes"
+                elif query_target == "procedure":
+                    discourse = explainer.explain_how(subject_name)
+                    pred_name = "requires"
+                else:
+                    discourse = explainer.synthesize_discourse(snapshot)
+                    pred_name = "definition"
+
+                return CognitiveEpistemicState(
+                    target_predicate=pred_name,
+                    target_subject=subject_name,
+                    target_object=discourse,
+                    confidence=0.90 if snapshot.definition else 0.75,
+                    uncertainty=0.10 if snapshot.definition else 0.25,
+                    support_count=max(1, len(snapshot.hypernyms) + len(snapshot.causes)),
+                    is_known=True,
+                    raw_belief_value=discourse,
+                    provenance=snapshot.provenance or "concept_explainer",
+                )
+        except Exception as exc:
+            logger.debug("HCIRGateway: concept explainer error for %r: %s", subject_name, exc)
+
+        return None
+
+    # ── Command: Goal & Action Proposals ──────────────────────────────
+
+    def process_command(self, grounded: GroundedSemanticFrame) -> GoalNode:
+        """Convert a grounded command frame into a GoalNode in HCIR."""
+        frame = grounded.frame
+        action_verb = frame.predicate
+        patient_ref = frame.get_role(ThematicRole.PATIENT) or frame.get_role(ThematicRole.THEME)
+        destination_ref = frame.get_role(ThematicRole.DESTINATION) or frame.get_role(
+            ThematicRole.LOCATION
+        )
+
+        patient_name = patient_ref.concept_name if patient_ref else "object"
+        dest_name = destination_ref.concept_name if destination_ref else ""
+
+        goal_spec = f"{action_verb} {patient_name} to {dest_name}".strip()
+        goal = GoalNode(
+            description=goal_spec,
+            priority=0.8,
+            tags=["language_command", frame.metadata.language, action_verb],
+        )
+        self._commit_node(goal)
+        return goal
+
+    # ── Helpers ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _predicate_to_edge_type(predicate: str) -> HCIREdgeType | None:
+        """Map a semantic predicate to an HCIREdgeType for spatial/relational edges."""
+        _MAP: dict[str, HCIREdgeType] = {
+            "located_on": HCIREdgeType.LOCATED_IN,
+            "located_in": HCIREdgeType.LOCATED_IN,
+            "located_at": HCIREdgeType.LOCATED_AT,
+            "located_inside": HCIREdgeType.LOCATED_IN,
+            "located_within": HCIREdgeType.LOCATED_IN,
+            "located_under": HCIREdgeType.BELOW,
+            "located_beneath": HCIREdgeType.BELOW,
+            "below": HCIREdgeType.BELOW,
+            "under": HCIREdgeType.BELOW,
+            "located_above": HCIREdgeType.ABOVE,
+            "above": HCIREdgeType.ABOVE,
+            "located_beside": HCIREdgeType.NEAR,
+            "located_near": HCIREdgeType.NEAR,
+            "near": HCIREdgeType.NEAR,
+            "supports": HCIREdgeType.SUPPORTS,
+            "part_of": HCIREdgeType.PART_OF,
+            "contains": HCIREdgeType.CONTAINS,
+            "is_a": HCIREdgeType.GENERALIZES,
+            "causes": HCIREdgeType.CAUSES,
+            "requires": HCIREdgeType.REQUIRES,
+            "enables": HCIREdgeType.CAUSES,
+        }
+        return _MAP.get(predicate)

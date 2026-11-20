@@ -1,0 +1,150 @@
+{
+  "iso_code": "de",
+  "name": "German",
+  "typology": {
+    "word_order": "SVO",
+    "adposition_type": "preposition",
+    "wh_movement": "front",
+    "yes_no_strategy": "inversion",
+    "copula_style": "explicit_verb",
+    "has_articles": true,
+    "case_marking": true
+  },
+  "closed_class": {
+    "specifiers": {
+      "der": "definite",
+      "die": "definite",
+      "das": "definite",
+      "dem": "definite",
+      "den": "definite",
+      "ein": "indefinite",
+      "eine": "indefinite",
+      "einem": "indefinite",
+      "einen": "indefinite",
+      "dieser": "proximal",
+      "diese": "proximal",
+      "dieses": "proximal"
+    },
+    "adpositions": {
+      "auf": "located_on",
+      "in": "located_in",
+      "unter": "located_under",
+      "über": "located_above",
+      "neben": "located_near",
+      "bei": "located_near",
+      "an": "located_at"
+    },
+    "question_markers": {
+      "wo": {
+        "target": "location",
+        "predicate": "located_on"
+      },
+      "was": {
+        "target": "definition",
+        "predicate": "is_a"
+      },
+      "warum": {
+        "target": "cause",
+        "predicate": "causes"
+      },
+      "wie": {
+        "target": "procedure",
+        "predicate": "requires"
+      },
+      "wer": {
+        "target": "agent"
+      }
+    },
+    "question_particles": [],
+    "copula_forms": [
+      "ist",
+      "sind",
+      "war",
+      "waren",
+      "sein"
+    ],
+    "command_verbs": {
+      "auflisten": "fs.list",
+      "liste": "fs.list",
+      "lesen": "fs.read",
+      "lies": "fs.read",
+      "erklären": "knowledge.explain",
+      "erkläre": "knowledge.explain",
+      "warum": "knowledge.explain_why",
+      "wie": "knowledge.explain_how",
+      "erinnern": "memory.recall",
+      "speichern": "memory.store",
+      "vergessen": "memory.forget",
+      "schieben": "push",
+      "bewegen": "move",
+      "öffnen": "open",
+      "schließen": "close"
+    },
+    "polite_wrappers": [
+      "bitte kannst du mir sagen wo",
+      "kannst du mir sagen wo",
+      "kannst du erklären",
+      "bitte",
+      "sag mir",
+      "ich möchte wissen über"
+    ],
+    "expository_markers": {
+      "exemplification": [
+        "wie",
+        "zum beispiel",
+        "beispielsweise"
+      ],
+      "cause": [
+        "verursacht",
+        "führt zu"
+      ],
+      "require": [
+        "erfordert",
+        "benötigt",
+        "braucht"
+      ],
+      "enable": [
+        "ermöglicht",
+        "erlaubt"
+      ],
+      "because": [
+        "weil",
+        "da"
+      ]
+    }
+  },
+  "morphology": {
+    "strip_suffixes": [
+      "ung",
+      "heit",
+      "keit",
+      "en",
+      "er",
+      "es",
+      "em",
+      "e",
+      "s"
+    ],
+    "strip_prefixes": [
+      "ge"
+    ],
+    "plural_endings": [
+      "en",
+      "er",
+      "e",
+      "s"
+    ],
+    "stemming_rules": []
+  },
+  "templates": {
+    "location_known": "Der {theme} ist {adposition} dem {location}.",
+    "location_unknown": "Ich weiß nicht, wo der {theme} ist.",
+    "verification_true": "Ja, der {theme} ist {adposition} dem {location}.",
+    "verification_false": "Nein, der {theme} ist nicht {adposition} dem {location}.",
+    "definition_template": "{subject} ist {definition}.",
+    "cause_template": "{effect} tritt auf, weil {cause} auftritt.",
+    "procedure_template": "{target} erfordert {step}.",
+    "command_receipt": "Verstanden. Ziel akzeptiert.",
+    "understood_assertion": "Verstanden."
+  }
+}

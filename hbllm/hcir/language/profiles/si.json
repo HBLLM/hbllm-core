@@ -1,0 +1,165 @@
+{
+  "iso_code": "si",
+  "name": "Sinhala",
+  "typology": {
+    "word_order": "SOV",
+    "adposition_type": "postposition",
+    "wh_movement": "in_situ",
+    "yes_no_strategy": "particle",
+    "copula_style": "postpositional_particle",
+    "has_articles": false,
+    "case_marking": true
+  },
+  "closed_class": {
+    "specifiers": {
+      "මේ": "proximal",
+      "අර": "distal",
+      "එම": "definite"
+    },
+    "adpositions": {
+      "මත": "located_on",
+      "මතට": "located_on",
+      "තුළ": "located_in",
+      "තුළට": "located_in",
+      "යට": "located_under",
+      "යටට": "located_under",
+      "ළඟ": "located_near",
+      "අසල": "located_near"
+    },
+    "question_markers": {
+      "කොහෙද": {
+        "target": "location",
+        "predicate": "located_on"
+      },
+      "කුමක්ද": {
+        "target": "definition",
+        "predicate": "is_a"
+      },
+      "මොකක්ද": {
+        "target": "definition",
+        "predicate": "is_a"
+      },
+      "ඇයි": {
+        "target": "cause",
+        "predicate": "causes"
+      },
+      "කෙසේද": {
+        "target": "procedure",
+        "predicate": "requires"
+      }
+    },
+    "question_particles": [
+      "ද",
+      "තියෙනවද",
+      "තිබෙනවද"
+    ],
+    "copula_forms": [
+      "තියෙනවා",
+      "තිබෙනවා",
+      "තියෙන්නේ",
+      "තිබෙන්නේ",
+      "වෙනවා",
+      "වේ"
+    ],
+    "command_verbs": {
+      "විවෘත කරන්න": "open",
+      "අරින්න": "open",
+      "ඇරගන්න": "open",
+      "අරින්නට": "open",
+      "අගුළු අරින්න": "unlock",
+      "අගුළුහරින්න": "unlock",
+      "තල්ලු කරන්න": "push",
+      "තල්ලු": "push",
+      "ගෙනයන්න": "move",
+      "දමන්න": "put",
+      "වහන්න": "close",
+      "අගුළු දමන්න": "lock",
+      "අගුළුලන්න": "lock",
+      "කරකවන්න": "rotate",
+      "නවතන්න": "stop",
+      "පැහැදිලි කරන්න": "knowledge.explain"
+    },
+    "polite_wrappers": [
+      "කරුණාකර",
+      "මට කියන්න"
+    ],
+    "expository_markers": {
+      "exemplification": [
+        "වැනි",
+        "උදාහරණයක් ලෙස"
+      ],
+      "cause": [
+        "හේතු වේ",
+        "ඇති කරයි"
+      ],
+      "require": [
+        "අවශ්‍ය වේ"
+      ],
+      "enable": [
+        "ඉඩ සලසයි"
+      ],
+      "because": [
+        "නිසා",
+        "බැවින්"
+      ]
+    },
+    "concept_map": {
+      "ball": "බෝලය",
+      "table": "මේසය",
+      "box": "පෙට්ටිය",
+      "cup": "කෝප්පය",
+      "robot": "රොබෝ",
+      "front_door": "ඉදිරිපස දොර",
+      "back_door": "පසුපස දොර",
+      "robot_arm": "රොබෝ අත",
+      "door": "දොර",
+      "arm": "අත",
+      "gate": "ගේට්ටුව"
+    },
+    "color_map": {
+      "red": "රතු",
+      "blue": "නිල්",
+      "green": "කොළ"
+    }
+  },
+  "morphology": {
+    "strip_suffixes": [
+      "ය",
+      "ට",
+      "න්",
+      "ක්"
+    ],
+    "strip_prefixes": [],
+    "plural_endings": [
+      "වල්",
+      "යෝ"
+    ],
+    "stemming_rules": [
+      [
+        "මතට",
+        "මත"
+      ],
+      [
+        "තුළට",
+        "තුළ"
+      ]
+    ]
+  },
+  "templates": {
+    "location_known": "{theme} {location} {adposition} තියෙනවා.",
+    "location_probable": "{theme} බොහෝ විට {location} {adposition} තියෙන්න පුළුවන්.",
+    "location_plausible": "මම හිතන්නේ {theme} {location} {adposition} තියෙන්න පුළුවන්.",
+    "location_unknown": "{theme} කොහෙද කියා මම දන්නේ නැහැ.",
+    "insufficient_evidence": "{theme} කොහෙද තියෙන්නේ කියලා තීරණය කිරීමට ප්‍රමාණවත් සාක්ෂි නැත.",
+    "contradicted_evidence": "{theme} පිළිබඳව පරස්පර සාක්ෂි තිබේ.",
+    "verification_true": "ඔව්, {theme} {location} {adposition} තියෙනවා.",
+    "verification_true_probable": "ඔව්, {theme} බොහෝ විට {location} {adposition} තියෙන්න පුළුවන්.",
+    "verification_true_plausible": "මම හිතන්නේ {theme} {location} {adposition} තියෙන්න පුළුවන්.",
+    "verification_false": "නැහැ, {theme} {location} {adposition} නැහැ.",
+    "definition_template": "{subject} යනු {definition}.",
+    "cause_template": "{cause} නිසා {effect} සිදු වේ.",
+    "procedure_template": "{target} සඳහා {step} අවශ්‍ය වේ.",
+    "command_receipt": "තේරුම් ගත්තා. ඉලක්කය පිළිගත්තා.",
+    "understood_assertion": "තේරුම් ගත්තා."
+  }
+}

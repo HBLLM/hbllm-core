@@ -712,10 +712,23 @@ class TieredWorkspace:
         )
         if not moved.is_committed:
             return False
-        source_ws.commit_operations(
+        removed = source_ws.commit_operations(
             [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
             author=author,
         )
+        if not removed.is_committed:
+            logger.warning(
+                "Demote source removal failed for node %s (%s -> %s); compensating destination",
+                node_id,
+                from_tier,
+                to_tier,
+            )
+            dest_ws.commit_operations(
+                [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
+                author=f"{author}:compensate",
+                grant=getattr(self, "_system_grant", None),
+            )
+            return False
 
         logger.info("Demoted node %s from %s to %s", node_id, from_tier, to_tier)
         return True

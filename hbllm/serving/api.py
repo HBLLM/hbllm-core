@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from hbllm.brain.core.prompt_helper import ChatContext
 
 from fastapi import (
+    Depends,
     FastAPI,
     File,
     HTTPException,
@@ -48,6 +49,15 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+
+def require_authenticated_tenant(request: Request) -> str:
+    """Resolve authenticated tenant_id from request.state or fail closed with 401."""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id or not isinstance(tenant_id, str):
+        raise HTTPException(status_code=401, detail="Authenticated tenant context required")
+    return tenant_id
+
 
 # ─── Request / Response Schemas ───────────────────────────────────────────────
 
@@ -562,13 +572,15 @@ async def lifespan(app: FastAPI) -> Any:
 
         # Usage & Billing endpoints
         @app.get("/v1/usage")
-        async def get_usage(api_req: Request, days: int = 30) -> Any:
-            tenant_id = getattr(api_req.state, "tenant_id", "default")
+        async def get_usage(
+            days: int = 30, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             return usage_tracker.get_tenant_usage(tenant_id, days)
 
         @app.get("/v1/usage/daily")
-        async def get_daily_usage(api_req: Request, days: int = 30) -> Any:
-            tenant_id = getattr(api_req.state, "tenant_id", "default")
+        async def get_daily_usage(
+            days: int = 30, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             return {"daily": usage_tracker.get_daily_usage(tenant_id, days)}
 
         @app.get("/v1/billing/plans")
@@ -576,8 +588,9 @@ async def lifespan(app: FastAPI) -> Any:
             return {"plans": billing.list_plans()}
 
         @app.get("/v1/billing")
-        async def get_billing(api_req: Request, days: int = 30) -> Any:
-            tenant_id = getattr(api_req.state, "tenant_id", "default")
+        async def get_billing(
+            days: int = 30, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             usage = usage_tracker.get_tenant_usage(tenant_id, days)
             cost = usage_tracker.estimate_cost(tenant_id, days)
             return {"usage": usage, "cost": cost}
@@ -657,13 +670,15 @@ async def lifespan(app: FastAPI) -> Any:
             return {"schemas": extractor.list_schemas()}
 
         @app.post("/v1/extract")
-        async def extract_data(request: Request) -> Any:
+        async def extract_data(
+            request: Request, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             body = await request.json()
             result = await extractor.extract(
                 text=body["text"],
                 schema_id=body.get("schema_id"),
                 schema=body.get("schema"),
-                tenant_id=body.get("tenant_id", ""),
+                tenant_id=tenant_id,
             )
             return {
                 "schema_id": result.schema_id,
@@ -683,11 +698,10 @@ async def lifespan(app: FastAPI) -> Any:
 
         # ── Agent Endpoints ──
         @app.post("/v1/agents")
-        async def create_agent(request: Request) -> Any:
+        async def create_agent(
+            request: Request, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             body = await request.json()
-            tenant_id = getattr(request.state, "tenant_id", None) or body.get(
-                "tenant_id", "default"
-            )
             agent = agent_registry.create_agent(
                 tenant_id=tenant_id,
                 name=body["name"],
@@ -697,20 +711,23 @@ async def lifespan(app: FastAPI) -> Any:
             return {"agent_id": agent.agent_id, "name": agent.name}
 
         @app.get("/v1/agents")
-        async def list_agents(request: Request) -> Any:
-            tenant_id = getattr(request.state, "tenant_id", "default")
+        async def list_agents(tenant_id: str = Depends(require_authenticated_tenant)) -> Any:
             agents = agent_registry.list_agents(tenant_id)
             return {"agents": [{"agent_id": a.agent_id, "name": a.name} for a in agents]}
 
         @app.get("/v1/agents/tools")
-        async def list_agent_tools(request: Request) -> Any:
-            tenant_id = getattr(request.state, "tenant_id", "default")
+        async def list_agent_tools(
+            tenant_id: str = Depends(require_authenticated_tenant),
+        ) -> Any:
             return {"tools": agent_registry.list_tools(tenant_id)}
 
         @app.post("/v1/agents/{agent_id}/run")
-        async def run_agent(agent_id: str, request: Request) -> Any:
+        async def run_agent(
+            agent_id: str,
+            request: Request,
+            tenant_id: str = Depends(require_authenticated_tenant),
+        ) -> Any:
             body = await request.json()
-            tenant_id = getattr(request.state, "tenant_id", "default")
             context = {
                 "vector_store": _state.get("vector_store"),
                 "embeddings": _state.get("embeddings"),
@@ -730,9 +747,10 @@ async def lifespan(app: FastAPI) -> Any:
             }
 
         @app.post("/v1/agents/tools")
-        async def register_tool(request: Request) -> Any:
+        async def register_tool(
+            request: Request, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             body = await request.json()
-            tenant_id = getattr(request.state, "tenant_id", "default")
             tool = agent_registry.register_webhook_tool(
                 tenant_id=tenant_id,
                 name=body["name"],
@@ -811,13 +829,15 @@ async def lifespan(app: FastAPI) -> Any:
             return {"lenses": mpa.list_lenses()}
 
         @app.post("/v1/analyze")
-        async def multi_perspective_analyze(request: Request) -> Any:
+        async def multi_perspective_analyze(
+            request: Request, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             body = await request.json()
             result = await mpa.analyze(
                 query=body["query"],
                 lenses=body.get("lenses"),
                 context=body.get("context", ""),
-                tenant_id=body.get("tenant_id", ""),
+                tenant_id=tenant_id,
             )
             return {
                 "request_id": result.request_id,
@@ -850,8 +870,9 @@ async def lifespan(app: FastAPI) -> Any:
 
         # ── Explainable AI (XAI) ──
         @app.get("/v1/xai/traces")
-        async def get_traces(request: Request, limit: int = 50) -> Any:
-            tenant_id = getattr(request.state, "tenant_id", "default")
+        async def get_traces(
+            limit: int = 50, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             return {"traces": xai.get_tenant_traces(tenant_id, limit)}
 
         @app.get("/v1/xai/trace/{trace_id}")
@@ -862,13 +883,15 @@ async def lifespan(app: FastAPI) -> Any:
             return trace
 
         @app.get("/v1/xai/audit")
-        async def get_audit_log(request: Request, limit: int = 100) -> Any:
-            tenant_id = getattr(request.state, "tenant_id", "default")
+        async def get_audit_log(
+            limit: int = 100, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             return {"audit_log": xai.get_audit_log(tenant_id, limit)}
 
         @app.get("/v1/xai/compliance")
-        async def compliance_report(request: Request, days: int = 30) -> Any:
-            tenant_id = getattr(request.state, "tenant_id", "default")
+        async def compliance_report(
+            days: int = 30, tenant_id: str = Depends(require_authenticated_tenant)
+        ) -> Any:
             return xai.get_compliance_report(tenant_id, days)
 
         logger.info("🧠 AGI features enabled (multi-perspective analysis, explainable AI)")
@@ -2530,6 +2553,9 @@ import time
 async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -> Any:
     """
     OpenAI-compatible chat completions endpoint for AI coding assistants like Cursor, Claude Code, etc.
+
+    Routes through Pure-HCIR first (zero LLM); falls back to brain pipeline if HCIR
+    parsing fails or is unavailable.
     """
     from hbllm.brain.core.factory import BrainConfig
 
@@ -2540,6 +2566,64 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
     session_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
 
+    # ── Pure-HCIR fast path (non-streaming only) ─────────────────────
+    if not request.stream:
+        last_user_msg = next(
+            (m.content for m in reversed(request.messages) if m.role == "user"),
+            None,
+        )
+        if last_user_msg:
+            try:
+                from hbllm.runtime.bootstrap import CognitiveSystem
+
+                cognitive_system = _state.get("cognitive_system")
+                if cognitive_system is None:
+                    cognitive_system = CognitiveSystem()
+                    _state["cognitive_system"] = cognitive_system
+
+                hcir_result = cognitive_system.process_dialogue(last_user_msg)
+                if hcir_result.is_success:
+                    logger.info(
+                        "HCIR autonomy: success for input: %s",
+                        last_user_msg[:80],
+                    )
+                    return JSONResponse(
+                        content={
+                            "id": f"chatcmpl-{correlation_id}",
+                            "object": "chat.completion",
+                            "created": int(time.time()),
+                            "model": "hbllm-pure-hcir",
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": hcir_result.response_text,
+                                    },
+                                    "finish_reason": "stop",
+                                }
+                            ],
+                            "usage": {
+                                "prompt_tokens": len(last_user_msg.split()),
+                                "completion_tokens": len(hcir_result.response_text.split()),
+                                "total_tokens": 0,
+                            },
+                        },
+                        headers={"X-HBLLM-Engine": "pure-hcir"},
+                    )
+                else:
+                    logger.debug(
+                        "HCIR fallback to brain pipeline: %s — %s",
+                        hcir_result.error_type,
+                        last_user_msg[:80],
+                    )
+            except Exception:
+                logger.debug(
+                    "HCIR unavailable, falling through to brain pipeline",
+                    exc_info=True,
+                )
+
+    # ── Brain pipeline path (existing) ───────────────────────────────
     # Flatten the messages list into a single prompt for HBLLM
     text_prompt = ""
     for msg in request.messages:
