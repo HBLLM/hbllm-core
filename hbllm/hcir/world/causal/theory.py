@@ -18,7 +18,7 @@ from hbllm.hcir.world.causal.axioms import (
     SpelkePhysicalAxiom,
     parse_evidence,
 )
-from hbllm.hcir.world.causal_discovery import CausalPredicate
+from hbllm.hcir.world.causal.predicates import CausalPredicate
 from hbllm.hcir.world.percept import PlaceLocus, TerminalSignal
 
 logger = logging.getLogger(__name__)

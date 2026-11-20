@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.hcir.world.causal_discovery import CausalPredicate
+from hbllm.hcir.world.causal.predicates import CausalPredicate
 
 
 @dataclass
