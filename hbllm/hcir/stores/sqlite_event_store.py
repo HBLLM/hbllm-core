@@ -118,9 +118,9 @@ def _compute_event_hash(
     data_json: str,
     previous_hash: str,
 ) -> str:
-    """Compute a deterministic hash for an event in the chain."""
+    """Compute a deterministic 256-bit SHA-256 hash for an event in the chain."""
     payload = f"{sequence}:{event_type}:{data_json}:{previous_hash}"
-    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 class SQLiteEventStore(IEventStore):
