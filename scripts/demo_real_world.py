@@ -150,6 +150,12 @@ def test_physics_and_spatial_simulation() -> None:
     engine.action_dynamics[3] = ActionDynamicsModel(3, delta_r=0, delta_c=-1, confidence=1.0)
     engine.action_dynamics[4] = ActionDynamicsModel(4, delta_r=0, delta_c=1, confidence=1.0)
 
+    # Wire barrier and goal ontology into HCIR Symbolic World Theory & Working Memory
+    engine.symbolic_theory.induce_barrier(2, evidence="collision")
+    engine.symbolic_theory.induce_goal(3, evidence="terminal_reward")
+    engine.learned_barriers.update([(r, 5) for r in range(10) if r != 4])
+    engine.learned_goal_positions = {(8, 8)}
+
     t0 = time.perf_counter()
     action, meta = engine.decide(grid, available_actions=[1, 2, 3, 4])
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -162,9 +168,13 @@ def test_physics_and_spatial_simulation() -> None:
     print(f"  OFC Mental Rollout:     Selected optimal kinematic action -> {chosen}")
     print(f"  Execution Time:         {elapsed_ms:.2f}ms")
     print(
-        f"  Epistemic State:        Avatar feature={engine.avatar_feature}, Learned goals={len(engine.learned_goal_positions)}"
+        f"  Cortical Theory State:  Barrier features={list(engine.symbolic_theory.barrier_features)}, "
+        f"Goal features={list(engine.symbolic_theory.goal_features)}, "
+        f"Learned barrier cells={len(engine.learned_barriers)}"
     )
-    print("  [PASS] Forward mental simulation routed through spatial geometry safely.")
+    print(
+        "  [PASS] Forward mental simulation routed through spatial geometry safely avoiding barriers."
+    )
 
 
 async def test_coding_and_tool_execution() -> None:
