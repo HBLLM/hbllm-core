@@ -152,10 +152,21 @@ class EnglishSyntaxParser:
             adjs.append(tokens[idx])
             idx += 1
 
-        # Check head noun
+        # Check head noun (allow compound nouns up to 3 consecutive NOUN tokens)
         if idx < len(tokens) and tokens[idx].pos == EnglishPOS.NOUN:
-            head = tokens[idx]
+            compound_parts = [tokens[idx]]
             idx += 1
+            while (
+                idx < len(tokens)
+                and len(compound_parts) < 3
+                and tokens[idx].pos == EnglishPOS.NOUN
+                and tokens[idx].features.get("is_path") != "true"
+                and not (idx + 1 < len(tokens) and tokens[idx + 1].pos == EnglishPOS.DET)
+            ):
+                compound_parts.append(tokens[idx])
+                idx += 1
+            adjs.extend(compound_parts[:-1])
+            head = compound_parts[-1]
         elif det or adjs:
             # Missing head noun
             return None, start_idx
@@ -220,6 +231,18 @@ class EnglishSyntaxParser:
                         is_negated=is_negated,
                     )
 
+            else:
+                # Predicative nominal copular: "Focus is a cognitive process"
+                pred_np, next_idx = self.parse_noun_phrase(tokens, idx)
+                if pred_np:
+                    vp = VerbPhrase(head_verb=verb_tok, direct_object=pred_np)
+                    return SentenceNode(
+                        construction=ConstructionType.COPULAR,
+                        subject=np,
+                        verb_phrase=vp,
+                        is_negated=is_negated,
+                    )
+
         if verb_tok.pos == EnglishPOS.VERB:
             # Standard SVO: "The robot pushed the box to the table"
             obj_np, next_idx = self.parse_noun_phrase(tokens, idx)
@@ -246,6 +269,30 @@ class EnglishSyntaxParser:
         """Parse imperative: Verb + (NP) + (PP)* ("Move the ball to the table")."""
         verb_tok = tokens[0]
         idx = 1
+
+        # Skip polite/beneficiary pronouns on conversational commands ("list me the files")
+        if verb_tok.lemma in {
+            "list",
+            "read",
+            "show",
+            "display",
+            "find",
+            "search",
+            "explain",
+            "describe",
+            "tell",
+            "fetch",
+            "get",
+        }:
+            if (
+                idx + 1 < len(tokens)
+                and tokens[idx].lemma == "for"
+                and tokens[idx + 1].lemma in ("me", "us")
+                and idx + 2 < len(tokens)
+            ):
+                idx += 2
+            elif idx < len(tokens) and tokens[idx].lemma in ("me", "us") and idx + 1 < len(tokens):
+                idx += 1
 
         obj_np, next_idx = self.parse_noun_phrase(tokens, idx)
         idx = next_idx if obj_np else idx
@@ -287,6 +334,17 @@ class EnglishSyntaxParser:
         # Check Adj complement ("Is the ball red?")
         if idx < len(tokens) and tokens[idx].pos == EnglishPOS.ADJ:
             vp = VerbPhrase(head_verb=aux_tok, adjective_complement=tokens[idx])
+            return SentenceNode(
+                construction=ConstructionType.YES_NO_QUESTION,
+                subject=subject_np,
+                verb_phrase=vp,
+                auxiliary=aux_tok,
+            )
+
+        # Check NP nominal complement ("Is Pluto a planet?")
+        pred_np, _ = self.parse_noun_phrase(tokens, idx)
+        if pred_np:
+            vp = VerbPhrase(head_verb=aux_tok, direct_object=pred_np)
             return SentenceNode(
                 construction=ConstructionType.YES_NO_QUESTION,
                 subject=subject_np,

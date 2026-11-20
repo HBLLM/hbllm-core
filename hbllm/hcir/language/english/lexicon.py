@@ -104,18 +104,37 @@ class EnglishLexicon:
             return bool(self._ontology_store.has_word(key, language="en"))
         return False
 
+    def is_trusted_word(self, word: str) -> bool:
+        """Return True if *word* is in core lexicon or non-noisy ontology entries."""
+        key = word.lower()
+        if key in self._entries:
+            return True
+        if self._ontology_store is not None:
+            if hasattr(self._ontology_store, "is_trusted_word"):
+                return bool(self._ontology_store.is_trusted_word(key, language="en"))
+            return bool(self._ontology_store.has_word(key, language="en"))
+        return False
+
+    def base_words(self) -> frozenset[str]:
+        """Return all words explicitly registered in the built-in lexicon."""
+        return frozenset(self._entries.keys())
+
     def _init_vocabulary(self) -> None:
         # Determiners
         for det in ["the", "a", "an", "this", "that", "these", "those"]:
             self.add_entry(EnglishLexicalEntry(lemma=det, pos=EnglishPOS.DET))
 
+        # Adverbs (markers like please/not)
+        for adv in ["please", "kindly", "not"]:
+            self.add_entry(EnglishLexicalEntry(lemma=adv, pos=EnglishPOS.ADV))
+
         # Pronouns
-        for pron in ["it", "them", "me", "you", "i", "what", "where"]:
+        for pron in ["it", "them", "me", "us", "you", "i", "what", "where"]:
             pos = EnglishPOS.WH if pron in ("what", "where") else EnglishPOS.PRON
             self.add_entry(EnglishLexicalEntry(lemma=pron, pos=pos))
 
         # Auxiliary verbs
-        for aux in ["is", "are", "was", "were", "did", "does", "do", "can"]:
+        for aux in ["is", "are", "was", "were", "did", "does", "do", "can", "could", "would"]:
             self.add_entry(EnglishLexicalEntry(lemma=aux, pos=EnglishPOS.AUX))
 
         # Prepositions
@@ -132,6 +151,11 @@ class EnglishLexicon:
             "from": "from",
             "to": "to",
             "into": "into",
+            "about": "about",
+            "for": "for",
+            "of": "of",
+            "with": "with",
+            "by": "by",
         }
         for prep, pred in preps.items():
             self.add_entry(
@@ -192,6 +216,13 @@ class EnglishLexicon:
             "unlock": "unlock",
             "rotate": "rotate",
             "close": "close",
+            "require": "requires",
+            "cause": "causes",
+            "trigger": "triggers",
+            "produce": "produces",
+            "improve": "improves",
+            "enable": "enables",
+            "maintain": "maintains",
         }
         for verb, pred in verbs.items():
             self.add_entry(

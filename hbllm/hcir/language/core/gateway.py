@@ -182,6 +182,42 @@ class HCIRGateway:
             evidence.id,
             evidence.methodology,
         )
+
+        # Also materialize conceptual/causal/dependency relations into persistent tier
+        if (
+            frame.predicate in ("is_a", "causes", "requires", "enables")
+            and subject_name
+            and obj_desc
+            and self._tiered_workspace is not None
+        ):
+            try:
+                from hbllm.hcir.language.reading_curriculum import (
+                    ExtractedProposition,
+                    commit_propositions,
+                )
+
+                p_ws = getattr(self._tiered_workspace, "persistent", None) or self._workspace
+                if p_ws is not None and hasattr(p_ws, "commit_operations"):
+                    grant = getattr(self._tiered_workspace, "_system_grant", None)
+                    raw_sent = getattr(frame.metadata, "raw_text", "") or claim_str
+                    commit_propositions(
+                        [
+                            ExtractedProposition(
+                                subject=subject_name.lower().replace(" ", "_"),
+                                relation=frame.predicate,
+                                obj=obj_desc.lower().replace(" ", "_"),
+                                source_file="dialogue_assertion",
+                                sentence=raw_sent,
+                            )
+                        ],
+                        p_ws,
+                        ontology_store=self._ontology_store,
+                        grant=grant,
+                        author="hcir_language_gateway",
+                    )
+            except Exception as exc:
+                logger.debug("HCIRGateway: conceptual proposition commit skipped: %s", exc)
+
         return evidence
 
     # ── Query: Epistemic State Resolution ─────────────────────────────
@@ -494,11 +530,19 @@ class HCIRGateway:
             "located_within": HCIREdgeType.LOCATED_IN,
             "located_under": HCIREdgeType.BELOW,
             "located_beneath": HCIREdgeType.BELOW,
+            "below": HCIREdgeType.BELOW,
+            "under": HCIREdgeType.BELOW,
             "located_above": HCIREdgeType.ABOVE,
+            "above": HCIREdgeType.ABOVE,
             "located_beside": HCIREdgeType.NEAR,
             "located_near": HCIREdgeType.NEAR,
+            "near": HCIREdgeType.NEAR,
             "supports": HCIREdgeType.SUPPORTS,
             "part_of": HCIREdgeType.PART_OF,
             "contains": HCIREdgeType.CONTAINS,
+            "is_a": HCIREdgeType.GENERALIZES,
+            "causes": HCIREdgeType.CAUSES,
+            "requires": HCIREdgeType.REQUIRES,
+            "enables": HCIREdgeType.CAUSES,
         }
         return _MAP.get(predicate)

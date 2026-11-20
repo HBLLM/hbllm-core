@@ -12,10 +12,17 @@ The unified orchestrator connecting natural language utterances to HCIR cognitio
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.hcir.graph import CognitiveGraph
+from hbllm.hcir.graph import (
+    CognitiveGraph,
+    ConceptNode,
+    GroundedConceptNode,
+    HCIRNodeType,
+    PhysicalEntityNode,
+)
+from hbllm.hcir.language.core.discourse import DiscourseSegmenter
 from hbllm.hcir.language.core.epistemic_policy import (
     CognitiveEpistemicState,
     EpistemicRealizationPolicy,
@@ -56,6 +63,7 @@ class LanguageTurnResult:
     hcir_node_id: str | None = (
         None  # EvidenceNode ID (for assertions) or GoalNode ID (for commands)
     )
+    sub_results: list[LanguageTurnResult] = field(default_factory=list)
 
 
 class MultilingualLanguageRuntime:
@@ -91,14 +99,14 @@ class MultilingualLanguageRuntime:
         self._graph = graph
         self._workspace = workspace
         self._ref_resolver = reference_resolver or ReferenceResolver()
-        self._grounding_resolver = GroundingResolver(graph, self._ref_resolver, workspace=workspace)
+        self._epistemic_policy = epistemic_policy or EpistemicRealizationPolicy()
         self._gateway = HCIRGateway(
             graph,
             workspace=workspace,
             ontology_store=None,  # Set after ontology_store init below
             tiered_workspace=getattr(workspace, "_tiered_workspace", None),
         )
-        self._epistemic_policy = epistemic_policy or EpistemicRealizationPolicy()
+        self._dyn_vocab_sig: tuple[int, int] = (-1, -1)
 
         if ontology_store is None:
             from hbllm.hcir.language.ontology_store import (
@@ -126,6 +134,13 @@ class MultilingualLanguageRuntime:
 
             OntologyBootstrapper.hydrate_lexicon(graph, en_parser._lexicon, language="en")
 
+        self._grounding_resolver = GroundingResolver(
+            graph,
+            self._ref_resolver,
+            workspace=workspace,
+            lexicon=en_parser._lexicon,
+        )
+
         self._parsers: dict[str, LanguageParser] = {
             "en": en_parser,
             "si": si_parser,
@@ -149,11 +164,56 @@ class MultilingualLanguageRuntime:
 
     # ── Utterance Processing Pipeline ─────────────────────────────────
 
+    def _sync_dynamic_vocabulary(self, parser: LanguageParser) -> None:
+        """Keep parser's Tier-1 typo normalizer aware of active world & persistent concepts."""
+        if not hasattr(parser, "set_dynamic_vocabulary"):
+            return
+        tiered_ws = self._gateway._tiered_workspace or getattr(
+            self._workspace, "_tiered_workspace", None
+        )
+        p_graph = getattr(getattr(tiered_ws, "persistent", None), "graph", None)
+        p_count = p_graph.node_count if p_graph is not None else 0
+        sig = (self._graph.node_count, p_count)
+        if sig == self._dyn_vocab_sig:
+            return
+        self._dyn_vocab_sig = sig
+
+        vocab: list[str] = []
+        for node in self._graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
+            if isinstance(node, PhysicalEntityNode) and node.entity_type:
+                vocab.append(node.entity_type)
+        for node in self._graph.nodes_by_type(HCIRNodeType.GROUNDED_CONCEPT):
+            if isinstance(node, GroundedConceptNode) and node.concept_name:
+                vocab.append(node.concept_name)
+        if p_graph is not None:
+            for node in p_graph.nodes_by_type(HCIRNodeType.CONCEPT):
+                if isinstance(node, ConceptNode) and node.label:
+                    vocab.append(node.label)
+        parser.set_dynamic_vocabulary(vocab)
+
+    def process_discourse(
+        self,
+        text: str,
+        language: str = "en",
+        speaker: str = "human",
+    ) -> list[LanguageTurnResult]:
+        """Process multi-sentence / multi-clause discourse sequentially within one turn."""
+        segments = DiscourseSegmenter.segment(text) if language == "en" else [text]
+        if not segments:
+            segments = [text]
+        self._ref_resolver.next_turn()
+        return [
+            self.process_utterance(seg, language=language, speaker=speaker, advance_turn=False)
+            for seg in segments
+        ]
+
     def process_utterance(
         self,
         text: str,
         language: str = "en",
         speaker: str = "human",
+        *,
+        advance_turn: bool = True,
     ) -> LanguageTurnResult:
         """Process a natural language utterance through the complete A16 pipeline."""
         parser = self._parsers.get(language)
@@ -174,8 +234,10 @@ class MultilingualLanguageRuntime:
                 error_detail=f"Language '{language}' is not supported.",
             )
 
-        # 0. Advance conversational discourse turn (decays prior topic salience)
-        self._ref_resolver.next_turn()
+        # 0. Advance conversational discourse turn once per user message
+        if advance_turn:
+            self._ref_resolver.next_turn()
+        self._sync_dynamic_vocabulary(parser)
 
         # 1. Parse into language-neutral SemanticFrame
         frame = parser.parse(text)

@@ -129,9 +129,21 @@ def run_pure_hcir_graduation_eval() -> dict[str, Any]:
         )
     )
 
-    # Warm up lazy language runtime & SQLite ontology connection before steady-state timing
-    system.process_dialogue("Explain atom")
-    system.process_dialogue("Remember that warmup is complete")
+    # Warm up lazy language runtime, spatial grounding, causal traversal, & command dispatcher
+    for _warm in (
+        "The test ball is on the table.",
+        "Where is the test ball?",
+        "Explain atom",
+        "Why focus",
+        "How does it work?",
+        "Remember that warmup is complete",
+        "Recall warmup",
+        "The test spoon is on the counter. Where is the test spoon?",
+        "List files and then explain focus.",
+        "explian focus",
+        "please can you explain focus?",
+    ):
+        system.process_dialogue(_warm)
 
     tracker = AutonomyTracker(min_turns_for_retirement=50, retirement_threshold=0.98)
     system.services.extensions["autonomy_metrics"] = tracker
@@ -255,6 +267,71 @@ def run_pure_hcir_graduation_eval() -> dict[str, Any]:
     ]
     for utt, subs in suite5_cases:
         _run_dialogue_case("memory_belief_revision", utt, expect_substrings=subs)
+
+    # ── Suite 5b: Long Discourse Paragraphs & Essays (5 turns) ──
+    discourse_cases: list[tuple[str, tuple[str, ...]]] = [
+        (
+            "The silver spoon is on the counter. The brown bowl is under the counter. Where is the silver spoon?",
+            ("counter",),
+        ),
+        (
+            "Where is the brown bowl?",
+            ("counter",),
+        ),
+        (
+            "Curiosity is a cognitive drive. Curiosity requires attention. Attention causes discovery.",
+            ("extracted and stored", "discovery"),
+        ),
+        (
+            "Why does discovery happen?",
+            ("attention", "discovery"),
+        ),
+        (
+            "In software engineering, systems face challenges such as latency and outages. Engineers design consensus protocols like Raft to maintain safety.",
+            ("extracted and stored", "consensus"),
+        ),
+    ]
+    for utt, subs in discourse_cases:
+        _run_dialogue_case("discourse_paragraphs", utt, expect_substrings=subs)
+
+    # ── Suite 5c: Multi-Step Instruction Sets (5 turns) ──
+    instruction_cases: list[tuple[str, tuple[str, ...]]] = [
+        ("List files and then explain focus.", ("fs.list", "focus")),
+        ("Read README.md; explain microscope.", ("fs.read", "microscope")),
+        (
+            "1. Remember that telemetry is active. 2. Explain algorithm. 3. List files.",
+            ("memory.store", "algorithm", "fs.list"),
+        ),
+        ("Recall telemetry and then forget telemetry", ("telemetry", "acknowledged")),
+        (
+            "Push the red ball to the shelf and then move the blue cup to the table.",
+            ("goal accepted",),
+        ),
+    ]
+    for utt, subs in instruction_cases:
+        _run_dialogue_case("instruction_sets", utt, expect_substrings=subs)
+
+    # ── Suite 5d: Orthographic Typo Recovery (5 turns) ──
+    typo_cases: list[tuple[str, tuple[str, ...]]] = [
+        ("explian focus", ("focus", "optical")),
+        ("lisst files", ("fs.list",)),
+        ("wher is the red ball?", ("table", "shelf")),
+        ("Where is the red blal?", ("table", "shelf")),
+        ("why does focsu happen?", ("focus", "spiking", "causal")),
+    ]
+    for utt, subs in typo_cases:
+        _run_dialogue_case("typo_recovery", utt, expect_substrings=subs)
+
+    # ── Suite 5e: Informal & Ungrammatical Recovery (5 turns) ──
+    informal_cases: list[tuple[str, tuple[str, ...]]] = [
+        ("please can you explain focus?", ("focus",)),
+        ("can you tell me what is algorithm?", ("algorithm", "rule")),
+        ("me want know about gravity", ("gravity", "force")),
+        ("where green book is?", ("desk",)),
+        ("the red ball on the table", ("understood",)),
+    ]
+    for utt, subs in informal_cases:
+        _run_dialogue_case("informal_ungrammatical", utt, expect_substrings=subs)
 
     # ── Suite 6: Governed Kernel Capabilities & SSRF Safety (10 tasks) ──
     tool_tasks: list[tuple[str, dict[str, Any]]] = [

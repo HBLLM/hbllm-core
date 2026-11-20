@@ -43,6 +43,7 @@ class LexicalOntologyStore:
         self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
+        self._trusted_cache: dict[tuple[str, str], bool] = {}
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -195,6 +196,102 @@ class LexicalOntologyStore:
             (language, key),
         )
         return cur.fetchone() is not None
+
+    def is_trusted_word(self, lemma: str, *, language: str = "en") -> bool:
+        """Return True if *lemma* exists in curated/WordNet/curriculum sources (not Gutenberg OCR noise)."""
+        key = lemma.strip().lower()
+        if not key:
+            return False
+        cache_key = (language, key)
+        if cache_key in self._trusted_cache:
+            return self._trusted_cache[cache_key]
+        cur = self._conn.execute(
+            "SELECT 1 FROM lexical_entries WHERE language = ? AND lemma = ? "
+            "AND source != 'corpus:gutenberg_cache' LIMIT 1",
+            (language, key),
+        )
+        trusted = cur.fetchone() is not None
+        if len(self._trusted_cache) < 8192:
+            self._trusted_cache[cache_key] = trusted
+        return trusted
+
+    def fuzzy_lookup(
+        self,
+        word: str,
+        *,
+        language: str = "en",
+        limit: int = 5,
+        include_replacements: bool = False,
+    ) -> list[str]:
+        """Fast O(edits) indexed 1-edit fuzzy lookup against trusted lexical entries.
+
+        Uses B-tree point lookups (``lemma IN (...)``) rather than range scans.
+        Defaults to high-precision Phase A edits (transpositions, deletions, missing
+        vowels / trailing endings) for sub-5ms lookup and minimal false positives.
+        """
+        key = word.strip().lower()
+        if len(key) < 4 or not key.isalpha():
+            return []
+
+        def _query_candidates(cands: list[str]) -> list[tuple[str, str]]:
+            hits: list[tuple[str, str]] = []
+            for start in range(0, len(cands), 850):
+                batch = cands[start : start + 850]
+                placeholders = ",".join("?" for _ in batch)
+                rows = self._conn.execute(
+                    f"SELECT DISTINCT lemma, source FROM lexical_entries "  # nosec B608
+                    f"WHERE language = ? AND lemma IN ({placeholders}) "
+                    f"AND source != 'corpus:gutenberg_cache'",
+                    (language, *batch),
+                ).fetchall()
+                hits.extend((str(r[0]), str(r[1])) for r in rows)
+            return hits
+
+        splits = [(key[:i], key[i:]) for i in range(len(key) + 1)]
+        transposes = [
+            left + right[1] + right[0] + right[2:] for left, right in splits if len(right) > 1
+        ]
+        deletes = [
+            left + right[1:] for left, right in splits if right and len(left + right[1:]) >= 3
+        ]
+        fast_inserts = [key + c for c in "esydnl"] + [
+            left + c + right for left, right in splits for c in "aeiou"
+        ]
+        phase_a = sorted(
+            {c for c in (*transposes, *deletes, *fast_inserts) if c != key and len(c) >= 3}
+        )
+        raw_hits = _query_candidates(phase_a) if phase_a else []
+
+        if not raw_hits and include_replacements:
+            alphabet = "abcdefghijklmnopqrstuvwxyz"
+            replaces = [left + c + right[1:] for left, right in splits if right for c in alphabet]
+            seen_a = set(phase_a)
+            phase_b = sorted({c for c in replaces if c != key and len(c) >= 3 and c not in seen_a})
+            if phase_b:
+                raw_hits = _query_candidates(phase_b)
+
+        if not raw_hits:
+            return []
+
+        key_sorted = sorted(key)
+        trusted_sources = {"core_ontology", "t3_llm_scaffold", "t4_reading_curriculum"}
+        # Deduplicate keeping best source per lemma
+        best_source: dict[str, str] = {}
+        for lemma, src in raw_hits:
+            if lemma not in best_source or src in trusted_sources:
+                best_source[lemma] = src
+
+        ranked = sorted(
+            best_source.items(),
+            key=lambda item: (
+                0 if sorted(item[0]) == key_sorted else 1,
+                0 if item[0][0] == key[0] else 1,
+                0 if item[1] in trusted_sources else 1,
+                abs(len(item[0]) - len(key)),
+                item[0],
+            ),
+        )
+        return [lemma for lemma, _ in ranked[:limit]]
 
     def get_hypernyms(self, lemma: str, *, language: str = "en") -> list[str]:
         key = lemma.strip().lower()

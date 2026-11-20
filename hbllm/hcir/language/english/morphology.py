@@ -7,8 +7,29 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from hbllm.hcir.language.english.lexicon import EnglishLexicon, EnglishPOS
+from hbllm.hcir.language.english.normalizer import OrthographicNormalizer
+
+_URL_OR_PATH_TOKEN_RE = re.compile(
+    r"""
+    https?://[^\s<>"'()]*[^\s<>"'().,!?;:]
+    | [A-Za-z0-9_./-]*[A-Za-z0-9_/-]+\.[A-Za-z0-9]{1,8}(?=/|\s|$|[.,!?;:])
+    | [A-Za-z0-9_-]+(?:/[A-Za-z0-9_.-]+)+
+    | [A-Za-z0-9_]+(?:[-'][A-Za-z0-9_]+)*
+    | [?.!,;:]
+    """,
+    re.VERBOSE,
+)
+_STRICT_PATH_RE = re.compile(
+    r"^(?:https?://[^\s]+|[A-Za-z0-9_./-]*[A-Za-z0-9_/-]+\.[A-Za-z]{1,8}|[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+)$"
+)
+
+
+def is_path_or_url(token: str) -> bool:
+    """Return True if *token* looks like a file path, dotted filename, or URL."""
+    return bool(_STRICT_PATH_RE.match(token))
 
 
 @dataclass(frozen=True)
@@ -24,8 +45,13 @@ class MorphToken:
 class EnglishMorphology:
     """Morphological analyzer and inflector for English."""
 
-    def __init__(self, lexicon: EnglishLexicon | None = None) -> None:
+    def __init__(
+        self,
+        lexicon: EnglishLexicon | None = None,
+        normalizer: OrthographicNormalizer | None = None,
+    ) -> None:
         self._lexicon = lexicon or EnglishLexicon()
+        self._normalizer = normalizer or OrthographicNormalizer(lexicon=self._lexicon)
         self._irregular_verbs = {
             "is": ("be", "present", "3s"),
             "are": ("be", "present", "pl"),
@@ -50,19 +76,50 @@ class EnglishMorphology:
         }
 
     def tokenize(self, text: str) -> list[str]:
-        """Split text into normalized word and punctuation tokens."""
-        # Normalize whitespace and separate punctuation
-        cleaned = re.sub(r"([?.!,])", r" \1 ", text)
-        tokens = cleaned.strip().split()
-        return tokens
+        """Split text into normalized word, path/URL, and punctuation tokens."""
+        tokens = _URL_OR_PATH_TOKEN_RE.findall(text.strip())
+        if tokens:
+            return tokens
+        cleaned = re.sub(r"([?.!,;:])", r" \1 ", text)
+        return cleaned.strip().split()
 
-    def analyze(self, token: str) -> MorphToken:
-        """Perform morphological analysis and POS identification for a token."""
+    def _trusted_lookup(self, stem: str) -> list[Any]:
+        if hasattr(self._lexicon, "is_trusted_word"):
+            if not self._lexicon.is_trusted_word(stem):
+                return []
+            return list(self._lexicon.lookup(stem))
+        if self._lexicon.has_word(stem):
+            return list(self._lexicon.lookup(stem))
+        return []
+
+    @staticmethod
+    def _inflected_token(
+        surface: str,
+        stem: str,
+        entries: list[Any],
+        *,
+        default_pos: EnglishPOS,
+        features: dict[str, str],
+    ) -> MorphToken:
+        pos = entries[0].pos if entries else default_pos
+        return MorphToken(surface=surface, lemma=stem, pos=pos, features=dict(features))
+
+    def analyze(self, token: str, *, _allow_fuzzy: bool = True) -> MorphToken:
+        """Perform morphological analysis, inflection stripping, and typo recovery."""
         word = token.lower()
 
         # Check punctuation
-        if word in ("?", ".", "!", ","):
+        if word in ("?", ".", "!", ",", ";", ":"):
             return MorphToken(surface=token, lemma=word, pos=EnglishPOS.PUNCT, features={})
+
+        # Protect filenames, paths, and URLs with exact surface casing
+        if is_path_or_url(token):
+            return MorphToken(
+                surface=token,
+                lemma=token,
+                pos=EnglishPOS.NOUN,
+                features={"is_path": "true"},
+            )
 
         # Check irregular verbs
         if word in self._irregular_verbs:
@@ -85,10 +142,10 @@ class EnglishMorphology:
                 features={"number": "plural"},
             )
 
-        # Direct lexicon lookup
-        entries = self._lexicon.lookup(word)
-        if entries:
-            entry = entries[0]
+        # Direct trusted lexicon lookup
+        direct_entries = self._trusted_lookup(word)
+        if direct_entries:
+            entry = direct_entries[0]
             return MorphToken(
                 surface=token,
                 lemma=entry.lemma,
@@ -96,50 +153,95 @@ class EnglishMorphology:
                 features={"number": "singular", "tense": "present"},
             )
 
-        # Rule-based noun pluralization: -es, -s
+        # Rule-based -ies pluralization: directories -> directory, queries -> query
+        if word.endswith("ies") and len(word) > 4:
+            stem_y = word[:-3] + "y"
+            entries = self._trusted_lookup(stem_y)
+            if entries:
+                return self._inflected_token(
+                    token,
+                    stem_y,
+                    entries,
+                    default_pos=EnglishPOS.NOUN,
+                    features={"number": "plural"},
+                )
+
+        # Rule-based -es / -s: sibilant stems check -es before -e; others check -s (-e) FIRST
+        # so "files" -> "file" (not "fil") and "boxes"/"focuses" -> "box"/"focus".
         if word.endswith("es") and len(word) > 3:
-            stem = word[:-2]
-            if self._lexicon.has_word(stem):
-                return MorphToken(
-                    surface=token, lemma=stem, pos=EnglishPOS.NOUN, features={"number": "plural"}
-                )
-            stem_e = word[:-1]
-            if self._lexicon.has_word(stem_e):
-                return MorphToken(
-                    surface=token, lemma=stem_e, pos=EnglishPOS.NOUN, features={"number": "plural"}
-                )
+            if word.endswith(("shes", "ches", "xes", "zes", "ses", "oes")):
+                stem_order = (word[:-2], word[:-1])
+            else:
+                stem_order = (word[:-1], word[:-2])
+            for stem in stem_order:
+                entries = self._trusted_lookup(stem)
+                if entries:
+                    pos = entries[0].pos
+                    feats = (
+                        {"tense": "present", "person": "3s"}
+                        if pos == EnglishPOS.VERB
+                        else {"number": "plural"}
+                    )
+                    return self._inflected_token(
+                        token,
+                        stem,
+                        entries,
+                        default_pos=EnglishPOS.NOUN,
+                        features=feats,
+                    )
         elif word.endswith("s") and len(word) > 2:
             stem = word[:-1]
-            if self._lexicon.has_word(stem):
-                return MorphToken(
-                    surface=token, lemma=stem, pos=EnglishPOS.NOUN, features={"number": "plural"}
+            entries = self._trusted_lookup(stem)
+            if entries:
+                pos = entries[0].pos
+                feats = (
+                    {"tense": "present", "person": "3s"}
+                    if pos == EnglishPOS.VERB
+                    else {"number": "plural"}
+                )
+                return self._inflected_token(
+                    token,
+                    stem,
+                    entries,
+                    default_pos=EnglishPOS.NOUN,
+                    features=feats,
                 )
 
         # Rule-based verb past tense: -ed
         if word.endswith("ed") and len(word) > 3:
-            stem = word[:-2]
-            if self._lexicon.has_word(stem):
-                return MorphToken(
-                    surface=token, lemma=stem, pos=EnglishPOS.VERB, features={"tense": "past"}
-                )
-            stem_d = word[:-1]
-            if self._lexicon.has_word(stem_d):
-                return MorphToken(
-                    surface=token, lemma=stem_d, pos=EnglishPOS.VERB, features={"tense": "past"}
-                )
+            for stem in (word[:-2], word[:-1]):
+                if self._trusted_lookup(stem):
+                    return MorphToken(
+                        surface=token, lemma=stem, pos=EnglishPOS.VERB, features={"tense": "past"}
+                    )
 
-        # Rule-based 3rd person singular verb: -s
-        if word.endswith("s") and len(word) > 2:
-            stem = word[:-1]
-            if self._lexicon.has_word(stem):
+        # Rule-based progressive verb: -ing
+        if word.endswith("ing") and len(word) > 5:
+            for stem in (word[:-3], word[:-3] + "e"):
+                entries = self._trusted_lookup(stem)
+                if entries and any(e.pos == EnglishPOS.VERB for e in entries):
+                    return MorphToken(
+                        surface=token,
+                        lemma=stem,
+                        pos=EnglishPOS.VERB,
+                        features={"aspect": "progressive"},
+                    )
+
+        # Orthographic normalization fallback for untrusted typos
+        if _allow_fuzzy:
+            corrected = self._normalizer.normalize_token(token)
+            if corrected.lower() != word:
+                reanalyzed = self.analyze(corrected, _allow_fuzzy=False)
+                feats = dict(reanalyzed.features)
+                feats["corrected_from"] = word
                 return MorphToken(
                     surface=token,
-                    lemma=stem,
-                    pos=EnglishPOS.VERB,
-                    features={"tense": "present", "person": "3s"},
+                    lemma=reanalyzed.lemma,
+                    pos=reanalyzed.pos,
+                    features=feats,
                 )
 
-        # Unknown word fallback -> treat as noun
+        # Final untrusted fallback -> treat as generic noun
         return MorphToken(surface=token, lemma=word, pos=EnglishPOS.NOUN, features={})
 
     def lemmatize_sequence(self, text: str) -> list[MorphToken]:

@@ -79,7 +79,12 @@ class ConceptExplainer:
         self._tiered_workspace = tiered_workspace
         self._ontology_store = ontology_store
 
-    def gather_knowledge(self, concept_query: str) -> ConceptKnowledgeSnapshot:
+    def gather_knowledge(
+        self,
+        concept_query: str,
+        *,
+        _allow_fuzzy: bool = True,
+    ) -> ConceptKnowledgeSnapshot:
         """Traverse ontology and tiered workspace to gather multi-dimensional knowledge."""
         concept = concept_query.strip().lower()
         # Strip common leading words
@@ -120,7 +125,66 @@ class ConceptExplainer:
             except Exception as exc:
                 logger.debug("ConceptExplainer: workspace traversal error for %r: %s", concept, exc)
 
+        # 3. Fuzzy concept recovery when unknown typo queried (e.g. "why does focsu happen?")
+        if (
+            _allow_fuzzy
+            and not snapshot.has_knowledge
+            and len(concept) >= 4
+            and concept.replace(" ", "").isalpha()
+        ):
+            corrected = self._fuzzy_resolve_concept(concept)
+            if corrected and corrected != concept:
+                return self.gather_knowledge(corrected, _allow_fuzzy=False)
+
         return snapshot
+
+    def _fuzzy_resolve_concept(self, concept: str) -> str | None:
+        """Attempt bounded edit-distance recovery against ConceptNodes and ontology store."""
+        from hbllm.hcir.graph import ConceptNode, HCIRNodeType
+        from hbllm.hcir.language.english.normalizer import damerau_levenshtein
+
+        # Avoid overwriting valid trusted English words (except corpus OCR noise)
+        if self._ontology_store is not None and hasattr(self._ontology_store, "is_trusted_word"):
+            if self._ontology_store.is_trusted_word(concept, language="en"):
+                return None
+
+        max_dist = 2 if len(concept) >= 6 else 1
+        best_label: str | None = None
+        best_dist = max_dist + 1
+
+        p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
+        if p_graph is not None:
+            for node in p_graph.nodes_by_type(HCIRNodeType.CONCEPT):
+                if isinstance(node, ConceptNode) and node.label:
+                    cand = node.label.lower()
+                    d = damerau_levenshtein(concept, cand, max_dist)
+                    if d <= max_dist and (d < 2 or cand[0] == concept[0]):
+                        if d < best_dist:
+                            best_dist = d
+                            best_label = cand
+        if best_label is not None:
+            return best_label
+
+        if self._ontology_store is not None and hasattr(self._ontology_store, "fuzzy_lookup"):
+            hits = self._ontology_store.fuzzy_lookup(concept, language="en", limit=3)
+            for raw_cand in hits:
+                cand = str(raw_cand).lower()
+                is_anagram_transposition = sorted(cand) == sorted(concept)
+                is_missing_trailing_e = cand == concept + "e"
+                is_double_letter = re.sub(r"(.)\1+", r"\1", concept) == re.sub(
+                    r"(.)\1+", r"\1", cand
+                )
+                is_strong_prefix = len(concept) >= 6 and cand[:4] == concept[:4]
+                if (
+                    is_anagram_transposition
+                    or is_missing_trailing_e
+                    or is_double_letter
+                    or is_strong_prefix
+                ):
+                    if damerau_levenshtein(concept, cand, 1) <= 1:
+                        return cand
+
+        return None
 
     def _traverse_workspace_graph(
         self,

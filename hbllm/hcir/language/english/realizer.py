@@ -44,9 +44,11 @@ class EnglishRealizer:
         prep = "on"
         if pred in ("located_in", "in"):
             prep = "on" if obj.lower() in ("table", "shelf", "floor", "desk", "chair") else "in"
-        elif pred in ("below", "under"):
+        elif pred in ("below", "under", "located_under", "located_beneath"):
             prep = "under"
-        elif pred in ("near",):
+        elif pred in ("above", "located_above"):
+            prep = "above"
+        elif pred in ("near", "located_near", "located_beside"):
             prep = "near"
 
         # 0. Definition, Causal, and Procedural discourse answers

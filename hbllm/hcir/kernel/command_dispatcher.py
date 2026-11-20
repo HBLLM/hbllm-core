@@ -325,6 +325,24 @@ class CommandDispatcher:
             if self._resolver is not None and self._resolver.has_capability(pattern):
                 return pattern
 
+        # Bounded fuzzy typo recovery on known capability verbs (only if len >= 4)
+        if len(verb_lower) >= 4 and verb_lower.isalpha():
+            from hbllm.hcir.language.english.normalizer import damerau_levenshtein
+
+            max_dist = 2 if len(verb_lower) >= 6 else 1
+            best_verb: str | None = None
+            best_dist = max_dist + 1
+            for cand_verb in sorted(self._verb_map.keys()):
+                if abs(len(cand_verb) - len(verb_lower)) > max_dist:
+                    continue
+                d = damerau_levenshtein(verb_lower, cand_verb, max_dist)
+                if d <= max_dist and (d < 2 or cand_verb[0] == verb_lower[0]):
+                    if d < best_dist:
+                        best_dist = d
+                        best_verb = cand_verb
+            if best_verb is not None:
+                return self._verb_map[best_verb]
+
         return None
 
     def register_verb(self, verb: str, capability: str) -> None:
@@ -363,10 +381,18 @@ class CommandDispatcher:
 
         # Map target to the right parameter based on capability
         if capability in ("fs.read", "code.python_ast"):
-            params["path"] = target
+            path_val = target
+            raw = getattr(frame.metadata, "raw_text", "").strip()
+            for tok in re.findall(
+                r"[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,8}|[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+", raw
+            ):
+                if tok.lower() == target.lower() or not path_val:
+                    path_val = tok
+                    break
+            params["path"] = path_val
         elif capability == "fs.list":
-            # Map generic words like "directory", "folder", "files" to current directory "."
-            if target.lower() in ("directory", "dir", "folder", "files", ""):
+            # Map generic words like "directory", "folder", "files", "file" to current directory "."
+            if target.lower() in ("directory", "dir", "folder", "files", "file", ""):
                 params["path"] = "."
             else:
                 params["path"] = target
@@ -403,8 +429,12 @@ class CommandDispatcher:
             text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
             text = re.sub(
                 r"\s+(?:works?|occurs?|happens?|operates?|functions?)\s*$", "", text, flags=re.I
-            ).strip()
-            if is_anaphoric_term(text) and target and not is_anaphoric_term(target):
+            )
+            text = re.sub(r"\b(?:is|are|was|were|do|does|did)\b", " ", text, flags=re.I)
+            text = " ".join(text.split()).strip()
+            if (is_anaphoric_term(text) or not text) and target and not is_anaphoric_term(target):
+                text = target
+            elif target and not is_anaphoric_term(target) and text.lower() != target.lower():
                 text = target
             params["content"] = text or target or raw
         elif capability == "knowledge.explain_how":
@@ -420,8 +450,12 @@ class CommandDispatcher:
             text = re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
             text = re.sub(
                 r"\s+(?:works?|occurs?|happens?|operates?|functions?)\s*$", "", text, flags=re.I
-            ).strip()
-            if is_anaphoric_term(text) and target and not is_anaphoric_term(target):
+            )
+            text = re.sub(r"\b(?:is|are|was|were|do|does|did)\b", " ", text, flags=re.I)
+            text = " ".join(text.split()).strip()
+            if (is_anaphoric_term(text) or not text) and target and not is_anaphoric_term(target):
+                text = target
+            elif target and not is_anaphoric_term(target) and text.lower() != target.lower():
                 text = target
             params["content"] = text or target or raw
         elif capability == "knowledge.explain":

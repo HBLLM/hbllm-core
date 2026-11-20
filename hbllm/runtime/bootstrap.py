@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -58,10 +58,162 @@ class CognitiveSystem:
     reasoning_runtime: Any | None = None  # UnifiedReasoningRuntime
     brain: Any | None = None
     hydrated_count: int = 0
+    _loop: Any = field(default=None, init=False, repr=False)
+
+    def _execute_language_turn(self, turn: Any, lang_rt: Any, speaker: str) -> Any:
+        """Execute post-parse cognitive actions (curiosity fallback & command dispatch)."""
+        if not turn.is_success:
+            return turn
+
+        # Autonomous epistemic curiosity fallback for unknown QUERY frames
+        curiosity = self.services.extensions.get("epistemic_curiosity")
+        if (
+            curiosity is not None
+            and turn.semantic_frame.frame_type == FrameType.QUERY
+            and turn.epistemic_state is not None
+            and not turn.epistemic_state.is_known
+            and turn.epistemic_state.target_subject
+        ):
+            import asyncio
+
+            q_target = turn.semantic_frame.query_target or "definition"
+            q_mode = (
+                "why"
+                if q_target == "cause"
+                else ("how" if q_target == "procedure" else "definition")
+            )
+            try:
+                try:
+                    q_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    q_loop = None
+
+                if q_loop is not None and q_loop.is_running():
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        cur_res = pool.submit(
+                            asyncio.run,
+                            curiosity.research_concept(
+                                turn.epistemic_state.target_subject,
+                                query_mode=q_mode,
+                                uncertainty=float(turn.epistemic_state.uncertainty),
+                            ),
+                        ).result(timeout=30.0)
+                else:
+                    if self._loop is None or self._loop.is_closed():
+                        self._loop = asyncio.new_event_loop()
+                    cur_res = self._loop.run_until_complete(
+                        curiosity.research_concept(
+                            turn.epistemic_state.target_subject,
+                            query_mode=q_mode,
+                            uncertainty=float(turn.epistemic_state.uncertainty),
+                        )
+                    )
+                if cur_res.researched:
+                    re_state = lang_rt._gateway._lookup_epistemic_prior(
+                        turn.epistemic_state.target_subject,
+                        query_target=q_target,
+                    )
+                    if re_state is not None and re_state.is_known:
+                        turn.epistemic_state = re_state
+                        realizer = lang_rt._realizers.get(turn.language)
+                        if realizer is not None:
+                            turn.response_text = realizer.realize(
+                                re_state, original_frame=turn.semantic_frame
+                            )
+                    elif cur_res.summary:
+                        turn.response_text = cur_res.summary
+                    if cur_res.sources:
+                        turn.response_text = (
+                            f"{turn.response_text}\n\n"
+                            f"[Learned autonomously via web research "
+                            f"({cur_res.propositions_ingested} facts ingested); "
+                            f"source: {cur_res.sources[0]}]"
+                        )
+            except Exception as exc:
+                logger.debug("Autonomous curiosity query fallback skipped: %s", exc)
+
+        # If COMMAND frame parsed successfully, dispatch through governed capabilities
+        if turn.semantic_frame.frame_type == FrameType.COMMAND and turn.semantic_frame.predicate:
+            from hbllm.hcir.kernel.command_dispatcher import CommandDispatcher
+
+            dispatcher = self.services.extensions.get("command_dispatcher")
+            if dispatcher is None:
+                dispatcher = CommandDispatcher(
+                    self.services.capability_resolver,
+                    workspace=self.workspace,
+                )
+                self.services.extensions["command_dispatcher"] = dispatcher
+
+            resolved_cap = dispatcher._resolve_capability(
+                turn.semantic_frame.predicate, frame=turn.semantic_frame
+            )
+            grounded_ents = (
+                getattr(turn.grounded_frame, "grounded_entities", {})
+                if turn.grounded_frame is not None
+                else {}
+            )
+            if resolved_cap is None and turn.hcir_node_id is not None and grounded_ents:
+                # Physical-world action GoalNode (e.g. "Push the red ball to the shelf")
+                return turn
+
+            import asyncio
+
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+
+                if loop is not None and loop.is_running():
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                        receipt = pool.submit(
+                            asyncio.run, dispatcher.dispatch(turn.semantic_frame)
+                        ).result(timeout=30.0)
+                else:
+                    if self._loop is None or self._loop.is_closed():
+                        self._loop = asyncio.new_event_loop()
+                    receipt = self._loop.run_until_complete(
+                        dispatcher.dispatch(turn.semantic_frame)
+                    )
+
+                if receipt.success:
+                    result_summary = receipt.result.get("content", "")
+                    if not result_summary:
+                        entries = receipt.result.get("entries", [])
+                        if entries:
+                            result_summary = "\n".join(e.get("name", str(e)) for e in entries[:20])
+                    if not result_summary:
+                        result_summary = str(receipt.result)
+
+                    turn.response_text = (
+                        f"Command executed: {receipt.verb} → {receipt.capability}\n{result_summary}"
+                    )
+                else:
+                    turn.response_text = f"Command '{receipt.verb}' failed: {receipt.error}"
+                    turn.is_success = False
+            except Exception as exc:
+                turn.response_text = f"Command dispatch error: {exc}"
+                turn.is_success = False
+
+        return turn
 
     def process_dialogue(self, dialogue: Any, speaker_id: str = "user") -> Any:
-        """Process natural language dialogue via Pure-HCIR first, with optional scaffold fallback."""
+        """Process natural language dialogue via Pure-HCIR multi-clause & single-turn pipeline."""
         from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+        from hbllm.hcir.language.core.discourse import (
+            DiscourseSegmenter,
+            ExpositoryProseProcessor,
+        )
+        from hbllm.hcir.language.core.semantic_frame import (
+            LanguageErrorType,
+            LanguageMetadata,
+            SemanticFrame,
+        )
+        from hbllm.hcir.language.runtime import LanguageTurnResult, MultilingualLanguageRuntime
 
         if isinstance(dialogue, ObservationEnvelope) and self.bridge is not None:
             return self.bridge.process_dialogue(dialogue, speaker_id=speaker_id)
@@ -78,8 +230,6 @@ class CognitiveSystem:
         )
 
         # 1. Native non-LLM HCIR Language Runtime (A16/A17)
-        from hbllm.hcir.language.runtime import MultilingualLanguageRuntime
-
         lang_rt = self.services.extensions.get("language_runtime")
         if lang_rt is None:
             lang_rt = MultilingualLanguageRuntime(
@@ -91,7 +241,129 @@ class CognitiveSystem:
                 lang_rt._gateway._tiered_workspace = self.tiered_workspace
             self.services.extensions["language_runtime"] = lang_rt
 
-        turn = lang_rt.process_utterance(text, speaker=speaker)
+        lang_rt._sync_dynamic_vocabulary(lang_rt._parsers["en"])
+        segments = DiscourseSegmenter.segment(text)
+        prose_proc = ExpositoryProseProcessor()
+
+        if len(segments) <= 1:
+            turn = lang_rt.process_utterance(text, speaker=speaker)
+            if (
+                not turn.is_success
+                and turn.error_type == LanguageErrorType.UNRESOLVED_LANGUAGE
+                and len(text.split()) >= 6
+            ):
+                summary = prose_proc.ingest_prose(
+                    text,
+                    workspace=self.workspace,
+                    tiered_workspace=self.tiered_workspace,
+                    ontology_store=lang_rt._ontology_store,
+                    reference_resolver=lang_rt._ref_resolver,
+                )
+                if summary.propositions:
+                    turn = LanguageTurnResult(
+                        raw_input=text,
+                        language="en",
+                        semantic_frame=SemanticFrame(
+                            frame_type=FrameType.ASSERTION,
+                            predicate="expository_prose",
+                            metadata=LanguageMetadata(language="en", raw_text=text),
+                        ),
+                        response_text=summary.summary_text,
+                        is_success=True,
+                    )
+            if turn.is_success:
+                turn = self._execute_language_turn(turn, lang_rt, speaker)
+        else:
+            # Multi-sentence paragraph / essay / multi-step instruction set
+            lang_rt._ref_resolver.next_turn()
+            sub_turns: list[LanguageTurnResult] = []
+            for seg in segments:
+                sub = lang_rt.process_utterance(seg, speaker=speaker, advance_turn=False)
+                if sub.is_success:
+                    sub = self._execute_language_turn(sub, lang_rt, speaker)
+                    sub_turns.append(sub)
+                else:
+                    summary = prose_proc.ingest_prose(
+                        seg,
+                        workspace=self.workspace,
+                        tiered_workspace=self.tiered_workspace,
+                        ontology_store=lang_rt._ontology_store,
+                        reference_resolver=lang_rt._ref_resolver,
+                    )
+                    if summary.propositions:
+                        sub_turns.append(
+                            LanguageTurnResult(
+                                raw_input=seg,
+                                language="en",
+                                semantic_frame=SemanticFrame(
+                                    frame_type=FrameType.ASSERTION,
+                                    predicate="expository_prose",
+                                    metadata=LanguageMetadata(language="en", raw_text=seg),
+                                ),
+                                response_text=summary.summary_text,
+                                is_success=True,
+                            )
+                        )
+                    else:
+                        sub_turns.append(sub)
+
+            actionable = [
+                t
+                for t in sub_turns
+                if t.semantic_frame.frame_type in (FrameType.QUERY, FrameType.COMMAND)
+            ]
+            assertions = [
+                t for t in sub_turns if t.semantic_frame.frame_type == FrameType.ASSERTION
+            ]
+            # Extract cross-clause prose triples across expository assertions
+            if assertions and len(actionable) == 0:
+                holistic = prose_proc.ingest_prose(
+                    text,
+                    workspace=self.workspace,
+                    tiered_workspace=self.tiered_workspace,
+                    ontology_store=lang_rt._ontology_store,
+                    reference_resolver=lang_rt._ref_resolver,
+                )
+            else:
+                holistic = None
+
+            if actionable:
+                if len(actionable) == 1:
+                    response_text = actionable[0].response_text
+                else:
+                    response_text = "\n\n".join(
+                        f"[Step {idx}] {t.response_text}" for idx, t in enumerate(actionable, 1)
+                    )
+                overall_success = all(t.is_success for t in actionable)
+                rep = actionable[-1]
+            elif holistic is not None and holistic.propositions:
+                response_text = holistic.summary_text
+                overall_success = True
+                rep = next((t for t in reversed(sub_turns) if t.is_success), sub_turns[-1])
+            elif any(t.is_success for t in sub_turns):
+                ok_resps = [t.response_text for t in sub_turns if t.is_success and t.response_text]
+                response_text = ok_resps[-1] if len(ok_resps) == 1 else " ".join(ok_resps)
+                overall_success = True
+                rep = next(t for t in reversed(sub_turns) if t.is_success)
+            else:
+                response_text = sub_turns[0].response_text or "I did not understand that input."
+                overall_success = False
+                rep = sub_turns[0]
+
+            turn = LanguageTurnResult(
+                raw_input=text,
+                language=rep.language,
+                semantic_frame=rep.semantic_frame,
+                grounded_frame=rep.grounded_frame,
+                epistemic_state=rep.epistemic_state,
+                response_text=response_text,
+                is_success=overall_success,
+                error_type=None if overall_success else rep.error_type,
+                error_detail="" if overall_success else rep.error_detail,
+                hcir_node_id=rep.hcir_node_id,
+                sub_results=sub_turns,
+            )
+
         metrics = self.services.extensions.setdefault(
             "autonomy_metrics",
             {
@@ -118,131 +390,6 @@ class CognitiveSystem:
             neuromod = self.services.extensions.get("neuromodulation")
             if neuromod is not None and hasattr(neuromod, "signal_reward"):
                 neuromod.signal_reward(0.2)
-
-            # Autonomous epistemic curiosity fallback for unknown QUERY frames
-            curiosity = self.services.extensions.get("epistemic_curiosity")
-            if (
-                curiosity is not None
-                and turn.semantic_frame.frame_type == FrameType.QUERY
-                and turn.epistemic_state is not None
-                and not turn.epistemic_state.is_known
-                and turn.epistemic_state.target_subject
-            ):
-                import asyncio
-
-                q_target = turn.semantic_frame.query_target or "definition"
-                q_mode = (
-                    "why"
-                    if q_target == "cause"
-                    else ("how" if q_target == "procedure" else "definition")
-                )
-                try:
-                    try:
-                        q_loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        q_loop = None
-
-                    if q_loop is not None and q_loop.is_running():
-                        import concurrent.futures
-
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                            cur_res = pool.submit(
-                                asyncio.run,
-                                curiosity.research_concept(
-                                    turn.epistemic_state.target_subject,
-                                    query_mode=q_mode,
-                                    uncertainty=float(turn.epistemic_state.uncertainty),
-                                ),
-                            ).result(timeout=30.0)
-                    else:
-                        cur_res = asyncio.run(
-                            curiosity.research_concept(
-                                turn.epistemic_state.target_subject,
-                                query_mode=q_mode,
-                                uncertainty=float(turn.epistemic_state.uncertainty),
-                            )
-                        )
-                    if cur_res.researched:
-                        # Re-query gateway from freshly populated persistent memory
-                        re_state = lang_rt._gateway._lookup_epistemic_prior(
-                            turn.epistemic_state.target_subject,
-                            query_target=q_target,
-                        )
-                        if re_state is not None and re_state.is_known:
-                            turn.epistemic_state = re_state
-                            realizer = lang_rt._realizers.get(turn.language)
-                            if realizer is not None:
-                                turn.response_text = realizer.realize(
-                                    re_state, original_frame=turn.semantic_frame
-                                )
-                        elif cur_res.summary:
-                            turn.response_text = cur_res.summary
-                        if cur_res.sources:
-                            turn.response_text = (
-                                f"{turn.response_text}\n\n"
-                                f"[Learned autonomously via web research "
-                                f"({cur_res.propositions_ingested} facts ingested); "
-                                f"source: {cur_res.sources[0]}]"
-                            )
-                except Exception as exc:
-                    logger.debug("Autonomous curiosity query fallback skipped: %s", exc)
-
-            # If COMMAND frame parsed successfully, dispatch through governed capabilities
-            if (
-                turn.semantic_frame.frame_type == FrameType.COMMAND
-                and turn.semantic_frame.predicate
-            ):
-                from hbllm.hcir.kernel.command_dispatcher import CommandDispatcher
-
-                dispatcher = self.services.extensions.get("command_dispatcher")
-                if dispatcher is None:
-                    dispatcher = CommandDispatcher(
-                        self.services.capability_resolver,
-                        workspace=self.workspace,
-                    )
-                    self.services.extensions["command_dispatcher"] = dispatcher
-
-                import asyncio
-
-                try:
-                    try:
-                        loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        loop = None
-
-                    if loop is not None and loop.is_running():
-                        import concurrent.futures
-
-                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                            receipt = pool.submit(
-                                asyncio.run, dispatcher.dispatch(turn.semantic_frame)
-                            ).result(timeout=30.0)
-                    else:
-                        receipt = asyncio.run(dispatcher.dispatch(turn.semantic_frame))
-
-                    # Augment the turn result with execution receipt
-                    if receipt.success:
-                        result_summary = receipt.result.get("content", "")
-                        if not result_summary:
-                            entries = receipt.result.get("entries", [])
-                            if entries:
-                                result_summary = "\n".join(
-                                    e.get("name", str(e)) for e in entries[:20]
-                                )
-                        if not result_summary:
-                            result_summary = str(receipt.result)
-
-                        turn.response_text = (
-                            f"Command executed: {receipt.verb} → {receipt.capability}\n"
-                            f"{result_summary}"
-                        )
-                    else:
-                        turn.response_text = f"Command '{receipt.verb}' failed: {receipt.error}"
-                        turn.is_success = False
-                except Exception as exc:
-                    turn.response_text = f"Command dispatch error: {exc}"
-                    turn.is_success = False
-
             return turn
 
         neuromod = self.services.extensions.get("neuromodulation")

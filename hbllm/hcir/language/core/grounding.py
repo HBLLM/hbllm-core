@@ -37,6 +37,7 @@ from hbllm.hcir.language.core.semantic_frame import (
     SemanticFrame,
     ThematicRole,
 )
+from hbllm.hcir.language.english.normalizer import damerau_levenshtein
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,12 @@ class GroundingResolver:
         graph: CognitiveGraph,
         reference_resolver: ReferenceResolver | None = None,
         workspace: Any | None = None,
+        lexicon: Any | None = None,
     ) -> None:
         self._graph = graph
         self._ref_resolver = reference_resolver or ReferenceResolver()
         self._workspace = workspace
+        self._lexicon = lexicon
 
     def ground_frame(self, frame: SemanticFrame) -> GroundedSemanticFrame:
         """Ground all entity references within a SemanticFrame against HCIR state."""
@@ -130,28 +133,93 @@ class GroundingResolver:
                             grounded.grounded_concepts[role] = node.id
                             break
 
-            # 3. Match Physical Entities in A13
+            # 3. Match Physical Entities in A13 (with fuzzy fallback for untrusted typos)
             matching_entities: list[PhysicalEntityNode] = []
             for node in self._graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
                 if isinstance(node, PhysicalEntityNode):
                     if self._entity_matches_reference(node, ref):
                         matching_entities.append(node)
 
+            if not matching_entities and ref.concept_name and len(ref.concept_name) >= 4:
+                cname = ref.concept_name.lower()
+                is_trusted = bool(
+                    self._lexicon is not None
+                    and hasattr(self._lexicon, "is_trusted_word")
+                    and self._lexicon.is_trusted_word(cname)
+                )
+                if not is_trusted:
+                    max_dist = 2 if len(cname) >= 6 else 1
+                    best_etype: str | None = None
+                    best_dist = max_dist + 1
+                    fuzzy_candidates: list[PhysicalEntityNode] = []
+                    for node in self._graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
+                        if not isinstance(node, PhysicalEntityNode):
+                            continue
+                        etype = node.entity_type.lower()
+                        d = damerau_levenshtein(cname, etype, max_dist)
+                        if d <= max_dist:
+                            corrected_ref = EntityReference(
+                                concept_name=node.entity_type,
+                                properties=dict(ref.properties),
+                                specifier=ref.specifier,
+                                raw_text=ref.raw_text,
+                                discourse_id=ref.discourse_id,
+                            )
+                            if self._entity_matches_reference(node, corrected_ref):
+                                if d < best_dist:
+                                    best_dist = d
+                                    best_etype = node.entity_type
+                                    fuzzy_candidates = [node]
+                                elif d == best_dist and node.entity_type == best_etype:
+                                    fuzzy_candidates.append(node)
+                    if fuzzy_candidates and best_etype:
+                        matching_entities = fuzzy_candidates
+                        ref = EntityReference(
+                            concept_name=best_etype,
+                            properties=dict(ref.properties),
+                            specifier=ref.specifier,
+                            raw_text=ref.raw_text,
+                            discourse_id=ref.discourse_id,
+                        )
+                        frame.set_role(role, ref)
+
             grounded.candidate_entities[role] = [e.id for e in matching_entities]
 
-            # 4. Evaluate Definite vs Indefinite matching
+            is_conceptual_pred = frame.predicate in ("is_a", "causes", "requires", "enables")
+            is_spatial_pred = frame.predicate in (
+                "located_on",
+                "located_in",
+                "located_at",
+                "located_inside",
+                "located_within",
+                "located_under",
+                "located_beneath",
+                "located_above",
+                "located_near",
+                "located_beside",
+                "below",
+                "above",
+                "near",
+            )
+
+            # 4. Evaluate Definite vs Indefinite/Generic matching
             if ref.specifier == "definite":  # "the red ball"
                 if len(matching_entities) == 0:
                     # ── Open-world auto-creation policy ──
-                    # ASSERTION: Create new entity on-the-fly (language as perception)
-                    if frame.frame_type == FrameType.ASSERTION and ref.concept_name:
+                    # ASSERTION (physical/spatial/property): Create new entity on-the-fly
+                    if (
+                        frame.frame_type == FrameType.ASSERTION
+                        and ref.concept_name
+                        and not is_conceptual_pred
+                    ):
                         new_entity = self._auto_create_entity(ref)
                         grounded.grounded_entities[role] = new_entity.id
                         new_mentions.append((new_entity.id, ref.concept_name, ref.properties))
                     # COMMAND: Relaxed grounding — pass raw concept through
                     elif frame.frame_type == FrameType.COMMAND:
-                        # Mark as ungrounded but don't fail — CommandDispatcher
-                        # will interpret the concept name as a tool parameter
+                        pass
+                    # CONCEPTUAL ASSERTION ("is_a", "causes", "requires"): keep conceptual
+                    elif frame.frame_type == FrameType.ASSERTION and is_conceptual_pred:
                         pass
                     else:
                         # QUERY: Strict grounding
@@ -178,7 +246,10 @@ class GroundingResolver:
                         )
                     )
 
-            elif ref.specifier in ("indefinite", "generic"):  # "a ball" / "balls"
+            elif ref.specifier in (
+                "indefinite",
+                "generic",
+            ):  # "a ball" / "balls" / bare telegraphic
                 if matching_entities:
                     chosen_entity = matching_entities[0]
                     grounded.grounded_entities[role] = chosen_entity.id
@@ -189,6 +260,12 @@ class GroundingResolver:
                             ref.properties,
                         )
                     )
+                elif (
+                    frame.frame_type == FrameType.ASSERTION and is_spatial_pred and ref.concept_name
+                ):
+                    new_entity = self._auto_create_entity(ref)
+                    grounded.grounded_entities[role] = new_entity.id
+                    new_mentions.append((new_entity.id, ref.concept_name, ref.properties))
 
         # Register mentions in discourse only after all references in frame are resolved
         for ent_id, c_name, props in new_mentions:

@@ -7,8 +7,10 @@ Implements the LanguageParser protocol.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import Any
 
+from hbllm.hcir.language.core.discourse import DiscourseSegmenter
 from hbllm.hcir.language.core.semantic_frame import (
     EntityReference,
     FrameType,
@@ -18,7 +20,11 @@ from hbllm.hcir.language.core.semantic_frame import (
     ThematicRole,
 )
 from hbllm.hcir.language.english.lexicon import EnglishLexicon, EnglishPOS
-from hbllm.hcir.language.english.morphology import EnglishMorphology
+from hbllm.hcir.language.english.morphology import EnglishMorphology, MorphToken
+from hbllm.hcir.language.english.normalizer import (
+    COMMAND_VERB_VOCAB,
+    strip_conversational_wrappers,
+)
 from hbllm.hcir.language.english.syntax import (
     ConstructionType,
     EnglishSyntaxParser,
@@ -42,12 +48,17 @@ class EnglishParser:
         self._morphology = morphology or EnglishMorphology(self._lexicon)
         self._syntax = syntax or EnglishSyntaxParser()
 
+    def set_dynamic_vocabulary(self, words: Iterable[str]) -> None:
+        """Update active world/persistent entity & concept vocabulary for typo recovery."""
+        self._morphology._normalizer.set_dynamic_vocabulary(words)
+
     def parse(self, text: str) -> SemanticFrame:
         """Parse raw English text into a language-neutral SemanticFrame."""
         meta = LanguageMetadata(language="en", raw_text=text)
+        cleaned_text, _ = strip_conversational_wrappers(text)
 
-        # 1. Morphological analysis & tokenization
-        tokens = self._morphology.lemmatize_sequence(text)
+        # 1. Morphological analysis, tokenization & typo normalization
+        tokens = self._morphology.lemmatize_sequence(cleaned_text or text)
         if not tokens:
             return SemanticFrame(
                 frame_type=FrameType.ERROR,
@@ -56,12 +67,38 @@ class EnglishParser:
                 metadata=meta,
             )
 
-        # 2. Syntactic parsing
+        # Priority check for specialized info/memory/web imperative commands
+        # (prevents generic syntax parser from truncating "tell me about", "remember that", etc.)
+        content = [t for t in tokens if t.pos != EnglishPOS.PUNCT]
+        if content:
+            first_lemma = content[0].lemma
+            is_copular_noun = len(content) >= 2 and content[1].pos == EnglishPOS.AUX
+            if first_lemma in {
+                "why",
+                "how",
+                "tell",
+                "remember",
+                "explain",
+                "describe",
+                "search",
+                "websearch",
+                "google",
+                "fetch",
+                "browse",
+            } and (not is_copular_noun or first_lemma in ("why", "how")):
+                imp_priority = self._try_parse_imperative_command(tokens, meta)
+                if imp_priority is not None:
+                    return imp_priority
+
+        # 2. Strict syntactic parsing
         ast = self._syntax.parse(tokens)
         if not ast:
             imp_frame = self._try_parse_imperative_command(tokens, meta)
             if imp_frame is not None:
                 return imp_frame
+            rec_frame = self._try_recover_ungrammatical(tokens, meta)
+            if rec_frame is not None:
+                return rec_frame
             return SemanticFrame(
                 frame_type=FrameType.ERROR,
                 error_type=LanguageErrorType.UNRESOLVED_LANGUAGE,
@@ -83,22 +120,7 @@ class EnglishParser:
 
     def parse_discourse(self, text: str) -> list[SemanticFrame]:
         """Parse multi-sentence / multi-clause English discourse into ordered SemanticFrames."""
-        import re
-
-        clauses: list[str] = []
-        for sent in re.split(r"[.!?;]+", text):
-            sent = sent.strip()
-            if not sent:
-                continue
-            # Split sequential clauses on 'and then', 'then', or clause-level 'and'
-            parts = re.split(r"\b(?:and\s+then|then)\b", sent, flags=re.IGNORECASE)
-            for part in parts:
-                subparts = re.split(r"\band\b", part, flags=re.IGNORECASE)
-                if len(subparts) > 1 and all(len(p.strip().split()) >= 2 for p in subparts):
-                    clauses.extend(p.strip() for p in subparts if p.strip())
-                elif part.strip():
-                    clauses.append(part.strip())
-
+        clauses = DiscourseSegmenter.segment(text)
         return [self.parse(clause) for clause in clauses]
 
     def _try_parse_imperative_command(
@@ -109,52 +131,75 @@ class EnglishParser:
         if len(content) < 2:
             return None
         first = content[0]
-        # Accept leading verb (either tagged VERB, in known command verbs, or in lexicon/ontology)
-        _KNOWN_COMMAND_VERBS = frozenset(
-            {
-                "explain",
-                "describe",
-                "tell",
-                "detail",
-                "summarize",
-                "why",
-                "how",
-                "read",
-                "show",
-                "display",
-                "list",
-                "search",
-                "find",
-                "verify",
-                "check",
-                "analyze",
-                "remember",
-                "store",
-                "recall",
-                "forget",
-                "ingest",
-                "fetch",
-                "browse",
-                "google",
-                "websearch",
-            }
+        # Reject immediately if followed by an auxiliary verb ("Focus is ...", "Coffee was ...")
+        if (
+            len(content) >= 2
+            and content[1].pos == EnglishPOS.AUX
+            and first.lemma not in ("why", "how")
+        ):
+            return None
+
+        _KNOWN_COMMAND_VERBS = (
+            frozenset(
+                {
+                    "explain",
+                    "describe",
+                    "tell",
+                    "detail",
+                    "summarize",
+                    "why",
+                    "how",
+                    "read",
+                    "show",
+                    "display",
+                    "list",
+                    "search",
+                    "find",
+                    "verify",
+                    "check",
+                    "analyze",
+                    "remember",
+                    "store",
+                    "recall",
+                    "forget",
+                    "ingest",
+                    "fetch",
+                    "browse",
+                    "google",
+                    "websearch",
+                }
+            )
+            | COMMAND_VERB_VOCAB
         )
-        first_entries = self._lexicon.lookup(first.lemma)
-        is_verb = (
-            first.pos == EnglishPOS.VERB
-            or first.lemma in _KNOWN_COMMAND_VERBS
-            or any(e.pos == EnglishPOS.VERB for e in first_entries)
-        )
+        is_verb = first.pos == EnglishPOS.VERB or first.lemma in _KNOWN_COMMAND_VERBS
         if not is_verb:
             return None
 
         rest = [t for t in content[1:] if t.pos != EnglishPOS.DET]
         verb_pred = first.lemma
 
+        # Skip beneficiary pronouns ("list me files", "read for me README.md")
+        if verb_pred in {
+            "list",
+            "read",
+            "show",
+            "display",
+            "find",
+            "search",
+            "explain",
+            "describe",
+            "fetch",
+            "get",
+        }:
+            if len(rest) > 2 and rest[0].lemma == "for" and rest[1].lemma in ("me", "us"):
+                rest = rest[2:]
+            elif len(rest) > 1 and rest[0].lemma in ("me", "us"):
+                rest = rest[1:]
+
         # Normalize "explain why X" -> predicate="why", "explain how X" -> predicate="how"
-        if verb_pred == "explain" and len(content) > 2 and content[1].lemma in ("why", "how"):
-            verb_pred = content[1].lemma
-            rest = [t for t in content[2:] if t.pos != EnglishPOS.DET]
+        if verb_pred == "explain" and len(rest) > 1 and rest[0].lemma in ("why", "how"):
+            verb_pred = rest[0].lemma
+            rest = rest[1:]
 
         # Normalize "tell me about X" -> predicate="explain", target="X"
         if verb_pred == "tell":
@@ -167,10 +212,14 @@ class EnglishParser:
                 verb_pred = "explain"
                 rest = [t for t in content[about_idx + 1 :] if t.pos != EnglishPOS.DET]
 
-        # Strip leading auxiliary verbs in "why does X happen?" / "how do they work?"
-        _LEADING_AUX = frozenset({"do", "does", "did", "is", "are", "was", "were", "can", "will"})
-        if verb_pred in ("why", "how") and len(rest) > 1 and rest[0].lemma in _LEADING_AUX:
-            rest = rest[1:]
+        # Strip stray auxiliaries in "why does X happen?" / "why X is happen?" / "how do they work?"
+        _STRAY_AUX = frozenset(
+            {"be", "do", "does", "did", "is", "are", "was", "were", "can", "will", "to"}
+        )
+        if verb_pred in ("why", "how"):
+            filtered_rest = [t for t in rest if t.lemma not in _STRAY_AUX]
+            if filtered_rest:
+                rest = filtered_rest
 
         # Strip trailing functional verbs in "how X works" or "why X occurs"
         _TRAILING_VERBS = frozenset(
@@ -198,8 +247,9 @@ class EnglishParser:
             props["modifier"] = " ".join(t.lemma for t in rest[:-1])
 
         is_anaphoric = head.lemma in {"it", "this", "that", "they", "them", "these", "those"}
+        head_name = head.surface if head.features.get("is_path") == "true" else head.lemma
         patient = EntityReference(
-            concept_name="" if is_anaphoric else head.lemma,
+            concept_name="" if is_anaphoric else head_name,
             specifier="anaphoric" if is_anaphoric else "generic",
             raw_text=head.surface,
             properties=props,
@@ -305,6 +355,21 @@ class EnglishParser:
                     frame.set_role(ThematicRole.THEME, subject_ref)
                 return frame
 
+            # Nominal verification: "Is Pluto a planet?"
+            if ast.verb_phrase and ast.verb_phrase.direct_object:
+                pred_ref = self._np_to_reference(ast.verb_phrase.direct_object)
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate="is_a",
+                    query_target="verification",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                if pred_ref:
+                    frame.set_role(ThematicRole.PATIENT, pred_ref)
+                return frame
+
         # 3. IMPERATIVE COMMANDS ("Move the red ball to the table", "Push the box")
         elif ast.construction == ConstructionType.IMPERATIVE:
             verb_pred = ast.verb_phrase.head_verb.lemma if ast.verb_phrase else "act"
@@ -371,6 +436,25 @@ class EnglishParser:
                 frame.set_role(ThematicRole.LOCATION, prop_ref)
                 return frame
 
+            # Nominal copular assertion: "Focus is a cognitive process"
+            if (
+                ast.verb_phrase
+                and ast.verb_phrase.direct_object
+                and ast.verb_phrase.head_verb.lemma == "be"
+            ):
+                pred_ref = self._np_to_reference(ast.verb_phrase.direct_object)
+                meta.polarity = not ast.is_negated
+                frame = SemanticFrame(
+                    frame_type=FrameType.ASSERTION,
+                    predicate="is_a",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                if pred_ref:
+                    frame.set_role(ThematicRole.PATIENT, pred_ref)
+                return frame
+
             # SVO action assertion: "The robot pushed the box"
             if ast.verb_phrase and ast.verb_phrase.head_verb:
                 verb_pred = ast.verb_phrase.head_verb.lemma
@@ -395,6 +479,173 @@ class EnglishParser:
             metadata=meta,
         )
 
+    def _try_recover_ungrammatical(
+        self,
+        tokens: list[MorphToken],
+        meta: LanguageMetadata,
+    ) -> SemanticFrame | None:
+        """Recover structured intent from telegraphic or mildly ungrammatical utterances.
+
+        Strictly rejects malformed word-salad containing unexpected verbs, auxiliaries,
+        or adverbs inside NP slots so ``UNRESOLVED_LANGUAGE`` remains intact.
+        """
+        clean = [t for t in tokens if t.pos != EnglishPOS.PUNCT]
+        if len(clean) < 2:
+            return None
+
+        # Pattern 1: Uninverted Wh-Question ("where red ball is?", "what focus is?")
+        if clean[0].lemma in ("where", "what"):
+            wh_lemma = clean[0].lemma
+            rest = list(clean[1:])
+            if rest and rest[-1].pos == EnglishPOS.AUX:
+                rest = rest[:-1]
+            wh_prop: str | None = None
+            if (
+                wh_lemma == "what"
+                and rest
+                and rest[0].lemma in ("color", "location", "shape", "size")
+            ):
+                wh_prop = rest[0].lemma
+                rest = rest[1:]
+                if rest and rest[-1].pos == EnglishPOS.AUX:
+                    rest = rest[:-1]
+            subject_ref = self._parse_relaxed_np(rest)
+            if subject_ref is not None:
+                if wh_lemma == "where":
+                    frame = SemanticFrame(
+                        frame_type=FrameType.QUERY,
+                        predicate="located_on",
+                        query_target="location",
+                        metadata=meta,
+                    )
+                else:
+                    frame = SemanticFrame(
+                        frame_type=FrameType.QUERY,
+                        predicate=f"property_{wh_prop or 'property'}",
+                        query_target="property",
+                        metadata=meta,
+                    )
+                frame.set_role(ThematicRole.THEME, subject_ref)
+                return frame
+
+        # Pattern 2: Missing-copula spatial assertion ("the red ball on the table", "ball red on table")
+        spatial_prep_idxs = [
+            i
+            for i, tok in enumerate(clean)
+            if tok.pos == EnglishPOS.PREP
+            and tok.lemma
+            in ("on", "in", "inside", "within", "under", "beneath", "above", "near", "beside")
+        ]
+        if len(spatial_prep_idxs) == 1:
+            p_idx = spatial_prep_idxs[0]
+            left = clean[:p_idx]
+            right = clean[p_idx + 1 :]
+            left_ref = self._parse_relaxed_np(left)
+            right_ref = self._parse_relaxed_np(right)
+            if left_ref is not None and right_ref is not None:
+                prep_pred = self._get_predicate_for_prep(clean[p_idx].lemma)
+                frame = SemanticFrame(
+                    frame_type=FrameType.ASSERTION,
+                    predicate=prep_pred,
+                    metadata=meta,
+                )
+                frame.set_role(ThematicRole.THEME, left_ref)
+                frame.set_role(ThematicRole.LOCATION, right_ref)
+                return frame
+
+        # Pattern 3: Introductory clause / adverbial lead-in before comma
+        comma_indices = [i for i, tok in enumerate(tokens) if tok.lemma == ","]
+        if comma_indices:
+            c_idx = comma_indices[0]
+            prefix = [t for t in tokens[:c_idx] if t.pos != EnglishPOS.PUNCT]
+            suffix = [t for t in tokens[c_idx + 1 :] if t.pos != EnglishPOS.PUNCT]
+            if prefix and len(suffix) >= 2 and prefix[0].pos in (EnglishPOS.PREP, EnglishPOS.ADV):
+                sub_ast = self._syntax.parse(suffix)
+                if sub_ast is not None:
+                    return self._ast_to_semantic_frame(sub_ast, meta)
+
+        return None
+
+    def _parse_relaxed_np(self, tokens: list[MorphToken]) -> EntityReference | None:
+        """Parse (Det)? (Adj* Noun+ | Noun+ Adj+) strictly consuming all *tokens*."""
+        if not tokens:
+            return None
+        for tok in tokens:
+            if tok.pos in (
+                EnglishPOS.AUX,
+                EnglishPOS.VERB,
+                EnglishPOS.ADV,
+                EnglishPOS.WH,
+                EnglishPOS.PREP,
+                EnglishPOS.PUNCT,
+            ):
+                return None
+
+        if len(tokens) == 1 and tokens[0].pos == EnglishPOS.PRON:
+            return EntityReference(specifier="anaphoric", raw_text=tokens[0].surface)
+
+        idx = 0
+        det_tok: MorphToken | None = None
+        if tokens[idx].pos == EnglishPOS.DET:
+            det_tok = tokens[idx]
+            idx += 1
+
+        rem = tokens[idx:]
+        if not rem:
+            return None
+
+        adjs: list[MorphToken] = []
+        nouns: list[MorphToken] = []
+        # Standard order: Adj* Noun+ OR reversed order: Noun+ Adj+ (only if no leading Adj)
+        if rem[0].pos == EnglishPOS.ADJ:
+            for tok in rem:
+                if tok.pos == EnglishPOS.ADJ and not nouns:
+                    adjs.append(tok)
+                elif tok.pos == EnglishPOS.NOUN:
+                    nouns.append(tok)
+                else:
+                    return None
+        elif rem[0].pos == EnglishPOS.NOUN:
+            seen_adj = False
+            for tok in rem:
+                if tok.pos == EnglishPOS.NOUN and not seen_adj:
+                    nouns.append(tok)
+                elif tok.pos == EnglishPOS.ADJ:
+                    seen_adj = True
+                    adjs.append(tok)
+                else:
+                    return None
+        else:
+            return None
+
+        if not nouns or len(nouns) > 3:
+            return None
+
+        props: dict[str, Any] = {}
+        for adj in adjs:
+            props.update(self._get_properties_for_adj(adj.lemma))
+
+        if nouns[-1].features.get("is_path") == "true":
+            concept_name = nouns[-1].surface
+        else:
+            concept_name = " ".join(n.lemma for n in nouns)
+
+        specifier = "generic"
+        if det_tok:
+            if det_tok.lemma in ("a", "an"):
+                specifier = "indefinite"
+            elif det_tok.lemma in ("this", "that", "these", "those"):
+                specifier = "demonstrative"
+            else:
+                specifier = "definite"
+
+        return EntityReference(
+            concept_name=concept_name,
+            properties=props,
+            specifier=specifier,
+            raw_text=" ".join(t.surface for t in tokens),
+        )
+
     # ── Helper Mappers ────────────────────────────────────────────────
 
     def _np_to_reference(self, np: NounPhrase | None) -> EntityReference | None:
@@ -409,21 +660,35 @@ class EnglishParser:
                 raw_text=np.pronoun.surface,
             )
 
-        # Specifier (definite vs indefinite vs demonstrative)
-        specifier = "definite"
+        # Specifier (definite vs indefinite vs demonstrative vs bare generic)
+        specifier = "generic"
         if np.determiner:
             det_lemma = np.determiner.lemma
             if det_lemma in ("a", "an"):
                 specifier = "indefinite"
-            elif det_lemma in ("this", "that"):
+            elif det_lemma in ("this", "that", "these", "those"):
                 specifier = "demonstrative"
+            else:
+                specifier = "definite"
 
-        # Adjective properties
+        # Separate true ADJ property modifiers from compound NOUN modifiers
         props: dict[str, Any] = {}
-        for adj in np.adjectives:
-            props.update(self._get_properties_for_adj(adj.lemma))
+        compound_mods: list[str] = []
+        for mod in np.adjectives:
+            if mod.pos == EnglishPOS.NOUN:
+                compound_mods.append(mod.lemma)
+            else:
+                props.update(self._get_properties_for_adj(mod.lemma))
 
-        concept_name = np.head_noun.lemma if np.head_noun else None
+        if np.head_noun:
+            if np.head_noun.features.get("is_path") == "true":
+                concept_name: str | None = np.head_noun.surface
+            elif compound_mods:
+                concept_name = " ".join([*compound_mods, np.head_noun.lemma])
+            else:
+                concept_name = np.head_noun.lemma
+        else:
+            concept_name = None
         raw_text = " ".join(t.surface for t in np.raw_tokens)
 
         return EntityReference(
