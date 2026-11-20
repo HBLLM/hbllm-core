@@ -181,6 +181,14 @@ class EnglishLexicon:
             "floor": "floor",
             "color": "color",
             "location": "location",
+            "focus": "focus",
+            "stimulus": "stimulus",
+            "spiking": "spiking",
+            "microscope": "microscope",
+            "telescope": "telescope",
+            "server": "server",
+            "algorithm": "algorithm",
+            "computer": "computer",
         }
         for noun, pred in nouns.items():
             self.add_entry(

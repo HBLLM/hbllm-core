@@ -649,9 +649,9 @@ class UniversalLanguageRealizer:
             else ("location" if obj else "definition")
         )
 
-        adp_word = self._get_adposition_for_predicate(pred)
         subj_str = self.profile.closed_class.concept_map.get(subj, subj)
         obj_str = self.profile.closed_class.concept_map.get(obj, obj)
+        adp_word = self._get_adposition_for_predicate(pred, location=obj_str or obj)
 
         # 0. Discourse explanation / long answers (definition, causes, requires)
         if pred in ("definition", "causes", "requires") and obj:
@@ -761,15 +761,42 @@ class UniversalLanguageRealizer:
 
         # Default spatial assertion realization
         rel_pred = frame.predicate or "located_on"
-        adp_word = self._get_adposition_for_predicate(rel_pred)
+        adp_word = self._get_adposition_for_predicate(rel_pred, location=loc_surface)
         tmpl = self.profile.templates.location_known
         return tmpl.format(theme=theme_with_color, adposition=adp_word, location=loc_surface)
 
-    def _get_adposition_for_predicate(self, predicate: str) -> str:
+    def _get_adposition_for_predicate(self, predicate: str, location: str = "") -> str:
+        effective_pred = predicate
+        if predicate in ("located_in", "in") and location:
+            loc_low = location.lower().strip()
+            # Physical support surface vs container: flat support surfaces use "on"
+            surface_markers = (
+                "table",
+                "shelf",
+                "floor",
+                "desk",
+                "chair",
+                "counter",
+                "මේසය",
+                "මේසේ",
+                "රාක්කය",
+                "පුටුව",
+                "බිම",
+                "மேசை",
+                "மேசையின்",
+                "நாற்காலி",
+                "தரை",
+            )
+            if any(surf in loc_low for surf in surface_markers):
+                effective_pred = "located_on"
+
+        for adp, pred in self.profile.closed_class.adpositions.items():
+            if pred == effective_pred:
+                return adp
         for adp, pred in self.profile.closed_class.adpositions.items():
             if pred == predicate:
                 return adp
         # Fallback to first available adposition or predicate
         if self.profile.closed_class.adpositions:
             return next(iter(self.profile.closed_class.adpositions.keys()))
-        return predicate
+        return effective_pred

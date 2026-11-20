@@ -288,8 +288,8 @@ class MemoryCapabilityExecutor:
                                     }
                                 ],
                             }
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Ontology fallback lookup failed for query %r: %s", query, exc)
             return {
                 "ok": True,
                 "action": "recalled",

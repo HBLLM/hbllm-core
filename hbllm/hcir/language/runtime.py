@@ -122,8 +122,10 @@ class MultilingualLanguageRuntime:
                 LexicalOntologyStore,
             )
 
-            if DEFAULT_ONTOLOGY_DB.exists():
+            try:
                 ontology_store = LexicalOntologyStore(DEFAULT_ONTOLOGY_DB)
+            except Exception as exc:
+                logger.debug("Failed to initialize LexicalOntologyStore: %s", exc)
         self._ontology_store = ontology_store
 
         # Wire ontology_store into gateway for epistemic prior lookups

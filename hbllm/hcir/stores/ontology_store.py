@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-DEFAULT_ONTOLOGY_DB = Path("checkpoints/t1_ontology/lexical_ontology.db")
+DEFAULT_ONTOLOGY_DB = (
+    Path(__file__).resolve().parents[3] / "checkpoints" / "t1_ontology" / "lexical_ontology.db"
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +77,13 @@ class LexicalOntologyStore:
             """
         )
         self._conn.commit()
+
+        cur = self._conn.execute("SELECT count(*) FROM lexical_entries;")
+        row = cur.fetchone()
+        if row and row[0] == 0:
+            from hbllm.hcir.language.ontology_bootstrap import CORE_ONTOLOGY_RECORDS
+
+            self.upsert_many(CORE_ONTOLOGY_RECORDS, source="core_bootstrap")
 
     def upsert_many(
         self,
