@@ -201,7 +201,12 @@ class CognitiveSystem:
 
         return turn
 
-    def process_dialogue(self, dialogue: Any, speaker_id: str = "user") -> Any:
+    def process_dialogue(
+        self,
+        dialogue: Any,
+        speaker_id: str = "user",
+        language: str | None = None,
+    ) -> Any:
         """Process natural language dialogue via Pure-HCIR multi-clause & single-turn pipeline."""
         from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
         from hbllm.hcir.language.core.discourse import (
@@ -229,6 +234,14 @@ class CognitiveSystem:
             else speaker_id
         )
 
+        if language is None:
+            if any("\u0d80" <= ch <= "\u0dff" for ch in text):
+                language = "si"
+            elif any("\u0b80" <= ch <= "\u0bff" for ch in text):
+                language = "ta"
+            else:
+                language = "en"
+
         # 1. Native non-LLM HCIR Language Runtime (A16/A17)
         lang_rt = self.services.extensions.get("language_runtime")
         if lang_rt is None:
@@ -241,12 +254,15 @@ class CognitiveSystem:
                 lang_rt._gateway._tiered_workspace = self.tiered_workspace
             self.services.extensions["language_runtime"] = lang_rt
 
-        lang_rt._sync_dynamic_vocabulary(lang_rt._parsers["en"])
+        if language in lang_rt._parsers:
+            lang_rt._sync_dynamic_vocabulary(lang_rt._parsers[language])
+        else:
+            lang_rt._sync_dynamic_vocabulary(lang_rt._parsers["en"])
         segments = DiscourseSegmenter.segment(text)
         prose_proc = ExpositoryProseProcessor()
 
         if len(segments) <= 1:
-            turn = lang_rt.process_utterance(text, speaker=speaker)
+            turn = lang_rt.process_utterance(text, language=language, speaker=speaker)
             if (
                 not turn.is_success
                 and turn.error_type == LanguageErrorType.UNRESOLVED_LANGUAGE
@@ -278,7 +294,9 @@ class CognitiveSystem:
             lang_rt._ref_resolver.next_turn()
             sub_turns: list[LanguageTurnResult] = []
             for seg in segments:
-                sub = lang_rt.process_utterance(seg, speaker=speaker, advance_turn=False)
+                sub = lang_rt.process_utterance(
+                    seg, language=language, speaker=speaker, advance_turn=False
+                )
                 if sub.is_success:
                     sub = self._execute_language_turn(sub, lang_rt, speaker)
                     sub_turns.append(sub)
