@@ -186,7 +186,6 @@ class EnglishLexicon:
             "spiking": "spiking",
             "microscope": "microscope",
             "telescope": "telescope",
-            "server": "server",
             "algorithm": "algorithm",
             "computer": "computer",
         }
