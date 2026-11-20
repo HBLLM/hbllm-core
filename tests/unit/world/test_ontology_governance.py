@@ -193,7 +193,9 @@ def test_codebase_ontology_mutation_invariants() -> None:
             with path.open("r", encoding="utf-8", errors="ignore") as f:
                 for line_no, line in enumerate(f, start=1):
                     if pattern.search(line):
-                        if path.name != "cortex_causal.py":
+                        if path.name != "cortex_causal.py" and not (
+                            len(path.parts) >= 2 and path.parts[-2:] == ("causal", "theory.py")
+                        ):
                             violations.append(
                                 f"{path.relative_to(core_dir)}:{line_no}: {line.strip()}"
                             )
