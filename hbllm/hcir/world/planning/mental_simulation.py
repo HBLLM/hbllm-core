@@ -42,8 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
+from hbllm.hcir.world.cortex_planner import get_sub_attr
 
 
 @dataclass

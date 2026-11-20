@@ -10,9 +10,15 @@ Biologically modeled on mammalian OFC counterfactual preplay and frontopolar (BA
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+
+def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
+    return getattr(target, attr, default) if target is not None else default
+
+
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.cortical_stage import StageResult
@@ -36,10 +42,6 @@ if TYPE_CHECKING:
     from hbllm.hcir.world.engine_state import CognitiveContext
 
 logger = logging.getLogger(__name__)
-
-
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
 
 
 @dataclass

@@ -17,14 +17,18 @@ WORLD_DIR = HBLLM_DIR / "hcir" / "world"
 HCIR_DIR = HBLLM_DIR / "hcir"
 
 # R6/R7/R8 ratchets (tightened monotonically downward after R8 bounded state & latency)
-MAX_WORLD_HASATTR = 156
-MAX_WORLD_GETATTR3 = 395
+MAX_WORLD_HASATTR = 154
+MAX_WORLD_GETATTR3 = 392
 MAX_HCIR_BROAD_SILENT_EXCEPT = 0
 MAX_HBLLM_BROAD_SILENT_EXCEPT = 46
 MAX_SQLITE_CONNECT_CALLS = 22
 MAX_SQLITE_CONNECT_FILES = 8
 MAX_ENGINE_LOC = 4104
-MAX_PLANNER_LOC = 5020
+MAX_PLANNER_LOC = 250
+MAX_DELIBERATION_LOC = 250
+MAX_ASSIMILATOR_LOC = 250
+MAX_MOTOR_LOC = 250
+MAX_PERCEPTION_LOC = 250
 
 
 def _iter_python_files(base: Path) -> list[Path]:
@@ -114,9 +118,25 @@ def test_decision_core_file_size_ratchet() -> None:
         1 for _ in (WORLD_DIR / "autonomous_epistemic_engine.py").open(encoding="utf-8")
     )
     planner_loc = sum(1 for _ in (WORLD_DIR / "cortex_planner.py").open(encoding="utf-8"))
+    deliberation_loc = sum(1 for _ in (WORLD_DIR / "cortex_deliberation.py").open(encoding="utf-8"))
     assert engine_loc <= MAX_ENGINE_LOC, (
         f"autonomous_epistemic_engine.py has {engine_loc} LOC > ratchet {MAX_ENGINE_LOC}"
     )
     assert planner_loc <= MAX_PLANNER_LOC, (
         f"cortex_planner.py has {planner_loc} LOC > ratchet {MAX_PLANNER_LOC}"
+    )
+    assert deliberation_loc <= MAX_DELIBERATION_LOC, (
+        f"cortex_deliberation.py has {deliberation_loc} LOC > ratchet {MAX_DELIBERATION_LOC}"
+    )
+    assimilator_loc = sum(1 for _ in (WORLD_DIR / "cortex_assimilator.py").open(encoding="utf-8"))
+    assert assimilator_loc <= MAX_ASSIMILATOR_LOC, (
+        f"cortex_assimilator.py has {assimilator_loc} LOC > ratchet {MAX_ASSIMILATOR_LOC}"
+    )
+    motor_loc = sum(1 for _ in (WORLD_DIR / "cortex_motor.py").open(encoding="utf-8"))
+    assert motor_loc <= MAX_MOTOR_LOC, (
+        f"cortex_motor.py has {motor_loc} LOC > ratchet {MAX_MOTOR_LOC}"
+    )
+    perception_loc = sum(1 for _ in (WORLD_DIR / "cortex_perception.py").open(encoding="utf-8"))
+    assert perception_loc <= MAX_PERCEPTION_LOC, (
+        f"cortex_perception.py has {perception_loc} LOC > ratchet {MAX_PERCEPTION_LOC}"
     )

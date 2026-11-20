@@ -26,10 +26,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
-
-
 @dataclass
 class EpistemicGoalProposal:
     """Immutable proposal for candidate goals and associated epistemic state mutations.
