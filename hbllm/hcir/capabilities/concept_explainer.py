@@ -141,7 +141,7 @@ class ConceptExplainer:
     def _fuzzy_resolve_concept(self, concept: str) -> str | None:
         """Attempt bounded edit-distance recovery against ConceptNodes and ontology store."""
         from hbllm.hcir.graph import ConceptNode, HCIRNodeType
-        from hbllm.hcir.language.english.normalizer import damerau_levenshtein
+        from hbllm.hcir.language.core.normalizer import damerau_levenshtein
 
         # Avoid overwriting valid trusted English words (except corpus OCR noise)
         if self._ontology_store is not None and hasattr(self._ontology_store, "is_trusted_word"):

@@ -63,13 +63,20 @@
     ],
     "command_verbs": {
       "විවෘත කරන්න": "open",
+      "අරින්න": "open",
+      "ඇරගන්න": "open",
+      "අරින්නට": "open",
       "අගුළු අරින්න": "unlock",
       "අගුළුහරින්න": "unlock",
       "තල්ලු කරන්න": "push",
+      "තල්ලු": "push",
       "ගෙනයන්න": "move",
       "දමන්න": "put",
       "වහන්න": "close",
       "අගුළු දමන්න": "lock",
+      "අගුළුලන්න": "lock",
+      "කරකවන්න": "rotate",
+      "නවතන්න": "stop",
       "පැහැදිලි කරන්න": "knowledge.explain"
     },
     "polite_wrappers": [
@@ -95,6 +102,24 @@
         "නිසා",
         "බැවින්"
       ]
+    },
+    "concept_map": {
+      "ball": "බෝලය",
+      "table": "මේසය",
+      "box": "පෙට්ටිය",
+      "cup": "කෝප්පය",
+      "robot": "රොබෝ",
+      "front_door": "ඉදිරිපස දොර",
+      "back_door": "පසුපස දොර",
+      "robot_arm": "රොබෝ අත",
+      "door": "දොර",
+      "arm": "අත",
+      "gate": "ගේට්ටුව"
+    },
+    "color_map": {
+      "red": "රතු",
+      "blue": "නිල්",
+      "green": "කොළ"
     }
   },
   "morphology": {
@@ -122,8 +147,14 @@
   },
   "templates": {
     "location_known": "{theme} {location} {adposition} තියෙනවා.",
+    "location_probable": "{theme} බොහෝ විට {location} {adposition} තියෙන්න පුළුවන්.",
+    "location_plausible": "මම හිතන්නේ {theme} {location} {adposition} තියෙන්න පුළුවන්.",
     "location_unknown": "{theme} කොහෙද කියා මම දන්නේ නැහැ.",
+    "insufficient_evidence": "{theme} කොහෙද තියෙන්නේ කියලා තීරණය කිරීමට ප්‍රමාණවත් සාක්ෂි නැත.",
+    "contradicted_evidence": "{theme} පිළිබඳව පරස්පර සාක්ෂි තිබේ.",
     "verification_true": "ඔව්, {theme} {location} {adposition} තියෙනවා.",
+    "verification_true_probable": "ඔව්, {theme} බොහෝ විට {location} {adposition} තියෙන්න පුළුවන්.",
+    "verification_true_plausible": "මම හිතන්නේ {theme} {location} {adposition} තියෙන්න පුළුවන්.",
     "verification_false": "නැහැ, {theme} {location} {adposition} නැහැ.",
     "definition_template": "{subject} යනු {definition}.",
     "cause_template": "{cause} නිසා {effect} සිදු වේ.",

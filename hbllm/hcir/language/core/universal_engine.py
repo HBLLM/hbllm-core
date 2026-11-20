@@ -35,9 +35,11 @@ class UniversalLanguageParser:
         self,
         profile: LanguageProfile,
         *,
+        lexicon: Any | None = None,
         ontology_store: Any | None = None,
     ) -> None:
         self.profile = profile
+        self.lexicon = lexicon
         self._ontology_store = ontology_store
         self._dynamic_vocab: set[str] = set()
 
@@ -292,26 +294,40 @@ class UniversalLanguageParser:
         # Check multi-word command verbs first (e.g. "විවෘත කරන්න", "qu'est-ce que")
         matched_verb: str | None = None
         matched_cap: str | None = None
-        tok_count = 1
+        rem_tokens: list[str] = []
 
-        for length in (3, 2, 1):
-            if len(clean_tokens) >= length:
-                candidate = " ".join(clean_tokens[:length]).lower()
-                if candidate in cmd_verbs:
-                    matched_verb = candidate
-                    matched_cap = cmd_verbs[candidate]
-                    tok_count = length
-                    break
+        is_sov = self.profile.typology.word_order == "SOV"
+
+        if is_sov:
+            # Check tail of sentence for command verbs (e.g. "ඉදිරිපස දොර අරින්න")
+            for length in (3, 2, 1):
+                if len(clean_tokens) >= length:
+                    candidate = " ".join(clean_tokens[-length:]).lower()
+                    if candidate in cmd_verbs:
+                        matched_verb = candidate
+                        matched_cap = cmd_verbs[candidate]
+                        rem_tokens = clean_tokens[:-length]
+                        break
+
+        if matched_verb is None or matched_cap is None:
+            # Check head of sentence for command verbs (e.g. "open the door")
+            for length in (3, 2, 1):
+                if len(clean_tokens) >= length:
+                    candidate = " ".join(clean_tokens[:length]).lower()
+                    if candidate in cmd_verbs:
+                        matched_verb = candidate
+                        matched_cap = cmd_verbs[candidate]
+                        rem_tokens = clean_tokens[length:]
+                        break
 
         if matched_verb is None or matched_cap is None:
             return None
 
-        rem_tokens = clean_tokens[tok_count:]
         target_ref = self._extract_entity_ref(rem_tokens) if rem_tokens else None
 
         frame = SemanticFrame(
             frame_type=FrameType.COMMAND,
-            predicate=matched_verb,
+            predicate=matched_cap,
             metadata=meta,
         )
         if target_ref is not None:
@@ -412,17 +428,27 @@ class UniversalLanguageParser:
             if adp_idx <= 0:
                 return [], [], None
 
-            # Split lhs into Theme and Location
+            # In postpositional SOV, the noun directly preceding the postposition is the location
             lhs = tokens[:adp_idx]
             if len(lhs) >= 2:
-                # First half theme, second half location
-                split_point = len(lhs) // 2
-                theme_toks = lhs[:split_point]
-                loc_toks = lhs[split_point:]
+                theme_toks = lhs[:-1]
+                loc_toks = [lhs[-1]]
             else:
                 theme_toks = lhs
                 loc_toks = []
             return theme_toks, loc_toks, pred
+
+    def _apply_stemming(self, token: str) -> str:
+        t_low = token.lower()
+        for rule in self.profile.morphology.stemming_rules:
+            if len(rule) == 2:
+                suf, rep = rule
+                if t_low.endswith(suf) and len(t_low) > len(suf):
+                    return t_low[: -len(suf)] + rep
+        for suf in self.profile.morphology.strip_suffixes:
+            if t_low.endswith(suf) and len(t_low) > len(suf):
+                return t_low[: -len(suf)]
+        return t_low
 
     def _extract_entity_ref(self, tokens: list[str]) -> EntityReference | None:
         if not tokens:
@@ -441,6 +467,70 @@ class UniversalLanguageParser:
 
         if not clean_words:
             return None
+
+        # 1. Check attached lexicon if available (e.g. SinhalaLexicon / TamilLexicon)
+        if self.lexicon is not None and hasattr(self.lexicon, "lookup"):
+            full_phrase = " ".join(tokens)
+            stemmed_phrase = " ".join(self._apply_stemming(t) for t in tokens)
+            for cand_phrase in (full_phrase, stemmed_phrase):
+                phrase_entries = self.lexicon.lookup(cand_phrase)
+                if phrase_entries and "noun" in str(getattr(phrase_entries[0], "pos", "")).lower():
+                    return EntityReference(
+                        concept_name=phrase_entries[0].semantic_predicate,
+                        properties=getattr(phrase_entries[0], "properties", {}) or {},
+                        specifier=spec_type,
+                        raw_text=full_phrase,
+                    )
+
+            lex_props: dict[str, Any] = {}
+            lex_concept: str | None = None
+            i = 0
+            while i < len(clean_words):
+                matched = False
+                if i + 1 < len(clean_words):
+                    bg_raw = f"{clean_words[i]} {clean_words[i + 1]}"
+                    bg_stem = f"{clean_words[i]} {self._apply_stemming(clean_words[i + 1])}"
+                    for bg in (bg_raw, bg_stem):
+                        entries = self.lexicon.lookup(bg)
+                        if entries and "noun" in str(getattr(entries[0], "pos", "")).lower():
+                            lex_concept = entries[0].semantic_predicate
+                            matched = True
+                            i += 2
+                            break
+                    if matched:
+                        continue
+                w = clean_words[i]
+                w_stem = self._apply_stemming(w)
+                entries = self.lexicon.lookup(w) or self.lexicon.lookup(w_stem)
+                if entries:
+                    e = entries[0]
+                    p_str = str(getattr(e, "pos", "")).lower()
+                    if "noun" in p_str:
+                        lex_concept = e.semantic_predicate
+                    elif "adj" in p_str or hasattr(e, "properties"):
+                        lex_props.update(getattr(e, "properties", {}) or {})
+                        if e.semantic_predicate and "color" not in lex_props:
+                            lex_props["color"] = e.semantic_predicate
+                i += 1
+
+            if lex_concept:
+                return EntityReference(
+                    concept_name=lex_concept,
+                    properties=lex_props,
+                    specifier=spec_type,
+                    raw_text=" ".join(tokens),
+                )
+
+        # 2. Known colors & declarative concept map
+        inv_concept = {v.lower(): k for k, v in self.profile.closed_class.concept_map.items()}
+        inv_color = {v.lower(): k for k, v in self.profile.closed_class.color_map.items()}
+
+        full_phrase = " ".join(clean_words).lower()
+        full_stemmed = " ".join(self._apply_stemming(t) for t in clean_words).lower()
+        if full_phrase in inv_concept:
+            return EntityReference(concept_name=inv_concept[full_phrase], specifier=spec_type)
+        if full_stemmed in inv_concept:
+            return EntityReference(concept_name=inv_concept[full_stemmed], specifier=spec_type)
 
         # Known colors / properties
         color_candidates = {
@@ -483,24 +573,46 @@ class UniversalLanguageParser:
 
         props: dict[str, Any] = {}
         noun_parts: list[str] = []
-        for w in clean_words:
+        mapped_concept: str | None = None
+
+        i = 0
+        while i < len(clean_words):
+            matched = False
+            if i + 1 < len(clean_words):
+                bg_raw = f"{clean_words[i]} {clean_words[i + 1]}".lower()
+                bg_stem = f"{clean_words[i]} {self._apply_stemming(clean_words[i + 1])}".lower()
+                for bg in (bg_raw, bg_stem):
+                    if bg in inv_concept:
+                        mapped_concept = inv_concept[bg]
+                        matched = True
+                        i += 2
+                        break
+                if matched:
+                    continue
+
+            w = clean_words[i]
             w_low = w.lower()
-            matched_color: str | None = None
-            if w_low in color_candidates:
-                matched_color = w_low
-            else:
-                for suf in self.profile.morphology.strip_suffixes:
-                    if len(w_low) > len(suf) + 2 and w_low.endswith(suf):
-                        cand = w_low[: -len(suf)]
-                        if cand in color_candidates:
-                            matched_color = cand
-                            break
-            if matched_color is not None:
-                props["color"] = matched_color
+            w_stem = self._apply_stemming(w_low)
+
+            if w_low in inv_color:
+                props["color"] = inv_color[w_low]
+            elif w_stem in inv_color:
+                props["color"] = inv_color[w_stem]
+            elif w_low in color_candidates:
+                props["color"] = w_low
+            elif w_stem in color_candidates:
+                props["color"] = w_stem
+            elif w_low in inv_concept:
+                mapped_concept = inv_concept[w_low]
+            elif w_stem in inv_concept:
+                mapped_concept = inv_concept[w_stem]
             else:
                 noun_parts.append(w_low)
+            i += 1
 
-        concept_name = " ".join(noun_parts) if noun_parts else " ".join(clean_words)
+        concept_name = mapped_concept or (
+            " ".join(noun_parts) if noun_parts else " ".join(clean_words)
+        )
         return EntityReference(
             concept_name=concept_name,
             specifier=spec_type,
@@ -538,6 +650,8 @@ class UniversalLanguageRealizer:
         )
 
         adp_word = self._get_adposition_for_predicate(pred)
+        subj_str = self.profile.closed_class.concept_map.get(subj, subj)
+        obj_str = self.profile.closed_class.concept_map.get(obj, obj)
 
         # 0. Discourse explanation / long answers (definition, causes, requires)
         if pred in ("definition", "causes", "requires") and obj:
@@ -545,40 +659,86 @@ class UniversalLanguageRealizer:
                 return obj
             if target == "cause":
                 tmpl = self.profile.templates.cause_template
-                return tmpl.format(effect=subj, cause=obj)
+                return tmpl.format(effect=subj_str, cause=obj_str)
             elif target == "procedure":
                 tmpl = self.profile.templates.procedure_template
-                return tmpl.format(target=subj, step=obj)
+                return tmpl.format(target=subj_str, step=obj_str)
             else:
                 tmpl = self.profile.templates.definition_template
-                return tmpl.format(subject=subj, definition=obj)
+                return tmpl.format(subject=subj_str, definition=obj_str)
 
-        # 1. Unknown / Insufficient Evidence
+        # 1. Contradiction / Insufficient Evidence
+        if level == EpistemicVerbalizationLevel.CONTRADICTED:
+            return self.profile.templates.contradicted_evidence.format(theme=subj_str)
+
         if (
             level == EpistemicVerbalizationLevel.INSUFFICIENT_EVIDENCE
             or not epistemic_state.is_known
         ):
-            tmpl = self.profile.templates.location_unknown
-            return tmpl.format(theme=subj)
+            tmpl = (
+                self.profile.templates.insufficient_evidence
+                if self.profile.templates.insufficient_evidence
+                else self.profile.templates.location_unknown
+            )
+            return tmpl.format(theme=subj_str)
 
         # 2. Verification queries (Yes / No)
         if target == "verification":
             if epistemic_state.raw_belief_value is True or epistemic_state.is_known:
-                tmpl = self.profile.templates.verification_true
+                if level == EpistemicVerbalizationLevel.PROBABLE:
+                    tmpl = self.profile.templates.verification_true_probable
+                elif level == EpistemicVerbalizationLevel.PLAUSIBLE:
+                    tmpl = self.profile.templates.verification_true_plausible
+                else:
+                    tmpl = self.profile.templates.verification_true
             else:
                 tmpl = self.profile.templates.verification_false
-            return tmpl.format(theme=subj, adposition=adp_word, location=obj)
+            return tmpl.format(theme=subj_str, adposition=adp_word, location=obj_str)
 
         # 3. Location queries
-        tmpl = self.profile.templates.location_known
-        return tmpl.format(theme=subj, adposition=adp_word, location=obj)
+        if level == EpistemicVerbalizationLevel.PROBABLE:
+            tmpl = self.profile.templates.location_probable
+        elif level == EpistemicVerbalizationLevel.PLAUSIBLE:
+            tmpl = self.profile.templates.location_plausible
+        else:
+            tmpl = self.profile.templates.location_known
+        return tmpl.format(theme=subj_str, adposition=adp_word, location=obj_str)
 
     def realize_frame(self, frame: SemanticFrame) -> str:
         """Verbalize a SemanticFrame directly (e.g. for interlingual translation)."""
         theme_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
         loc_ref = frame.get_role(ThematicRole.LOCATION) or frame.get_role(ThematicRole.DESTINATION)
-        theme_str = theme_ref.concept_name if theme_ref else "entity"
-        loc_str = loc_ref.concept_name if loc_ref else "location"
+        theme_name: str = (
+            (theme_ref.concept_name or "entity")
+            if theme_ref and theme_ref.concept_name
+            else "entity"
+        )
+        loc_name: str = (
+            (loc_ref.concept_name or "location") if loc_ref and loc_ref.concept_name else "location"
+        )
+
+        concept_map = self.profile.closed_class.concept_map
+        color_map = self.profile.closed_class.color_map
+
+        theme_surface = concept_map.get(theme_name, theme_name)
+        loc_surface = concept_map.get(loc_name, loc_name)
+
+        if theme_ref and theme_ref.properties.get("color"):
+            color_val = str(theme_ref.properties["color"])
+            color_surface = color_map.get(color_val, color_val)
+            theme_with_color = f"{color_surface} {theme_surface}".strip()
+        else:
+            theme_with_color = theme_surface
+
+        if self.profile.typology.has_articles:
+            spec_word = next(iter(self.profile.closed_class.specifiers.keys()), "the")
+            loc_lower = self.profile.templates.location_known.lower()
+            if not any(
+                loc_lower.startswith(art)
+                for art in ("the ", "le ", "la ", "l'", "der ", "die ", "das ")
+            ):
+                theme_with_color = f"{spec_word} {theme_with_color}".strip()
+                loc_surface = f"{spec_word} {loc_surface}".strip()
 
         if frame.frame_type == FrameType.QUERY:
             if frame.query_target == "location":
@@ -595,21 +755,15 @@ class UniversalLanguageRealizer:
                         else "is"
                     )
                     marker_cap = marker.capitalize()
-                    spec_word = (
-                        next(iter(self.profile.closed_class.specifiers.keys()), "")
-                        if self.profile.typology.has_articles
-                        else ""
-                    )
-                    theme_with_spec = f"{spec_word} {theme_str}".strip() if spec_word else theme_str
-                    return f"{marker_cap} {cop} {theme_with_spec}?"
+                    return f"{marker_cap} {cop} {theme_with_color}?"
                 else:
-                    return f"{theme_str} {marker}?"
+                    return f"{theme_with_color} {marker}?"
 
         # Default spatial assertion realization
         rel_pred = frame.predicate or "located_on"
         adp_word = self._get_adposition_for_predicate(rel_pred)
         tmpl = self.profile.templates.location_known
-        return tmpl.format(theme=theme_str, adposition=adp_word, location=loc_str)
+        return tmpl.format(theme=theme_with_color, adposition=adp_word, location=loc_surface)
 
     def _get_adposition_for_predicate(self, predicate: str) -> str:
         for adp, pred in self.profile.closed_class.adpositions.items():

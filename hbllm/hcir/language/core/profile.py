@@ -54,6 +54,12 @@ class ClosedClassLexicon(BaseModel):
     expository_markers: dict[str, list[str]] = Field(
         default_factory=dict
     )  # relation cues: "exemplification", "cause", "require", "enable", "because"
+    concept_map: dict[str, str] = Field(
+        default_factory=dict
+    )  # language-neutral concept -> native surface noun (e.g. "ball" -> "බෝලය")
+    color_map: dict[str, str] = Field(
+        default_factory=dict
+    )  # language-neutral property -> native surface word (e.g. "red" -> "රතු")
 
 
 class MorphologyConfig(BaseModel):
@@ -71,8 +77,14 @@ class RealizationTemplates(BaseModel):
     """Surface realization templates for verbalizing cognitive states."""
 
     location_known: str = "{theme} is {adposition} {location}."
+    location_probable: str = "{theme} is probably {adposition} {location}."
+    location_plausible: str = "I think {theme} may be {adposition} {location}."
     location_unknown: str = "I do not know where {theme} is."
+    insufficient_evidence: str = "There is not enough evidence to determine where {theme} is."
+    contradicted_evidence: str = "There is contradictory evidence regarding {theme}."
     verification_true: str = "Yes, {theme} is {adposition} {location}."
+    verification_true_probable: str = "Yes, {theme} is probably {adposition} {location}."
+    verification_true_plausible: str = "I think {theme} may be {adposition} {location}."
     verification_false: str = "No, {theme} is not {adposition} {location}."
     definition_template: str = "{subject} is {definition}."
     cause_template: str = "{effect} occurs because {cause} occurs."

@@ -17,6 +17,7 @@
       "அந்தக்": "distal"
     },
     "adpositions": {
+      "மீது": "located_on",
       "மேல்": "located_on",
       "உள்": "located_in",
       "உள்ளே": "located_in",
@@ -56,12 +57,15 @@
     ],
     "command_verbs": {
       "திற": "open",
+      "திறக்கவும்": "open",
       "பூட்டு நீக்கு": "unlock",
       "தள்ளு": "push",
       "நகர்த்து": "move",
       "வை": "put",
       "மூடு": "close",
       "பூட்டு": "lock",
+      "சுழற்று": "rotate",
+      "சுழற்றவும்": "rotate",
       "விளக்கு": "knowledge.explain"
     },
     "polite_wrappers": [
@@ -85,24 +89,67 @@
       "because": [
         "ஏனெனில்"
       ]
+    },
+    "concept_map": {
+      "ball": "பந்து",
+      "table": "மேசை",
+      "box": "பெட்டி",
+      "cup": "கோப்பை",
+      "robot": "ரோபோ",
+      "front_door": "முன் கதவு",
+      "back_door": "பின் கதவு",
+      "robot_arm": "ரோபோ கை",
+      "door": "கதவு",
+      "arm": "கை",
+      "gate": "வாயில்"
+    },
+    "color_map": {
+      "red": "சிவப்பு",
+      "blue": "நீலம்",
+      "green": "பச்சை"
     }
   },
   "morphology": {
     "strip_suffixes": [
-      "ஐ",
+      "யை",
+      "வை",
+      "தை",
+      "க்கு",
+      "உக்கு",
       "இல்",
-      "க்கு"
+      "ஐ",
+      "இருக்கிறதா",
+      "உள்ளதா"
     ],
     "strip_prefixes": [],
     "plural_endings": [
       "கள்"
     ],
-    "stemming_rules": []
+    "stemming_rules": [
+      [
+        "வை",
+        "வு"
+      ],
+      [
+        "தை",
+        "து"
+      ],
+      [
+        "யை",
+        ""
+      ]
+    ]
   },
   "templates": {
     "location_known": "{theme} {location} {adposition} இருக்கிறது.",
+    "location_probable": "{theme} அநேகமாக {location} {adposition} இருக்கலாம்.",
+    "location_plausible": "நான் நினைக்கிறேன் {theme} {location} {adposition} இருக்கலாம்.",
     "location_unknown": "{theme} எங்கே என்று எனக்குத் தெரியாது.",
+    "insufficient_evidence": "{theme} எங்கே உள்ளது என்பதை தீர்மானிக்க போதுமான ஆதாரம் இல்லை.",
+    "contradicted_evidence": "{theme} குறித்து முரண்பட்ட சான்றுகள் உள்ளன.",
     "verification_true": "ஆம், {theme} {location} {adposition} இருக்கிறது.",
+    "verification_true_probable": "ஆம், {theme} அநேகமாக {location} {adposition} இருக்கலாம்.",
+    "verification_true_plausible": "நான் நினைக்கிறேன் {theme} {location} {adposition} இருக்கலாம்.",
     "verification_false": "இல்லை, {theme} {location} {adposition} இல்லை.",
     "definition_template": "{subject} என்பது {definition}.",
     "cause_template": "{cause} என்பதால் {effect} ஏற்படுகிறது.",

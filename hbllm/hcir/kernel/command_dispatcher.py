@@ -327,7 +327,7 @@ class CommandDispatcher:
 
         # Bounded fuzzy typo recovery on known capability verbs (only if len >= 4)
         if len(verb_lower) >= 4 and verb_lower.isalpha():
-            from hbllm.hcir.language.english.normalizer import damerau_levenshtein
+            from hbllm.hcir.language.core.normalizer import damerau_levenshtein
 
             max_dist = 2 if len(verb_lower) >= 6 else 1
             best_verb: str | None = None

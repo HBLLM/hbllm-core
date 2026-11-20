@@ -28,6 +28,7 @@ from hbllm.hcir.graph import (
     HCIRNodeType,
     PhysicalEntityNode,
 )
+from hbllm.hcir.language.core.normalizer import damerau_levenshtein
 from hbllm.hcir.language.core.reference import ReferenceResolver
 from hbllm.hcir.language.core.semantic_frame import (
     EntityReference,
@@ -37,7 +38,6 @@ from hbllm.hcir.language.core.semantic_frame import (
     SemanticFrame,
     ThematicRole,
 )
-from hbllm.hcir.language.english.normalizer import damerau_levenshtein
 
 logger = logging.getLogger(__name__)
 

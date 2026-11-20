@@ -125,7 +125,7 @@ class TestUniversalEngineFrench:
 
         frame = fr_parser.parse("Lister les fichiers")
         assert frame.frame_type == FrameType.COMMAND
-        assert frame.predicate in ("lister", "liste")
+        assert frame.predicate in ("fs.list", "lister", "liste")
 
     def test_french_spatial_assertion_parsing(self) -> None:
         graph = CognitiveGraph()
