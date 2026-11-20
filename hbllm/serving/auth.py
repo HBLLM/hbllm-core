@@ -46,12 +46,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # Pass-through for health checks, static files, and CORS preflight
+        # Pass-through for health checks, P2P zero-trust federation mailbox, static files, and CORS preflight
         _bypass_paths = [
             "/health",
             "/health/live",
             "/health/ready",
             "/metrics",
+            "/v1/federation/mailbox",
         ]
         # Only expose /docs and /openapi.json in non-production environments
         if os.environ.get("HBLLM_ENV", "").lower() != "production":
