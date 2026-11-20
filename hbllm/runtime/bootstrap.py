@@ -249,9 +249,13 @@ class CognitiveSystem:
         if neuromod is not None and hasattr(neuromod, "signal_novelty"):
             neuromod.signal_novelty(0.3)
 
-        # 2. Optional isolated LLM teacher scaffold (strictly outside hbllm/hcir/)
+        # 2. Optional isolated LLM teacher scaffold (retired in Pure-HCIR v2.0 graduation)
         scaffold = self.services.extensions.get("llm_scaffold")
-        if scaffold is not None and (self.config.enable_brain_llm or not turn.is_success):
+        if (
+            scaffold is not None
+            and not getattr(scaffold, "retired", False)
+            and self.config.enable_brain_llm
+        ):
             scaffold_res = scaffold.advise_and_distill(text, self.workspace, speaker_id=speaker)
             if not hasattr(metrics, "record_parse"):
                 metrics["shadow_invocations"] += 1

@@ -39,8 +39,8 @@ if _REPO_ROOT not in sys.path:
 
 from hbllm.brain.self_model.calibrator import EpistemicCalibrator  # noqa: E402
 from hbllm.hcir.capabilities.web_capabilities import is_safe_url  # noqa: E402
+from hbllm.hcir.kernel.autonomy_tracker import AutonomyTracker  # noqa: E402
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system  # noqa: E402
-from plugins.llm_scaffold.teacher import AutonomyTracker  # noqa: E402
 
 
 @dataclass

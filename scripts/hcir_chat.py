@@ -245,9 +245,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=["auto", "pure", "nvidia"],
-        default="auto",
-        help="Chat mode: auto (HCIR+fallback), pure (HCIR only), nvidia (always shadow)",
+        choices=["pure", "auto", "nvidia"],
+        default="pure",
+        help="Chat mode: pure (Pure-HCIR standalone, default), auto (HCIR+fallback), nvidia (shadow)",
     )
     parser.add_argument(
         "--curiosity",

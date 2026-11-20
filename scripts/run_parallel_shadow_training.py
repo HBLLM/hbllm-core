@@ -31,11 +31,11 @@ _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from hbllm.hcir.kernel.autonomy_tracker import AutonomyTracker
 from hbllm.hcir.language.ontology_store import DEFAULT_ONTOLOGY_DB, LexicalOntologyStore
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 from plugins.llm_scaffold import (
     DEFAULT_LOCAL_CHECKPOINT,
-    AutonomyTracker,
     LLMTeacherScaffold,
 )
 

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from hbllm.hcir.kernel.autonomy_tracker import AutonomyTracker
 from hbllm.hcir.language.ontology_store import LexicalOntologyStore
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 from plugins.llm_scaffold import (
-    AutonomyTracker,
     LLMTeacherScaffold,
     parse_teacher_json,
 )

@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
+from hbllm.hcir.kernel.autonomy_tracker import AutonomyTracker
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 from plugins.llm_scaffold import (
     DEFAULT_LOCAL_CHECKPOINT,
-    AutonomyTracker,
     LLMTeacherScaffold,
 )
 

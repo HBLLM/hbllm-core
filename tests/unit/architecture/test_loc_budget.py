@@ -21,7 +21,7 @@ LOC_BUDGET = 300_000
 HCIR_LOC_BUDGET = 150_000
 
 # Ratchet: number of ``__path__.append`` shims may only go down. Target is 0.
-MAX_PATH_APPEND_SHIMS = 16
+MAX_PATH_APPEND_SHIMS = 12
 
 FORBIDDEN_HCIR_IMPORT_PREFIXES = (
     "openai",
