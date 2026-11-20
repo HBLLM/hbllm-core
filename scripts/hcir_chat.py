@@ -39,7 +39,7 @@ def _load_dotenv() -> None:
                 os.environ.setdefault(key.strip(), val.strip())
 
 
-def build_system():
+def build_system(enable_curiosity: bool = False):
     """Boot the CognitiveSystem from the canonical bootstrap."""
     from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
@@ -47,6 +47,7 @@ def build_system():
         world_id="chat",
         enable_grounding=False,
         enable_brain_llm=False,
+        enable_autonomous_curiosity=enable_curiosity,
     )
     return build_cognitive_system(cfg)
 
@@ -248,13 +249,20 @@ def main() -> None:
         default="auto",
         help="Chat mode: auto (HCIR+fallback), pure (HCIR only), nvidia (always shadow)",
     )
+    parser.add_argument(
+        "--curiosity",
+        action="store_true",
+        help="Enable autonomous epistemic curiosity (governed web research on knowledge gaps)",
+    )
     args = parser.parse_args()
 
     _load_dotenv()
 
     print("Booting cognitive system...")
-    system = build_system()
+    system = build_system(enable_curiosity=args.curiosity)
     print(f"  ✓ System booted (graph: {system.workspace.graph.node_count} nodes)")
+    if args.curiosity:
+        print("  ✓ Autonomous epistemic curiosity enabled (governed web.search/web.fetch)")
 
     scaffold = attach_nvidia_scaffold(system)
     if scaffold:

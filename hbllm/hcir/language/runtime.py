@@ -193,7 +193,8 @@ class MultilingualLanguageRuntime:
         # 2. Grounding & Reference Resolution against A13/A15 HCIR state
         grounded = self._grounding_resolver.ground_frame(frame)
         # Register concrete conceptual topics for multi-turn coreference
-        self._register_frame_topics(frame)
+        # (only when not already grounded to a physical entity in the world graph)
+        self._register_frame_topics(frame, grounded)
         if not grounded.grounding_success:
             # COMMAND frames with tool verbs bypass NOT-FOUND grounding failures —
             # the CommandDispatcher interprets raw concept names as tool params.
@@ -300,12 +301,16 @@ class MultilingualLanguageRuntime:
             is_success=True,
         )
 
-    def _register_frame_topics(self, frame: SemanticFrame) -> None:
+    def _register_frame_topics(self, frame: SemanticFrame, grounded: Any | None = None) -> None:
         """Register concrete conceptual topics from a parsed frame into ReferenceResolver."""
         from hbllm.hcir.language.core.reference import is_anaphoric_term
         from hbllm.hcir.language.core.semantic_frame import ThematicRole
 
+        grounded_ents = getattr(grounded, "grounded_entities", {}) if grounded is not None else {}
         for role in (ThematicRole.THEME, ThematicRole.PATIENT, ThematicRole.AGENT):
+            if role in grounded_ents:
+                # Physical entity mention is already registered with its graph entity_id
+                return
             ref = frame.get_role(role)
             if ref is not None and ref.concept_name and not is_anaphoric_term(ref.concept_name):
                 self._ref_resolver.register_topic(ref.concept_name)
