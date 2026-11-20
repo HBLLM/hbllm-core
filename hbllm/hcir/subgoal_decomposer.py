@@ -63,11 +63,12 @@ class EpistemicFrontierDetector:
     def detect_frontiers(
         avatar_pos: tuple[int, int],
         unobserved_mask: np.ndarray,
-        barrier_cells: set[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
         known_walls: set[tuple[int, int]] | None = None,
         deadlock_cells: set[tuple[int, int]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> list[tuple[tuple[int, int], float]]:
         """Identify reachable cells bordering unobserved space, ranked by barrier-aware information gain.
 
@@ -80,7 +81,7 @@ class EpistemicFrontierDetector:
         if not np.any(unobserved_mask):
             return []
 
-        all_barriers = set(barrier_cells)
+        all_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         if known_walls:
             all_barriers.update(known_walls)
         deadlocks = set(deadlock_cells) if deadlock_cells else set()
@@ -174,14 +175,15 @@ class HierarchicalGoalDecomposer:
         workspace: HCIRWorkspaceState,
         primary_goal: GoalNode,
         avatar_pos: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         candidate_subgoals: list[dict[str, Any]] | None = None,
         step_size: int = 1,
         force_subgoals: bool = False,
         unobserved_mask: np.ndarray | None = None,
         resource_budget: int | None = None,
         recharge_stations: list[dict[str, Any]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> GoalNode:
         """Analyze reachability of primary goal and return the active prerequisite GoalNode.
 
@@ -202,7 +204,7 @@ class HierarchicalGoalDecomposer:
         goal_r, goal_c = int(target_pos[0]), int(target_pos[1])
 
         # 1. Check if primary goal has an unobstructed geodesic path through known space
-        effective_barriers = set(barrier_cells)
+        effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         if unobserved_mask is not None and np.any(unobserved_mask):
             unobserved_cells = set(zip(*np.where(unobserved_mask)))
             effective_barriers.update(unobserved_cells)
@@ -210,7 +212,7 @@ class HierarchicalGoalDecomposer:
         primary_path = PhysicsPredictor.compute_geodesic_path(
             start=avatar_pos,
             goal=(goal_r, goal_c),
-            barrier_cells=effective_barriers,
+            blocked_nodes=effective_barriers,
             grid_shape=grid_shape,
             step_size=step_size,
         )
@@ -257,7 +259,7 @@ class HierarchicalGoalDecomposer:
                 s_path = PhysicsPredictor.compute_geodesic_path(
                     start=avatar_pos,
                     goal=(s_r, s_c),
-                    barrier_cells=effective_barriers,
+                    blocked_nodes=effective_barriers,
                     grid_shape=grid_shape,
                     step_size=step_size,
                 )
@@ -314,7 +316,7 @@ class HierarchicalGoalDecomposer:
                 c_path = PhysicsPredictor.compute_geodesic_path(
                     start=avatar_pos,
                     goal=(cand_r, cand_c),
-                    barrier_cells=barrier_cells,
+                    blocked_nodes=effective_barriers,
                     grid_shape=grid_shape,
                     step_size=step_size,
                 )
@@ -407,7 +409,7 @@ class HierarchicalGoalDecomposer:
             frontiers = EpistemicFrontierDetector.detect_frontiers(
                 avatar_pos=avatar_pos,
                 unobserved_mask=unobserved_mask,
-                barrier_cells=barrier_cells,
+                blocked_nodes=effective_barriers,
                 grid_shape=grid_shape,
                 step_size=step_size,
             )
@@ -452,13 +454,13 @@ class HierarchicalGoalDecomposer:
             free_path = PhysicsPredictor.compute_geodesic_path(
                 start=avatar_pos,
                 goal=(gr, gc),
-                barrier_cells=set(),
+                blocked_nodes=set(),
                 grid_shape=grid_shape,
                 step_size=step_size,
             )
             if free_path:
                 for pr, pc in free_path:
-                    if (pr, pc) in barrier_cells:
+                    if (pr, pc) in effective_barriers:
                         clear_subgoal_id = f"clear_barrier_{pr}_{pc}"
                         if clear_subgoal_id not in self.completed_subgoals:
                             adj_cells = [
@@ -471,12 +473,12 @@ class HierarchicalGoalDecomposer:
                                 if (
                                     0 <= ar < grid_shape[0]
                                     and 0 <= ac < grid_shape[1]
-                                    and (ar, ac) not in barrier_cells
+                                    and (ar, ac) not in effective_barriers
                                 ):
                                     adj_path = PhysicsPredictor.compute_geodesic_path(
                                         start=avatar_pos,
                                         goal=(ar, ac),
-                                        barrier_cells=barrier_cells,
+                                        blocked_nodes=effective_barriers,
                                         grid_shape=grid_shape,
                                         step_size=step_size,
                                     )

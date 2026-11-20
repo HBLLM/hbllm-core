@@ -80,20 +80,24 @@ class TopologicalCutSetAnalyzer:
     @staticmethod
     def get_reachable_component(
         start: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> set[tuple[int, int]]:
         """Compute the flood-fill reachable connected component from start."""
         H, W = grid_shape
         sr, sc = int(round(start[0])), int(round(start[1]))
-        if (sr, sc) in barrier_cells or not (0 <= sr < H and 0 <= sc < W):
+        effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
+        if (sr, sc) in effective_barriers or not (0 <= sr < H and 0 <= sc < W):
             return set()
 
         if step_size == 1 and _rust_graph is not None:
             try:
                 rust_comps = _rust_graph.topological_connected_components(
-                    H, W, [(int(r), int(c)) for r, c in barrier_cells if 0 <= r < H and 0 <= c < W]
+                    H,
+                    W,
+                    [(int(r), int(c)) for r, c in effective_barriers if 0 <= r < H and 0 <= c < W],
                 )
                 for comp in rust_comps:
                     comp_set = {(int(r), int(c)) for r, c in comp}
@@ -113,7 +117,7 @@ class TopologicalCutSetAnalyzer:
             for dr, dc in deltas:
                 nr, nc = r + dr, c + dc
                 if 0 <= nr < H and 0 <= nc < W:
-                    if (nr, nc) not in visited and (nr, nc) not in barrier_cells:
+                    if (nr, nc) not in visited and (nr, nc) not in effective_barriers:
                         visited.add((nr, nc))
                         queue.append((nr, nc))
 
@@ -123,18 +127,20 @@ class TopologicalCutSetAnalyzer:
     def analyze_cut_set(
         start: tuple[int, int],
         goal: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
         movable_barriers: set[tuple[int, int]] | None = None,
         occupied_cells: set[tuple[int, int]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> CutSetResult:
         """Analyze whether start and goal are in disjoint components and locate the barrier cut-set."""
         H, W = grid_shape
+        effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         c_start = TopologicalCutSetAnalyzer.get_reachable_component(
-            start, barrier_cells, grid_shape, step_size
+            start, effective_barriers, grid_shape, step_size
         )
-        barriers_for_goal = set(barrier_cells)
+        barriers_for_goal = set(effective_barriers)
         if goal in barriers_for_goal:
             barriers_for_goal.remove(goal)
         c_goal = TopologicalCutSetAnalyzer.get_reachable_component(
@@ -372,18 +378,20 @@ class TopologicalCutSetAnalyzer:
         start: tuple[int, int],
         goal: tuple[int, int],
         grid_shape: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
         traversable_cells: set[tuple[int, int]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> MinCutMaxFlowResult:
         """Compute the s-t min-cut and bottleneck barrier partition via Edmonds-Karp."""
         H, W = grid_shape
+        effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         trav = (
             traversable_cells
             if traversable_cells is not None
-            else {(r, c) for r in range(H) for c in range(W) if (r, c) not in barrier_cells}
+            else {(r, c) for r in range(H) for c in range(W) if (r, c) not in effective_barriers}
         )
 
-        all_nodes: set[tuple[int, int]] = set(trav) | set(barrier_cells)
+        all_nodes: set[tuple[int, int]] = set(trav) | set(effective_barriers)
         if start not in all_nodes or goal not in all_nodes:
             return MinCutMaxFlowResult(
                 max_flow=0.0,
@@ -491,24 +499,26 @@ class TopologicalCutSetAnalyzer:
     def analyze_manifold_topology(
         start: tuple[int, int],
         goal: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
         movable_barriers: set[tuple[int, int]] | None = None,
         occupied_cells: set[tuple[int, int]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> ManifoldTopologyResult:
         """Perform comprehensive persistent homology and min-cut manifold analysis."""
+        effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         cut_res = TopologicalCutSetAnalyzer.analyze_cut_set(
             start=start,
             goal=goal,
-            barrier_cells=barrier_cells,
+            blocked_nodes=effective_barriers,
             grid_shape=grid_shape,
             step_size=step_size,
             movable_barriers=movable_barriers,
             occupied_cells=occupied_cells,
         )
         H, W = grid_shape
-        trav = {(r, c) for r in range(H) for c in range(W) if (r, c) not in barrier_cells}
+        trav = {(r, c) for r in range(H) for c in range(W) if (r, c) not in effective_barriers}
         betti = TopologicalCutSetAnalyzer.compute_betti_invariants(grid_shape, trav)
         min_cut = None
         if cut_res.is_partitioned:
@@ -516,7 +526,7 @@ class TopologicalCutSetAnalyzer:
                 start=start,
                 goal=goal,
                 grid_shape=grid_shape,
-                barrier_cells=barrier_cells,
+                blocked_nodes=effective_barriers,
                 traversable_cells=trav,
             )
         return ManifoldTopologyResult(

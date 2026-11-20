@@ -3,9 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 from hbllm.hcir.world.causal.predicates import CausalPredicate
+
+
+class AffordanceType(str, Enum):
+    """Core ontological affordance types grounded in physical interaction dynamics.
+
+    Decouples cognitive reasoning and planning from domain-specific or game-specific
+    terminologies (e.g. 'barrier', 'gem', 'key', 'door') and expresses universal physical
+    capabilities and interaction constraints.
+    """
+
+    IMPASSABLE = "barrier"  # Non-traversable solid matter / topological obstacle
+    PASSABLE = "walkable"  # Free navigable space / medium
+    TELIC = "goal"  # Terminal attractor / desired state
+    CANDIDATE_TELIC = "candidate_goal"  # Hypothesized goal pending confirmation
+    PUSHABLE = "cargo"  # Manipulable entity under contact displacement
+    RECEPTACLE = "receptacle"  # Container locus, drop-off, or target boundary
+    ACTUATABLE = "actuator"  # Distal state switch / trigger / button
+    HAZARD = "hazard"  # Lethal hazard / penalty zone
 
 
 @dataclass
@@ -47,5 +66,6 @@ class ConditionalAffordance:
 
 __all__ = [
     "ActionAffordance",
+    "AffordanceType",
     "ConditionalAffordance",
 ]

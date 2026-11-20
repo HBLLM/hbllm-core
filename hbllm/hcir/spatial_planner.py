@@ -496,20 +496,29 @@ class HCIRSpatialEntityPlanner:
     def construct_entity_graph(
         self,
         entities: list[SpatialEntity],
-        barriers: set[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        barriers: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int | None = None,
         known_barriers: set[tuple[int, int]] | None = None,
+        impassable_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> EntityGraph:
         """Constructs a topological EntityGraph from abstract spatial entities and barriers."""
         H, W = grid_shape
         step = step_size or self.step_size or 1
         eg = EntityGraph(grid_shape=(H, W), step_size=step)
 
+        effective_blocked = set(
+            blocked_nodes
+            if blocked_nodes is not None
+            else impassable_nodes
+            if impassable_nodes is not None
+            else barriers
+        )
         if known_barriers:
             eg.barriers.update(known_barriers)
         eg.barriers.update(self._learned_barriers)
-        eg.barriers.update(barriers)
+        eg.barriers.update(effective_blocked)
 
         # Gestalt grouping: deduplicate co-located entities (e.g. concentric composite items)
         deduped_entities: dict[str, SpatialEntity] = {}
@@ -1595,14 +1604,15 @@ class HCIRSpatialEntityPlanner:
         self,
         start: tuple[int, int],
         goal: tuple[int, int],
-        barrier_cells: set[tuple[int, int]],
-        grid_shape: tuple[int, int],
-        step_size: int,
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
+        step_size: int = 1,
         footprint_offsets: list[tuple[int, int]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> list[tuple[int, int]]:
         """Computes a collision-free geodesic path accounting for carried object footprint offsets."""
         offsets = footprint_offsets or [(0, 0)]
-        effective_barriers = set(barrier_cells)
+        effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         if self._learned_barriers:
             effective_barriers.update(self._learned_barriers - {goal, start})
         from hbllm.hcir.world.predictors.physics import PhysicsPredictor
@@ -1610,7 +1620,7 @@ class HCIRSpatialEntityPlanner:
         return PhysicsPredictor.compute_geodesic_path(
             start=start,
             goal=goal,
-            barrier_cells=effective_barriers,
+            blocked_nodes=effective_barriers,
             grid_shape=grid_shape,
             step_size=step_size,
             footprint_offsets=offsets,

@@ -597,10 +597,11 @@ class PhysicsPredictor:
         cls,
         start: tuple[int, int],
         goal: tuple[int, int],
-        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
-        grid_shape: tuple[int, int],
+        barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
         footprint_offsets: list[tuple[int, int]] | set[tuple[int, int]] | None = None,
+        blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
     ) -> list[tuple[int, int]]:
         """Breadth-first search for shortest obstacle-clearing geodesic path, accounting for composite footprints."""
         H, W = grid_shape
@@ -617,7 +618,7 @@ class PhysicsPredictor:
                 ic = int(round(o[1]))
                 if (ir, ic) != (0, 0) and (ir, ic) not in offsets:
                     offsets.append((ir, ic))
-        effective_barriers = set(barrier_cells)
+        effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         effective_barriers.discard((goal_r, goal_c))
         for off_r, off_c in offsets:
             effective_barriers.discard((goal_r + off_r, goal_c + off_c))
