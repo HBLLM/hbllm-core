@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from hbllm.hcir.world.causal.affordances import ActionAffordance, ConditionalAffordance
+from hbllm.hcir.world.causal.affordances import (
+    ActionAffordance,
+    AffordanceType,
+    ConditionalAffordance,
+)
 from hbllm.hcir.world.causal.axioms import (
     GovernedSetView,
     OntologyEvidenceRank,
@@ -28,6 +32,7 @@ from hbllm.hcir.world.causal.theory import (
 
 __all__ = [
     "ActionAffordance",
+    "AffordanceType",
     "BaseCausalDiscoveryEngine",
     "BeliefTransitionEvent",
     "BeliefTransitionType",

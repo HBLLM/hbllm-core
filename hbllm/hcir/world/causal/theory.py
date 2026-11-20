@@ -12,7 +12,7 @@ import numpy as np
 from hbllm.hcir.graph import ConceptNode
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-from hbllm.hcir.world.causal.affordances import ConditionalAffordance
+from hbllm.hcir.world.causal.affordances import AffordanceType, ConditionalAffordance
 from hbllm.hcir.world.causal.axioms import (
     OntologyEvidenceRank,
     SpelkePhysicalAxiom,
@@ -868,23 +868,28 @@ class HCIRSymbolicWorldTheory:
             props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.cargo_predicates)
 
-        feat = getattr(entity, "feature_id", getattr(entity, "id", None))
-        if feat in self._cargo_features:
-            return True
-        role = getattr(entity, "role", None)
-        if role in (EntityRole.MANIPULABLE, getattr(EntityRole, "CARGO", None)) or str(
-            role
-        ).lower() in ("cargo", "manipulable", "pushable"):
-            return True
-        props = {
-            "feature_id": feat,
-            "visual_id": feat,
-            "id": feat,
-            "area": getattr(entity, "area", 1),
-            "role": str(role),
-            **getattr(entity, "properties", {}),
-        }
-        return any(pred.evaluate(props) for pred in self.cargo_predicates)
+        if isinstance(entity, SpatialEntity):
+            feat = entity.id
+            if feat in self._cargo_features:
+                return True
+            role = entity.role
+            if role == EntityRole.MANIPULABLE or str(role).lower() in (
+                "cargo",
+                "manipulable",
+                "pushable",
+            ):
+                return True
+            props = {
+                "feature_id": feat,
+                "visual_id": feat,
+                "id": feat,
+                "area": entity.area,
+                "role": str(role),
+                **(entity.properties or {}),
+            }
+            return any(pred.evaluate(props) for pred in self.cargo_predicates)
+
+        return False
 
     def is_receptacle(self, entity: SpatialEntity | int | str | Any) -> bool:
         """True if entity or feature satisfies any receptacle predicate."""
@@ -895,34 +900,127 @@ class HCIRSymbolicWorldTheory:
             props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
             return any(pred.evaluate(props) for pred in self.receptacle_predicates)
 
-        feat = getattr(entity, "feature_id", getattr(entity, "id", None))
-        if feat in self._receptacle_features:
-            return True
-        role = getattr(entity, "role", None)
-        if role == EntityRole.RECEPTACLE or str(role).lower() in (
-            "receptacle",
-            "entityrole.receptacle",
-            "dock",
-        ):
-            return True
-        props = {
-            "feature_id": feat,
-            "visual_id": feat,
-            "id": feat,
-            "area": getattr(entity, "area", 1),
-            "role": str(role),
-            **getattr(entity, "properties", {}),
-        }
-        return any(pred.evaluate(props) for pred in self.receptacle_predicates)
+        if isinstance(entity, SpatialEntity):
+            feat = entity.id
+            if feat in self._receptacle_features:
+                return True
+            role = entity.role
+            if role == EntityRole.RECEPTACLE or str(role).lower() in (
+                "receptacle",
+                "entityrole.receptacle",
+                "dock",
+            ):
+                return True
+            props = {
+                "feature_id": feat,
+                "visual_id": feat,
+                "id": feat,
+                "area": entity.area,
+                "role": str(role),
+                **(entity.properties or {}),
+            }
+            return any(pred.evaluate(props) for pred in self.receptacle_predicates)
+
+        return False
+
+    def is_actuator(self, entity: SpatialEntity | int | str | Any) -> bool:
+        """True if entity or feature satisfies any distal actuator predicate."""
+        if isinstance(entity, (int, np.integer, str)):
+            feat = int(entity) if isinstance(entity, (int, np.integer)) else entity
+            if feat in self._actuator_features:
+                return True
+            props = {"feature_id": feat, "visual_id": feat, "id": feat, "name": str(feat)}
+            return any(pred.evaluate(props) for pred in self.actuator_predicates)
+
+        if isinstance(entity, SpatialEntity):
+            feat = entity.id
+            if feat in self._actuator_features:
+                return True
+            role = entity.role
+            if role == EntityRole.ACTUATOR or str(role).lower() in (
+                "actuator",
+                "entityrole.actuator",
+                "switch",
+                "button",
+            ):
+                return True
+            props = {
+                "feature_id": feat,
+                "visual_id": feat,
+                "id": feat,
+                "area": entity.area,
+                "role": str(role),
+                **(entity.properties or {}),
+            }
+            return any(pred.evaluate(props) for pred in self.actuator_predicates)
+
+        return False
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # DECLARATIVE CAUSAL AFFORDANCE INDUCTION & QUERIES
+    # ═══════════════════════════════════════════════════════════════════════
+
+    def induce_affordance(
+        self,
+        feature_id: Any,
+        affordance: AffordanceType | str,
+        evidence: Any = None,
+    ) -> bool:
+        """Universal entrypoint for physical affordance induction.
+
+        Maps raw interaction dynamics (collisions, rewards, displacements) to
+        formal CausalPredicates without domain-specific or game-specific heuristics.
+        """
+        aff_str = affordance.value if isinstance(affordance, AffordanceType) else str(affordance)
+        if aff_str in (AffordanceType.IMPASSABLE.value, "barrier", "impassable", "obstacle"):
+            return self._induce_impassable(feature_id, evidence)
+        elif aff_str in (AffordanceType.PASSABLE.value, "walkable", "passable"):
+            return self._induce_passable(feature_id, evidence)
+        elif aff_str in (AffordanceType.TELIC.value, "goal", "telic", "target"):
+            return self._induce_telic(feature_id, evidence)
+        elif aff_str in (AffordanceType.CANDIDATE_TELIC.value, "candidate_goal", "candidate_telic"):
+            return self._induce_candidate_telic(feature_id, evidence)
+        elif aff_str in (AffordanceType.PUSHABLE.value, "cargo", "pushable", "movable"):
+            return self._induce_pushable(feature_id, evidence)
+        elif aff_str in (AffordanceType.RECEPTACLE.value, "receptacle", "container"):
+            return self._induce_receptacle(feature_id, evidence)
+        elif aff_str in (AffordanceType.ACTUATABLE.value, "actuator", "switch", "button"):
+            return self._induce_actuatable(feature_id, evidence)
+        elif aff_str in (AffordanceType.HAZARD.value, "hazard", "lethal"):
+            return self._induce_impassable(feature_id, evidence or "lethal_hazard")
+        else:
+            logger.warning("HCIRSymbolicWorldTheory: Unknown affordance type: %s", aff_str)
+            return False
+
+    def has_affordance(
+        self,
+        feature_id: Any,
+        affordance: AffordanceType | str,
+        agent_state: dict[str, Any] | None = None,
+    ) -> bool:
+        """Query whether feature_id satisfies the specified physical affordance."""
+        aff_str = affordance.value if isinstance(affordance, AffordanceType) else str(affordance)
+        if aff_str in (AffordanceType.IMPASSABLE.value, "barrier", "impassable", "obstacle"):
+            return self.is_barrier(feature_id, agent_state=agent_state)
+        elif aff_str in (AffordanceType.PASSABLE.value, "walkable", "passable"):
+            return self.is_walkable(feature_id, agent_state=agent_state)
+        elif aff_str in (AffordanceType.TELIC.value, "goal", "telic", "target"):
+            return self.is_goal(feature_id)
+        elif aff_str in (AffordanceType.PUSHABLE.value, "cargo", "pushable", "movable"):
+            return self.is_cargo(feature_id)
+        elif aff_str in (AffordanceType.RECEPTACLE.value, "receptacle", "container"):
+            return self.is_receptacle(feature_id)
+        elif aff_str in (AffordanceType.ACTUATABLE.value, "actuator", "switch", "button"):
+            return self.is_actuator(feature_id)
+        elif aff_str in (AffordanceType.HAZARD.value, "hazard", "lethal"):
+            return self.get_role(feature_id) == "hazard"
+        return False
 
     def induce_goal(self, feature_id: Any, evidence: Any = None) -> bool:
-        """Induce universal goal predicate with minimum description length and evidence gating.
+        """Induce universal goal predicate with minimum description length and evidence gating."""
+        return self.induce_affordance(feature_id, AffordanceType.TELIC, evidence)
 
-        A confirmed goal strictly requires terminal-reward provenance (rank >= TERMINAL_REWARD).
-        If evidence is insufficient, it is registered as a candidate goal only.
-        A confirmed goal will not delete an existing barrier unless its evidence rank
-        strictly outranks the barrier's evidence.
-        """
+    def _induce_telic(self, feature_id: Any, evidence: Any = None) -> bool:
         if feature_id in self._avatar_features:
             return False
 
@@ -935,7 +1033,7 @@ class HCIRSymbolicWorldTheory:
                 rank,
                 ev_str,
             )
-            self.induce_candidate_goal(feature_id, evidence=evidence)
+            self._induce_candidate_telic(feature_id, evidence=evidence)
             return False
 
         if feature_id in self._barrier_features:
@@ -988,6 +1086,9 @@ class HCIRSymbolicWorldTheory:
 
     def induce_candidate_goal(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce candidate goal hypothesis pending terminal verification."""
+        return self.induce_affordance(feature_id, AffordanceType.CANDIDATE_TELIC, evidence)
+
+    def _induce_candidate_telic(self, feature_id: Any, evidence: Any = None) -> bool:
         if (
             feature_id in self._avatar_features
             or feature_id in self._cargo_features
@@ -1001,6 +1102,9 @@ class HCIRSymbolicWorldTheory:
 
     def induce_barrier(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce universal barrier predicate (enforcing HCIR Attractor Invariant)."""
+        return self.induce_affordance(feature_id, AffordanceType.IMPASSABLE, evidence)
+
+    def _induce_impassable(self, feature_id: Any, evidence: Any = None) -> bool:
         if feature_id in self._avatar_features:
             return False
 
@@ -1084,6 +1188,9 @@ class HCIRSymbolicWorldTheory:
 
     def induce_walkable(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce universal walkable space predicate with self-correcting belief revision."""
+        return self.induce_affordance(feature_id, AffordanceType.PASSABLE, evidence)
+
+    def _induce_passable(self, feature_id: Any, evidence: Any = None) -> bool:
         rank, ev_str = parse_evidence(evidence or "traversal")
         if rank == OntologyEvidenceRank.UNVERIFIED:
             rank = OntologyEvidenceRank.TRAVERSAL
@@ -1134,6 +1241,9 @@ class HCIRSymbolicWorldTheory:
 
     def induce_cargo(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce pushable cargo predicate with governed belief revision."""
+        return self.induce_affordance(feature_id, AffordanceType.PUSHABLE, evidence)
+
+    def _induce_pushable(self, feature_id: Any, evidence: Any = None) -> bool:
         rank, ev_str = parse_evidence(evidence or "cargo")
         if rank == OntologyEvidenceRank.UNVERIFIED:
             rank = OntologyEvidenceRank.INTERACTION
@@ -1173,6 +1283,9 @@ class HCIRSymbolicWorldTheory:
 
     def induce_receptacle(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce universal receptacle predicate."""
+        return self.induce_affordance(feature_id, AffordanceType.RECEPTACLE, evidence)
+
+    def _induce_receptacle(self, feature_id: Any, evidence: Any = None) -> bool:
         rank, ev_str = parse_evidence(evidence or "receptacle")
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
             self.mark_verified_in_context("receptacle", feature_id)
@@ -1192,6 +1305,9 @@ class HCIRSymbolicWorldTheory:
 
     def induce_actuator(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce distal actuator / switch affordance."""
+        return self.induce_affordance(feature_id, AffordanceType.ACTUATABLE, evidence)
+
+    def _induce_actuatable(self, feature_id: Any, evidence: Any = None) -> bool:
         rank, ev_str = parse_evidence(evidence or "actuator")
         if "hydration" not in ev_str.lower() and "template" not in ev_str.lower():
             self.mark_verified_in_context("actuator", feature_id)
