@@ -12,11 +12,21 @@ import random
 from collections import deque
 from typing import Any
 
-import gymnasium as gym
-import minigrid  # noqa: F401 - registers MiniGrid environments with gymnasium
 import numpy as np
-from gymnasium.envs.toy_text.frozen_lake import generate_random_map
-from minigrid.core.constants import OBJECT_TO_IDX
+
+try:
+    import gymnasium as gym
+    import minigrid  # noqa: F401 - registers MiniGrid environments with gymnasium
+    from gymnasium.envs.toy_text.frozen_lake import generate_random_map
+    from minigrid.core.constants import OBJECT_TO_IDX
+
+    _HAS_EXTERNAL_BENCHMARKS = True
+except ImportError:
+    _HAS_EXTERNAL_BENCHMARKS = False
+    gym = None  # type: ignore[assignment]
+    minigrid = None  # type: ignore[assignment]
+    generate_random_map = None  # type: ignore[assignment]
+    OBJECT_TO_IDX = {}  # type: ignore[assignment]
 
 from benchmarks.envs.protocol import (
     ACTION_DOWN,
@@ -64,6 +74,11 @@ class GymFrozenLakeBenchmarkEnv(BenchmarkEnvironment):
         ontology_seed: int = 404,
         scramble_per_seed: bool = False,
     ) -> None:
+        if not _HAS_EXTERNAL_BENCHMARKS:
+            raise ImportError(
+                "gymnasium and minigrid are required for GymFrozenLakeBenchmarkEnv. "
+                "Install via `pip install gymnasium minigrid`."
+            )
         self.size = size
         self.p_frozen = p_frozen
         self.max_steps = max_steps
@@ -248,6 +263,11 @@ class MiniGridEmptyBenchmarkEnv(BenchmarkEnvironment):
         ontology_seed: int = 505,
         scramble_per_seed: bool = False,
     ) -> None:
+        if not _HAS_EXTERNAL_BENCHMARKS:
+            raise ImportError(
+                "gymnasium and minigrid are required for MiniGrid benchmark environments. "
+                "Install via `pip install gymnasium minigrid`."
+            )
         self.env_id = env_id
         self.max_steps = max_steps
         self.cardinal_mode = cardinal_mode

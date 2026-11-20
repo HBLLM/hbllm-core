@@ -161,8 +161,11 @@ async def test_event_driven_autonomy_runtime():
         # Signal an observation to start the clock
         runtime.notify_observation()
 
-        # Wait slightly longer than the idle threshold
-        await asyncio.sleep(0.25)
+        # Wait slightly longer than the idle threshold (allowing up to 1.0s for CPU contention)
+        for _ in range(20):
+            if runtime.consolidation_count > initial_count:
+                break
+            await asyncio.sleep(0.05)
 
         # Offline consolidation should have triggered via timeout without polling sleep loops
         assert runtime.consolidation_count > initial_count

@@ -319,6 +319,10 @@ def test_open_ended_pcfg_hypothesis_synthesis_falsification_and_proposals() -> N
 
 def test_independent_external_benchmarks_frozenlake_and_minigrid() -> None:
     """Verify third-party Gymnasium FrozenLake & MiniGrid environments work end-to-end with zero leakage."""
+    import pytest
+
+    pytest.importorskip("gymnasium")
+    pytest.importorskip("minigrid")
     for env_cls, seed_base, budget in (
         (GymFrozenLakeBenchmarkEnv, 500, 60),
         (MiniGridEmptyBenchmarkEnv, 510, 60),
