@@ -149,6 +149,20 @@ CHAT_CASES: list[Case] = [
         all_of(says("orbit"), forbids(r"command executed|knowledge\.")),
         read="Gravity enables orbit.",
     ),
+    Case(
+        "causal_enable_polar_yes",
+        "causal",
+        "Does gravity enable orbit?",
+        yes,
+        read="Gravity enables orbit.",
+    ),
+    Case(
+        "causal_enable_inverse_what",
+        "causal",
+        "What enables orbit?",
+        says("gravity"),
+        read="Gravity enables orbit.",
+    ),
     # dialogue negation & belief revision
     Case(
         "neg_dialogue_bat_bird",
@@ -170,6 +184,34 @@ CHAT_CASES: list[Case] = [
         "Is a whale a fish?",
         no_or_abstain,
         taught=("A whale is a fish.", "A whale is not a fish."),
+    ),
+    Case(
+        "neg_dialogue_whale_revision_reverse",
+        "negation",
+        "Is a whale a fish?",
+        yes,
+        taught=("A whale is not a fish.", "A whale is a fish."),
+    ),
+    Case(
+        "neg_dialogue_plural_snakes",
+        "negation",
+        "Is a snake a reptile?",
+        no_or_abstain,
+        taught=("Snakes are not reptiles.",),
+    ),
+    Case(
+        "neg_dialogue_no_dog_cat",
+        "negation",
+        "Is a dog a cat?",
+        no_or_abstain,
+        taught=("No dog is a cat.",),
+    ),
+    Case(
+        "neg_dialogue_heat_rust",
+        "negation",
+        "Does heat cause rust?",
+        no_or_abstain,
+        taught=("Heat does not cause rust.",),
     ),
     # imperatives without internal leaks
     Case(
@@ -398,7 +440,12 @@ def run_chat_case(c: Case) -> dict[str, Any]:
 
 
 def ece(rows: list[dict[str, Any]], bins: int = 10) -> tuple[float | None, int]:
-    pts = [(r["confidence"], r["passed"]) for r in rows if r["confidence"] is not None]
+    # Score answered turns only; abstentions make no truth claim
+    pts = [
+        (r["confidence"], r["passed"])
+        for r in rows
+        if r["confidence"] is not None and r.get("class") == "answer"
+    ]
     if not pts:
         return None, 0
     total = 0.0

@@ -338,10 +338,17 @@ class ConceptExplainer:
         # 1. Definition Sentence
         if snapshot.definition:
             defn = snapshot.definition.rstrip(".")
+            lower_defn = defn.lower()
+            name_lower = name.lower()
             # Ensure definition begins smoothly
-            if defn.lower().startswith(f"a {name} is") or defn.lower().startswith(f"an {name} is"):
-                sentences.append(f"{defn}.")
-            elif defn.lower().startswith("is ") or defn.lower().startswith("are "):
+            if (
+                lower_defn.startswith(f"a {name_lower} is")
+                or lower_defn.startswith(f"an {name_lower} is")
+                or lower_defn.startswith(f"{name_lower} is")
+                or lower_defn.startswith(f"{name_lower} was")
+            ):
+                sentences.append(f"{defn[0].upper() + defn[1:]}.")
+            elif lower_defn.startswith("is ") or lower_defn.startswith("are "):
                 sentences.append(f"{prefix}{name} {defn}.")
             else:
                 sentences.append(f"{prefix}{name} is {defn}.")

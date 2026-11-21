@@ -241,6 +241,31 @@ class EnglishMorphology:
                     features=feats,
                 )
 
+        # Open-vocabulary regular plural noun fallback
+        if (
+            word.endswith("s")
+            and len(word) > 3
+            and not word.endswith(("ss", "us", "is"))
+            and word
+            not in (
+                "gas",
+                "lens",
+                "basis",
+                "crisis",
+                "series",
+                "species",
+                "focus",
+                "apparatus",
+            )
+        ):
+            stem = word[:-1]
+            return MorphToken(
+                surface=token,
+                lemma=stem,
+                pos=EnglishPOS.NOUN,
+                features={"number": "plural"},
+            )
+
         # Final untrusted fallback -> treat as generic noun
         return MorphToken(surface=token, lemma=word, pos=EnglishPOS.NOUN, features={})
 

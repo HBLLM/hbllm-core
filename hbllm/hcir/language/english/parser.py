@@ -338,6 +338,11 @@ class EnglishParser:
                     "allow",
                     "permit",
                 ):
+                    obj_ref = (
+                        self._np_to_reference(ast.verb_phrase.direct_object)
+                        if ast.verb_phrase.direct_object
+                        else None
+                    )
                     frame = SemanticFrame(
                         frame_type=FrameType.QUERY,
                         predicate="enables",
@@ -346,6 +351,8 @@ class EnglishParser:
                     )
                     if subject_ref:
                         frame.set_role(ThematicRole.THEME, subject_ref)
+                    if obj_ref:
+                        frame.set_role(ThematicRole.PATIENT, obj_ref)
                     return frame
 
                 prop_name = ast.wh_property.lemma if ast.wh_property else "property"
@@ -461,6 +468,29 @@ class EnglishParser:
                     frame.set_role(ThematicRole.PATIENT, obj_ref)
                 return frame
 
+            # Enablement verification: "Does gravity enable orbit?"
+            if ast.verb_phrase and ast.verb_phrase.head_verb.lemma in (
+                "enable",
+                "allow",
+                "permit",
+            ):
+                obj_ref = (
+                    self._np_to_reference(ast.verb_phrase.direct_object)
+                    if ast.verb_phrase.direct_object
+                    else None
+                )
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate="enables",
+                    query_target="verification",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                if obj_ref:
+                    frame.set_role(ThematicRole.PATIENT, obj_ref)
+                return frame
+
             # Nominal verification: "Is Pluto a planet?"
             if ast.verb_phrase and ast.verb_phrase.direct_object:
                 pred_ref = self._np_to_reference(ast.verb_phrase.direct_object)
@@ -561,9 +591,21 @@ class EnglishParser:
                     frame.set_role(ThematicRole.PATIENT, pred_ref)
                 return frame
 
-            # SVO action assertion: "The robot pushed the box"
+            # SVO action assertion: "The robot pushed the box", "Gravity enables orbit", "Heat does not cause rust"
             if ast.verb_phrase and ast.verb_phrase.head_verb:
-                verb_pred = ast.verb_phrase.head_verb.lemma
+                verb_lemma = ast.verb_phrase.head_verb.lemma
+                meta.polarity = not ast.is_negated
+
+                # Normalize canonical relation predicates
+                if verb_lemma in ("cause", "trigger", "lead"):
+                    verb_pred = "causes"
+                elif verb_lemma in ("enable", "allow", "permit"):
+                    verb_pred = "enables"
+                elif verb_lemma in ("require", "need", "depend"):
+                    verb_pred = "requires"
+                else:
+                    verb_pred = verb_lemma
+
                 obj_ref = self._np_to_reference(ast.verb_phrase.direct_object)
 
                 frame = SemanticFrame(

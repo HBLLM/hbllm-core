@@ -196,16 +196,48 @@ class EnglishSyntaxParser:
         if not np or idx >= len(tokens):
             return None
 
+        # Check negative determiner ("no dog", "no cars")
+        is_negated = np.determiner is not None and np.determiner.lemma == "no"
+
         # Check verb / copula
         verb_tok = tokens[idx]
         idx += 1
 
         if verb_tok.lemma == "be" or verb_tok.pos == EnglishPOS.AUX:
-            # Copular or spatial assertion: NP + BE + Adj OR NP + BE + PP
-            is_negated = False
+            # Check negation marker "not"
             if idx < len(tokens) and tokens[idx].lemma == "not":
                 is_negated = True
                 idx += 1
+
+            # Check if followed by a main lexical verb (e.g. "Heat does not cause rust")
+            if idx < len(tokens) and tokens[idx].pos == EnglishPOS.VERB:
+                main_verb = tokens[idx]
+                idx += 1
+                obj_np, next_idx = self.parse_noun_phrase(tokens, idx)
+                idx = next_idx if obj_np else idx
+
+                pps: list[PrepositionalPhrase] = []
+                while idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
+                    prep = tokens[idx]
+                    p_np, p_next = self.parse_noun_phrase(tokens, idx + 1)
+                    if p_np:
+                        pps.append(PrepositionalPhrase(preposition=prep, noun_phrase=p_np))
+                        idx = p_next
+                    else:
+                        break
+
+                vp = VerbPhrase(
+                    head_verb=main_verb,
+                    direct_object=obj_np,
+                    prepositional_phrases=pps,
+                )
+                return SentenceNode(
+                    construction=ConstructionType.DECLARATIVE,
+                    subject=np,
+                    verb_phrase=vp,
+                    auxiliary=verb_tok,
+                    is_negated=is_negated,
+                )
 
             if idx < len(tokens) and tokens[idx].pos == EnglishPOS.ADJ:
                 # Copular property: "The ball is red"
@@ -248,7 +280,7 @@ class EnglishSyntaxParser:
             obj_np, next_idx = self.parse_noun_phrase(tokens, idx)
             idx = next_idx if obj_np else idx
 
-            pps: list[PrepositionalPhrase] = []
+            pps = []
             while idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
                 prep = tokens[idx]
                 p_np, p_next = self.parse_noun_phrase(tokens, idx + 1)
@@ -260,7 +292,10 @@ class EnglishSyntaxParser:
 
             vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np, prepositional_phrases=pps)
             return SentenceNode(
-                construction=ConstructionType.DECLARATIVE, subject=np, verb_phrase=vp
+                construction=ConstructionType.DECLARATIVE,
+                subject=np,
+                verb_phrase=vp,
+                is_negated=is_negated,
             )
 
         return None

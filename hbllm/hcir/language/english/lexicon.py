@@ -121,7 +121,20 @@ class EnglishLexicon:
 
     def _init_vocabulary(self) -> None:
         # Determiners
-        for det in ["the", "a", "an", "this", "that", "these", "those"]:
+        for det in [
+            "the",
+            "a",
+            "an",
+            "this",
+            "that",
+            "these",
+            "those",
+            "no",
+            "every",
+            "each",
+            "some",
+            "any",
+        ]:
             self.add_entry(EnglishLexicalEntry(lemma=det, pos=EnglishPOS.DET))
 
         # Adverbs (markers like please/not)

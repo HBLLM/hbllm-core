@@ -80,6 +80,28 @@ class EnglishRealizer:
         if lower in MASS_NOUNS:
             return clean.capitalize() if title else clean
 
+        # Plural noun check (e.g. reptiles, dogs, mammals, programs, birds)
+        if (
+            lower.endswith("s")
+            and not lower.endswith(("ss", "us", "is"))
+            and lower
+            not in (
+                "gas",
+                "lens",
+                "basis",
+                "crisis",
+                "series",
+                "species",
+                "focus",
+                "apparatus",
+            )
+        ):
+            sing = clean[:-1]
+            art = "An" if sing.lower()[0] in "aeiou" else "A"
+            if not title:
+                art = art.lower()
+            return f"{art} {sing}"
+
         # Countable common noun: prefix 'a' or 'an'
         art = "An" if lower[0] in "aeiou" else "A"
         if not title:
@@ -112,7 +134,9 @@ class EnglishRealizer:
         if pred == "identity" and obj:
             return f"{obj}." if not obj.endswith(".") else obj
 
-        if pred in ("causes", "enables") and obj:
+        is_verification = bool(original_frame and original_frame.query_target == "verification")
+
+        if pred in ("causes", "enables") and obj and not is_verification:
             if original_frame and original_frame.query_target in ("enables", "enable"):
                 return f"{subj.capitalize()} enables {obj}."
             if original_frame and original_frame.query_target == "cause":
@@ -122,8 +146,11 @@ class EnglishRealizer:
             if pred == "enables":
                 return f"{subj.capitalize()} enables {obj}."
 
-        if pred == "requires" and obj:
-            if original_frame and original_frame.query_target in ("procedure", "requirement"):
+        if pred == "requires" and obj and not is_verification:
+            if original_frame and original_frame.query_target in (
+                "procedure",
+                "requirement",
+            ):
                 if ("." in obj or "\n" in obj) and len(obj) > 30:
                     return obj
                 return f"To operate or function, {subj} fundamentally requires {obj}."
@@ -167,8 +194,10 @@ class EnglishRealizer:
                     art_s = self._format_noun(subj, title=False)
                     art_o = self._format_noun(obj, title=False)
                     return f"Yes, {art_s} is {art_o}."
-                elif pred in ("causes", "enables"):
+                elif pred == "causes":
                     return f"Yes, {subj} causes {obj}."
+                elif pred == "enables":
+                    return f"Yes, {subj} enables {obj}."
                 elif pred == "requires":
                     art_o = self._format_noun(obj, title=False)
                     return f"Yes, {subj} requires {art_o}."
@@ -184,8 +213,10 @@ class EnglishRealizer:
                     art_s = self._format_noun(subj, title=False)
                     art_o = self._format_noun(obj, title=False)
                     return f"No, {art_s} is not {art_o}."
-                elif pred in ("causes", "enables"):
+                elif pred == "causes":
                     return f"No, {subj} does not cause {obj}."
+                elif pred == "enables":
+                    return f"No, {subj} does not enable {obj}."
                 elif pred == "requires":
                     art_o = self._format_noun(obj, title=False)
                     return f"No, {subj} does not require {art_o}."
@@ -197,6 +228,11 @@ class EnglishRealizer:
             # If obj is a multi-sentence explanation or paragraph, return it directly
             if ("." in obj or "\n" in obj) and len(obj) > 30:
                 return obj
+            obj_clean = obj.strip()
+            if obj_clean.lower().startswith(
+                (f"{subj.lower()} is ", f"a {subj.lower()} is ", f"an {subj.lower()} is ")
+            ):
+                return obj_clean if obj_clean.endswith(".") else f"{obj_clean}."
             subj_title = self._format_noun(subj, title=True)
             obj_fmt = self._format_noun(obj, title=False)
             if level == EpistemicVerbalizationLevel.CERTAIN:
