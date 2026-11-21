@@ -404,8 +404,9 @@ class EpistemicFeedbackAssimilator:
         for gp in goals_to_retire:
             cond = satisfied_when_map.pop(gp, None)
             view.exhausted_candidate_goals.add(gp)
-            if hasattr(view, "goals") and gp in view.goals:
-                view.goals.remove(gp)
+            v_goals = view.state.goals
+            if gp in v_goals:
+                v_goals.remove(gp)
             active_arb = getattr(view, "active_arbitrated_goal", None)
             if active_arb is not None:
                 arb_tgt = active_arb.target
@@ -618,9 +619,33 @@ class EpistemicFeedbackAssimilator:
             if action is not None and not is_effector_action:
                 prev_inh = view.inhibited_actions.get(action, 0)
                 inh_steps = 4 if view.consecutive_quiescent_actions >= 2 else 3
-                view.inhibited_actions[action] = max(prev_inh + 2, inh_steps)
+                view.inhibited_actions[action] = min(max(prev_inh + 2, inh_steps), 10)
                 if prev_avatar_pos is not None:
                     view.failed_transitions.add((prev_avatar_pos, action))
+
+                # If non-displacement action produced 0 diff when avatar is in open space
+                # (no adjacent non-background/interactive cells), induce contact-dependence.
+                if not view.is_displacement_action(action):
+                    has_adj_entity = False
+                    if prev_avatar_pos is not None and curr_grid is not None:
+                        H_a, W_a = curr_grid.shape
+                        r_a, c_a = prev_avatar_pos
+                        bg_a = int(view.bg_feature)
+                        for dr_a, dc_a in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                            nr_a, nc_a = r_a + dr_a, c_a + dc_a
+                            if 0 <= nr_a < H_a and 0 <= nc_a < W_a:
+                                val_a = int(curr_grid[nr_a, nc_a])
+                                if val_a != bg_a and val_a not in view.avatar_features:
+                                    has_adj_entity = True
+                                    break
+                    if not has_adj_entity:
+                        if action in view.action_affordances:
+                            view.action_affordances[action].requires_contact = True
+                        else:
+                            view.action_affordances[action] = ActionAffordance(
+                                action_id=action,
+                                requires_contact=True,
+                            )
 
             if is_effector_action and target_coord is not None:
                 view.quiescent_actuation_targets.add(target_coord)
@@ -1897,7 +1922,7 @@ class EpistemicFeedbackAssimilator:
                             ):
                                 view.immobile_entity_actions.add(view.last_action)
                             prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                            view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
+                            view.inhibited_actions[view.last_action] = min(max(prev_inh + 2, 3), 10)
                         view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
                         view.apply_wm_delta(
                             WorkingMemoryDelta("consecutive_simulation_failures", 0)
@@ -1914,9 +1939,10 @@ class EpistemicFeedbackAssimilator:
                         and not possible_orthogonal_wall_slip
                     ):
                         prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                        view.inhibited_actions[view.last_action] = max(prev_inh + 3, 5)
+                        val = max(prev_inh + 3, 5)
                         if view.consecutive_stuck_steps >= 2:
-                            view.inhibited_actions[view.last_action] = max(prev_inh + 6, 8)
+                            val = max(prev_inh + 6, 8)
+                        view.inhibited_actions[view.last_action] = min(val, 10)
                         if prev_avatar_pos is not None:
                             view.failed_transitions.add((prev_avatar_pos, view.last_action))
                             view.working_memory.habenular_ior.failed_transitions.add(
@@ -1934,7 +1960,7 @@ class EpistemicFeedbackAssimilator:
                             and not possible_orthogonal_wall_slip
                         ):
                             prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                            view.inhibited_actions[view.last_action] = max(prev_inh + 2, 4)
+                            view.inhibited_actions[view.last_action] = min(max(prev_inh + 2, 4), 10)
                             view.failed_transitions.add((prev_avatar_pos, view.last_action))
                             view.working_memory.habenular_ior.failed_transitions.add(
                                 (prev_avatar_pos, view.last_action)
@@ -2047,7 +2073,7 @@ class EpistemicFeedbackAssimilator:
                     ):
                         view.failed_transitions.add((prev_avatar_pos, view.last_action))
                         prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                        view.inhibited_actions[view.last_action] = max(prev_inh + 2, 3)
+                        view.inhibited_actions[view.last_action] = min(max(prev_inh + 2, 3), 10)
                     if view.mental_plan:
                         view.mental_plan.clear()
                         view.working_memory.active_plan_step = None

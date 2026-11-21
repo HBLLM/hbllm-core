@@ -100,6 +100,18 @@ class ObjectSpec:
     properties: dict[str, Any] = field(default_factory=dict)
     macro_tasks: list[MacroAction] = field(default_factory=list)
 
+    @property
+    def grid_pos(self) -> tuple[int, int]:
+        return self.pos
+
+    @grid_pos.setter
+    def grid_pos(self, val: tuple[int, int]) -> None:
+        self.pos = val
+
+    @property
+    def area(self) -> int:
+        return int(self.properties.get("area", 1))
+
 
 @dataclass
 class MicroActionSpec:

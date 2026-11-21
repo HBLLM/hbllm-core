@@ -248,6 +248,7 @@ class MyAgent(Agent):
                 seed=self._seed,
                 instructions=instructions,
                 enable_grounding=self.enable_grounding,
+                memory_dir=None,
             )
         )
         self.internal_engine = self.system.engine
@@ -586,6 +587,7 @@ class MyAgent(Agent):
                         instructions=self.instructions,
                         seed=self._seed,
                         enable_grounding=self.enable_grounding,
+                        memory_dir=None,
                     )
                 )
                 self.internal_engine = sys.engine

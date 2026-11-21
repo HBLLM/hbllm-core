@@ -463,8 +463,13 @@ class MacroPlanSynthesizer:
                                 engine.working_memory.focus_switch_actions.add(sw_a)
 
                     av_feats = set(get_engine_state_attr(engine, "avatar_features", set()) or set())
-                    if getattr(engine, "avatar_feature", None) is not None:
-                        av_feats.add(engine.avatar_feature)
+                    av_feat_val = get_engine_state_attr(engine, "avatar_feature", None)
+                    if av_feat_val is not None:
+                        av_feats.add(av_feat_val)
+
+                    if role in ("agent", "avatar"):
+                        if get_engine_state_attr(engine, "avatar_pos", None) is None:
+                            engine.avatar_pos = pos
 
                     if role == "goal" or "exit" in role or role == "candidate_goal":
                         rec_pos = get_engine_state_attr(engine, "recent_positions", set())
@@ -695,7 +700,13 @@ class MacroPlanSynthesizer:
                     cand_feature_map[e.grid_pos] = e.feature_id
 
         for g_pos in engine.learned_goal_positions:
-            if g_pos not in confirmed_goals and g_pos != av_pos and g_pos not in recent_pos:
+            if (
+                0 <= g_pos[0] < curr_grid.shape[0]
+                and 0 <= g_pos[1] < curr_grid.shape[1]
+                and g_pos not in confirmed_goals
+                and g_pos != av_pos
+                and g_pos not in recent_pos
+            ):
                 confirmed_goals.append(g_pos)
 
         if confirmed_goals:
@@ -809,7 +820,9 @@ class MacroPlanSynthesizer:
         _nav_cache: dict[tuple[int, int], bool] = {}
 
         def _can_navigate_to(dest: tuple[int, int]) -> bool:
-            if av_pos is None:
+            if av_pos is None or not (
+                0 <= dest[0] < curr_grid.shape[0] and 0 <= dest[1] < curr_grid.shape[1]
+            ):
                 return False
             if dest == av_pos:
                 return True

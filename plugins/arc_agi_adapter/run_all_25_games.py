@@ -407,6 +407,7 @@ def run_all_25_games(
             for e in environments
             if e.game_id.lower() in selected_lower
             or getattr(e, "title", "").lower() in selected_lower
+            or any(e.game_id.lower().startswith(s) for s in selected_lower)
         ]
         if not environments:
             print(f"⚠️ No environments matched filters: {selected_games}")
@@ -498,6 +499,8 @@ def run_all_25_games(
             seed=seed,
             trace_dir=str(game_trace_dir) if game_trace_dir is not None else None,
         )
+        if max_level_steps is not None:
+            agent.ACTIONS_PER_LEVEL = max_level_steps
         cognitive_engine = CognitiveAgentAdapter(agent)
 
         # Phase C: Seed engine with cross-game prior knowledge
@@ -916,6 +919,7 @@ def run_all_25_games(
             },
             "games": results,
         }
+        scorecard_path.parent.mkdir(parents=True, exist_ok=True)
         scorecard_path.write_text(json.dumps(checkpoint, indent=2))
 
     total_time_elapsed = time.time() - total_time_start

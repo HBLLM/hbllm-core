@@ -1553,8 +1553,13 @@ class EpistemicGoalScheduler:
                         else (0.0, 0.0, 0.0)
                     )
                     dist_g = abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
+                    is_vital = gf in engine.symbolic_theory.vital_resource_features
+                    if is_vital and engine.is_under_strict_step_budget():
+                        return (-1, -round(pref_g, 3), dist_g)
                     if gf in engine.symbolic_theory.goal_features:
                         return (0, -round(pref_g, 3), dist_g)
+                    if is_vital:
+                        return (1, -round(pref_g, 3), dist_g)
                     if haz_g >= 0.65 and pref_g < 0.45:
                         return (8, haz_g, dist_g)
                     if bar_g >= 0.72 and pref_g < 0.40:

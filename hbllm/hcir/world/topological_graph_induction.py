@@ -496,6 +496,8 @@ class GeodesicManifoldRouter:
 
         if soft_avoid_cells:
             for cand_goal in candidate_goals[:max_candidate_goals]:
+                if not (0 <= cand_goal[0] < H and 0 <= cand_goal[1] < W):
+                    continue
                 buf_mask = passable_mask.copy()
                 for sr, sc in soft_avoid_cells:
                     if 0 <= sr < H and 0 <= sc < W and (sr, sc) != start_pos:
@@ -512,6 +514,8 @@ class GeodesicManifoldRouter:
                     return buf_plan
 
         for cand_goal in candidate_goals[:max_candidate_goals]:
+            if not (0 <= cand_goal[0] < H and 0 <= cand_goal[1] < W):
+                continue
             cand_mask = passable_mask.copy()
             cand_mask[cand_goal[0], cand_goal[1]] = True
             action_plan = GridTopologyGraph.shortest_path_with_actions(
