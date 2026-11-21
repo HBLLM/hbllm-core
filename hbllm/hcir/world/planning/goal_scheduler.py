@@ -433,7 +433,7 @@ class EpistemicGoalScheduler:
     ) -> list[tuple[int, int]]:
         """Return reachable unvisited frontier cells ordered by Manhattan distance from avatar."""
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
-        return GeodesicManifoldRouter.compute_reachable_frontiers(
+        frontiers = GeodesicManifoldRouter.compute_reachable_frontiers(
             engine=engine,
             curr_grid=curr_grid,
             bg=bg,
@@ -441,6 +441,12 @@ class EpistemicGoalScheduler:
             interactive_cluster_loci=interactive_cluster_loci,
             scipy_label_fn=_scipy_label,
         )
+        wm = engine.working_memory
+        return [
+            p
+            for p in frontiers
+            if not wm.is_exogenous_locus(p, lattice=curr_grid, bg=bg, include_outer_edge=False)
+        ]
 
     @classmethod
     def schedule_goals(
@@ -455,6 +461,14 @@ class EpistemicGoalScheduler:
     ) -> EpistemicGoalProposal:
         H, W = curr_grid.shape
         avatar_pos = engine.avatar_pos
+        wm_exog = engine.working_memory
+        entities = [
+            e
+            for e in entities
+            if not wm_exog.is_exogenous_locus(
+                e.grid_pos, lattice=curr_grid, bg=bg, include_outer_edge=False
+            )
+        ]
         has_4d_disp = (
             H > 1
             and W > 1
@@ -1659,9 +1673,21 @@ class EpistemicGoalScheduler:
         elif goals:
             clear_exhausted = True
 
-        # Exclude all known static lethal coordinates from candidate attractors
+        # Exclude all known static lethal and exogenous coordinates from candidate attractors
         all_lethals = engine.current_context_hazards
-        goals = [g for g in goals if g not in all_lethals]
+        goals = [
+            g
+            for g in goals
+            if g not in all_lethals
+            and not wm_exog.is_exogenous_locus(
+                g, lattice=curr_grid, bg=bg, include_outer_edge=False
+            )
+        ]
+        new_learned_positions = {
+            p
+            for p in new_learned_positions
+            if not wm_exog.is_exogenous_locus(p, lattice=curr_grid, bg=bg, include_outer_edge=False)
+        }
 
         # Reachability Gating: Discard goals physically disconnected from avatar
         if avatar_pos is not None and goals:

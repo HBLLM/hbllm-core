@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -34,6 +34,8 @@ class CausalPlanningContext:
     walkable_features: set[int]
     action_displacements: dict[int, tuple[int, int]]  # action_id -> (dr, dc)
     grid_shape: tuple[int, int] = (0, 0)
+    failed_transitions: set[tuple[tuple[int, int], int]] = field(default_factory=set)
+    inhibited_actions: set[Any] = field(default_factory=set)
 
 
 @dataclass
@@ -123,6 +125,12 @@ class CausalTheoryPlanner:
                     ):
                         goal_positions.add((r, c))
 
+        wm_exog = engine.working_memory
+        bg_val = 0
+        if curr_grid.size > 0:
+            vals, cnts = np.unique(curr_grid, return_counts=True)
+            bg_val = int(vals[int(np.argmax(cnts))])
+
         # Fallback to structural perception goals if still empty
         if not goal_positions:
             try:
@@ -135,16 +143,39 @@ class CausalTheoryPlanner:
                         or int(sg_f) == shroud_f
                     ):
                         continue
+                    added_nonexog = False
                     if sg.get("cells"):
                         for cp in sg["cells"]:
-                            if cp != engine.avatar_pos:
+                            if cp != engine.avatar_pos and not wm_exog.is_exogenous_locus(
+                                cp, lattice=curr_grid, bg=bg_val, include_outer_edge=False
+                            ):
                                 goal_positions.add(cp)
-                    elif sg.get("position") and sg["position"] != engine.avatar_pos:
+                                added_nonexog = True
+                    elif (
+                        sg.get("position")
+                        and sg["position"] != engine.avatar_pos
+                        and not wm_exog.is_exogenous_locus(
+                            sg["position"], lattice=curr_grid, bg=bg_val, include_outer_edge=False
+                        )
+                    ):
                         goal_positions.add(sg["position"])
-                    if sg_f is not None and int(np.count_nonzero(curr_grid == int(sg_f))) == 1:
+                        added_nonexog = True
+                    if (
+                        added_nonexog
+                        and sg_f is not None
+                        and int(np.count_nonzero(curr_grid == int(sg_f))) == 1
+                    ):
                         theory.induce_candidate_goal(int(sg_f), evidence="structural_goal_detector")
             except Exception as exc:
                 logger.debug("Structural goal induction at reset skipped: %s", exc)
+
+        goal_positions = {
+            gp
+            for gp in goal_positions
+            if not wm_exog.is_exogenous_locus(
+                gp, lattice=curr_grid, bg=bg_val, include_outer_edge=False
+            )
+        }
 
         if goal_positions and not theory.goal_features:
             singleton_goals = {
@@ -162,11 +193,10 @@ class CausalTheoryPlanner:
         if exhausted and len(goal_positions - exhausted) > 0:
             goal_positions.difference_update(exhausted)
 
-        # Extract action displacements from empirical action dynamics
-        action_displacements: dict[int, tuple[int, int]] = {}
-        for act_id, dyn in engine.action_dynamics.items():
-            if dyn.is_displacement_action():
-                action_displacements[act_id] = (dyn.delta_r, dyn.delta_c)
+        # Extract action displacements from harmonized engine action_deltas
+        action_displacements = dict(engine.action_deltas)
+        inhibited_actions = {act_id for act_id, ttl in engine.inhibited_actions.items() if ttl > 0}
+        failed_transitions = set(engine.failed_transitions)
 
         return CausalPlanningContext(
             goal_positions=goal_positions,
@@ -177,6 +207,8 @@ class CausalTheoryPlanner:
             walkable_features=set(theory.walkable_features),
             action_displacements=action_displacements,
             grid_shape=(int(curr_grid.shape[0]), int(curr_grid.shape[1])),
+            failed_transitions=failed_transitions,
+            inhibited_actions=inhibited_actions,
         )
 
     @staticmethod
@@ -216,6 +248,35 @@ class CausalTheoryPlanner:
             if feat in context.barrier_features:
                 return False
             if context.walkable_features and feat not in context.walkable_features:
+                return False
+        return True
+
+    @staticmethod
+    def is_stride_clear(
+        start_pos: tuple[int, int],
+        dr: int,
+        dc: int,
+        grid: np.ndarray,
+        context: CausalPlanningContext,
+    ) -> bool:
+        """Check intermediate cells on straight multi-cell strides against barriers/hazards."""
+        steps = max(abs(dr), abs(dc))
+        if steps <= 1 or not (dr == 0 or dc == 0 or abs(dr) == abs(dc)):
+            return True
+        step_r = (1 if dr > 0 else -1) if dr != 0 else 0
+        step_c = (1 if dc > 0 else -1) if dc != 0 else 0
+        H, W = context.grid_shape
+        for k in range(1, steps):
+            ir, ic = start_pos[0] + k * step_r, start_pos[1] + k * step_c
+            if ir < 0 or ic < 0 or ir >= H or ic >= W:
+                return False
+            inter_pos = (ir, ic)
+            if inter_pos in context.goal_positions:
+                continue
+            if inter_pos in context.barrier_positions:
+                return False
+            feat = int(grid[ir, ic])
+            if feat in context.barrier_features or feat in context.lethal_features:
                 return False
         return True
 
@@ -260,9 +321,15 @@ class CausalTheoryPlanner:
 
             # Expand neighbors using discovered action dynamics
             for act_id, (dr, dc) in context.action_displacements.items():
+                if act_id in context.inhibited_actions:
+                    continue
+                if (pos, act_id) in context.failed_transitions:
+                    continue
                 nr, nc = pos[0] + dr, pos[1] + dc
                 next_pos = (nr, nc)
                 if next_pos in visited:
+                    continue
+                if not CausalTheoryPlanner.is_stride_clear(pos, dr, dc, grid, context):
                     continue
                 if not CausalTheoryPlanner.is_position_safe(next_pos, grid, context):
                     continue
@@ -324,6 +391,8 @@ class CausalTheoryPlanner:
                 walkable_features=context.walkable_features,
                 action_displacements=context.action_displacements,
                 grid_shape=context.grid_shape,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
             )
             path_to_tool = CausalTheoryPlanner.plan_path(
                 start, grid, stage1_context, max_expansions=max_expansions
@@ -356,6 +425,8 @@ class CausalTheoryPlanner:
                 walkable_features=context.walkable_features | barrier_feats,
                 action_displacements=context.action_displacements,
                 grid_shape=context.grid_shape,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
             )
             path_to_goal = CausalTheoryPlanner.plan_path(
                 curr_pos, grid, stage2_context, max_expansions=max_expansions

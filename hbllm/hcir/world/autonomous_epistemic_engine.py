@@ -2059,51 +2059,47 @@ class AutonomousEpistemicEngine:
         for act, dyn in self.action_dynamics.items():
             if dyn.is_displacement_action():
                 deltas[act] = dyn.get_displacement()
-        # Symmetrical motor stride reconciliation:
-        # Reconcile antiparallel displacement vectors along cardinal axes to the maximum verified stride
-        # if one direction was constrained by an obstacle during calibration (e.g. (0, -6) vs (0, 3)).
-        for a1, d1 in list(deltas.items()):
-            for a2, d2 in list(deltas.items()):
-                if a1 != a2:
-                    if d1[0] == 0 and d2[0] == 0 and d1[1] * d2[1] < 0:
-                        max_stride = max(abs(d1[1]), abs(d2[1]))
-                        if abs(d1[1]) < max_stride and max_stride % abs(d1[1]) == 0:
-                            deltas[a1] = (0, -max_stride if d1[1] < 0 else max_stride)
-                    elif d1[1] == 0 and d2[1] == 0 and d1[0] * d2[0] < 0:
-                        max_stride = max(abs(d1[0]), abs(d2[0]))
-                        if abs(d1[0]) < max_stride and max_stride % abs(d1[0]) == 0:
-                            deltas[a1] = (-max_stride if d1[0] < 0 else max_stride, 0)
-
-        # Isotropic spatial lattice stride generalization:
-        # If any cardinal displacement action demonstrates an unconstrained stride S > 1,
-        # propagate S to uncalibrated or unit-prior cardinal actions (probes_tested == 0 or |d| <= 1).
-        calibrated_strides = [
-            max(abs(dyn.delta_r), abs(dyn.delta_c))
-            for dyn in self.action_dynamics.values()
-            if getattr(dyn, "probes_tested", 0) >= 1 and dyn.is_displacement_action()
-        ]
-        if calibrated_strides:
-            lattice_quantum = max(calibrated_strides)
-            if lattice_quantum > 1:
-                for act in list(deltas.keys()):
-                    dyn = self.action_dynamics.get(act)
-                    if dyn is None or getattr(dyn, "probes_tested", 0) == 0:
-                        dr, dc = deltas[act]
-                        if abs(dr) == 1 and dc == 0:
-                            deltas[act] = (dr * lattice_quantum, 0)
-                        elif abs(dc) == 1 and dr == 0:
-                            deltas[act] = (0, dc * lattice_quantum)
+        # Cardinal motor stride harmonization via axis-aware consensus:
+        # Reconcile unequal antiparallel magnitudes along an axis (e.g. -5 vs truncated +4 -> 5)
+        # and propagate modal cardinal stride to uncalibrated or unconfirmed singleton axes.
+        cardinal_acts = [(act, d) for act, d in deltas.items() if (d[0] == 0) != (d[1] == 0)]
+        stride_counts: dict[int, int] = {}
+        axis_max: dict[int, int] = {0: 0, 1: 0}
+        axis_signs: dict[tuple[int, int], int] = {}
+        for act, (dr, dc) in cardinal_acts:
+            axis = 0 if dr != 0 else 1
+            sign = 1 if (dr + dc) > 0 else -1
+            mag = abs(dr) + abs(dc)
+            axis_signs[(axis, sign)] = max(axis_signs.get((axis, sign), 0), mag)
+            dyn = self.action_dynamics.get(act)
+            if dyn is not None and dyn.probes_tested >= 1:
+                axis_max[axis] = max(axis_max[axis], mag)
+                stride_counts[mag] = stride_counts.get(mag, 0) + 1
+        consensus = max(stride_counts, key=lambda s: (stride_counts[s], s)) if stride_counts else 0
+        for act, (dr, dc) in cardinal_acts:
+            dyn = self.action_dynamics.get(act)
+            probes = dyn.probes_tested if dyn is not None else 0
+            axis = 0 if dr != 0 else 1
+            sign = 1 if (dr + dc) > 0 else -1
+            mag = abs(dr) + abs(dc)
+            twin_mag = axis_signs.get((axis, -sign), 0)
+            target_mag = axis_max[axis]
+            if consensus > 1 and (
+                (probes == 0 and mag <= 1)
+                or (twin_mag != mag and stride_counts.get(consensus, 0) >= 2 and probes <= 2)
+            ):
+                target_mag = max(target_mag, consensus)
+            if target_mag > mag:
+                deltas[act] = (sign * target_mag, 0) if axis == 0 else (0, sign * target_mag)
 
         _discrete_grid_convention = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
         for act, d in _discrete_grid_convention.items():
             if act not in deltas and (
                 act in self.action_affordances or not self.action_affordances
             ):
-                if calibrated_strides and max(calibrated_strides) > 1:
-                    lq = max(calibrated_strides)
-                    deltas[act] = (d[0] * lq, d[1] * lq)
-                else:
-                    deltas[act] = d
+                axis_c = 0 if d[0] != 0 else 1
+                lq = axis_max[axis_c] if axis_max[axis_c] > 1 else consensus
+                deltas[act] = (d[0] * lq, d[1] * lq) if lq > 1 else d
         return deltas
 
     @action_deltas.setter

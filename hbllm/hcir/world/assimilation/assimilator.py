@@ -495,6 +495,43 @@ class EpistemicFeedbackAssimilator:
                         "Non-integer action target coord ignored (%r, %r): %s", tr, tc, exc
                     )
 
+        _wm_exog_early = view.working_memory
+        _bg_exog_early = view.bg_feature if view.bg_feature is not None else 0
+        if diff.mutated_pixels and view.prev_grid is not None:
+            av_set_exog = set(view.avatar_features) if view.avatar_features else set()
+            if view.avatar_feature is not None:
+                av_set_exog.add(view.avatar_feature)
+            av_appeared = (
+                [
+                    (int(r), int(c))
+                    for r, c, _, new_v in diff.mutated_pixels
+                    if int(new_v) in av_set_exog
+                    and not _wm_exog_early.exogenous_tracker.is_partitioned_or_enclosing(
+                        (int(r), int(c)), view.prev_grid, bg=_bg_exog_early
+                    )
+                ]
+                if av_set_exog
+                else []
+            )
+            if av_appeared:
+                est_av_now: tuple[int, int] | None = (
+                    int(round(sum(p[0] for p in av_appeared) / len(av_appeared))),
+                    int(round(sum(p[1] for p in av_appeared) / len(av_appeared))),
+                )
+            else:
+                est_av_now = view.avatar_pos
+            pred_av_pos: tuple[int, int] | None = None
+            if view.avatar_pos is not None and action in view.action_deltas:
+                dr_p, dc_p = view.action_deltas[action]
+                pred_av_pos = (view.avatar_pos[0] + dr_p, view.avatar_pos[1] + dc_p)
+            _wm_exog_early.exogenous_tracker.observe_transition(
+                [(int(r), int(c)) for r, c, _, _ in diff.mutated_pixels],
+                action,
+                avatar_locus=est_av_now,
+                target_locus=target_coord,
+                extra_local_loci=(view.avatar_pos, pred_av_pos),
+            )
+
         # Active Manipulandum Effector Binding (Modal Select-Then-Direct):
         if target_coord is not None:
             view.working_memory.last_effector_target_coord = target_coord
@@ -758,7 +795,10 @@ class EpistemicFeedbackAssimilator:
                             ):
                                 if int(curr_grid[nr, nc]) != f_adj:
                                     mutated_adj.append((nr, nc))
-                                elif not view.symbolic_theory.is_barrier(f_adj):
+                                elif (
+                                    not is_known_displacement
+                                    and not view.symbolic_theory.is_barrier(f_adj)
+                                ):
                                     nonbarrier_adj.append((nr, nc))
                     loci.extend(mutated_adj if mutated_adj else nonbarrier_adj)
 
@@ -767,6 +807,18 @@ class EpistemicFeedbackAssimilator:
                 if view.avatar_feature is not None:
                     av_rc.add(view.avatar_feature)
                 for locus in dict.fromkeys(loci):
+                    lr_l, lc_l = locus
+                    if not (0 <= lr_l < H and 0 <= lc_l < W):
+                        continue
+                    if _wm_exog_early.is_exogenous_locus(
+                        locus, lattice=view.prev_grid, bg=_bg_exog_early, include_outer_edge=False
+                    ):
+                        continue
+                    locus_feat = int(view.prev_grid[lr_l, lc_l])
+                    if view.symbolic_theory.is_barrier(
+                        locus_feat
+                    ) or view.symbolic_theory.is_walkable(locus_feat):
+                        continue
                     confirmed_affs = view.working_memory.remote_causal.record_transition(
                         prev_grid=view.prev_grid,
                         curr_grid=curr_grid,
@@ -775,6 +827,13 @@ class EpistemicFeedbackAssimilator:
                         avatar_features=av_rc,
                     )
                     for aff in confirmed_affs:
+                        if _wm_exog_early.is_exogenous_locus(
+                            aff.remote_pos,
+                            lattice=view.prev_grid,
+                            bg=_bg_exog_early,
+                            include_outer_edge=False,
+                        ):
+                            continue
                         if (
                             aff.mutated_remote_feature == view.bg_feature
                             or view.symbolic_theory.is_walkable(aff.mutated_remote_feature)
@@ -794,6 +853,13 @@ class EpistemicFeedbackAssimilator:
                             for dr_u, dc_u in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                                 nr_u, nc_u = aff.remote_pos[0] + dr_u, aff.remote_pos[1] + dc_u
                                 if 0 <= nr_u < H and 0 <= nc_u < W:
+                                    if _wm_exog_early.is_exogenous_locus(
+                                        (nr_u, nc_u),
+                                        lattice=curr_grid,
+                                        bg=_bg_exog_early,
+                                        include_outer_edge=False,
+                                    ):
+                                        continue
                                     nf_u = int(curr_grid[nr_u, nc_u])
                                     if (
                                         nf_u != view.bg_feature
@@ -2084,18 +2150,6 @@ class EpistemicFeedbackAssimilator:
         movable_features.update(view.mobile_threat_features)
 
         _wm_exog = view.working_memory
-        _eff_target = (
-            (int(action_data["y"]), int(action_data["x"]))
-            if isinstance(action_data, dict) and "x" in action_data and "y" in action_data
-            else None
-        )
-        if diff.mutated_pixels:
-            _wm_exog.exogenous_tracker.observe_transition(
-                [(int(r), int(c)) for r, c, _, _ in diff.mutated_pixels],
-                action,
-                avatar_locus=_avatar_pos_now,
-                target_locus=_eff_target,
-            )
 
         def is_exogenous_mutation(r: int, c: int) -> bool:
             """Isolate uncontrollable exogenous / topologically partitioned mutations (I(DeltaS; A) ~ 0)."""

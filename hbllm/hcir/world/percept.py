@@ -457,11 +457,15 @@ class ExogenousSignalTracker:
         "exogenous_loci": RetentionPolicy.EPISODE_LOCAL,
         "_untargeted_actions": RetentionPolicy.EPISODE_LOCAL,
         "_untargeted_counts": RetentionPolicy.EPISODE_LOCAL,
+        "_colinear_tracks": RetentionPolicy.EPISODE_LOCAL,
     }
 
     exogenous_loci: set[PlaceLocus] = field(default_factory=set)
     _untargeted_actions: dict[PlaceLocus, set[Any]] = field(default_factory=dict, repr=False)
     _untargeted_counts: dict[PlaceLocus, int] = field(default_factory=dict, repr=False)
+    _colinear_tracks: dict[tuple[int, int], tuple[int, int, set[Any], list[PlaceLocus]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _cached_partition_key: tuple[Any, ...] | None = field(default=None, init=False, repr=False)
     _cached_partition_rows: Any | None = field(default=None, init=False, repr=False)
 
@@ -473,6 +477,7 @@ class ExogenousSignalTracker:
             self.exogenous_loci.clear()
             self._untargeted_actions.clear()
             self._untargeted_counts.clear()
+            self._colinear_tracks.clear()
 
     def mark_exogenous(self, loci: Any) -> None:
         """Register externally supplied exogenous / non-interactive loci."""
@@ -486,6 +491,7 @@ class ExogenousSignalTracker:
         *,
         avatar_locus: PlaceLocus | None = None,
         target_locus: PlaceLocus | None = None,
+        extra_local_loci: tuple[PlaceLocus | None, ...] = (),
         local_radius: float = 2.5,
     ) -> None:
         """Record non-local mutations to empirically discover exogenous ticking signals."""
@@ -499,8 +505,10 @@ class ExogenousSignalTracker:
                 return False
             return all(abs(float(x) - float(y)) <= local_radius for x, y in zip(a, b, strict=True))
 
+        local_refs = (avatar_locus, target_locus, *extra_local_loci)
+        nonlocal_2d: list[tuple[int, int]] = []
         for loc in mutated_loci:
-            if _is_near(loc, avatar_locus) or _is_near(loc, target_locus):
+            if any(_is_near(loc, ref) for ref in local_refs if ref is not None):
                 # Re-grounded by local motor or effector proximity
                 continue
             cnt = self._untargeted_counts.get(loc, 0) + 1
@@ -510,6 +518,40 @@ class ExogenousSignalTracker:
                 acts.add(action)
             if len(acts) >= 2 or cnt >= 3:
                 self.exogenous_loci.add(loc)
+            if isinstance(loc, tuple) and len(loc) == 2:
+                nonlocal_2d.append((int(loc[0]), int(loc[1])))
+
+        # 1D colinear sequential gauge aggregation (e.g. timer/fuel bars shifting 1-2px/step):
+        for axis in (0, 1):
+            groups: dict[int, list[int]] = {}
+            for r_i, c_i in nonlocal_2d:
+                key_coord = r_i if axis == 0 else c_i
+                val_coord = c_i if axis == 0 else r_i
+                groups.setdefault(key_coord, []).append(val_coord)
+            for key_coord, coords in groups.items():
+                if not (1 <= len(coords) <= 4):
+                    continue
+                line_locs: list[PlaceLocus] = [
+                    (key_coord, vc) if axis == 0 else (vc, key_coord) for vc in coords
+                ]
+                tkey = (axis, key_coord)
+                prev = self._colinear_tracks.get(tkey)
+                if prev is not None and min(abs(vc - prev[0]) for vc in coords) <= 2:
+                    last_vc, tick_cnt, acts_set, hist = prev
+                    if any(vc != last_vc for vc in coords):
+                        tick_cnt += 1
+                    next_vc = min(coords) if min(coords) < last_vc else max(coords)
+                    if action is not None:
+                        acts_set.add(action)
+                    hist.extend(line_locs)
+                    if len(hist) > 64:
+                        del hist[:-64]
+                    self._colinear_tracks[tkey] = (next_vc, tick_cnt, acts_set, hist)
+                    if tick_cnt >= 3 or (tick_cnt >= 2 and len(acts_set) >= 2):
+                        self.exogenous_loci.update(hist)
+                else:
+                    init_acts = {action} if action is not None else set()
+                    self._colinear_tracks[tkey] = (coords[0], 1, init_acts, list(line_locs))
 
     def _compute_partitioned_rows(self, lattice: Any, bg: Any = 0) -> Any:
         """Identify rows residing in topologically separated peripheral divider bands."""
@@ -564,7 +606,8 @@ class ExogenousSignalTracker:
                 if div_rows[rr + 1 : min(band_depth + 1, H)].any():
                     flags[rr] = True
         thresh_85 = int(W * 0.85)
-        for div_r in range(band_depth, 2, -1):
+        thresh_50 = int(W * 0.50)
+        for div_r in range(band_depth, 1, -1):
             if fast_hist:
                 line_idx = int(dom_vals[div_r])
                 line_cnt = int(dom_counts[div_r])
@@ -577,7 +620,16 @@ class ExogenousSignalTracker:
                     has_distinct_bg = (banner_dom != field_dom) and (
                         (b_max_cnt / (div_r * W)) >= 0.85
                     )
-                    has_divider_line = (line_idx != field_dom) and (line_cnt >= thresh_85)
+                    adj_bordered = (
+                        line_cnt == W
+                        and div_r <= 5
+                        and (b_max_cnt < div_r * W or banner_dom != field_dom)
+                        and int(dom_vals[div_r + 1]) != field_dom
+                        and int(dom_counts[div_r + 1]) >= thresh_50
+                    )
+                    has_divider_line = (
+                        (line_idx != field_dom or line_idx != bg_val) and (line_cnt >= thresh_85)
+                    ) or adj_bordered
                     if has_distinct_bg or has_divider_line:
                         flags[: div_r + 1] = True
                         break
@@ -599,7 +651,7 @@ class ExogenousSignalTracker:
                         has_distinct_bg = (banner_dom != field_dom) and (
                             (b_cnts[b_max] / banner_region.size) >= 0.85
                         )
-                        has_divider_line = (line_color != field_dom) and (
+                        has_divider_line = (line_color != field_dom or line_color != bg_val) and (
                             int(cnts[idx]) >= thresh_85
                         )
                         if has_distinct_bg or has_divider_line:
@@ -611,7 +663,7 @@ class ExogenousSignalTracker:
             for rr in range(bot_start, H):
                 if not flags[rr] and div_rows[bot_start:rr].any():
                     flags[rr] = True
-        for div_r in range(H - 4, max(H - band_depth - 2, H - H // 3), -1):
+        for div_r in range(H - 3, max(H - band_depth - 2, H - H // 3), -1):
             if not (0 <= div_r < H):
                 continue
             if fast_hist:
@@ -626,7 +678,16 @@ class ExogenousSignalTracker:
                     has_distinct_bg = (banner_dom != field_dom) and (
                         (b_max_cnt / ((H - div_r - 1) * W)) >= 0.85
                     )
-                    has_divider_line = (line_idx != field_dom) and (line_cnt >= thresh_85)
+                    adj_bordered = (
+                        line_cnt == W
+                        and div_r >= H - 6
+                        and (b_max_cnt < (H - div_r - 1) * W or banner_dom != field_dom)
+                        and int(dom_vals[div_r - 1]) != field_dom
+                        and int(dom_counts[div_r - 1]) >= thresh_50
+                    )
+                    has_divider_line = (
+                        (line_idx != field_dom or line_idx != bg_val) and (line_cnt >= thresh_85)
+                    ) or adj_bordered
                     if has_distinct_bg or has_divider_line:
                         flags[div_r:] = True
                         break
@@ -648,7 +709,7 @@ class ExogenousSignalTracker:
                         has_distinct_bg = (banner_dom != field_dom) and (
                             (b_cnts[b_max] / banner_region.size) >= 0.85
                         )
-                        has_divider_line = (line_color != field_dom) and (
+                        has_divider_line = (line_color != field_dom or line_color != bg_val) and (
                             int(cnts[idx]) >= thresh_85
                         )
                         if has_distinct_bg or has_divider_line:
