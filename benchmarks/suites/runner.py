@@ -70,6 +70,8 @@ def _is_exploration_death(
     """True when a terminal death occurred during exploration rather than policy exploitation."""
     if not died:
         return False
+    if baseline in ("fatal_memory_bfs", "dyna_q", "random"):
+        return True
     if engine is None:
         return baseline != "oracle"
     branch = str((meta or {}).get("branch", "")).lower()
@@ -78,16 +80,29 @@ def _is_exploration_death(
     grid = getattr(pre_obs, "visual_lattice", None)
     if grid is None:
         grid = getattr(pre_obs, "grid", None)
-    dyn = engine.action_dynamics.get(action)
-    if grid is not None and dyn is not None and engine.avatar_pos is not None:
-        nr = int(engine.avatar_pos[0]) + int(dyn.delta_r)
-        nc = int(engine.avatar_pos[1]) + int(dyn.delta_c)
-        H, W = len(grid), len(grid[0]) if len(grid) > 0 else 0
-        if 0 <= nr < H and 0 <= nc < W:
-            cell_feat = int(grid[nr][nc])
-            if cell_feat in engine.hazard_tracker.known_lethal_features:
-                return False
-            return bool(engine.is_feature_unverified(cell_feat, engine.bg_feature))
+    action_dynamics = getattr(engine, "action_dynamics", None)
+    avatar_pos = getattr(engine, "avatar_pos", None)
+    hazard_tracker = getattr(engine, "hazard_tracker", None)
+    if (
+        grid is not None
+        and action_dynamics is not None
+        and avatar_pos is not None
+        and hazard_tracker is not None
+    ):
+        dyn = action_dynamics.get(action)
+        if dyn is not None:
+            nr = int(avatar_pos[0]) + int(dyn.delta_r)
+            nc = int(avatar_pos[1]) + int(dyn.delta_c)
+            H, W = len(grid), len(grid[0]) if len(grid) > 0 else 0
+            if 0 <= nr < H and 0 <= nc < W:
+                cell_feat = int(grid[nr][nc])
+                known_lethal = getattr(hazard_tracker, "known_lethal_features", set())
+                if cell_feat in known_lethal:
+                    return False
+                is_unverified = getattr(engine, "is_feature_unverified", None)
+                bg_feature = getattr(engine, "bg_feature", 0)
+                if callable(is_unverified):
+                    return bool(is_unverified(cell_feat, bg_feature))
     return branch in {"macro_plan", "mental_plan", "mental_simulation"}
 
 
@@ -140,7 +155,15 @@ def run_closed_loop_task(
         with tempfile.TemporaryDirectory() as tmp_dir:
             system = None
             engine = None
-            if use_engine and shared_memory:
+            if baseline == "fatal_memory_bfs":
+                from benchmarks.baselines import FatalMemoryBFSAgent
+
+                engine = FatalMemoryBFSAgent(retain_fatal_memory=shared_memory)
+            elif baseline == "dyna_q":
+                from benchmarks.baselines import TabularDynaQAgent
+
+                engine = TabularDynaQAgent()
+            elif use_engine and shared_memory:
                 system = _make_system(
                     tmp_dir, f"{baseline}_s{primary_seed}", baseline in ("system", "demonstration")
                 )
@@ -149,7 +172,25 @@ def run_closed_loop_task(
             prev_succ = False
             for ep_idx in range(episodes):
                 ep_errors: list[str] = []
-                if use_engine and not shared_memory:
+                ep_death_info: dict[str, bool] = {}
+                if baseline in ("fatal_memory_bfs", "dyna_q"):
+                    if ep_idx > 0 and hasattr(engine, "reset_episode"):
+                        engine.reset_episode(reset_memory=not shared_memory)
+                    env_instance = env_cls(max_steps=max_budget)
+                    obs = env_instance.reset(seed=primary_seed)
+                    succ, steps, lats, errs, died = _run_loop_with_info(
+                        env_instance,
+                        obs,
+                        engine,
+                        baseline,
+                        max_budget,
+                        [],
+                        ep_errors,
+                        seed=primary_seed,
+                        death_info=ep_death_info,
+                    )
+                    exp_died = bool(ep_death_info.get("exploration_death", died))
+                elif use_engine and not shared_memory:
                     with tempfile.TemporaryDirectory() as ep_dir:
                         system = _make_system(
                             ep_dir,
@@ -164,7 +205,6 @@ def run_closed_loop_task(
                             if baseline == "demonstration"
                             else baseline
                         )
-                        ep_death_info: dict[str, bool] = {}
                         succ, steps, lats, errs, died = _run_loop_with_info(
                             env_instance,
                             obs,
@@ -240,7 +280,11 @@ def run_closed_loop_task(
                         if exp_died:
                             zs_exploration_deaths += 1
 
-    _run_primary_replay(use_engine=(baseline in ("system", "no_grounding", "demonstration")))
+    _run_primary_replay(
+        use_engine=(
+            baseline in ("system", "no_grounding", "demonstration", "fatal_memory_bfs", "dyna_q")
+        )
+    )
 
     # 2. Independent zero-shot evaluation across ALL remaining seeds (seeds[1:])
     if baseline != "demonstration" and len(seeds) > 1:
@@ -263,6 +307,40 @@ def run_closed_loop_task(
                         seed=s,
                         death_info=seed_death_info,
                     )
+            elif baseline == "fatal_memory_bfs":
+                from benchmarks.baselines import FatalMemoryBFSAgent
+
+                s_agent = FatalMemoryBFSAgent(retain_fatal_memory=False)
+                s_env = env_cls(max_steps=max_budget)
+                s_obs = s_env.reset(seed=s)
+                succ, steps, lats, errs, died = _run_loop_with_info(
+                    s_env,
+                    s_obs,
+                    s_agent,
+                    baseline,
+                    max_budget,
+                    [],
+                    seed_errs,
+                    seed=s,
+                    death_info=seed_death_info,
+                )
+            elif baseline == "dyna_q":
+                from benchmarks.baselines import TabularDynaQAgent
+
+                s_agent = TabularDynaQAgent()
+                s_env = env_cls(max_steps=max_budget)
+                s_obs = s_env.reset(seed=s)
+                succ, steps, lats, errs, died = _run_loop_with_info(
+                    s_env,
+                    s_obs,
+                    s_agent,
+                    baseline,
+                    max_budget,
+                    [],
+                    seed_errs,
+                    seed=s,
+                    death_info=seed_death_info,
+                )
             else:
                 s_env = env_cls(max_steps=max_budget)
                 s_obs = s_env.reset(seed=s)
@@ -380,31 +458,47 @@ def run_closed_loop_task(
 
     # 4. Cross-seed procedural transfer across ALL distinct seeds in the manifest
     cross_seed_transfer: dict[str, Any] = {}
-    if cross_seed and baseline in ("system", "no_grounding") and len(seeds) > 1:
+    if (
+        cross_seed
+        and baseline in ("system", "no_grounding", "fatal_memory_bfs", "dyna_q")
+        and len(seeds) > 1
+    ):
         xs_seeds = list(seeds)
         xs_succ: list[bool] = []
         xs_steps: list[int] = []
         xs_deaths = 0
         xs_exploration_deaths = 0
         with tempfile.TemporaryDirectory() as tmp_dir:
-            xs_engine = _make_system(tmp_dir, f"xseed_{baseline}", baseline == "system").engine
+            if baseline in ("system", "no_grounding"):
+                xs_engine = _make_system(tmp_dir, f"xseed_{baseline}", baseline == "system").engine
+            elif baseline == "fatal_memory_bfs":
+                from benchmarks.baselines import FatalMemoryBFSAgent
+
+                xs_engine = FatalMemoryBFSAgent(retain_fatal_memory=True)
+            elif baseline == "dyna_q":
+                from benchmarks.baselines import TabularDynaQAgent
+
+                xs_engine = TabularDynaQAgent()
             prev_ok = False
             for ep_idx, ep_seed in enumerate(xs_seeds):
                 xs_errs: list[str] = []
                 if ep_idx > 0:
-                    try:
-                        xs_engine.on_boundary(
-                            EpisodeBoundary(
-                                kind=(
-                                    EpisodeBoundaryKind.LEVEL_COMPLETE
-                                    if prev_ok
-                                    else EpisodeBoundaryKind.DEATH
-                                ),
-                                same_level=False,
+                    if hasattr(xs_engine, "on_boundary"):
+                        try:
+                            xs_engine.on_boundary(
+                                EpisodeBoundary(
+                                    kind=(
+                                        EpisodeBoundaryKind.LEVEL_COMPLETE
+                                        if prev_ok
+                                        else EpisodeBoundaryKind.DEATH
+                                    ),
+                                    same_level=False,
+                                )
                             )
-                        )
-                    except Exception as e:
-                        xs_errs.append(f"Cross-seed boundary error at seed {ep_seed}: {e}")
+                        except Exception as e:
+                            xs_errs.append(f"Cross-seed boundary error at seed {ep_seed}: {e}")
+                    elif hasattr(xs_engine, "reset_episode"):
+                        xs_engine.reset_episode(reset_memory=False)
                 xs_env = env_cls(max_steps=max_budget)
                 xs_obs = xs_env.reset(seed=ep_seed)
                 xs_death_info: dict[str, bool] = {}
@@ -532,6 +626,16 @@ def run_closed_loop_episode(
             return _run_loop(
                 env, obs, system.engine, baseline, max_budget, latencies, errors, seed=seed
             )
+    elif baseline == "fatal_memory_bfs":
+        from benchmarks.baselines import FatalMemoryBFSAgent
+
+        agent = FatalMemoryBFSAgent(retain_fatal_memory=False)
+        return _run_loop(env, obs, agent, baseline, max_budget, latencies, errors, seed=seed)
+    elif baseline == "dyna_q":
+        from benchmarks.baselines import TabularDynaQAgent
+
+        agent = TabularDynaQAgent()
+        return _run_loop(env, obs, agent, baseline, max_budget, latencies, errors, seed=seed)
 
     return _run_loop(env, obs, None, baseline, max_budget, latencies, errors, seed=seed)
 
@@ -584,6 +688,18 @@ def _run_loop_with_info(
                 action = rng.choice(list(avail))
             elif baseline == "oracle":
                 action = env.get_oracle_action()
+            elif baseline == "fatal_memory_bfs":
+                if engine is None or not hasattr(engine, "step"):
+                    from benchmarks.baselines import FatalMemoryBFSAgent
+
+                    engine = FatalMemoryBFSAgent(retain_fatal_memory=True)
+                action = engine.step(obs)
+            elif baseline == "dyna_q":
+                if engine is None or not hasattr(engine, "step"):
+                    from benchmarks.baselines import TabularDynaQAgent
+
+                    engine = TabularDynaQAgent()
+                action = engine.step(obs)
             elif baseline == "demonstration_oracle":
                 if engine is not None:
                     raw_action = engine.step(obs, last_action=last_oracle_action)
@@ -606,7 +722,10 @@ def _run_loop_with_info(
         step_journal.append({"step": step_count, "action": action, "meta": meta})
         latencies.append((time.perf_counter() - t0) * 1000.0)
         pre_obs = obs
-        pre_uncalibrated = engine is not None and not engine.is_action_calibrated(action)
+        calib_fn = getattr(engine, "is_action_calibrated", None)
+        pre_uncalibrated = (
+            (not calib_fn(action)) if (calib_fn is not None and callable(calib_fn)) else False
+        )
 
         try:
             obs, reward, done, info = env.step(action)
@@ -629,7 +748,15 @@ def _run_loop_with_info(
                     baseline,
                     pre_uncalibrated=pre_uncalibrated,
                 )
-            if engine is not None:
+            if baseline == "fatal_memory_bfs" and hasattr(engine, "record_transition"):
+                engine.record_transition(pre_obs, action, obs, died, info)
+            elif baseline == "dyna_q" and hasattr(engine, "record_transition"):
+                engine.record_transition(pre_obs, action, obs, reward, done)
+            if engine is not None and baseline in (
+                "system",
+                "no_grounding",
+                "demonstration_oracle",
+            ):
                 try:
                     engine.step(
                         obs,
@@ -641,6 +768,10 @@ def _run_loop_with_info(
                     errors.append(f"Terminal feedback error at step {step_count}: {e}")
                     success = False
             break
+        elif baseline == "fatal_memory_bfs" and hasattr(engine, "record_transition"):
+            engine.record_transition(pre_obs, action, obs, False, info)
+        elif baseline == "dyna_q" and hasattr(engine, "record_transition"):
+            engine.record_transition(pre_obs, action, obs, reward, False)
 
     return success, step_count, latencies, errors, died
 
@@ -733,9 +864,16 @@ def run_suite(
     baselines_dict: dict[str, Any] = {}
     if baseline == "system":
         print(
-            "\n--- Evaluating Reference Baselines (random, oracle, no_grounding, demonstration) ---"
+            "\n--- Evaluating Reference Baselines (random, fatal_memory_bfs, dyna_q, oracle, no_grounding, demonstration) ---"
         )
-        for b_name in ("random", "oracle", "no_grounding", "demonstration"):
+        for b_name in (
+            "random",
+            "fatal_memory_bfs",
+            "dyna_q",
+            "oracle",
+            "no_grounding",
+            "demonstration",
+        ):
             b_tasks: list[TaskResult] = []
             for task_def in manifest.get("tasks", []):
                 t_id = task_def["id"]
@@ -751,7 +889,9 @@ def run_suite(
                     perception_mode=perception_mode,
                     episodes=episodes_per_task,
                     shared_memory=shared_memory,
-                    cross_seed=(b_name == "no_grounding" and cross_seed),
+                    cross_seed=(
+                        b_name in ("no_grounding", "fatal_memory_bfs", "dyna_q") and cross_seed
+                    ),
                 )
                 b_task_res = TaskResult(
                     task_id=f"{t_id}_{b_name}",
@@ -918,7 +1058,16 @@ def main() -> int:
     parser.add_argument(
         "--baseline",
         default="system",
-        choices=["system", "stub_agent", "random", "oracle", "no_grounding", "demonstration"],
+        choices=[
+            "system",
+            "stub_agent",
+            "random",
+            "fatal_memory_bfs",
+            "dyna_q",
+            "oracle",
+            "no_grounding",
+            "demonstration",
+        ],
         help="Evaluation policy baseline",
     )
     parser.add_argument("--manifest", default=None, help="Custom manifest YAML path")
