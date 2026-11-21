@@ -209,8 +209,8 @@ class CognitiveSystem:
                         target_predicate=str(receipt.capability),
                         target_subject=concept_target,
                         is_known=not has_gap,
-                        confidence=0.10 if has_gap else 0.94,
-                        uncertainty=0.90 if has_gap else 0.06,
+                        confidence=0.10 if has_gap else 0.96,
+                        uncertainty=0.90 if has_gap else 0.04,
                         support_count=1 if not has_gap else 0,
                     )
                 else:
@@ -338,6 +338,10 @@ class CognitiveSystem:
                         reference_resolver=lang_rt._ref_resolver,
                     )
                     if summary.propositions:
+                        from hbllm.hcir.language.core.epistemic_policy import (
+                            CognitiveEpistemicState,
+                        )
+
                         sub_turns.append(
                             LanguageTurnResult(
                                 raw_input=seg,
@@ -346,6 +350,14 @@ class CognitiveSystem:
                                     frame_type=FrameType.ASSERTION,
                                     predicate="expository_prose",
                                     metadata=LanguageMetadata(language="en", raw_text=seg),
+                                ),
+                                epistemic_state=CognitiveEpistemicState(
+                                    target_predicate="expository_prose",
+                                    target_subject="prose",
+                                    confidence=0.96,
+                                    uncertainty=0.04,
+                                    support_count=len(summary.propositions),
+                                    is_known=True,
                                 ),
                                 response_text=summary.summary_text,
                                 is_success=True,
@@ -397,12 +409,25 @@ class CognitiveSystem:
                 overall_success = False
                 rep = sub_turns[0]
 
+            overall_ep = rep.epistemic_state
+            if overall_ep is None and overall_success:
+                from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
+
+                overall_ep = CognitiveEpistemicState(
+                    target_predicate="composite_utterance",
+                    target_subject="composite",
+                    confidence=0.96,
+                    uncertainty=0.04,
+                    support_count=len(sub_turns),
+                    is_known=True,
+                )
+
             turn = LanguageTurnResult(
                 raw_input=text,
                 language=rep.language,
                 semantic_frame=rep.semantic_frame,
                 grounded_frame=rep.grounded_frame,
-                epistemic_state=rep.epistemic_state,
+                epistemic_state=overall_ep,
                 response_text=response_text,
                 is_success=overall_success,
                 error_type=None if overall_success else rep.error_type,

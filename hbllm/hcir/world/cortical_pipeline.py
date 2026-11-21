@@ -92,7 +92,12 @@ class CorticalPipeline:
             if eng_bridge is not None:
                 bridge = eng_bridge
 
-        if self.engine is not None and current_ctx.curr_grid is not None:
+        grid_data = (
+            current_ctx.curr_grid
+            if current_ctx.curr_grid is not None
+            else current_ctx.signals.get("_curr_grid")
+        )
+        if self.engine is not None and grid_data is not None:
             theory = getattr(self.engine, "symbolic_theory", None)
             wm = getattr(self.engine, "working_memory", None)
             if theory is not None and hasattr(theory, "observe_grid_structure"):
@@ -101,7 +106,7 @@ class CorticalPipeline:
                 if getattr(self.engine, "avatar_feature", None) is not None:
                     av_feats.add(self.engine.avatar_feature)
                 shifted = theory.observe_grid_structure(
-                    current_ctx.curr_grid, bg_feature=bg_feat, avatar_features=av_feats
+                    grid_data, bg_feature=bg_feat, avatar_features=av_feats
                 )
                 if shifted:
                     from hbllm.hcir.world.cortex_causal import (
@@ -181,7 +186,7 @@ class CorticalPipeline:
                                 if clean_hint not in wm_ref.compiled_linguistic_hints:
                                     d_priors = bridge.ground_mission_instruction(
                                         clean_hint,
-                                        current_ctx.curr_grid,
+                                        grid_data,
                                         bg_f,
                                         av_s,
                                         self.engine.symbolic_theory,
@@ -223,8 +228,8 @@ class CorticalPipeline:
                                             if gf != tf:
                                                 th.retract_goal(gf, reason="mission_override")
                                         th.induce_candidate_goal(tf, evidence="grounded_dialogue")
-                                    if current_ctx.curr_grid is not None:
-                                        arr = np.asarray(current_ctx.curr_grid)
+                                    if grid_data is not None:
+                                        arr = np.asarray(grid_data)
                                         if arr.ndim == 2:
                                             for v_np, c_np in zip(
                                                 *np.unique(arr, return_counts=True), strict=False

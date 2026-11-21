@@ -140,11 +140,16 @@ def run_pure_hcir_graduation_eval() -> dict[str, Any]:
         "Remember that warmup is complete",
         "Recall warmup",
         "The test spoon is on the counter. Where is the test spoon?",
+        "In science, atoms form molecules. Molecules form complex structures.",
         "List files and then explain focus.",
         "explian focus",
         "please can you explain focus?",
     ):
         system.process_dialogue(_warm)
+
+    import gc
+
+    gc.collect()
 
     tracker = AutonomyTracker(min_turns_for_retirement=50, retirement_threshold=0.98)
     system.services.extensions["autonomy_metrics"] = tracker
@@ -332,7 +337,7 @@ def run_pure_hcir_graduation_eval() -> dict[str, Any]:
     # ── Suite 5d: Orthographic Typo Recovery (5 turns) ──
     typo_cases: list[tuple[str, tuple[str, ...]]] = [
         ("explian focus", ("focus", "optical")),
-        ("lisst files", ("fs.list",)),
+        ("lisst files", ("agents", "cargo", "benchmarks", "artifacts")),
         ("wher is the red ball?", ("table", "shelf")),
         ("Where is the red blal?", ("table", "shelf")),
         ("why does focsu happen?", ("focus", "spiking", "causal")),

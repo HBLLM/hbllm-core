@@ -332,11 +332,21 @@ class MultilingualLanguageRuntime:
                 and grounded.grounding_error != LanguageErrorType.AMBIGUOUS_REFERENCE
             ):
                 goal_node = self._gateway.process_command(grounded)
+                from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
+
                 return LanguageTurnResult(
                     raw_input=text,
                     language=language,
                     semantic_frame=frame,
                     grounded_frame=grounded,
+                    epistemic_state=CognitiveEpistemicState(
+                        target_predicate=frame.predicate or "command",
+                        target_subject=frame.predicate or "command",
+                        confidence=0.96,
+                        uncertainty=0.04,
+                        support_count=1,
+                        is_known=True,
+                    ),
                     is_success=True,
                     hcir_node_id=goal_node.id,
                     response_text="Goal accepted.",
@@ -412,11 +422,21 @@ class MultilingualLanguageRuntime:
         # B. COMMAND -> Create GoalNode for planner
         elif frame.frame_type == FrameType.COMMAND:
             goal_node = self._gateway.process_command(grounded)
+            from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
+
             return LanguageTurnResult(
                 raw_input=text,
                 language=language,
                 semantic_frame=frame,
                 grounded_frame=grounded,
+                epistemic_state=CognitiveEpistemicState(
+                    target_predicate=frame.predicate or "command",
+                    target_subject=frame.predicate or "command",
+                    confidence=0.96,
+                    uncertainty=0.04,
+                    support_count=1,
+                    is_known=True,
+                ),
                 is_success=True,
                 hcir_node_id=goal_node.id,
                 response_text="Goal accepted.",

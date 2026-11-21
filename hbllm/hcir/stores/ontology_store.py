@@ -46,6 +46,9 @@ class LexicalOntologyStore:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._trusted_cache: dict[tuple[str, str], bool] = {}
+        self._lookup_cache: dict[tuple[str, str], list[StoredLexicalEntry]] = {}
+        self._hypernyms_cache: dict[tuple[str, str], list[str]] = {}
+        self._is_a_cache: dict[tuple[str, str, str], bool] = {}
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -146,7 +149,10 @@ class LexicalOntologyStore:
                     """,
                     edge_rows,
                 )
-
+        self._trusted_cache.clear()
+        self._lookup_cache.clear()
+        self._hypernyms_cache.clear()
+        self._is_a_cache.clear()
         return len(entry_rows), len(edge_rows)
 
     def lookup(self, lemma: str, *, language: str = "en") -> list[StoredLexicalEntry]:
@@ -154,6 +160,9 @@ class LexicalOntologyStore:
         key = lemma.strip().lower()
         if not key:
             return []
+        cache_key = (language, key)
+        if cache_key in self._lookup_cache:
+            return self._lookup_cache[cache_key]
         cur = self._conn.execute(
             """
             SELECT lemma, pos, language, definition,
@@ -194,12 +203,17 @@ class LexicalOntologyStore:
                     source=row[8],
                 )
             )
+        if len(self._lookup_cache) < 32768:
+            self._lookup_cache[cache_key] = results
         return results
 
     def has_word(self, lemma: str, *, language: str = "en") -> bool:
         key = lemma.strip().lower()
         if not key:
             return False
+        cache_key = (language, key)
+        if cache_key in self._lookup_cache:
+            return bool(self._lookup_cache[cache_key])
         cur = self._conn.execute(
             "SELECT 1 FROM lexical_entries WHERE language = ? AND lemma = ? LIMIT 1",
             (language, key),
@@ -304,11 +318,19 @@ class LexicalOntologyStore:
 
     def get_hypernyms(self, lemma: str, *, language: str = "en") -> list[str]:
         key = lemma.strip().lower()
+        if not key:
+            return []
+        cache_key = (language, key)
+        if cache_key in self._hypernyms_cache:
+            return self._hypernyms_cache[cache_key]
         cur = self._conn.execute(
             "SELECT parent FROM hypernym_edges WHERE language = ? AND child = ?",
             (language, key),
         )
-        return [row[0] for row in cur.fetchall()]
+        res = [row[0] for row in cur.fetchall()]
+        if len(self._hypernyms_cache) < 32768:
+            self._hypernyms_cache[cache_key] = res
+        return res
 
     def is_a(
         self,
@@ -325,6 +347,9 @@ class LexicalOntologyStore:
             return False
         if start == target:
             return True
+        cache_key = (language, start, target)
+        if cache_key in self._is_a_cache:
+            return self._is_a_cache[cache_key]
 
         visited: set[str] = {start}
         queue: deque[tuple[str, int]] = deque([(start, 0)])
@@ -334,10 +359,14 @@ class LexicalOntologyStore:
                 continue
             for parent in self.get_hypernyms(curr, language=language):
                 if parent == target:
+                    if len(self._is_a_cache) < 32768:
+                        self._is_a_cache[cache_key] = True
                     return True
                 if parent not in visited:
                     visited.add(parent)
                     queue.append((parent, depth + 1))
+        if len(self._is_a_cache) < 32768:
+            self._is_a_cache[cache_key] = False
         return False
 
     def stats(self) -> dict[str, Any]:

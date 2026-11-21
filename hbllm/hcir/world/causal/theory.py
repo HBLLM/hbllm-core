@@ -355,7 +355,8 @@ class HCIRSymbolicWorldTheory:
         self._context_epoch += 1
         self._has_prior_context_transition = True
         self._awaiting_context_revalidation = True
-        self._prior_entity_distribution_stats = dict(self._current_entity_distribution_stats)
+        if self._current_entity_distribution_stats:
+            self._prior_entity_distribution_stats = dict(self._current_entity_distribution_stats)
         self._current_entity_distribution_stats.clear()
         self._current_context_verified.clear()
 

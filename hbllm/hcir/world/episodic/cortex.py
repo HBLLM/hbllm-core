@@ -853,7 +853,6 @@ class HippocampalEpisodicCortex:
             # re-instantiates any matching templates (e.g. key→door).
             view.symbolic_theory.snapshot_conditional_affordance_templates()
             view.symbolic_theory.clear_feature_bindings()
-            view.symbolic_theory.begin_context_epoch()
             acc_mon = getattr(view.working_memory, "acc_conflict", None)
             if acc_mon is not None and hasattr(acc_mon, "reset_episode"):
                 acc_mon.reset_episode(retain_long_term=False)
