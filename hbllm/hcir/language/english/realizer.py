@@ -22,12 +22,69 @@ from hbllm.hcir.language.core.semantic_frame import (
 
 logger = logging.getLogger(__name__)
 
+MASS_NOUNS = frozenset(
+    {
+        "oxygen",
+        "hydrogen",
+        "nitrogen",
+        "carbon",
+        "water",
+        "air",
+        "gravity",
+        "friction",
+        "matter",
+        "code",
+        "software",
+        "hardware",
+        "energy",
+        "heat",
+        "rust",
+        "iron",
+        "gold",
+        "silver",
+        "wood",
+    }
+)
+
 
 class EnglishRealizer:
     """Generates calibrated English surface utterances from cognitive state."""
 
     def __init__(self, policy: EpistemicRealizationPolicy | None = None) -> None:
         self._policy = policy or EpistemicRealizationPolicy()
+
+    @classmethod
+    def _format_noun(cls, word: str, title: bool = False) -> str:
+        """Format noun with correct indefinite article ('a'/'an') or bare noun for proper/mass nouns."""
+        if not word:
+            return ""
+        clean = word.strip()
+        lower = clean.lower()
+
+        # If already starts with an article
+        if lower.startswith(("a ", "an ", "the ")):
+            return clean.capitalize() if title else clean
+
+        # Proper noun check: capitalized or known proper name
+        if clean[0].isupper() or lower in (
+            "gandalf",
+            "darcy",
+            "mr. darcy",
+            "saruman",
+            "elizabeth",
+            "elizabeth bennet",
+        ):
+            return clean.capitalize() if title else clean
+
+        # Mass / uncountable noun check
+        if lower in MASS_NOUNS:
+            return clean.capitalize() if title else clean
+
+        # Countable common noun: prefix 'a' or 'an'
+        art = "An" if lower[0] in "aeiou" else "A"
+        if not title:
+            art = art.lower()
+        return f"{art} {clean}"
 
     def realize(
         self,
@@ -56,10 +113,14 @@ class EnglishRealizer:
             return f"{obj}." if not obj.endswith(".") else obj
 
         if pred in ("causes", "enables") and obj:
+            if original_frame and original_frame.query_target in ("enables", "enable"):
+                return f"{subj.capitalize()} enables {obj}."
             if original_frame and original_frame.query_target == "cause":
                 return f"{subj.capitalize()} causes {obj}."
             if ("." in obj or "\n" in obj) and len(obj) > 30:
                 return obj
+            if pred == "enables":
+                return f"{subj.capitalize()} enables {obj}."
 
         if pred == "requires" and obj:
             if original_frame and original_frame.query_target in ("procedure", "requirement"):
@@ -88,7 +149,10 @@ class EnglishRealizer:
                         f"I do not have enough evidence to determine whether {subj} requires {obj}."
                     )
                 elif pred in ("is_a", "type_of"):
-                    return f"I do not have enough evidence to determine whether {subj} is a {obj}."
+                    obj_str = self._format_noun(obj, title=False)
+                    return (
+                        f"I do not have enough evidence to determine whether {subj} is {obj_str}."
+                    )
                 return f"I do not have enough evidence to determine whether the {subj} is {prep} the {obj}."
             return f"I do not have enough evidence to determine the state of the {subj}."
 
@@ -100,14 +164,14 @@ class EnglishRealizer:
         if original_frame and original_frame.query_target == "verification":
             if epistemic_state.raw_belief_value is True:
                 if pred in ("is_a", "type_of"):
-                    art_s = self._indefinite_article(subj).lower()
-                    art_o = self._indefinite_article(obj).lower()
-                    return f"Yes, {art_s} {subj} is {art_o} {obj}."
+                    art_s = self._format_noun(subj, title=False)
+                    art_o = self._format_noun(obj, title=False)
+                    return f"Yes, {art_s} is {art_o}."
                 elif pred in ("causes", "enables"):
                     return f"Yes, {subj} causes {obj}."
                 elif pred == "requires":
-                    art_o = self._indefinite_article(obj).lower()
-                    return f"Yes, {subj} requires a {obj}."
+                    art_o = self._format_noun(obj, title=False)
+                    return f"Yes, {subj} requires {art_o}."
                 else:
                     if level == EpistemicVerbalizationLevel.CERTAIN:
                         return f"Yes, the {subj} is {prep} the {obj}."
@@ -117,14 +181,14 @@ class EnglishRealizer:
                         return f"I think the {subj} may be {prep} the {obj}."
             else:
                 if pred in ("is_a", "type_of"):
-                    art_s = self._indefinite_article(subj).lower()
-                    art_o = self._indefinite_article(obj).lower()
-                    return f"No, {art_s} {subj} is not {art_o} {obj}."
+                    art_s = self._format_noun(subj, title=False)
+                    art_o = self._format_noun(obj, title=False)
+                    return f"No, {art_s} is not {art_o}."
                 elif pred in ("causes", "enables"):
                     return f"No, {subj} does not cause {obj}."
                 elif pred == "requires":
-                    art_o = self._indefinite_article(obj).lower()
-                    return f"No, {subj} does not require a {obj}."
+                    art_o = self._format_noun(obj, title=False)
+                    return f"No, {subj} does not require {art_o}."
                 else:
                     return f"No, the {subj} is not {prep} the {obj}."
 
@@ -133,15 +197,16 @@ class EnglishRealizer:
             # If obj is a multi-sentence explanation or paragraph, return it directly
             if ("." in obj or "\n" in obj) and len(obj) > 30:
                 return obj
-            article = self._indefinite_article(subj)
+            subj_title = self._format_noun(subj, title=True)
+            obj_fmt = self._format_noun(obj, title=False)
             if level == EpistemicVerbalizationLevel.CERTAIN:
-                return f"{article} {subj} is {obj}."
+                return f"{subj_title} is {obj_fmt}."
             elif level == EpistemicVerbalizationLevel.PROBABLE:
-                return f"{article} {subj} is generally described as {obj}."
+                return f"{subj_title} is generally described as {obj_fmt}."
             elif level == EpistemicVerbalizationLevel.PLAUSIBLE:
-                return f"I believe {article.lower()} {subj} is {obj}."
+                return f"I believe {subj_title.lower()} is {obj_fmt}."
             else:
-                return f"From what I know, {article.lower()} {subj} may be described as {obj}."
+                return f"From what I know, {subj_title.lower()} may be described as {obj_fmt}."
 
         # 4. Property Query ("What color is the ball?")
         if original_frame and original_frame.query_target == "property" or pred == "color":
@@ -164,8 +229,18 @@ class EnglishRealizer:
 
     @staticmethod
     def _indefinite_article(word: str) -> str:
-        """Return 'A' or 'An' for the given word (title-cased)."""
-        if word and word[0].lower() in "aeiou":
+        """Return 'A' or 'An' for the given word (title-cased), or empty for proper/mass nouns."""
+        if not word:
+            return "A"
+        clean = word.strip()
+        lower = clean.lower()
+        if (
+            clean[0].isupper()
+            or lower in ("gandalf", "darcy", "mr. darcy", "saruman")
+            or lower in MASS_NOUNS
+        ):
+            return ""
+        if lower[0] in "aeiou":
             return "An"
         return "A"
 

@@ -80,6 +80,7 @@ class EnglishParser:
                 "remember",
                 "explain",
                 "describe",
+                "define",
                 "search",
                 "websearch",
                 "google",
@@ -144,6 +145,7 @@ class EnglishParser:
                 {
                     "explain",
                     "describe",
+                    "define",
                     "tell",
                     "detail",
                     "summarize",
@@ -188,6 +190,7 @@ class EnglishParser:
             "search",
             "explain",
             "describe",
+            "define",
             "fetch",
             "get",
         }:
@@ -195,6 +198,10 @@ class EnglishParser:
                 rest = rest[2:]
             elif len(rest) > 1 and rest[0].lemma in ("me", "us"):
                 rest = rest[1:]
+
+        # Normalize "define X" -> predicate="explain"
+        if verb_pred == "define":
+            verb_pred = "explain"
 
         # Normalize "explain why X" -> predicate="why", "explain how X" -> predicate="how"
         if verb_pred == "explain" and len(rest) > 1 and rest[0].lemma in ("why", "how"):
@@ -320,6 +327,21 @@ class EnglishParser:
                         frame_type=FrameType.QUERY,
                         predicate="requires",
                         query_target="procedure",
+                        metadata=meta,
+                    )
+                    if subject_ref:
+                        frame.set_role(ThematicRole.THEME, subject_ref)
+                    return frame
+
+                if ast.verb_phrase and ast.verb_phrase.head_verb.lemma in (
+                    "enable",
+                    "allow",
+                    "permit",
+                ):
+                    frame = SemanticFrame(
+                        frame_type=FrameType.QUERY,
+                        predicate="enables",
+                        query_target="enables",
                         metadata=meta,
                     )
                     if subject_ref:

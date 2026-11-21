@@ -389,21 +389,24 @@ class TestBootstrapDialoguePriorKnowledge:
     def test_explain_microscope_dialogue(self, system):
         res = system.process_dialogue("Explain microscope")
         assert res.is_success is True
-        assert "knowledge.explain" in res.response_text
+        assert res.epistemic_state is not None
+        assert res.epistemic_state.target_predicate == "knowledge.explain"
         assert "microscope" in res.response_text.lower()
         assert "magnifier" in res.response_text.lower() or "instrument" in res.response_text.lower()
 
     def test_describe_server_dialogue(self, system):
         res = system.process_dialogue("Describe a server")
         assert res.is_success is True
-        assert "knowledge.explain" in res.response_text
+        assert res.epistemic_state is not None
+        assert res.epistemic_state.target_predicate == "knowledge.explain"
         assert "server" in res.response_text.lower()
         assert "computer" in res.response_text.lower()
 
     def test_tell_me_about_algorithm_dialogue(self, system):
         res = system.process_dialogue("Tell me about an algorithm")
         assert res.is_success is True
-        assert "knowledge.explain" in res.response_text
+        assert res.epistemic_state is not None
+        assert res.epistemic_state.target_predicate == "knowledge.explain"
         assert "algorithm" in res.response_text.lower()
 
 

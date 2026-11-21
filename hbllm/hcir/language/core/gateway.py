@@ -191,30 +191,133 @@ class HCIRGateway:
             and self._tiered_workspace is not None
         ):
             try:
-                from hbllm.hcir.language.reading_curriculum import (
-                    ExtractedProposition,
-                    commit_propositions,
-                )
-
                 p_ws = getattr(self._tiered_workspace, "persistent", None) or self._workspace
                 if p_ws is not None and hasattr(p_ws, "commit_operations"):
                     grant = getattr(self._tiered_workspace, "_system_grant", None)
                     raw_sent = getattr(frame.metadata, "raw_text", "") or claim_str
-                    commit_propositions(
-                        [
-                            ExtractedProposition(
-                                subject=subject_name.lower().replace(" ", "_"),
-                                relation=frame.predicate,
-                                obj=obj_desc.lower().replace(" ", "_"),
-                                source_file="dialogue_assertion",
-                                sentence=raw_sent,
+                    is_negated = not getattr(frame.metadata, "polarity", True)
+                    s_clean = subject_name.lower().replace(" ", "_")
+                    o_clean = obj_desc.lower().replace(" ", "_")
+
+                    if not is_negated:
+                        from hbllm.hcir.language.reading_curriculum import (
+                            ExtractedProposition,
+                            commit_propositions,
+                        )
+
+                        commit_propositions(
+                            [
+                                ExtractedProposition(
+                                    subject=s_clean,
+                                    relation=frame.predicate,
+                                    obj=o_clean,
+                                    source_file="dialogue_assertion",
+                                    sentence=raw_sent,
+                                )
+                            ],
+                            p_ws,
+                            ontology_store=self._ontology_store,
+                            grant=grant,
+                            author="hcir_language_gateway",
+                        )
+                    else:
+                        from hbllm.hcir.graph import BeliefNode, ConceptNode, HCIREdge
+                        from hbllm.hcir.nodes import HCIREdgeType
+                        from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+                        src_id = f"t4_concept_{s_clean}"
+                        dst_id = f"t4_concept_{o_clean}"
+                        tx_ops: list[TransactionOperation] = []
+
+                        # Ensure concept nodes exist
+                        for term, cid in ((subject_name, src_id), (obj_desc, dst_id)):
+                            display = term.replace("_", " ")
+                            cnode = ConceptNode(
+                                id=cid,
+                                label=display,
+                                domain="dialogue_negation",
+                                tags=["t4_negation", display],
                             )
-                        ],
-                        p_ws,
-                        ontology_store=self._ontology_store,
-                        grant=grant,
-                        author="hcir_language_gateway",
-                    )
+                            tx_ops.append(
+                                TransactionOperation(
+                                    op=TransactionOp.UPSERT_NODE,
+                                    node_id=cnode.id,
+                                    node_data=cnode.model_dump(),
+                                )
+                            )
+
+                        # Retract existing positive edges between src_id and dst_id
+                        p_graph = getattr(p_ws, "graph", None)
+                        if p_graph is not None:
+                            for edge in list(p_graph.edges_from(src_id)):
+                                if any(t == dst_id for t in edge.targets):
+                                    rel = str(edge.properties.get("relation", "")).lower()
+                                    etype = getattr(
+                                        edge.edge_type, "value", str(edge.edge_type)
+                                    ).lower()
+                                    if rel in (
+                                        frame.predicate,
+                                        "is_a",
+                                        "causes",
+                                        "requires",
+                                        "enables",
+                                    ) or etype in ("generalizes", "supports", "causes", "requires"):
+                                        tx_ops.append(
+                                            TransactionOperation(
+                                                op=TransactionOp.REMOVE_EDGE,
+                                                edge_id=edge.id,
+                                            )
+                                        )
+
+                        # Retract existing positive belief node if any
+                        belief_id = f"t4_belief_{s_clean}_{frame.predicate}_{o_clean}"
+                        if p_graph is not None and p_graph.get_node(belief_id) is not None:
+                            tx_ops.append(
+                                TransactionOperation(
+                                    op=TransactionOp.REMOVE_NODE,
+                                    node_id=belief_id,
+                                )
+                            )
+
+                        # Commit contradiction edge
+                        edge_id = f"t4_contradicts_{src_id}__{dst_id}"
+                        contra_edge = HCIREdge(
+                            id=edge_id,
+                            edge_type=HCIREdgeType.CONTRADICTS,
+                            sources=[src_id],
+                            targets=[dst_id],
+                            weight=1.0,
+                            properties={
+                                "relation": f"not_{frame.predicate}",
+                                "polarity": False,
+                                "source_file": "dialogue_assertion",
+                                "sentence": raw_sent,
+                            },
+                        )
+                        tx_ops.append(
+                            TransactionOperation(
+                                op=TransactionOp.UPSERT_EDGE,
+                                edge=contra_edge,
+                            )
+                        )
+
+                        # Commit negative belief node
+                        bnode = BeliefNode(
+                            id=f"t4_belief_{s_clean}_not_{frame.predicate}_{o_clean}",
+                            statement=f"{subject_name} is not {obj_desc}",
+                            confidence=0.98,
+                            tags=["t4_negation", f"not_{frame.predicate}"],
+                            properties={"sentence": raw_sent},
+                        )
+                        tx_ops.append(
+                            TransactionOperation(
+                                op=TransactionOp.UPSERT_NODE,
+                                node_id=bnode.id,
+                                node_data=bnode.model_dump(),
+                            )
+                        )
+
+                        p_ws.commit_operations(tx_ops, author="hcir_language_gateway", grant=grant)
             except Exception as exc:
                 logger.debug("HCIRGateway: conceptual proposition commit skipped: %s", exc)
 
@@ -233,6 +336,8 @@ class HCIRGateway:
             return self._process_cause_query(grounded)
         elif frame.query_target in ("procedure", "requirement") or frame.predicate == "requires":
             return self._process_requirement_query(grounded)
+        elif frame.query_target in ("enables", "enable") or frame.predicate == "enables":
+            return self._process_enable_query(grounded)
         elif frame.query_target == "identity":
             return self._process_identity_query(grounded)
 
@@ -602,6 +707,43 @@ class HCIRGateway:
                 support_count=0,
             )
 
+        # Check for explicit contradictions in graphs
+        contradiction_found = False
+        for g in graphs:
+            for sid in s_ids:
+                for edge in g.edges_from(sid):
+                    etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                    rel = str(edge.properties.get("relation", "")).lower()
+                    if etype == "contradicts" or rel in (
+                        f"not_{pred}",
+                        "not_is_a",
+                        "not_causes",
+                        "not_requires",
+                        "not_enables",
+                        "not_type_of",
+                        "not_a",
+                    ):
+                        if any(t in o_ids for t in edge.targets):
+                            contradiction_found = True
+                            break
+                if contradiction_found:
+                    break
+            if contradiction_found:
+                break
+
+        if contradiction_found:
+            return CognitiveEpistemicState(
+                target_predicate=pred,
+                target_subject=subj,
+                target_object=obj,
+                is_known=True,
+                raw_belief_value=False,
+                confidence=0.98,
+                uncertainty=0.02,
+                support_count=3,
+                contradiction_count=0,
+            )
+
         if pred in ("is_a", "type_of"):
             found = False
             visited = set(s_ids)
@@ -645,7 +787,7 @@ class HCIRGateway:
             )
 
         elif pred in ("causes", "enables"):
-            found = False
+            direct_found = False
             for g in graphs:
                 for sid in s_ids:
                     for edge in g.edges_from(sid):
@@ -653,27 +795,69 @@ class HCIRGateway:
                         etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
                         if etype in ("causes", "enables") or rel in ("causes", "enables"):
                             if any(t in o_ids for t in edge.targets):
-                                found = True
+                                direct_found = True
                                 break
-                    if found:
+                    if direct_found:
                         break
-                if found:
+                if direct_found:
                     break
 
+            if direct_found:
+                return CognitiveEpistemicState(
+                    target_predicate="causes",
+                    target_subject=subj,
+                    target_object=obj,
+                    is_known=True,
+                    raw_belief_value=True,
+                    confidence=0.98,
+                    uncertainty=0.02,
+                    support_count=3,
+                    contradiction_count=0,
+                )
+
+            # Check for reverse causal edge (obj causes subj)
+            reverse_found = False
+            for g in graphs:
+                for oid in o_ids:
+                    for edge in g.edges_from(oid):
+                        rel = str(edge.properties.get("relation", "")).lower()
+                        etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                        if etype in ("causes", "enables") or rel in ("causes", "enables"):
+                            if any(t in s_ids for t in edge.targets):
+                                reverse_found = True
+                                break
+                    if reverse_found:
+                        break
+                if reverse_found:
+                    break
+
+            if reverse_found:
+                return CognitiveEpistemicState(
+                    target_predicate="causes",
+                    target_subject=subj,
+                    target_object=obj,
+                    is_known=True,
+                    raw_belief_value=False,
+                    confidence=0.98,
+                    uncertainty=0.02,
+                    support_count=3,
+                    contradiction_count=0,
+                )
+
+            # Neither direct nor reverse causal relationship recorded -> open-world epistemic abstention
             return CognitiveEpistemicState(
                 target_predicate="causes",
                 target_subject=subj,
                 target_object=obj,
-                is_known=True,
-                raw_belief_value=found,
-                confidence=0.98 if found else 0.95,
-                uncertainty=0.02 if found else 0.05,
-                support_count=3 if found else 0,
+                is_known=False,
+                confidence=0.08,
+                uncertainty=0.92,
+                support_count=0,
                 contradiction_count=0,
             )
 
         elif pred == "requires":
-            found = False
+            direct_found = False
             for g in graphs:
                 for sid in s_ids:
                     for edge in g.edges_from(sid):
@@ -681,22 +865,35 @@ class HCIRGateway:
                         etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
                         if etype == "requires" or rel == "requires":
                             if any(t in o_ids for t in edge.targets):
-                                found = True
+                                direct_found = True
                                 break
-                    if found:
+                    if direct_found:
                         break
-                if found:
+                if direct_found:
                     break
 
+            if direct_found:
+                return CognitiveEpistemicState(
+                    target_predicate="requires",
+                    target_subject=subj,
+                    target_object=obj,
+                    is_known=True,
+                    raw_belief_value=True,
+                    confidence=0.98,
+                    uncertainty=0.02,
+                    support_count=3,
+                    contradiction_count=0,
+                )
+
+            # No requirement recorded -> open-world epistemic abstention
             return CognitiveEpistemicState(
                 target_predicate="requires",
                 target_subject=subj,
                 target_object=obj,
-                is_known=True,
-                raw_belief_value=found,
-                confidence=0.98 if found else 0.95,
-                uncertainty=0.02 if found else 0.05,
-                support_count=3 if found else 0,
+                is_known=False,
+                confidence=0.08,
+                uncertainty=0.92,
+                support_count=0,
                 contradiction_count=0,
             )
 
@@ -831,6 +1028,66 @@ class HCIRGateway:
 
         return CognitiveEpistemicState(
             target_predicate="requires",
+            target_subject=theme_name,
+            is_known=False,
+            confidence=0.05,
+            uncertainty=0.95,
+        )
+
+    def _process_enable_query(self, grounded: GroundedSemanticFrame) -> CognitiveEpistemicState:
+        """Resolve 'What does X enable?' queries by traversing downstream enable/cause edges."""
+        frame = grounded.frame
+        theme_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
+        theme_name = theme_ref.concept_name if theme_ref else ""
+        if not theme_name:
+            return CognitiveEpistemicState(
+                target_predicate="enables",
+                target_subject="",
+                is_known=False,
+                confidence=0.0,
+            )
+
+        p_ws = getattr(self._tiered_workspace, "persistent", None)
+        p_graph = getattr(p_ws, "graph", None)
+        graphs = [g for g in (p_graph, self._graph) if g is not None]
+        th_ids = self._find_concept_ids(theme_name)
+
+        target_found: str | None = None
+        for g in graphs:
+            for tid in th_ids:
+                for edge in g.edges_from(tid):
+                    rel = str(edge.properties.get("relation", "")).lower()
+                    etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                    if etype in ("causes", "enables") or rel in ("causes", "enables"):
+                        if edge.targets:
+                            tgt_node = g.get_node(edge.targets[0])
+                            target_found = (
+                                getattr(tgt_node, "label", None)
+                                or getattr(tgt_node, "concept_name", None)
+                                or edge.targets[0]
+                                .replace("t4_concept_", "")
+                                .replace("concept_", "")
+                            )
+                            break
+                if target_found:
+                    break
+            if target_found:
+                break
+
+        if target_found:
+            return CognitiveEpistemicState(
+                target_predicate="enables",
+                target_subject=theme_name,
+                target_object=target_found,
+                is_known=True,
+                raw_belief_value=target_found,
+                confidence=0.98,
+                uncertainty=0.02,
+                support_count=3,
+            )
+
+        return CognitiveEpistemicState(
+            target_predicate="enables",
             target_subject=theme_name,
             is_known=False,
             confidence=0.05,

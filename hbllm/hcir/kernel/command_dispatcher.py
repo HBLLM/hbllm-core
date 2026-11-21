@@ -90,6 +90,7 @@ VERB_CAPABILITY_MAP: dict[str, str] = {
     "index": "knowledge.ingest",
     "explain": "knowledge.explain",
     "describe": "knowledge.explain",
+    "define": "knowledge.explain",
     "tell": "knowledge.explain",
     "detail": "knowledge.explain",
     "summarize": "knowledge.explain",

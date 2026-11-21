@@ -339,6 +339,7 @@ def extract_propositions_from_text(
             for rel, pattern in (
                 ("causes", _CAUSES_RE),
                 ("requires", _REQUIRES_RE),
+                ("enables", _ENABLES_RE),
             ):
                 m = pattern.match(sent_clean)
                 if not m:
@@ -458,7 +459,21 @@ def commit_propositions(
                 display = term.replace("_", " ")
                 defn = ""
                 if term == prop.subject and prop.relation == "is_a":
-                    defn = f"a {prop.obj.replace('_', ' ')} ({prop.sentence[:120]})"
+                    from hbllm.hcir.language.english.realizer import MASS_NOUNS
+
+                    clean_obj = prop.obj.replace("_", " ").strip()
+                    lower_obj = clean_obj.lower()
+                    if (
+                        lower_obj in MASS_NOUNS
+                        or clean_obj[0].isupper()
+                        or lower_obj.startswith(("a ", "an ", "the "))
+                    ):
+                        art_pfx = ""
+                    elif lower_obj and lower_obj[0] in "aeiou":
+                        art_pfx = "an "
+                    else:
+                        art_pfx = "a "
+                    defn = f"{art_pfx}{clean_obj} ({prop.sentence[:120]})"
                 cnode = ConceptNode(
                     id=cid,
                     label=display,

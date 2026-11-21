@@ -197,7 +197,7 @@ class CognitiveSystem:
                         result_summary = str(receipt.result)
 
                     turn.response_text = (
-                        f"Command executed: {receipt.verb} → {receipt.capability}\n{result_summary}"
+                        result_summary if result_summary else f"Executed {receipt.verb}."
                     )
                     from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
 

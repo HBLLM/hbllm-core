@@ -125,10 +125,96 @@ CHAT_CASES: list[Case] = [
         "causal_polar_reverse", "causal", "Does crash cause overflow?", no_or_abstain, read=CAUSAL
     ),
     Case(
-        "causal_polar_unrelated", "causal", "Does friction cause crash?", no_or_abstain, read=CAUSAL
+        "causal_polar_unrelated",
+        "causal",
+        "Does friction cause crash?",
+        abstains,
+        read=CAUSAL,
+        answerable=False,
+    ),
+    Case(
+        "causal_unrelated_zero_evidence",
+        "causal",
+        "Does heat cause rust?",
+        abstains,
+        read=CAUSAL,
+        answerable=False,
     ),
     Case("requires_what", "causal", "What does encryption require?", says("key"), read=CAUSAL),
     Case("requires_polar", "causal", "Does encryption require a key?", yes, read=CAUSAL),
+    Case(
+        "causal_enable_what",
+        "causal",
+        "What does gravity enable?",
+        all_of(says("orbit"), forbids(r"command executed|knowledge\.")),
+        read="Gravity enables orbit.",
+    ),
+    # dialogue negation & belief revision
+    Case(
+        "neg_dialogue_bat_bird",
+        "negation",
+        "Is a bat a bird?",
+        no_or_abstain,
+        taught=("A bat is not a bird.",),
+    ),
+    Case(
+        "neg_dialogue_penguin_mammal",
+        "negation",
+        "Is a penguin a mammal?",
+        no_or_abstain,
+        taught=("A penguin is not a mammal.",),
+    ),
+    Case(
+        "neg_dialogue_whale_revision",
+        "negation",
+        "Is a whale a fish?",
+        no_or_abstain,
+        taught=("A whale is a fish.", "A whale is not a fish."),
+    ),
+    # imperatives without internal leaks
+    Case(
+        "imp_tell_atom",
+        "imperative",
+        "Tell me about an atom.",
+        all_of(says("unit", "matter", "atom"), forbids(r"command executed|knowledge\.")),
+        taught=("An atom is a basic unit of matter.",),
+    ),
+    Case(
+        "imp_explain_compiler",
+        "imperative",
+        "Explain compiler.",
+        all_of(says("program"), forbids(r"command executed|knowledge\.")),
+        read=TAX,
+    ),
+    Case(
+        "imp_define_feline",
+        "imperative",
+        "Define feline.",
+        all_of(says("mammal"), forbids(r"command executed|knowledge\.")),
+        taught=("A feline is a mammal.",),
+    ),
+    # article correctness
+    Case(
+        "article_oxygen_mass",
+        "article",
+        "What is oxygen?",
+        all_of(says("element"), forbids(r"\ba (?:oxygen|element)\b")),
+        read="Oxygen is an element.",
+    ),
+    Case(
+        "article_dog_animal",
+        "article",
+        "What is a dog?",
+        all_of(says("animal", "mammal"), forbids(r"\ba animal\b")),
+        read=TAX,
+    ),
+    Case(
+        "article_gandalf_proper",
+        "article",
+        "Who is Gandalf?",
+        all_of(says("wizard"), forbids(r"\b[Aa] gandalf\b")),
+        taught=("Gandalf is a wizard.",),
+    ),
     # entities: question vs assertion, known vs unknown
     Case("who_known_full", "entity", "Who is Mr. Darcy?", says("man"), taught=DARCY),
     Case("who_known_short", "entity", "Who is Darcy?", says("man"), taught=DARCY),

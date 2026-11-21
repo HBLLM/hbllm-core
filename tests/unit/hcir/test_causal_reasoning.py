@@ -214,19 +214,22 @@ class TestE2ECausalDialogue:
         sys = build_cognitive_system()
         res = sys.process_dialogue("Why focus")
         assert res.is_success is True
-        assert "knowledge.explain_why" in res.response_text
+        assert res.epistemic_state is not None
+        assert res.epistemic_state.target_predicate == "knowledge.explain_why"
         assert "spiking" in res.response_text.lower() or "focus" in res.response_text.lower()
 
     def test_e2e_how_dialogue(self) -> None:
         sys = build_cognitive_system()
         res = sys.process_dialogue("How friendship")
         assert res.is_success is True
-        assert "knowledge.explain_how" in res.response_text
+        assert res.epistemic_state is not None
+        assert res.epistemic_state.target_predicate == "knowledge.explain_how"
         assert "care" in res.response_text.lower() or "friendship" in res.response_text.lower()
 
     def test_e2e_explain_how_microscope(self) -> None:
         sys = build_cognitive_system()
         res = sys.process_dialogue("Explain how a microscope works")
         assert res.is_success is True
-        assert "knowledge.explain_how" in res.response_text
+        assert res.epistemic_state is not None
+        assert res.epistemic_state.target_predicate == "knowledge.explain_how"
         assert "microscope" in res.response_text.lower()

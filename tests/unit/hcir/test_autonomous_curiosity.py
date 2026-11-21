@@ -148,7 +148,8 @@ class TestMultiTurnCoreference:
 
         r2 = sys.process_dialogue("Why does it happen?")
         assert r2.is_success is True
-        assert "knowledge.explain_why" in r2.response_text
+        assert r2.epistemic_state is not None
+        assert r2.epistemic_state.target_predicate == "knowledge.explain_why"
         assert "focus" in r2.response_text.lower() or "spiking" in r2.response_text.lower()
 
 

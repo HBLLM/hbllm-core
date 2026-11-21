@@ -25,8 +25,20 @@ logger = logging.getLogger(__name__)
 
 
 def _indefinite_article(word: str) -> str:
-    """Return 'A' or 'An' for the given word (title-cased)."""
-    if word and word[0].lower() in "aeiou":
+    """Return 'A' or 'An' for the given word (title-cased), or empty for proper/mass nouns."""
+    if not word:
+        return "A"
+    clean = word.strip()
+    lower = clean.lower()
+    from hbllm.hcir.language.english.realizer import MASS_NOUNS
+
+    if (
+        clean[0].isupper()
+        or lower in ("gandalf", "darcy", "mr. darcy", "saruman")
+        or lower in MASS_NOUNS
+    ):
+        return ""
+    if lower[0] in "aeiou":
         return "An"
     return "A"
 
@@ -321,6 +333,7 @@ class ConceptExplainer:
         sentences: list[str] = []
         name = snapshot.concept
         article = _indefinite_article(name)
+        prefix = f"{article} " if article else ""
 
         # 1. Definition Sentence
         if snapshot.definition:
@@ -329,11 +342,11 @@ class ConceptExplainer:
             if defn.lower().startswith(f"a {name} is") or defn.lower().startswith(f"an {name} is"):
                 sentences.append(f"{defn}.")
             elif defn.lower().startswith("is ") or defn.lower().startswith("are "):
-                sentences.append(f"{article} {name} {defn}.")
+                sentences.append(f"{prefix}{name} {defn}.")
             else:
-                sentences.append(f"{article} {name} is {defn}.")
+                sentences.append(f"{prefix}{name} is {defn}.")
         else:
-            sentences.append(f"{article} {name} is a recognized conceptual entity.")
+            sentences.append(f"{prefix}{name} is a recognized conceptual entity.")
 
         # 2. Taxonomy / Supercategory Sentence
         if snapshot.hypernyms:

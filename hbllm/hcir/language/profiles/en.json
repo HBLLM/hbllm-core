@@ -64,6 +64,7 @@
       "cat": "fs.read",
       "explain": "knowledge.explain",
       "describe": "knowledge.explain",
+      "define": "knowledge.explain",
       "why": "knowledge.explain_why",
       "how": "knowledge.explain_how",
       "remember": "memory.store",
