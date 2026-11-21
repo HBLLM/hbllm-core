@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 pytest.importorskip("hypothesis")
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from plugins.developmental_adapter.blank_brain import create_blank_brain_substrate
@@ -208,7 +208,7 @@ episode_strategy = st.fixed_dictionaries(
 
 
 @given(episodes=st.lists(episode_strategy, min_size=1, max_size=20))
-@settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow], deadline=None)
+@settings(max_examples=50)
 def test_arbitrary_demonstrations_fuzzing(episodes: list[dict[str, Any]]) -> None:
     """Hypothesis formulation must not crash across randomized, arbitrary demonstration streams."""
     engine, env = _create_engine()

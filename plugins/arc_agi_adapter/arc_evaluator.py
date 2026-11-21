@@ -128,7 +128,6 @@ class InteractiveARCEvaluator:
             engine.perception_adapter = ARCPerceptionAdapter()
 
         engine.reset()
-        engine.attach_game_reference(env)
 
         obs = env.reset() if hasattr(env, "reset") else getattr(env, "frame", None)
         curr_grid = np.asarray(
@@ -137,7 +136,7 @@ class InteractiveARCEvaluator:
         )
 
         available_actions = list(getattr(env, "available_actions", [1, 2, 3, 4, 5, 6]))
-        objects = extract_arc_objects(curr_grid, engine, env)
+        objects = extract_arc_objects(curr_grid, engine)
 
         steps = 0
         total_reward = 0.0
@@ -194,7 +193,7 @@ class InteractiveARCEvaluator:
                 getattr(env, "frame", obs if isinstance(obs, np.ndarray) else curr_grid),
                 dtype=int,
             )
-            objects = extract_arc_objects(curr_grid, engine, env)
+            objects = extract_arc_objects(curr_grid, engine)
 
         return {
             "solved": solved or (hasattr(env, "is_won") and env.is_won()),

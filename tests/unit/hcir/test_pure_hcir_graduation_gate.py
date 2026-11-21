@@ -16,5 +16,5 @@ def test_pure_hcir_graduation_gate_autonomy_and_calibration() -> None:
     assert report["autonomy"]["can_retire_llm"] is True
     assert report["overall_pass_rate"] >= 0.95
     assert report["gates"]["p95_latency_lt_25ms"] is True
-    assert report["calibration"]["ece"] < 0.055
+    assert report["calibration"]["ece"] < 0.05
     assert report["calibration"]["brier_score"] < 0.10

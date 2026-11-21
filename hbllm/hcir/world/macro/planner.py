@@ -467,10 +467,6 @@ class MacroPlanSynthesizer:
                     if av_feat_val is not None:
                         av_feats.add(av_feat_val)
 
-                    if role in ("agent", "avatar"):
-                        if get_engine_state_attr(engine, "avatar_pos", None) is None:
-                            engine.avatar_pos = pos
-
                     if role == "goal" or "exit" in role or role == "candidate_goal":
                         rec_pos = get_engine_state_attr(engine, "recent_positions", set())
                         av_f = av_feats

@@ -71,7 +71,6 @@ class HCIRSymbolicWorldTheory:
     _cargo_features: set[Any] = field(default_factory=set)
     _receptacle_features: set[Any] = field(default_factory=set)
     _actuator_features: set[Any] = field(default_factory=set)
-    _vital_resource_features: set[Any] = field(default_factory=set)
     _avatar_features: set[Any] = field(default_factory=set)
     _conditional_affordances: dict[Any, ConditionalAffordance] = field(default_factory=dict)
     _feature_evidence: dict[tuple[str, Any], tuple[int, str]] = field(default_factory=dict)
@@ -988,13 +987,6 @@ class HCIRSymbolicWorldTheory:
             return self._induce_receptacle(feature_id, evidence)
         elif aff_str in (AffordanceType.ACTUATABLE.value, "actuator", "switch", "button"):
             return self._induce_actuatable(feature_id, evidence)
-        elif aff_str in (
-            AffordanceType.HOMEOTROPIC.value,
-            "vital_resource",
-            "homeotropic",
-            "resource",
-        ):
-            return self._induce_vital_resource(feature_id, evidence)
         elif aff_str in (AffordanceType.HAZARD.value, "hazard", "lethal"):
             return self._induce_impassable(feature_id, evidence or "lethal_hazard")
         else:
@@ -1021,13 +1013,6 @@ class HCIRSymbolicWorldTheory:
             return self.is_receptacle(feature_id)
         elif aff_str in (AffordanceType.ACTUATABLE.value, "actuator", "switch", "button"):
             return self.is_actuator(feature_id)
-        elif aff_str in (
-            AffordanceType.HOMEOTROPIC.value,
-            "vital_resource",
-            "homeotropic",
-            "resource",
-        ):
-            return feature_id in self._vital_resource_features
         elif aff_str in (AffordanceType.HAZARD.value, "hazard", "lethal"):
             return self.get_role(feature_id) == "hazard"
         return False
@@ -1339,32 +1324,6 @@ class HCIRSymbolicWorldTheory:
             )
             self.actuator_predicates.append(pred)
             logger.info("HCIRSymbolicWorldTheory: Induced Actuator Rule: %s", pred.describe())
-        return True
-
-    @property
-    def vital_resource_features(self) -> frozenset[Any]:
-        """Set of features confirmed as homeostatic vital replenishers (e.g. timers, health)."""
-        return frozenset(self._vital_resource_features)
-
-    def induce_vital_resource(self, feature_id: Any, evidence: Any = None) -> bool:
-        """Induce universal vital resource / homeostatic replenisher affordance."""
-        return self.induce_affordance(feature_id, AffordanceType.HOMEOTROPIC, evidence)
-
-    def _induce_vital_resource(self, feature_id: Any, evidence: Any = None) -> bool:
-        rank, ev_str = parse_evidence(evidence or "homeotropic_replenishment")
-        if feature_id not in self._vital_resource_features:
-            self._vital_resource_features.add(feature_id)
-            self._feature_evidence[("vital_resource", feature_id)] = (rank, ev_str)
-            self.bind_feature_to_role(feature_id, "vital_resource")
-            pred = CausalPredicate(
-                variable="vital_resource",
-                operator="==",
-                value=feature_id,
-                relation="vital_replenisher",
-                metadata={"evidence": ev_str, "rank": rank, "role": "vital_resource"},
-            )
-            self.record_causal_predicate(pred)
-            logger.info("HCIRSymbolicWorldTheory: Induced Vital Resource: %s", pred.describe())
         return True
 
     def induce_avatar(self, feature_id: Any, evidence: Any = None) -> bool:

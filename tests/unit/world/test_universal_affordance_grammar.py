@@ -193,30 +193,3 @@ def test_spatial_planner_blocked_nodes_alias() -> None:
     assert path[0] == start
     assert path[-1] == goal
     assert not any((r, c) in blocked for r, c in path)
-
-
-def test_vital_resource_affordance_and_induction() -> None:
-    """Verify vital resource affordance induction and querying."""
-    theory = HCIRSymbolicWorldTheory()
-    assert theory.induce_vital_resource(15, evidence="timer_boost")
-    assert 15 in theory.vital_resource_features
-    assert theory.has_affordance(15, AffordanceType.HOMEOTROPIC)
-    assert theory.has_affordance(15, "vital_resource")
-
-
-def test_action_affordance_requires_contact_and_conditional_property() -> None:
-    """Verify canonical ActionAffordance.requires_contact and ConditionalAffordance.required_property."""
-    from hbllm.hcir.world.causal.affordances import ActionAffordance, ConditionalAffordance
-    from hbllm.hcir.world.causal.predicates import CausalPredicate
-
-    aff = ActionAffordance(action_id=5, requires_contact=True)
-    assert aff.action_id == 5
-    assert aff.requires_contact is True
-
-    cond = ConditionalAffordance(
-        feature=8,
-        condition=CausalPredicate(variable="avatar_state", operator="==", value="color_match"),
-        required_property="color_match",
-    )
-    assert cond.feature == 8
-    assert cond.required_property == "color_match"

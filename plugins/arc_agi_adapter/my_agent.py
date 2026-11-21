@@ -283,7 +283,6 @@ class MyAgent(Agent):
         except Exception:
             self._trace = None
         self.current_levels_completed: int = 0
-        self.level_executed_actions: list[tuple[int, dict[str, Any] | None]] = []
 
         # Time & Stagnation Tracking per Game Instance
         self._game_start_time: float = time.time()
@@ -354,8 +353,6 @@ class MyAgent(Agent):
     ) -> None:
         self.last_grid = None
         self._grid_before_action = None
-        if not retain_dynamics or not is_new_level:
-            self.level_executed_actions.clear()
         if hasattr(self.internal_agent, "on_boundary"):
             from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
 
@@ -379,8 +376,6 @@ class MyAgent(Agent):
                     )
                 except TypeError:
                     self.internal_agent.reset_episode(retain_dynamics=retain_dynamics)
-        if hasattr(self.internal_agent, "prev_grid"):
-            self.internal_agent.prev_grid = None
 
     def is_done(self, frames: list[FrameData], latest_frame: FrameData) -> bool:
         if getattr(self, "_is_marked_done", False):
@@ -523,8 +518,6 @@ class MyAgent(Agent):
         if state_obj is GameState.NOT_PLAYED or state_name == "NOT_PLAYED":
             self.internal_agent.reset_episode(retain_dynamics=False)
             self.last_grid = None
-            if hasattr(self.internal_agent, "prev_grid"):
-                self.internal_agent.prev_grid = None
             return GameAction.RESET
 
         if state_obj is GameState.GAME_OVER or state_name == "GAME_OVER":
@@ -558,8 +551,6 @@ class MyAgent(Agent):
         if getattr(latest_frame, "full_reset", False):
             self.internal_agent.reset_episode(retain_dynamics=False)
             self.last_grid = None
-            if hasattr(self.internal_agent, "prev_grid"):
-                self.internal_agent.prev_grid = None
 
         # Game ID extraction and internal cognitive management BEFORE planning
         raw_gid = getattr(latest_frame, "game_id", None) or getattr(self, "game_id", None)
@@ -581,7 +572,7 @@ class MyAgent(Agent):
                 self._stagnation_steps = 0
                 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-                sys = build_cognitive_system(
+                cog_sys = build_cognitive_system(
                     CognitiveSystemConfig(
                         world_id=f"arc_{base_gid}",
                         instructions=self.instructions,
@@ -590,8 +581,16 @@ class MyAgent(Agent):
                         memory_dir=None,
                     )
                 )
-                self.internal_engine = sys.engine
+                try:
+                    from plugins.arc_agi_adapter.arc_perception import ARCPerceptionAdapter
+                except ImportError:
+                    from arc_perception import ARCPerceptionAdapter  # type: ignore[no-redef]
+                self.system = cog_sys
+                self.services = cog_sys.services
+                self.internal_engine = cog_sys.engine
+                self.internal_engine.perception_adapter = ARCPerceptionAdapter()
                 self.internal_agent = self.internal_engine
+                self.engine = self.internal_engine
                 self.last_grid = None
 
         grid = self._extract_grid(latest_frame, frames)
@@ -614,66 +613,11 @@ class MyAgent(Agent):
                     self.internal_engine.assimilate_feedback(
                         grid, available_actions, is_success=True
                     )
-
-                # Consolidate winning dynamic trajectory into persistent procedural memory
-                if self.level_executed_actions and self.current_game_id:
-                    clean_gid = self.current_game_id.lower().split("-")[0].strip()
-                    skill_name = f"{clean_gid}_lvl_{self.current_levels_completed}"
-                    proc_steps = []
-                    for aid, adata in self.level_executed_actions:
-                        if aid == 6 or (isinstance(adata, dict) and "x" in adata and "y" in adata):
-                            ax = int(adata["x"]) if adata and "x" in adata else 0
-                            ay = int(adata["y"]) if adata and "y" in adata else 0
-                            proc_steps.append(
-                                {
-                                    "type": "click_xy",
-                                    "x": ax,
-                                    "y": ay,
-                                }
-                            )
-                            proc_steps.append(
-                                {
-                                    "type": "click_cell",
-                                    "cell_coord": [ay, ax],
-                                }
-                            )
-                        elif adata:
-                            proc_steps.append(
-                                {
-                                    "type": "primitive_with_data",
-                                    "action_id": int(aid),
-                                    "data": adata,
-                                }
-                            )
-                        else:
-                            proc_steps.append({"type": "primitive", "action_id": int(aid)})
-
-                    if proc_steps:
-                        try:
-                            from hbllm.memory.procedural import ProceduralMemory
-
-                            # In-memory SQLite (:memory:) — absolutely zero .db files created on disk!
-                            pm = ProceduralMemory(db_path=":memory:")
-                            pm.store_skill_sync(
-                                tenant_id="arc_agi",
-                                skill_name=skill_name,
-                                trigger_pattern=f"Dynamically learned winning sequence for {clean_gid} level {self.current_levels_completed}",
-                                steps=proc_steps,
-                                source_node="MyAgent.dynamic_consolidation",
-                            )
-                            print(
-                                f"[ARC] Procedural skill dynamically consolidated: {skill_name} ({len(proc_steps)} steps)",
-                                flush=True,
-                            )
-                        except Exception as _e:
-                            logger.debug("Procedural consolidation error: %s", _e)
-                self.level_executed_actions.clear()
             else:
                 print(
                     f"[ARC] Game reset to level: {self.current_levels_completed} -> {lvl_completed} (game={self.current_game_id})",
                     flush=True,
                 )
-                self.level_executed_actions.clear()
             self.current_levels_completed = lvl_completed
             if hasattr(self.internal_agent, "current_level"):
                 self.internal_agent.current_level = lvl_completed
@@ -695,13 +639,6 @@ class MyAgent(Agent):
         else:
             self._stagnation_grid_hash = grid_hash
             self._stagnation_steps = 0
-
-        # Synchronize working level and frame state
-        self.internal_agent.last_frame_state = state_name
-        if hasattr(self.internal_agent, "current_level"):
-            self.internal_agent.current_level = lvl_completed
-        if hasattr(self.internal_agent, "spatial_cognitive_agent"):
-            self.internal_agent.spatial_cognitive_agent.current_level = lvl_completed
 
         # Synchronize environmental step limit if present in frame
         sc = getattr(latest_frame, "step_counter", None) or getattr(
@@ -726,141 +663,100 @@ class MyAgent(Agent):
 
         # Execute cognitive planning with resilient error recovery
         try:
-            if hasattr(self.internal_engine, "decide"):
-                _arc_schema = getattr(self, "action_schemas", None)
-                if _arc_schema is None:
-                    g = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
-                        getattr(self, "arc_env", None), "game", None
-                    )
-                    v_targets = []
-                    if g and hasattr(g, "actions") and g.actions:
-                        v_targets = [
-                            getattr(a, "data", None)
-                            for a in g.actions
-                            if isinstance(getattr(a, "data", None), dict)
-                            and getattr(a, "data", None)
-                        ]
-                    _arc_schema = [dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS]
-                    if v_targets:
-                        for s in _arc_schema:
-                            if s.get("action_id") == 6:
-                                s["valid_targets"] = v_targets
-                g_ctx = getattr(getattr(self, "arc_env", None), "_game", None) or getattr(
-                    getattr(self, "arc_env", None), "game", None
-                )
-                _objects = None
-                try:
-                    from plugins.arc_agi_adapter.arc_perception import extract_arc_objects
+            _arc_schema = getattr(self, "action_schemas", None) or [
+                dict(s) for s in ARC_DEFAULT_ACTION_SCHEMAS
+            ]
+            from hbllm.hcir.world.percept import (
+                ActuatorSchema,
+                EmbodiedObservation,
+                TerminalSignal,
+            )
+            from plugins.arc_agi_adapter.action_contract import (
+                ActionContract,
+                EffectKind,
+            )
 
-                    _objects = extract_arc_objects(
-                        grid,
-                        engine=self.internal_engine,
-                        game_obj=g_ctx or latest_frame,
-                    )
-                except Exception as _e:
-                    logger.debug("extract_arc_objects failed: %s", _e)
+            # C3: was the last actuation rejected by the env? (zero-motion
+            # sample must not teach dynamics — flagged into metadata)
+            if self._grid_before_action is not None and self._last_decided_action is not None:
+                _eff = ActionContract.reconcile(
+                    self._grid_before_action,
+                    grid,
+                    self._last_decided_action,
+                    action_was_available=self._action_was_available,
+                )
+                self._actuation_rejected = _eff.kind == EffectKind.ENV_REJECTED
 
-                from hbllm.hcir.world.percept import (
-                    ActuatorSchema,
-                    EmbodiedObservation,
-                    TerminalSignal,
+            is_win = bool(
+                getattr(latest_frame, "is_win", False)
+                or state_name == "WIN"
+                or state_obj is GameState.WIN
+            )
+            is_lost = bool(
+                getattr(latest_frame, "is_lost", False)
+                or state_name == "GAME_OVER"
+                or state_obj is GameState.GAME_OVER
+            )
+            _actuators = [
+                ActuatorSchema(
+                    actuator_id=str(s.get("action_id", i)),
+                    kind="point" if s.get("action_id") == 6 else "discrete",
+                    params={k: v for k, v in s.items() if k not in ("action_id", "valid_targets")},
+                    valid_targets=s.get("valid_targets"),
                 )
-                from plugins.arc_agi_adapter.action_contract import (
-                    ActionContract,
-                    EffectKind,
-                )
-
-                # C3: was the last actuation rejected by the env? (zero-motion
-                # sample must not teach dynamics — flagged into metadata)
-                if self._grid_before_action is not None and self._last_decided_action is not None:
-                    _eff = ActionContract.reconcile(
-                        self._grid_before_action,
-                        grid,
-                        self._last_decided_action,
-                        action_was_available=self._action_was_available,
-                    )
-                    self._actuation_rejected = _eff.kind == EffectKind.ENV_REJECTED
-
-                is_win = bool(
-                    getattr(latest_frame, "is_win", False)
-                    or state_name == "WIN"
-                    or state_obj is GameState.WIN
-                )
-                is_lost = bool(
-                    getattr(latest_frame, "is_lost", False)
-                    or state_name == "GAME_OVER"
-                    or state_obj is GameState.GAME_OVER
-                )
-                _actuators = [
-                    ActuatorSchema(
-                        actuator_id=str(s.get("action_id", i)),
-                        kind="point" if s.get("action_id") == 6 else "discrete",
-                        params={
-                            k: v for k, v in s.items() if k not in ("action_id", "valid_targets")
-                        },
-                        valid_targets=s.get("valid_targets"),
-                    )
-                    for i, s in enumerate(_arc_schema or [])
-                ]
-                _meta: dict[str, Any] = {}
-                if self._step_limit is not None:
-                    _meta["step_limit"] = self._step_limit
-                if self._actuation_rejected:
-                    _meta["actuation_rejected"] = True
-                obs = EmbodiedObservation(
-                    lattice=grid,
-                    entities=_objects or [],
-                    available_actions=available_actions,
-                    actuators=_actuators,
-                    terminal=TerminalSignal.SUCCESS
+                for i, s in enumerate(_arc_schema)
+            ]
+            _meta: dict[str, Any] = {}
+            if self._step_limit is not None:
+                _meta["step_limit"] = self._step_limit
+            if self._actuation_rejected:
+                _meta["actuation_rejected"] = True
+            obs = EmbodiedObservation(
+                lattice=grid,
+                available_actions=available_actions,
+                actuators=_actuators,
+                terminal=(
+                    TerminalSignal.SUCCESS
                     if is_win
-                    else (TerminalSignal.FAILURE if is_lost else None),
-                    context_id=str(
-                        self.game_id or self.current_game_id or raw_gid or "default_context"
-                    ),
-                    episode_id=str(self.current_levels_completed),
-                    metadata=_meta,
-                )
-                _t0 = __import__("time").perf_counter()
-                action_id, action_data = self.internal_engine.step(obs)
-                self._decide_latency_ms = (__import__("time").perf_counter() - _t0) * 1000.0
-                conf = 1.0
-                # WP1: no-proposal sentinel (pipeline commit rejected) -> deterministic
-                # nearest-legal fallback, surfaced via the action contract repair path.
-                if action_id is None:
-                    self._contract_violations += 1
-                    self._last_violation = "pipeline_rejected"
-                    action_id = sorted(available_actions)[0] if available_actions else 0
-                    action_data = None
-                elif action_id == 6 and (
-                    action_data is None
-                    or not isinstance(action_data, dict)
-                    or "x" not in action_data
-                    or "y" not in action_data
-                ):
-                    H, W = int(grid.shape[0]), int(grid.shape[1])
-                    fallback_x, fallback_y = W // 2, H // 2
-                    if _objects:
-                        for obj in _objects:
-                            if getattr(obj, "role", None) in ("switch", "actuator"):
-                                fallback_x, fallback_y = int(obj.grid_pos[1]), int(obj.grid_pos[0])
-                                break
-                    action_data = {"x": fallback_x, "y": fallback_y}
-                # C3: validate chosen action; repair to nearest legal on violation
-                _res = ActionContract.validate_or_repair(
-                    int(action_id),
-                    action_data,
-                    list(available_actions),
-                    (int(grid.shape[0]), int(grid.shape[1])),
-                )
-                if not _res.ok:
-                    self._contract_violations += 1
-                    self._last_violation = _res.violation
-                    if _res.repaired_action_id is not None:
-                        action_id, action_data = _res.repaired_action_id, None
-            else:
-                action_id, conf = self.internal_agent.plan_next_action(grid, available_actions)
-                action_data = getattr(self.internal_agent, "last_action_data", None)
+                    else (TerminalSignal.FAILURE if is_lost else None)
+                ),
+                context_id=str(
+                    self.game_id or self.current_game_id or raw_gid or "default_context"
+                ),
+                episode_id=str(self.current_levels_completed),
+                metadata=_meta,
+            )
+            _t0 = time.perf_counter()
+            action_id, action_data = self.internal_engine.step(obs)
+            self._decide_latency_ms = (time.perf_counter() - _t0) * 1000.0
+            conf = 1.0
+            # WP1: no-proposal sentinel (pipeline commit rejected) -> deterministic
+            # nearest-legal fallback, surfaced via the action contract repair path.
+            if action_id is None:
+                self._contract_violations += 1
+                self._last_violation = "pipeline_rejected"
+                action_id = sorted(available_actions)[0] if available_actions else 0
+                action_data = None
+            elif action_id == 6 and (
+                action_data is None
+                or not isinstance(action_data, dict)
+                or "x" not in action_data
+                or "y" not in action_data
+            ):
+                H, W = int(grid.shape[0]), int(grid.shape[1])
+                action_data = {"x": W // 2, "y": H // 2}
+            # C3: validate chosen action; repair to nearest legal on violation
+            _res = ActionContract.validate_or_repair(
+                int(action_id),
+                action_data,
+                list(available_actions),
+                (int(grid.shape[0]), int(grid.shape[1])),
+            )
+            if not _res.ok:
+                self._contract_violations += 1
+                self._last_violation = _res.violation
+                if _res.repaired_action_id is not None:
+                    action_id, action_data = _res.repaired_action_id, None
             if step_idx < 5 or step_idx % 10 == 0:
                 print(
                     f"[ARC] -> action_id={action_id} conf={conf:.3f} data={action_data}", flush=True
@@ -905,32 +801,18 @@ class MyAgent(Agent):
             and "x" in action_data
             and "y" in action_data
         ):
+            H, W = grid.shape
             if (
                 not isinstance(action_data, dict)
                 or "x" not in action_data
                 or "y" not in action_data
             ):
-                H, W = grid.shape
-                fallback_x, fallback_y = W // 2, H // 2
-                if (
-                    hasattr(self.internal_agent, "current_target_pos")
-                    and self.internal_agent.current_target_pos is not None
-                ):
-                    fallback_y, fallback_x = (
-                        int(round(self.internal_agent.current_target_pos[0])),
-                        int(round(self.internal_agent.current_target_pos[1])),
-                    )
-                elif (
-                    hasattr(self.internal_agent, "current_actor_pos")
-                    and self.internal_agent.current_actor_pos is not None
-                ):
-                    fallback_y, fallback_x = (
-                        int(round(self.internal_agent.current_actor_pos[0])),
-                        int(round(self.internal_agent.current_actor_pos[1])),
-                    )
-                coords = {"x": max(0, min(W - 1, fallback_x)), "y": max(0, min(H - 1, fallback_y))}
+                coords = {"x": max(0, min(W - 1, W // 2)), "y": max(0, min(H - 1, H // 2))}
             else:
-                coords = {"x": max(0, int(action_data["x"])), "y": max(0, int(action_data["y"]))}
+                coords = {
+                    "x": max(0, min(W - 1, int(action_data["x"]))),
+                    "y": max(0, min(H - 1, int(action_data["y"]))),
+                }
             if hasattr(act_enum, "set_data"):
                 act_enum.set_data(coords)
             act_enum.data = coords
@@ -959,17 +841,6 @@ class MyAgent(Agent):
                 self._last_violation = None
             except Exception:
                 pass
-
-        # Record executed action for episodic procedural consolidation
-        act_data_rec = (
-            coords
-            if (
-                (hasattr(act_enum, "is_complex") and act_enum.is_complex())
-                or (action_data and isinstance(action_data, dict))
-            )
-            else None
-        )
-        self.level_executed_actions.append((int(action_id), act_data_rec))
 
         return act_enum
 

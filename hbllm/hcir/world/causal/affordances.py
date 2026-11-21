@@ -25,7 +25,6 @@ class AffordanceType(str, Enum):
     RECEPTACLE = "receptacle"  # Container locus, drop-off, or target boundary
     ACTUATABLE = "actuator"  # Distal state switch / trigger / button
     HAZARD = "hazard"  # Lethal hazard / penalty zone
-    HOMEOTROPIC = "vital_resource"  # Sustenance / replenishment resource (e.g. time, energy, fuel)
 
 
 @dataclass
@@ -42,7 +41,6 @@ class ActionAffordance:
     target_param_keys: tuple[str, ...] = ("x", "y")
     is_displacement: bool = False
     delta: tuple[int, ...] | None = None
-    requires_contact: bool = False
     is_state_transform: bool = False
     is_focus_switch: bool = False
     is_undo: bool = False
@@ -64,7 +62,6 @@ class ConditionalAffordance:
     evidence: str = ""
     target_action: str = "traverse"
     prerequisite_feature: Any | None = None
-    required_property: Any | None = None
 
 
 __all__ = [

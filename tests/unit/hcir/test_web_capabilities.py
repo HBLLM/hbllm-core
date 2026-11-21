@@ -371,9 +371,7 @@ class TestWebCapabilitiesDialogue:
             res = sys.process_dialogue("search the web for quantum computing")
 
         assert res.is_success is True
-        assert (
-            res.epistemic_state is not None and res.epistemic_state.target_predicate == "web.search"
-        )
+        assert "web.search" in res.response_text
         assert "Quantum computing" in res.response_text
 
     def test_e2e_fetch_url_dialogue(self) -> None:
@@ -398,7 +396,5 @@ class TestWebCapabilitiesDialogue:
             res = sys.process_dialogue("fetch https://en.wikipedia.org/wiki/Quantum_teleportation")
 
         assert res.is_success is True
-        assert (
-            res.epistemic_state is not None and res.epistemic_state.target_predicate == "web.fetch"
-        )
+        assert "web.fetch" in res.response_text
         assert "Quantum Teleportation" in res.response_text
