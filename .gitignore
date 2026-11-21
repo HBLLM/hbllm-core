@@ -94,6 +94,8 @@ kaggle_submission/environment_files/
 !/reports/audit/
 /reports/audit/probes/
 !/reports/dev/
+!/reports/adversarial/
+/reports/adversarial/*_latest.json
 !/reports/*.md
 !/reports/*.json
 /scratch/
@@ -106,6 +108,8 @@ kaggle_submission/environment_files/
 !/reports/audit/
 /reports/audit/probes/
 !/reports/dev/
+!/reports/adversarial/
+/reports/adversarial/*_latest.json
 !/reports/*.md
 !/reports/*.json
 /bench_runs

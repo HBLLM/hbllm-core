@@ -60,6 +60,13 @@ class CognitiveSystem:
     hydrated_count: int = 0
     _loop: Any = field(default=None, init=False, repr=False)
 
+    def attach_ontology_store(self, store: Any) -> None:
+        """Attach or update a LexicalOntologyStore across language runtime and parsers."""
+        lang_rt = self.services.extensions.get("language_runtime")
+        if lang_rt is not None and hasattr(lang_rt, "attach_ontology_store"):
+            lang_rt.attach_ontology_store(store)
+        self.services.extensions["ontology_store"] = store
+
     def _execute_language_turn(self, turn: Any, lang_rt: Any, speaker: str) -> Any:
         """Execute post-parse cognitive actions (curiosity fallback & command dispatch)."""
         if not turn.is_success:
@@ -192,6 +199,20 @@ class CognitiveSystem:
                     turn.response_text = (
                         f"Command executed: {receipt.verb} → {receipt.capability}\n{result_summary}"
                     )
+                    from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
+
+                    concept_target = str(receipt.result.get("concept", receipt.verb))
+                    has_gap = "do not have" in result_summary.lower() or not receipt.result.get(
+                        "ok", True
+                    )
+                    turn.epistemic_state = CognitiveEpistemicState(
+                        target_predicate=str(receipt.capability),
+                        target_subject=concept_target,
+                        is_known=not has_gap,
+                        confidence=0.10 if has_gap else 0.94,
+                        uncertainty=0.90 if has_gap else 0.06,
+                        support_count=1 if not has_gap else 0,
+                    )
                 else:
                     turn.response_text = f"Command '{receipt.verb}' failed: {receipt.error}"
                     turn.is_success = False
@@ -245,9 +266,17 @@ class CognitiveSystem:
         # 1. Native non-LLM HCIR Language Runtime (A16/A17)
         lang_rt = self.services.extensions.get("language_runtime")
         if lang_rt is None:
+            ont_store = self.services.extensions.get("ontology_store")
+            if ont_store is None and self.config.memory_dir is None:
+                from hbllm.hcir.language.ontology_store import LexicalOntologyStore
+
+                ont_store = LexicalOntologyStore(":memory:")
+                self.services.extensions["ontology_store"] = ont_store
+
             lang_rt = MultilingualLanguageRuntime(
                 self.workspace.graph,
                 workspace=self.workspace,
+                ontology_store=ont_store,
             )
             # Wire tiered_workspace into the gateway for epistemic prior lookups
             if self.tiered_workspace is not None:

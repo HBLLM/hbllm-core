@@ -128,9 +128,26 @@ class EnglishLexicon:
         for adv in ["please", "kindly", "not"]:
             self.add_entry(EnglishLexicalEntry(lemma=adv, pos=EnglishPOS.ADV))
 
-        # Pronouns
-        for pron in ["it", "them", "me", "us", "you", "i", "what", "where"]:
-            pos = EnglishPOS.WH if pron in ("what", "where") else EnglishPOS.PRON
+        # Pronouns & Wh-words
+        for pron in [
+            "it",
+            "them",
+            "me",
+            "us",
+            "you",
+            "i",
+            "what",
+            "where",
+            "who",
+            "why",
+            "how",
+            "which",
+        ]:
+            pos = (
+                EnglishPOS.WH
+                if pron in ("what", "where", "who", "why", "how", "which")
+                else EnglishPOS.PRON
+            )
             self.add_entry(EnglishLexicalEntry(lemma=pron, pos=pos))
 
         # Auxiliary verbs
@@ -188,6 +205,22 @@ class EnglishLexicon:
             "telescope": "telescope",
             "algorithm": "algorithm",
             "computer": "computer",
+            "dog": "dog",
+            "cat": "cat",
+            "mammal": "mammal",
+            "animal": "animal",
+            "compiler": "compiler",
+            "program": "program",
+            "overflow": "overflow",
+            "crash": "crash",
+            "friction": "friction",
+            "heat": "heat",
+            "encryption": "encryption",
+            "key": "key",
+            "man": "man",
+            "woman": "woman",
+            "person": "person",
+            "whale": "whale",
         }
         for noun, pred in nouns.items():
             self.add_entry(

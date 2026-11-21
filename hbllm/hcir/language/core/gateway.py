@@ -225,6 +225,17 @@ class HCIRGateway:
     def process_query(self, grounded: GroundedSemanticFrame) -> CognitiveEpistemicState:
         """Query HCIR world model and epistemics for a grounded question."""
         frame = grounded.frame
+
+        # 0. Specialized query routing
+        if frame.query_target == "verification":
+            return self._process_verification_query(grounded)
+        elif frame.query_target == "cause":
+            return self._process_cause_query(grounded)
+        elif frame.query_target in ("procedure", "requirement") or frame.predicate == "requires":
+            return self._process_requirement_query(grounded)
+        elif frame.query_target == "identity":
+            return self._process_identity_query(grounded)
+
         target_role = (
             ThematicRole.THEME
             if frame.get_role(ThematicRole.THEME) is not None
@@ -447,6 +458,460 @@ class HCIRGateway:
             target_predicate=frame.predicate,
             target_subject=subject_name,
             is_known=False,
+        )
+
+    # ── Specialized Conceptual Query Processors ───────────────────────
+
+    def _find_concept_ids(self, name: str) -> set[str]:
+        """Find matching ConceptNode IDs across persistent, brain, and working graphs."""
+        p_ws = getattr(self._tiered_workspace, "persistent", None)
+        p_graph = getattr(p_ws, "graph", None)
+        b_ws = getattr(self._tiered_workspace, "brain", None)
+        b_graph = getattr(b_ws, "graph", None)
+        graphs = [g for g in (p_graph, b_graph, self._graph) if g is not None]
+
+        clean = name.lower().strip().replace(" ", "_")
+        ids: set[str] = set()
+        cand_ids = {f"t4_concept_{clean}", f"concept_{clean}", clean}
+        for g in graphs:
+            for cid in cand_ids:
+                if g.get_node(cid) is not None:
+                    ids.add(cid)
+            for node in g.all_nodes():
+                lbl = (
+                    (getattr(node, "label", "") or getattr(node, "concept_name", "") or "")
+                    .lower()
+                    .strip()
+                )
+                if lbl == clean or lbl == clean.replace("_", " "):
+                    ids.add(node.id)
+        return ids
+
+    def _process_verification_query(
+        self, grounded: GroundedSemanticFrame
+    ) -> CognitiveEpistemicState:
+        """Process verification / yes-no queries for both physical entities and conceptual knowledge."""
+        frame = grounded.frame
+        target_role = (
+            ThematicRole.THEME
+            if frame.get_role(ThematicRole.THEME) is not None
+            else (
+                ThematicRole.AGENT
+                if frame.get_role(ThematicRole.AGENT) is not None
+                else ThematicRole.THEME
+            )
+        )
+        object_role = (
+            ThematicRole.PATIENT
+            if frame.get_role(ThematicRole.PATIENT) is not None
+            else (
+                ThematicRole.LOCATION
+                if frame.get_role(ThematicRole.LOCATION) is not None
+                else (
+                    ThematicRole.DESTINATION
+                    if frame.get_role(ThematicRole.DESTINATION) is not None
+                    else ThematicRole.PATIENT
+                )
+            )
+        )
+        entity_id = grounded.grounded_entities.get(target_role)
+        object_id = grounded.grounded_entities.get(object_role)
+
+        subject_ref = frame.get_role(target_role)
+        subject_name = (
+            subject_ref.concept_name if (subject_ref and subject_ref.concept_name) else "entity"
+        )
+        object_ref = frame.get_role(object_role)
+        expected_object_name = (
+            object_ref.concept_name if (object_ref and object_ref.concept_name) else ""
+        )
+        pred = frame.predicate or "is_a"
+
+        # Case 1: Physical / Spatial verification
+        if entity_id and (object_id or expected_object_name):
+            ent_node = self._graph.get_node(entity_id)
+            ent_props: dict[str, Any] = (
+                ent_node.properties
+                if hasattr(ent_node, "properties") and isinstance(ent_node.properties, dict)
+                else getattr(ent_node, "observed_properties", {})
+            )
+            is_connected = False
+            for edge in self._graph.edges_from(entity_id):
+                if object_id and object_id in edge.targets:
+                    is_connected = True
+                    break
+                for target_id in edge.targets:
+                    target_node = self._graph.get_node(target_id)
+                    if (
+                        isinstance(target_node, PhysicalEntityNode)
+                        and target_node.entity_type == expected_object_name
+                    ):
+                        is_connected = True
+                        break
+            if not is_connected and expected_object_name:
+                if str(ent_props.get("location", "")).lower() == expected_object_name.lower():
+                    is_connected = True
+
+            return CognitiveEpistemicState(
+                target_predicate=pred or "located_on",
+                target_subject=subject_name,
+                target_object=expected_object_name,
+                confidence=0.96 if is_connected else 0.92,
+                uncertainty=0.04 if is_connected else 0.08,
+                support_count=3 if is_connected else 2,
+                contradiction_count=0,
+                is_known=True,
+                raw_belief_value=is_connected,
+            )
+
+        # Case 2: Conceptual verification
+        return self._verify_conceptual_relation(subject_name, expected_object_name, pred)
+
+    def _verify_conceptual_relation(
+        self, subj: str, obj: str, pred: str
+    ) -> CognitiveEpistemicState:
+        """Verify conceptual relations (taxonomy, causality, requirements) over HCIR knowledge graphs."""
+        s_clean = subj.lower().strip().replace(" ", "_")
+        o_clean = obj.lower().strip().replace(" ", "_")
+
+        p_ws = getattr(self._tiered_workspace, "persistent", None)
+        p_graph = getattr(p_ws, "graph", None)
+        b_ws = getattr(self._tiered_workspace, "brain", None)
+        b_graph = getattr(b_ws, "graph", None)
+        graphs = [g for g in (p_graph, b_graph, self._graph) if g is not None]
+
+        s_ids = self._find_concept_ids(s_clean)
+        o_ids = self._find_concept_ids(o_clean)
+
+        has_s_ont = bool(
+            self._ontology_store is not None and self._ontology_store.has_word(s_clean)
+        )
+        has_o_ont = bool(
+            self._ontology_store is not None and self._ontology_store.has_word(o_clean)
+        )
+
+        # Unknown concepts -> Abstain
+        if (not s_ids and not has_s_ont) or (not o_ids and not has_o_ont):
+            return CognitiveEpistemicState(
+                target_predicate=pred,
+                target_subject=subj,
+                target_object=obj,
+                is_known=False,
+                confidence=0.05,
+                uncertainty=0.95,
+                support_count=0,
+            )
+
+        if pred in ("is_a", "type_of"):
+            found = False
+            visited = set(s_ids)
+            queue = list(s_ids)
+            while queue:
+                curr = queue.pop(0)
+                if curr in o_ids:
+                    found = True
+                    break
+                for g in graphs:
+                    for edge in g.edges_from(curr):
+                        rel = str(edge.properties.get("relation", "")).lower()
+                        etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                        if etype in ("generalizes", "supports") or rel in ("is_a", "type_of"):
+                            for target_id in edge.targets:
+                                if target_id not in visited:
+                                    visited.add(target_id)
+                                    queue.append(target_id)
+
+            if not found and self._ontology_store is not None:
+                try:
+                    hyps = {
+                        h.lower().replace("_", " ")
+                        for h in self._ontology_store.get_hypernyms(s_clean)
+                    }
+                    if o_clean.replace("_", " ") in hyps:
+                        found = True
+                except Exception as exc:
+                    logger.debug("HCIRGateway: ontology hypernym verification error: %s", exc)
+
+            return CognitiveEpistemicState(
+                target_predicate="is_a",
+                target_subject=subj,
+                target_object=obj,
+                is_known=True,
+                raw_belief_value=found,
+                confidence=0.98 if found else 0.95,
+                uncertainty=0.02 if found else 0.05,
+                support_count=3 if found else 0,
+                contradiction_count=0,
+            )
+
+        elif pred in ("causes", "enables"):
+            found = False
+            for g in graphs:
+                for sid in s_ids:
+                    for edge in g.edges_from(sid):
+                        rel = str(edge.properties.get("relation", "")).lower()
+                        etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                        if etype in ("causes", "enables") or rel in ("causes", "enables"):
+                            if any(t in o_ids for t in edge.targets):
+                                found = True
+                                break
+                    if found:
+                        break
+                if found:
+                    break
+
+            return CognitiveEpistemicState(
+                target_predicate="causes",
+                target_subject=subj,
+                target_object=obj,
+                is_known=True,
+                raw_belief_value=found,
+                confidence=0.98 if found else 0.95,
+                uncertainty=0.02 if found else 0.05,
+                support_count=3 if found else 0,
+                contradiction_count=0,
+            )
+
+        elif pred == "requires":
+            found = False
+            for g in graphs:
+                for sid in s_ids:
+                    for edge in g.edges_from(sid):
+                        rel = str(edge.properties.get("relation", "")).lower()
+                        etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                        if etype == "requires" or rel == "requires":
+                            if any(t in o_ids for t in edge.targets):
+                                found = True
+                                break
+                    if found:
+                        break
+                if found:
+                    break
+
+            return CognitiveEpistemicState(
+                target_predicate="requires",
+                target_subject=subj,
+                target_object=obj,
+                is_known=True,
+                raw_belief_value=found,
+                confidence=0.98 if found else 0.95,
+                uncertainty=0.02 if found else 0.05,
+                support_count=3 if found else 0,
+                contradiction_count=0,
+            )
+
+        return CognitiveEpistemicState(
+            target_predicate=pred,
+            target_subject=subj,
+            target_object=obj,
+            is_known=False,
+            confidence=0.1,
+            uncertainty=0.9,
+        )
+
+    def _process_cause_query(self, grounded: GroundedSemanticFrame) -> CognitiveEpistemicState:
+        """Resolve 'What causes X?' queries by traversing upstream causal edges."""
+        frame = grounded.frame
+        patient_ref = frame.get_role(ThematicRole.PATIENT) or frame.get_role(ThematicRole.THEME)
+        patient_name = patient_ref.concept_name if patient_ref else ""
+        if not patient_name:
+            return CognitiveEpistemicState(
+                target_predicate="causes",
+                target_subject="",
+                is_known=False,
+                confidence=0.0,
+            )
+
+        p_ws = getattr(self._tiered_workspace, "persistent", None)
+        p_graph = getattr(p_ws, "graph", None)
+        graphs = [g for g in (p_graph, self._graph) if g is not None]
+        pat_ids = self._find_concept_ids(patient_name)
+
+        cause_found: str | None = None
+        for g in graphs:
+            for edge in g.all_edges():
+                rel = str(edge.properties.get("relation", "")).lower()
+                etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                if etype == "causes" or rel == "causes":
+                    if any(t in pat_ids for t in edge.targets):
+                        if edge.sources:
+                            src_node = g.get_node(edge.sources[0])
+                            cause_found = (
+                                getattr(src_node, "label", None)
+                                or getattr(src_node, "concept_name", None)
+                                or edge.sources[0]
+                                .replace("t4_concept_", "")
+                                .replace("concept_", "")
+                            )
+                            break
+            if cause_found:
+                break
+
+        if cause_found:
+            return CognitiveEpistemicState(
+                target_predicate="causes",
+                target_subject=cause_found,
+                target_object=patient_name,
+                is_known=True,
+                raw_belief_value=cause_found,
+                confidence=0.98,
+                uncertainty=0.02,
+                support_count=3,
+            )
+
+        prior = self._lookup_epistemic_prior(patient_name, query_target="cause")
+        if prior is not None:
+            return prior
+
+        return CognitiveEpistemicState(
+            target_predicate="causes",
+            target_subject=patient_name,
+            is_known=False,
+            confidence=0.05,
+            uncertainty=0.95,
+        )
+
+    def _process_requirement_query(
+        self, grounded: GroundedSemanticFrame
+    ) -> CognitiveEpistemicState:
+        """Resolve 'What does X require?' queries by traversing downstream requirement edges."""
+        frame = grounded.frame
+        theme_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
+        theme_name = theme_ref.concept_name if theme_ref else ""
+        if not theme_name:
+            return CognitiveEpistemicState(
+                target_predicate="requires",
+                target_subject="",
+                is_known=False,
+                confidence=0.0,
+            )
+
+        p_ws = getattr(self._tiered_workspace, "persistent", None)
+        p_graph = getattr(p_ws, "graph", None)
+        graphs = [g for g in (p_graph, self._graph) if g is not None]
+        th_ids = self._find_concept_ids(theme_name)
+
+        req_found: str | None = None
+        for g in graphs:
+            for tid in th_ids:
+                for edge in g.edges_from(tid):
+                    rel = str(edge.properties.get("relation", "")).lower()
+                    etype = getattr(edge.edge_type, "value", str(edge.edge_type)).lower()
+                    if etype == "requires" or rel == "requires":
+                        if edge.targets:
+                            tgt_node = g.get_node(edge.targets[0])
+                            req_found = (
+                                getattr(tgt_node, "label", None)
+                                or getattr(tgt_node, "concept_name", None)
+                                or edge.targets[0]
+                                .replace("t4_concept_", "")
+                                .replace("concept_", "")
+                            )
+                            break
+                if req_found:
+                    break
+            if req_found:
+                break
+
+        if req_found:
+            return CognitiveEpistemicState(
+                target_predicate="requires",
+                target_subject=theme_name,
+                target_object=req_found,
+                is_known=True,
+                raw_belief_value=req_found,
+                confidence=0.98,
+                uncertainty=0.02,
+                support_count=3,
+            )
+
+        prior = self._lookup_epistemic_prior(theme_name, query_target="procedure")
+        if prior is not None:
+            return prior
+
+        return CognitiveEpistemicState(
+            target_predicate="requires",
+            target_subject=theme_name,
+            is_known=False,
+            confidence=0.05,
+            uncertainty=0.95,
+        )
+
+    def _process_identity_query(self, grounded: GroundedSemanticFrame) -> CognitiveEpistemicState:
+        """Resolve 'Who is X?' identity queries against EvidenceNodes and ConceptNodes."""
+        frame = grounded.frame
+        theme_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
+        theme_name = theme_ref.concept_name if theme_ref else ""
+        if not theme_name:
+            return CognitiveEpistemicState(
+                target_predicate="identity",
+                target_subject="",
+                is_known=False,
+                confidence=0.0,
+            )
+
+        id_clean = theme_name.lower().strip().replace(" ", "_")
+        clean_space = id_clean.replace("_", " ")
+        p_ws = getattr(self._tiered_workspace, "persistent", None)
+        p_graph = getattr(p_ws, "graph", None)
+        graphs = [g for g in (p_graph, self._graph) if g is not None]
+
+        identity_found: str | None = None
+        for g in graphs:
+            for node in g.all_nodes():
+                lbl = (
+                    getattr(node, "label", "") or getattr(node, "concept_name", "") or ""
+                ).lower()
+                nid = node.id.lower()
+                if (
+                    clean_space in lbl
+                    or lbl in clean_space
+                    or id_clean in lbl
+                    or lbl in id_clean
+                    or id_clean in nid
+                ):
+                    defn = getattr(node, "definition", "")
+                    if defn:
+                        identity_found = defn
+                        break
+            if identity_found:
+                break
+
+        if not identity_found:
+            for node in self._graph.all_nodes():
+                tags = getattr(node, "tags", [])
+                methodology = getattr(node, "methodology", "")
+                if any(
+                    clean_space in str(t).lower()
+                    or str(t).lower() in clean_space
+                    or id_clean in str(t).lower()
+                    for t in tags
+                ):
+                    if "is_a" in methodology:
+                        identity_found = methodology.split("is_a")[-1].strip()
+                        break
+
+        if identity_found:
+            clean_id = identity_found
+            if "(" in clean_id and ")" in clean_id:
+                clean_id = clean_id.split("(")[1].split(")")[0].strip()
+            return CognitiveEpistemicState(
+                target_predicate="identity",
+                target_subject=theme_name,
+                target_object=clean_id,
+                is_known=True,
+                raw_belief_value=clean_id,
+                confidence=0.98,
+                uncertainty=0.02,
+                support_count=3,
+            )
+
+        return CognitiveEpistemicState(
+            target_predicate="identity",
+            target_subject=theme_name,
+            is_known=False,
+            confidence=0.05,
+            uncertainty=0.95,
         )
 
     # ── Epistemic Prior Lookup ────────────────────────────────────────

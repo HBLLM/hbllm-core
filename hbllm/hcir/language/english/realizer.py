@@ -51,8 +51,85 @@ class EnglishRealizer:
         elif pred in ("near", "located_near", "located_beside"):
             prep = "near"
 
-        # 0. Definition, Causal, and Procedural discourse answers
-        if pred in ("definition", "causes", "requires") and obj:
+        # 0. Specialized identity, causal, and requirement answers
+        if pred == "identity" and obj:
+            return f"{obj}." if not obj.endswith(".") else obj
+
+        if pred in ("causes", "enables") and obj:
+            if original_frame and original_frame.query_target == "cause":
+                return f"{subj.capitalize()} causes {obj}."
+            if ("." in obj or "\n" in obj) and len(obj) > 30:
+                return obj
+
+        if pred == "requires" and obj:
+            if original_frame and original_frame.query_target in ("procedure", "requirement"):
+                if ("." in obj or "\n" in obj) and len(obj) > 30:
+                    return obj
+                return f"To operate or function, {subj} fundamentally requires {obj}."
+
+        # 1. Unknown / Insufficient Evidence
+        if level == EpistemicVerbalizationLevel.INSUFFICIENT_EVIDENCE:
+            if original_frame and original_frame.query_target == "location":
+                return f"I do not have enough evidence to determine where the {subj} is."
+            elif original_frame and original_frame.query_target == "property":
+                clean_pred = (pred or "").replace("property_", "").replace("_property", "")
+                if clean_pred and clean_pred not in ("property", "state", ""):
+                    return f"I do not know the {clean_pred} of the {subj}."
+                return f"I do not know what a {subj} is."
+            elif original_frame and original_frame.query_target == "identity":
+                return f"I do not know who {subj} is."
+            elif original_frame and original_frame.query_target == "verification":
+                if pred in ("causes", "enables"):
+                    return (
+                        f"I do not have enough evidence to determine whether {subj} causes {obj}."
+                    )
+                elif pred == "requires":
+                    return (
+                        f"I do not have enough evidence to determine whether {subj} requires {obj}."
+                    )
+                elif pred in ("is_a", "type_of"):
+                    return f"I do not have enough evidence to determine whether {subj} is a {obj}."
+                return f"I do not have enough evidence to determine whether the {subj} is {prep} the {obj}."
+            return f"I do not have enough evidence to determine the state of the {subj}."
+
+        # 2. Contradiction
+        if level == EpistemicVerbalizationLevel.CONTRADICTED:
+            return f"There is conflicting evidence regarding the {subj}."
+
+        # 3. Verification (Yes/No answer)
+        if original_frame and original_frame.query_target == "verification":
+            if epistemic_state.raw_belief_value is True:
+                if pred in ("is_a", "type_of"):
+                    art_s = self._indefinite_article(subj).lower()
+                    art_o = self._indefinite_article(obj).lower()
+                    return f"Yes, {art_s} {subj} is {art_o} {obj}."
+                elif pred in ("causes", "enables"):
+                    return f"Yes, {subj} causes {obj}."
+                elif pred == "requires":
+                    art_o = self._indefinite_article(obj).lower()
+                    return f"Yes, {subj} requires a {obj}."
+                else:
+                    if level == EpistemicVerbalizationLevel.CERTAIN:
+                        return f"Yes, the {subj} is {prep} the {obj}."
+                    elif level == EpistemicVerbalizationLevel.PROBABLE:
+                        return f"Yes, the {subj} is probably {prep} the {obj}."
+                    else:
+                        return f"I think the {subj} may be {prep} the {obj}."
+            else:
+                if pred in ("is_a", "type_of"):
+                    art_s = self._indefinite_article(subj).lower()
+                    art_o = self._indefinite_article(obj).lower()
+                    return f"No, {art_s} {subj} is not {art_o} {obj}."
+                elif pred in ("causes", "enables"):
+                    return f"No, {subj} does not cause {obj}."
+                elif pred == "requires":
+                    art_o = self._indefinite_article(obj).lower()
+                    return f"No, {subj} does not require a {obj}."
+                else:
+                    return f"No, the {subj} is not {prep} the {obj}."
+
+        # 4. Definition and taxonomic discourse answers
+        if pred in ("definition", "is_a") and obj:
             # If obj is a multi-sentence explanation or paragraph, return it directly
             if ("." in obj or "\n" in obj) and len(obj) > 30:
                 return obj
@@ -65,30 +142,6 @@ class EnglishRealizer:
                 return f"I believe {article.lower()} {subj} is {obj}."
             else:
                 return f"From what I know, {article.lower()} {subj} may be described as {obj}."
-
-        # 1. Unknown / Insufficient Evidence
-        if level == EpistemicVerbalizationLevel.INSUFFICIENT_EVIDENCE:
-            if original_frame and original_frame.query_target == "location":
-                return f"I do not have enough evidence to determine where the {subj} is."
-            elif original_frame and original_frame.query_target == "property":
-                return f"I do not know the {pred} of the {subj}."
-            return f"I do not have enough evidence to determine the state of the {subj}."
-
-        # 2. Contradiction
-        if level == EpistemicVerbalizationLevel.CONTRADICTED:
-            return f"There is conflicting evidence regarding the {subj}."
-
-        # 3. Verification (Yes/No answer)
-        if original_frame and original_frame.query_target == "verification":
-            if epistemic_state.raw_belief_value is True:
-                if level == EpistemicVerbalizationLevel.CERTAIN:
-                    return f"Yes, the {subj} is {prep} the {obj}."
-                elif level == EpistemicVerbalizationLevel.PROBABLE:
-                    return f"Yes, the {subj} is probably {prep} the {obj}."
-                else:
-                    return f"I think the {subj} may be {prep} the {obj}."
-            else:
-                return f"No, the {subj} is not {prep} the {obj}."
 
         # 4. Property Query ("What color is the ball?")
         if original_frame and original_frame.query_target == "property" or pred == "color":

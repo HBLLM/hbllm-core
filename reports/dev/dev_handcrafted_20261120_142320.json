@@ -1,0 +1,1261 @@
+{
+  "git_sha": "ce3be3f277cecd68d2199280ec326c5890543a03",
+  "config_hash": "14543fb1164029d1",
+  "timestamp": "20261120_142320",
+  "split": "dev",
+  "eval_tag": null,
+  "tasks": [
+    {
+      "task_id": "grid_nav_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 17,
+      "max_budget": 100,
+      "seed_count": 20,
+      "steps_to_first_success": 25,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 4,
+      "exploration_deaths": 4,
+      "p50_latency_ms": 30.74,
+      "p95_latency_ms": 108.28,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        25,
+        17,
+        17,
+        17,
+        17
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          false,
+          true,
+          false,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false
+        ],
+        "steps_per_seed": [
+          25,
+          39,
+          14,
+          20,
+          23,
+          21,
+          27,
+          25,
+          23,
+          16,
+          1,
+          48,
+          27,
+          23,
+          22,
+          22,
+          21,
+          16,
+          12,
+          1
+        ],
+        "solve_rate": 0.8,
+        "wilson_95_ci": [
+          0.584,
+          0.9193
+        ],
+        "total_deaths": 4,
+        "death_rate": 0.2,
+        "exploration_deaths": 4,
+        "exploration_death_rate": 0.2,
+        "success": true,
+        "steps": 21
+      },
+      "same_layout_replay": {
+        "seed": 10,
+        "success": true,
+        "final_steps": 17,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          25,
+          17,
+          17,
+          17,
+          17
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 10,
+        "success": true,
+        "final_steps": 17,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          25,
+          17,
+          17,
+          17,
+          17
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 18,
+        "oracle_success": true,
+        "oracle_steps": 18
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          25,
+          13,
+          8,
+          8,
+          9,
+          7,
+          12,
+          11,
+          14,
+          13,
+          13,
+          17,
+          18,
+          13,
+          16,
+          15,
+          13,
+          10,
+          8,
+          12
+        ],
+        "solve_rate": 1.0,
+        "solve_rate_wilson_95_ci": [
+          0.8389,
+          1.0
+        ],
+        "transfer_solve_rate": 1.0,
+        "transfer_wilson_95_ci": [
+          0.8318,
+          1.0
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 20
+      }
+    },
+    {
+      "task_id": "grid_push_dev_system_handcrafted",
+      "family": "grid",
+      "split": "dev",
+      "steps": 6,
+      "max_budget": 100,
+      "seed_count": 20,
+      "steps_to_first_success": 11,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "p50_latency_ms": 19.54,
+      "p95_latency_ms": 47.74,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        11,
+        6,
+        6,
+        6,
+        6
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps_per_seed": [
+          11,
+          18,
+          17,
+          20,
+          11,
+          14,
+          31,
+          100,
+          22,
+          18,
+          18,
+          15,
+          19,
+          16,
+          13,
+          13,
+          21,
+          15,
+          24,
+          21
+        ],
+        "solve_rate": 0.95,
+        "wilson_95_ci": [
+          0.7639,
+          0.9911
+        ],
+        "total_deaths": 0,
+        "death_rate": 0.0,
+        "exploration_deaths": 0,
+        "exploration_death_rate": 0.0,
+        "success": true,
+        "steps": 22
+      },
+      "same_layout_replay": {
+        "seed": 30,
+        "success": true,
+        "final_steps": 6,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          11,
+          6,
+          6,
+          6,
+          6
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 30,
+        "success": true,
+        "final_steps": 6,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          11,
+          6,
+          6,
+          6,
+          6
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 8,
+        "oracle_success": true,
+        "oracle_steps": 6
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false
+        ],
+        "steps": [
+          11,
+          7,
+          8,
+          6,
+          6,
+          4,
+          9,
+          13,
+          14,
+          12,
+          12,
+          9,
+          8,
+          8,
+          9,
+          8,
+          9,
+          11,
+          8,
+          100
+        ],
+        "solve_rate": 0.95,
+        "solve_rate_wilson_95_ci": [
+          0.7639,
+          0.9911
+        ],
+        "transfer_solve_rate": 0.9474,
+        "transfer_wilson_95_ci": [
+          0.7536,
+          0.9906
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 37
+      }
+    },
+    {
+      "task_id": "continuous_reach_dev_system_handcrafted",
+      "family": "continuous",
+      "split": "dev",
+      "steps": 25,
+      "max_budget": 60,
+      "seed_count": 20,
+      "steps_to_first_success": 32,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "p50_latency_ms": 52.7,
+      "p95_latency_ms": 149.53,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        32,
+        25,
+        25,
+        25,
+        25
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps_per_seed": [
+          32,
+          30,
+          30,
+          28,
+          29,
+          31,
+          28,
+          29,
+          60,
+          32,
+          29,
+          31,
+          31,
+          32,
+          29,
+          32,
+          30,
+          31,
+          29,
+          30
+        ],
+        "solve_rate": 0.95,
+        "wilson_95_ci": [
+          0.7639,
+          0.9911
+        ],
+        "total_deaths": 0,
+        "death_rate": 0.0,
+        "exploration_deaths": 0,
+        "exploration_death_rate": 0.0,
+        "success": true,
+        "steps": 32
+      },
+      "same_layout_replay": {
+        "seed": 50,
+        "success": true,
+        "final_steps": 25,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          32,
+          25,
+          25,
+          25,
+          25
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 50,
+        "success": true,
+        "final_steps": 25,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          32,
+          25,
+          25,
+          25,
+          25
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 29,
+        "oracle_success": true,
+        "oracle_steps": 25
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69
+        ],
+        "successes": [
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          false,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          32,
+          60,
+          26,
+          24,
+          25,
+          27,
+          24,
+          25,
+          60,
+          28,
+          25,
+          27,
+          27,
+          35,
+          26,
+          28,
+          26,
+          27,
+          25,
+          26
+        ],
+        "solve_rate": 0.9,
+        "solve_rate_wilson_95_ci": [
+          0.699,
+          0.9721
+        ],
+        "transfer_solve_rate": 0.8947,
+        "transfer_wilson_95_ci": [
+          0.6861,
+          0.9706
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 18
+      }
+    },
+    {
+      "task_id": "symbolic_rules_dev_system_handcrafted",
+      "family": "symbolic",
+      "split": "dev",
+      "steps": 14,
+      "max_budget": 80,
+      "seed_count": 20,
+      "steps_to_first_success": 20,
+      "steps_to_stable_policy": 0,
+      "success_at_budget": true,
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "p50_latency_ms": 32.99,
+      "p95_latency_ms": 156.21,
+      "errors": [],
+      "episode_successes": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "episode_steps": [
+        20,
+        14,
+        14,
+        14,
+        14
+      ],
+      "zero_shot": {
+        "n": 20,
+        "seeds": [
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps_per_seed": [
+          20,
+          19,
+          21,
+          17,
+          17,
+          16,
+          21,
+          18,
+          21,
+          21,
+          20,
+          19,
+          18,
+          19,
+          16,
+          19,
+          20,
+          17,
+          22,
+          19
+        ],
+        "solve_rate": 1.0,
+        "wilson_95_ci": [
+          0.8389,
+          1.0
+        ],
+        "total_deaths": 0,
+        "death_rate": 0.0,
+        "exploration_deaths": 0,
+        "exploration_death_rate": 0.0,
+        "success": true,
+        "steps": 19
+      },
+      "same_layout_replay": {
+        "seed": 70,
+        "success": true,
+        "final_steps": 14,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          20,
+          14,
+          14,
+          14,
+          14
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "lifelong": {
+        "seed": 70,
+        "success": true,
+        "final_steps": 14,
+        "episodes": 5,
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          20,
+          14,
+          14,
+          14,
+          14
+        ],
+        "steps_to_stable_policy": 0,
+        "total_deaths": 0,
+        "exploration_deaths": 0
+      },
+      "one_shot_imitation": {
+        "success": true,
+        "steps": 14,
+        "oracle_success": true,
+        "oracle_steps": 14
+      },
+      "cross_seed_transfer": {
+        "seeds": [
+          70,
+          71,
+          72,
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89
+        ],
+        "successes": [
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "steps": [
+          20,
+          13,
+          11,
+          11,
+          9,
+          10,
+          11,
+          12,
+          11,
+          15,
+          10,
+          13,
+          12,
+          13,
+          10,
+          9,
+          11,
+          11,
+          12,
+          13
+        ],
+        "solve_rate": 1.0,
+        "solve_rate_wilson_95_ci": [
+          0.8389,
+          1.0
+        ],
+        "transfer_solve_rate": 1.0,
+        "transfer_wilson_95_ci": [
+          0.8318,
+          1.0
+        ],
+        "total_deaths": 0,
+        "exploration_deaths": 0,
+        "skills_consolidated": 20
+      }
+    }
+  ],
+  "family_scores": {
+    "grid": 0.8359,
+    "continuous": 0.7237,
+    "symbolic": 0.8812
+  },
+  "generality_score": 0.8136,
+  "cross_seed_transfer_score": 0.9605,
+  "lifelong_generality_score": 0.8822,
+  "total_deaths": 4,
+  "exploration_deaths": 4,
+  "mean_p50_latency_ms": 33.99,
+  "mean_p95_latency_ms": 115.44,
+  "baselines": {
+    "random": {
+      "generality_score": 0.0292,
+      "zero_shot_generality_score": 0.0292,
+      "zero_shot_family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0,
+        "symbolic": 0.0875
+      },
+      "zero_shot_n_trials": 80,
+      "zero_shot_solve_rate": 0.0125,
+      "zero_shot_wilson_95_ci": [
+        0.0022,
+        0.0675
+      ],
+      "total_deaths": 11,
+      "exploration_deaths": 11,
+      "same_layout_replay_generality_score": 0.0,
+      "lifelong_generality_score": 0.0,
+      "lifelong_family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0,
+        "symbolic": 0.0
+      },
+      "family_scores": {
+        "grid": 0.0,
+        "continuous": 0.0,
+        "symbolic": 0.0875
+      },
+      "solve_rate": 0.0,
+      "lifelong_curve": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ],
+      "mean_steps_to_stable_policy": null,
+      "cross_seed_transfer": {}
+    },
+    "oracle": {
+      "generality_score": 0.8877,
+      "zero_shot_generality_score": 0.8877,
+      "zero_shot_family_scores": {
+        "grid": 0.9461,
+        "continuous": 0.7892,
+        "symbolic": 0.9278
+      },
+      "zero_shot_n_trials": 80,
+      "zero_shot_solve_rate": 1.0,
+      "zero_shot_wilson_95_ci": [
+        0.9542,
+        1.0
+      ],
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "same_layout_replay_generality_score": 0.8814,
+      "lifelong_generality_score": 0.8814,
+      "lifelong_family_scores": {
+        "grid": 0.94,
+        "continuous": 0.7917,
+        "symbolic": 0.9125
+      },
+      "family_scores": {
+        "grid": 0.9461,
+        "continuous": 0.7892,
+        "symbolic": 0.9278
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0,
+      "cross_seed_transfer": {}
+    },
+    "no_grounding": {
+      "generality_score": 0.8136,
+      "zero_shot_generality_score": 0.8136,
+      "zero_shot_family_scores": {
+        "grid": 0.8359,
+        "continuous": 0.7237,
+        "symbolic": 0.8812
+      },
+      "zero_shot_n_trials": 80,
+      "zero_shot_solve_rate": 0.925,
+      "zero_shot_wilson_95_ci": [
+        0.8459,
+        0.9652
+      ],
+      "total_deaths": 4,
+      "exploration_deaths": 4,
+      "same_layout_replay_generality_score": 0.8822,
+      "lifelong_generality_score": 0.8822,
+      "lifelong_family_scores": {
+        "grid": 0.9425,
+        "continuous": 0.7917,
+        "symbolic": 0.9125
+      },
+      "family_scores": {
+        "grid": 0.8359,
+        "continuous": 0.7237,
+        "symbolic": 0.8812
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0,
+      "cross_seed_transfer": {
+        "transfer_solve_rate": 0.9605,
+        "transfer_wilson_95_ci": [
+          0.8903,
+          0.9865
+        ]
+      }
+    },
+    "demonstration": {
+      "generality_score": 0.8686,
+      "zero_shot_generality_score": 0.8686,
+      "zero_shot_family_scores": {
+        "grid": 0.935,
+        "continuous": 0.7583,
+        "symbolic": 0.9125
+      },
+      "zero_shot_n_trials": 4,
+      "zero_shot_solve_rate": 1.0,
+      "zero_shot_wilson_95_ci": [
+        0.5101,
+        1.0
+      ],
+      "total_deaths": 0,
+      "exploration_deaths": 0,
+      "same_layout_replay_generality_score": 0.8814,
+      "lifelong_generality_score": 0.8814,
+      "lifelong_family_scores": {
+        "grid": 0.94,
+        "continuous": 0.7917,
+        "symbolic": 0.9125
+      },
+      "family_scores": {
+        "grid": 0.935,
+        "continuous": 0.7583,
+        "symbolic": 0.9125
+      },
+      "solve_rate": 1.0,
+      "lifelong_curve": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "mean_steps_to_stable_policy": 0.0,
+      "cross_seed_transfer": {}
+    }
+  },
+  "env_hash": "aec58d7269d2cd6d",
+  "zero_shot": {
+    "generality_score": 0.8136,
+    "family_scores": {
+      "grid": 0.8359,
+      "continuous": 0.7237,
+      "symbolic": 0.8812
+    },
+    "family_solve_rates": {
+      "grid": 0.875,
+      "continuous": 0.95,
+      "symbolic": 1.0
+    },
+    "family_wilson_95_ci": {
+      "grid": [
+        0.7389,
+        0.9454
+      ],
+      "continuous": [
+        0.7639,
+        0.9911
+      ],
+      "symbolic": [
+        0.8389,
+        1.0
+      ]
+    },
+    "n_trials": 80,
+    "n_solved": 74,
+    "solve_rate": 0.925,
+    "wilson_95_ci": [
+      0.8459,
+      0.9652
+    ],
+    "total_deaths": 4,
+    "death_rate": 0.05,
+    "exploration_deaths": 4,
+    "exploration_death_rate": 0.05
+  },
+  "same_layout_replay": {
+    "generality_score": 0.8822,
+    "family_scores": {
+      "grid": 0.9425,
+      "continuous": 0.7917,
+      "symbolic": 0.9125
+    },
+    "solve_rate": 1.0,
+    "mean_steps_to_stable_policy": 0.0
+  },
+  "lifelong": {
+    "generality_score": 0.8822,
+    "family_scores": {
+      "grid": 0.9425,
+      "continuous": 0.7917,
+      "symbolic": 0.9125
+    },
+    "solve_rate": 1.0,
+    "mean_steps_to_stable_policy": 0.0
+  },
+  "one_shot_imitation": {
+    "generality_score": 0.8686,
+    "family_scores": {
+      "grid": 0.935,
+      "continuous": 0.7583,
+      "symbolic": 0.9125
+    },
+    "solve_rate": 1.0
+  },
+  "cross_seed_transfer": {
+    "n_episodes": 80,
+    "n_transfer_episodes": 76,
+    "solve_rate": 0.9625,
+    "solve_rate_wilson_95_ci": [
+      0.8955,
+      0.9872
+    ],
+    "transfer_solve_rate": 0.9605,
+    "transfer_wilson_95_ci": [
+      0.8903,
+      0.9865
+    ],
+    "family_solve_rates": {
+      "grid": 0.9737,
+      "continuous": 0.8947,
+      "symbolic": 1.0
+    },
+    "family_wilson_95_ci": {
+      "grid": [
+        0.8651,
+        0.9953
+      ],
+      "continuous": [
+        0.6861,
+        0.9706
+      ],
+      "symbolic": [
+        0.8318,
+        1.0
+      ]
+    },
+    "total_deaths": 0,
+    "exploration_deaths": 0,
+    "skills_consolidated": 95
+  }
+}

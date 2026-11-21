@@ -124,6 +124,9 @@ class BaseOrthographicNormalizer:
         if low in self._common_typos:
             return self._common_typos[low]
 
+        if len(low) <= 3:
+            return token
+
         if self._is_trusted(low):
             return token
 

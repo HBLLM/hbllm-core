@@ -341,6 +341,18 @@ class EnglishSyntaxParser:
                 auxiliary=aux_tok,
             )
 
+        # Check Verb + (NP) complement ("Does overflow cause crash?", "Does encryption require a key?")
+        if idx < len(tokens) and tokens[idx].pos == EnglishPOS.VERB:
+            verb_tok = tokens[idx]
+            obj_np, _ = self.parse_noun_phrase(tokens, idx + 1)
+            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np)
+            return SentenceNode(
+                construction=ConstructionType.YES_NO_QUESTION,
+                subject=subject_np,
+                verb_phrase=vp,
+                auxiliary=aux_tok,
+            )
+
         # Check NP nominal complement ("Is Pluto a planet?")
         pred_np, _ = self.parse_noun_phrase(tokens, idx)
         if pred_np:
@@ -355,7 +367,7 @@ class EnglishSyntaxParser:
         return None
 
     def _parse_wh_question(self, tokens: list[MorphToken]) -> SentenceNode | None:
-        """Parse Wh-question: Where is the ball? / What color is the ball?"""
+        """Parse Wh-question: Where is the ball? / What causes crash? / Who is Darcy?"""
         wh_tok = tokens[0]
         idx = 1
         wh_prop: MorphToken | None = None
@@ -369,15 +381,43 @@ class EnglishSyntaxParser:
             wh_prop = tokens[idx]
             idx += 1
 
-        if idx >= len(tokens) or tokens[idx].pos != EnglishPOS.AUX:
+        if idx >= len(tokens):
+            return None
+
+        # Check Wh + Main Verb ("What causes crash?")
+        if tokens[idx].pos == EnglishPOS.VERB:
+            verb_tok = tokens[idx]
+            obj_np, _ = self.parse_noun_phrase(tokens, idx + 1)
+            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np)
+            return SentenceNode(
+                construction=ConstructionType.WH_QUESTION,
+                subject=None,
+                verb_phrase=vp,
+                wh_word=wh_tok,
+            )
+
+        if tokens[idx].pos != EnglishPOS.AUX:
             return None
 
         aux_tok = tokens[idx]
         idx += 1
 
-        subject_np, _ = self.parse_noun_phrase(tokens, idx)
+        subject_np, next_idx = self.parse_noun_phrase(tokens, idx)
         if not subject_np:
             return None
+
+        # Check Wh + Aux + Subject + Main Verb ("What does encryption require?")
+        if next_idx < len(tokens) and tokens[next_idx].pos == EnglishPOS.VERB:
+            verb_tok = tokens[next_idx]
+            obj_np, _ = self.parse_noun_phrase(tokens, next_idx + 1)
+            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np)
+            return SentenceNode(
+                construction=ConstructionType.WH_QUESTION,
+                subject=subject_np,
+                verb_phrase=vp,
+                auxiliary=aux_tok,
+                wh_word=wh_tok,
+            )
 
         vp = VerbPhrase(head_verb=aux_tok)
         return SentenceNode(

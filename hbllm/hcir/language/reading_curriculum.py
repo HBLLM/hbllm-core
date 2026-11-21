@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 _IS_A_RE = re.compile(
-    r"^(?:the\s+|a\s+|an\s+)?([a-zA-Z][a-zA-Z0-9_-]{2,28})\s+is\s+(?:a|an)\s+(?:[a-zA-Z-]+\s+)?([a-zA-Z][a-zA-Z0-9_-]{2,28})\b",
+    r"^(?:the\s+|a\s+|an\s+)?([a-zA-Z][a-zA-Z0-9_\s-]{1,35}?)\s+(?:is|are)\s+(?:a|an)?\s*(.+)$",
     re.IGNORECASE,
 )
 _CAUSES_RE = re.compile(
@@ -38,8 +38,37 @@ _REQUIRES_RE = re.compile(
     re.IGNORECASE,
 )
 _GLOSSARY_IS_A_RE = re.compile(
-    r"^\*?\s*\*\*([a-zA-Z][a-zA-Z0-9_\s-]{2,28})\*\*:\s+(?:the\s+|a\s+|an\s+)?(?:[a-zA-Z-]+\s+)?([a-zA-Z][a-zA-Z0-9_-]{2,28})\b",
+    r"^\*?\s*\*\*([a-zA-Z0-9_\s-]{2,40})\*\*:\s*(.+)$",
     re.IGNORECASE,
+)
+_NEGATION_RE = re.compile(r"\b(?:is|are|was|were)\s+not\b|\bnever\b", re.IGNORECASE)
+_HEDGE_RE = re.compile(
+    r"\b(?:may|might|could|can)\s+(?:cause|trigger|lead|produce|require|need)\b",
+    re.IGNORECASE,
+)
+_GARBAGE_OBJ = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "if",
+        "when",
+        "must",
+        "determines",
+        "requiring",
+        "every",
+        "only",
+        "no",
+        "is",
+        "are",
+        "deep",
+        "neural",
+        "level",
+        "high",
+        "type",
+        "kind",
+        "form",
+    }
 )
 _INTRO_STRIP_RE = re.compile(
     r"^(?:however|furthermore|moreover|therefore|consequently|additionally|"
@@ -161,9 +190,29 @@ def _clean_term(raw: str) -> str:
 def _singularize_basic(term: str) -> str:
     if len(term) > 4 and term.endswith("ies"):
         return term[:-3] + "y"
-    if len(term) > 4 and term.endswith("s") and not term.endswith("ss"):
+    if len(term) >= 4 and term.endswith("s") and not term.endswith("ss"):
         return term[:-1]
     return term
+
+
+def _extract_head_from_np(np_text: str) -> str:
+    """Extract semantic head noun from noun phrase, stripping modifiers & 'type of'."""
+    m_type = re.search(
+        r"\b(?:type|kind|form|sort)\s+of\s+(?:the\s+|a\s+|an\s+)?([a-zA-Z0-9_-]+)",
+        np_text,
+        re.IGNORECASE,
+    )
+    if m_type:
+        return _singularize_basic(_clean_term(m_type.group(1)))
+    if " of " in np_text:
+        np_text = np_text.split(" of ", 1)[0]
+    words = re.findall(r"[a-zA-Z0-9_-]+", np_text)
+    content_words = [
+        w for w in words if w.lower() not in {"a", "an", "the", "this", "that", "these", "those"}
+    ]
+    if not content_words:
+        return ""
+    return _singularize_basic(_clean_term(content_words[-1]))
 
 
 def _strip_intro_clause(sent: str) -> str:
@@ -245,10 +294,28 @@ def extract_propositions_from_text(
 
     for raw_sent in _SENT_SPLIT_RE.split(text):
         raw_trimmed = raw_sent.strip()
+        # 0. Reject negated sentences and hedged causal claims
+        if _NEGATION_RE.search(raw_trimmed) or _HEDGE_RE.search(raw_trimmed):
+            continue
+
         # 1. Check structured glossary definition pattern first
         gm = _GLOSSARY_IS_A_RE.match(raw_trimmed)
         if gm:
-            _add(gm.group(1), "is_a", gm.group(2), raw_trimmed[:120])
+            term = gm.group(1).strip()
+            body = gm.group(2).strip()
+            first = body.split()[0].lower() if body.split() else ""
+            if first not in _GARBAGE_OBJ and first not in {
+                "if",
+                "determines",
+                "the",
+                "must",
+                "when",
+            }:
+                m_def = re.match(r"^(?:is\s+(?:a|an)\s+|(?:a|an)\s+)(.+)$", body, re.IGNORECASE)
+                if m_def:
+                    obj = _extract_head_from_np(m_def.group(1))
+                    if obj and obj not in _GARBAGE_OBJ:
+                        _add(_singularize_basic(_clean_term(term)), "is_a", obj, raw_trimmed[:120])
             continue
 
         sent = raw_trimmed.lstrip("#>-*` ")
@@ -260,17 +327,25 @@ def extract_propositions_from_text(
         )
 
         matched_primary = False
-        for rel, pattern in (
-            ("is_a", _IS_A_RE),
-            ("causes", _CAUSES_RE),
-            ("requires", _REQUIRES_RE),
-        ):
-            m = pattern.match(sent_clean)
-            if not m:
-                continue
-            if _add(m.group(1), rel, m.group(2), sent):
-                matched_primary = True
-            break
+        m_isa = _IS_A_RE.match(sent_clean)
+        if m_isa:
+            subj = _singularize_basic(_clean_term(m_isa.group(1)))
+            obj = _extract_head_from_np(m_isa.group(2))
+            if subj and obj and subj != obj and obj not in _GARBAGE_OBJ:
+                if _add(subj, "is_a", obj, sent):
+                    matched_primary = True
+
+        if not matched_primary:
+            for rel, pattern in (
+                ("causes", _CAUSES_RE),
+                ("requires", _REQUIRES_RE),
+            ):
+                m = pattern.match(sent_clean)
+                if not m:
+                    continue
+                if _add(m.group(1), rel, m.group(2), sent):
+                    matched_primary = True
+                break
 
         if not include_extended:
             continue

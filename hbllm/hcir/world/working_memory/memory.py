@@ -586,16 +586,8 @@ class PrefrontalWorkingMemory:
                 else y_min + (float(gr) + 0.5) * cell_h
             )
             self.continuous_goal_pos = np.array([cont_x, cont_y], dtype=float)
-        elif (
-            self.continuous_goal_pos is None
-            or float(
-                np.linalg.norm(
-                    np.asarray(self.continuous_goal_pos) - np.asarray(self.continuous_agent_pos)
-                )
-            )
-            <= 0.35
-        ):
-            self.continuous_goal_pos = None
+        # If target_rc is None (e.g. agent overlaps/occludes the goal on the discrete lattice),
+        # retain self.continuous_goal_pos so continuous servoing can reach exact convergence.
 
     def register_cardinality_constraint(
         self,

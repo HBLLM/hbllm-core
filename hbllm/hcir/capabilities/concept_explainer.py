@@ -245,9 +245,18 @@ class ConceptExplainer:
                             snapshot.requires.append(_clean_concept_name(obj_part))
                         elif concept in obj_part:
                             snapshot.required_by.append(_clean_concept_name(subj_part))
+                elif " is_a " in claim_lower or " is a " in claim_lower:
+                    parts = re.split(r"\b(?:is_a|is a)\b", claim_lower)
+                    if len(parts) == 2:
+                        subj_part, obj_part = parts[0].strip(), parts[1].strip()
+                        if concept in subj_part and obj_part:
+                            clean_hyp = _clean_concept_name(obj_part)
+                            if clean_hyp not in snapshot.hypernyms:
+                                snapshot.hypernyms.append(clean_hyp)
                 else:
-                    if claim_text not in snapshot.beliefs and len(claim_text) > 10:
-                        snapshot.beliefs.append(claim_text)
+                    clean_c = claim_text.replace("is_a", "is a").replace("_", " ")
+                    if clean_c not in snapshot.beliefs and len(clean_c) > 10:
+                        snapshot.beliefs.append(clean_c)
 
         # Inspect graph edges from persistent tier for typed relational traversal
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
@@ -372,7 +381,7 @@ class ConceptExplainer:
 
         # 5. Contextual Knowledge & Stored Beliefs
         if snapshot.beliefs:
-            first_belief = snapshot.beliefs[0].rstrip(".")
+            first_belief = snapshot.beliefs[0].rstrip(".").replace("is_a", "is a").replace("_", " ")
             sentences.append(f"Recorded knowledge notes that {first_belief}.")
 
         return " ".join(sentences)

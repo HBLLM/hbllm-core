@@ -166,6 +166,14 @@ class MultilingualLanguageRuntime:
         self._profiles: dict[str, LanguageProfile] = {}
         self._load_default_profiles()
 
+    def attach_ontology_store(self, ontology_store: Any) -> None:
+        """Attach or update the LexicalOntologyStore across parsers and gateway."""
+        self._ontology_store = ontology_store
+        self._gateway._ontology_store = ontology_store
+        for lang, parser in self._parsers.items():
+            if hasattr(parser, "_lexicon") and hasattr(parser._lexicon, "attach_ontology_store"):
+                parser._lexicon.attach_ontology_store(ontology_store)
+
     def _load_default_profiles(self) -> None:
         """Auto-discover and load declarative LanguageProfiles from profiles/."""
         if not DEFAULT_PROFILES_DIR.exists():
@@ -375,11 +383,27 @@ class MultilingualLanguageRuntime:
         # A. ASSERTION -> Ingest as EvidenceNode
         if frame.frame_type == FrameType.ASSERTION:
             evidence_node = self._gateway.process_assertion(grounded, speaker=speaker)
+            from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
+            from hbllm.hcir.language.core.semantic_frame import ThematicRole
+
+            target_subj = ""
+            ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
+            if ref is not None and ref.concept_name:
+                target_subj = str(ref.concept_name)
+            epistemic_state = CognitiveEpistemicState(
+                target_predicate=frame.predicate or "assert",
+                target_subject=target_subj,
+                confidence=0.95,
+                uncertainty=0.05,
+                support_count=1,
+                is_known=True,
+            )
             return LanguageTurnResult(
                 raw_input=text,
                 language=language,
                 semantic_frame=frame,
                 grounded_frame=grounded,
+                epistemic_state=epistemic_state,
                 is_success=True,
                 hcir_node_id=evidence_node.id,
                 response_text="Understood.",

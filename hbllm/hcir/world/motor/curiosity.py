@@ -149,8 +149,47 @@ class EpistemicCuriosityExplorer:
             # actions over spatial effectors. Ego-motion grounding is essential to discover what
             # entity on the screen moves in contingency with motor commands.
             if engine.avatar_pos is None:
+                bg = engine.estimate_background(curr_grid)
+                H, W = curr_grid.shape
+                vals, counts = np.unique(curr_grid, return_counts=True)
+                candidates: list[tuple[int, int]] = []
+                for v, c in zip(vals, counts):
+                    vf = int(v)
+                    if vf != bg and c <= 2 and not engine.symbolic_theory.is_barrier(vf):
+                        coords = np.argwhere(curr_grid == vf)
+                        for r, c_idx in coords:
+                            candidates.append((int(r), int(c_idx)))
+
                 disp_acts = [a for a in untested_at_pos if engine.is_displacement_action(a)]
-                chosen = disp_acts[0] if disp_acts else untested_at_pos[0]
+                pool = disp_acts if disp_acts else untested_at_pos
+                if candidates:
+                    deltas = engine.action_deltas
+                    scored: list[tuple[int, float]] = []
+                    for act in pool:
+                        dr, dc = deltas.get(act, (0, 0))
+                        score = 0.0
+                        for r, c_idx in candidates:
+                            nr, nc = r + dr, c_idx + dc
+                            if 0 <= nr < H and 0 <= nc < W:
+                                cell_val = int(curr_grid[nr, nc])
+                                if cell_val == bg:
+                                    score += 2.0
+                                elif (
+                                    cell_val in engine.hazard_tracker.known_lethal_features
+                                    or (nr, nc) in engine.current_context_hazards
+                                ):
+                                    score -= 10.0
+                                elif engine.symbolic_theory.is_barrier(cell_val):
+                                    score -= 5.0
+                                else:
+                                    score -= 1.0
+                            else:
+                                score -= 10.0
+                        scored.append((act, score))
+                    scored.sort(key=lambda x: x[1], reverse=True)
+                    chosen = scored[0][0]
+                else:
+                    chosen = pool[0]
             else:
                 spatial_effs = [a for a in untested_at_pos if engine.is_spatial_effector(a)]
                 if spatial_effs:
@@ -197,9 +236,57 @@ class EpistemicCuriosityExplorer:
     def _probe_motor_babble(
         engine: AutonomousEpistemicEngine,
         displacement_actions: list[int],
+        curr_grid: np.ndarray | None = None,
     ) -> EpistemicProbeProposal | None:
         """Motor babbling for self-identification and agency discovery."""
         if displacement_actions and not engine.avatar_features and engine.avatar_feature is None:
+            # If curr_grid is provided, evaluate displacement actions across candidate
+            # avatar features to prioritize stepping into free background space rather
+            # than stepping blindly into walls, hazards, or out of bounds.
+            if curr_grid is not None and curr_grid.ndim >= 2:
+                bg = engine.estimate_background(curr_grid)
+                H, W = curr_grid.shape
+                vals, counts = np.unique(curr_grid, return_counts=True)
+                candidates: list[tuple[int, int]] = []
+                for v, c in zip(vals, counts):
+                    vf = int(v)
+                    if vf != bg and c <= 2 and not engine.symbolic_theory.is_barrier(vf):
+                        coords = np.argwhere(curr_grid == vf)
+                        for r, c_idx in coords:
+                            candidates.append((int(r), int(c_idx)))
+
+                if candidates:
+                    deltas = engine.action_deltas
+                    scored_actions: list[tuple[int, float]] = []
+                    for act in displacement_actions:
+                        dr, dc = deltas.get(act, (0, 0))
+                        score = 0.0
+                        for r, c_idx in candidates:
+                            nr, nc = r + dr, c_idx + dc
+                            if 0 <= nr < H and 0 <= nc < W:
+                                cell_val = int(curr_grid[nr, nc])
+                                if cell_val == bg:
+                                    score += 2.0
+                                elif (
+                                    cell_val in engine.hazard_tracker.known_lethal_features
+                                    or (nr, nc) in engine.current_context_hazards
+                                ):
+                                    score -= 10.0
+                                elif engine.symbolic_theory.is_barrier(cell_val):
+                                    score -= 5.0
+                                else:
+                                    score -= 1.0
+                            else:
+                                score -= 10.0
+                        scored_actions.append((act, score))
+
+                    scored_actions.sort(key=lambda x: x[1], reverse=True)
+                    best_act = scored_actions[0][0]
+                    return EpistemicProbeProposal(
+                        action=best_act,
+                        exploration_mode="motor_babbling",
+                    )
+
             babble_idx = engine.context_epistemic_probes % len(displacement_actions)
             return EpistemicProbeProposal(
                 action=displacement_actions[babble_idx],
@@ -704,7 +791,7 @@ class EpistemicCuriosityExplorer:
         ]
 
         # 2b. Motor babbling for self-identification
-        babble_prop = cls._probe_motor_babble(engine, displacement_actions)
+        babble_prop = cls._probe_motor_babble(engine, displacement_actions, curr_grid=curr_grid)
         if babble_prop is not None:
             return babble_prop
 

@@ -283,7 +283,49 @@ class EnglishParser:
                     frame.set_role(ThematicRole.THEME, subject_ref)
                 return frame
 
+            elif wh_word == "who":
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate="identity",
+                    query_target="identity",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                return frame
+
             elif wh_word == "what":
+                if ast.verb_phrase and ast.verb_phrase.head_verb.lemma in (
+                    "cause",
+                    "trigger",
+                    "lead",
+                ):
+                    obj_ref = (
+                        self._np_to_reference(ast.verb_phrase.direct_object)
+                        if ast.verb_phrase.direct_object
+                        else None
+                    )
+                    frame = SemanticFrame(
+                        frame_type=FrameType.QUERY,
+                        predicate="causes",
+                        query_target="cause",
+                        metadata=meta,
+                    )
+                    if obj_ref:
+                        frame.set_role(ThematicRole.PATIENT, obj_ref)
+                    return frame
+
+                if ast.verb_phrase and ast.verb_phrase.head_verb.lemma in ("require", "need"):
+                    frame = SemanticFrame(
+                        frame_type=FrameType.QUERY,
+                        predicate="requires",
+                        query_target="procedure",
+                        metadata=meta,
+                    )
+                    if subject_ref:
+                        frame.set_role(ThematicRole.THEME, subject_ref)
+                    return frame
+
                 prop_name = ast.wh_property.lemma if ast.wh_property else "property"
                 frame = SemanticFrame(
                     frame_type=FrameType.QUERY,
@@ -353,6 +395,48 @@ class EnglishParser:
                 )
                 if subject_ref:
                     frame.set_role(ThematicRole.THEME, subject_ref)
+                return frame
+
+            # Causal verification: "Does overflow cause crash?"
+            if ast.verb_phrase and ast.verb_phrase.head_verb.lemma in ("cause", "trigger", "lead"):
+                obj_ref = (
+                    self._np_to_reference(ast.verb_phrase.direct_object)
+                    if ast.verb_phrase.direct_object
+                    else None
+                )
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate="causes",
+                    query_target="verification",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                if obj_ref:
+                    frame.set_role(ThematicRole.PATIENT, obj_ref)
+                return frame
+
+            # Requirement verification: "Does encryption require a key?"
+            if ast.verb_phrase and ast.verb_phrase.head_verb.lemma in (
+                "require",
+                "depend",
+                "need",
+            ):
+                obj_ref = (
+                    self._np_to_reference(ast.verb_phrase.direct_object)
+                    if ast.verb_phrase.direct_object
+                    else None
+                )
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate="requires",
+                    query_target="verification",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                if obj_ref:
+                    frame.set_role(ThematicRole.PATIENT, obj_ref)
                 return frame
 
             # Nominal verification: "Is Pluto a planet?"
