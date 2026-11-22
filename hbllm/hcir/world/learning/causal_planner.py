@@ -36,6 +36,8 @@ class CausalPlanningContext:
     grid_shape: tuple[int, int] = (0, 0)
     failed_transitions: set[tuple[tuple[int, int], int]] = field(default_factory=set)
     inhibited_actions: set[Any] = field(default_factory=set)
+    transition_kb: Any | None = None
+    active_state_tokens: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -223,6 +225,8 @@ class CausalTheoryPlanner:
             grid_shape=(int(curr_grid.shape[0]), int(curr_grid.shape[1])),
             failed_transitions=failed_transitions,
             inhibited_actions=inhibited_actions,
+            transition_kb=theory.transition_kb,
+            active_state_tokens=frozenset(),
         )
 
     @staticmethod
@@ -249,14 +253,34 @@ class CausalTheoryPlanner:
         grid: np.ndarray,
         context: CausalPlanningContext,
     ) -> bool:
-        """Check if a position is safe to traverse based on causal theory."""
+        """Check if a position is safe to traverse based on causal theory and transition KB."""
         r, c = pos
         if r < 0 or c < 0 or r >= context.grid_shape[0] or c >= context.grid_shape[1]:
             return False
         feat = int(grid[r, c])
         if feat in context.lethal_features:
             return False
-        if pos not in context.goal_positions:
+        is_goal = pos in context.goal_positions
+        if context.transition_kb is not None:
+            ev = context.transition_kb.evaluate_transition(
+                feat,
+                locus=pos,
+                active_state_tokens=context.active_state_tokens,
+            )
+            if ev.risk_cost >= 40.0 and ev.goal_value <= 0.0:
+                return False
+            if ev.confidence > 0.0:
+                if not is_goal and not ev.traversable:
+                    return False
+                locus_belief = context.transition_kb.get_belief(pos, scope="locus")
+                if (
+                    not is_goal
+                    and pos in context.barrier_positions
+                    and not (locus_belief is not None and ev.traversable)
+                ):
+                    return False
+                return True
+        if not is_goal:
             if pos in context.barrier_positions:
                 return False
             if feat in context.barrier_features:
@@ -287,10 +311,29 @@ class CausalTheoryPlanner:
             inter_pos = (ir, ic)
             if inter_pos in context.goal_positions:
                 continue
+            feat = int(grid[ir, ic])
+            if feat in context.lethal_features:
+                return False
+            if context.transition_kb is not None:
+                ev = context.transition_kb.evaluate_transition(
+                    feat,
+                    locus=inter_pos,
+                    active_state_tokens=context.active_state_tokens,
+                )
+                if ev.risk_cost >= 40.0 and ev.goal_value <= 0.0:
+                    return False
+                if ev.confidence > 0.0:
+                    if not ev.traversable:
+                        return False
+                    locus_belief = context.transition_kb.get_belief(inter_pos, scope="locus")
+                    if inter_pos in context.barrier_positions and not (
+                        locus_belief is not None and ev.traversable
+                    ):
+                        return False
+                    continue
             if inter_pos in context.barrier_positions:
                 return False
-            feat = int(grid[ir, ic])
-            if feat in context.barrier_features or feat in context.lethal_features:
+            if feat in context.barrier_features:
                 return False
         return True
 
@@ -301,59 +344,68 @@ class CausalTheoryPlanner:
         context: CausalPlanningContext,
         max_expansions: int = 500,
     ) -> list[int] | None:
-        """A* pathfinding using causally-discovered action dynamics and hazards.
-
-        Returns a list of action_ids forming a path from start to nearest goal,
-        or None if no path found.
-        """
+        """A* pathfinding via GridTopologyGraph.shortest_path_from_kb and TransitionKB."""
         if not context.goal_positions or not context.action_displacements:
             return None
 
-        import heapq
+        from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
+        from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
 
-        # Priority queue: (f_score, g_score, position, action_path)
-        start_h = CausalTheoryPlanner.compute_causal_heuristic(start, context)
-        open_set: list[tuple[float, int, tuple[int, int], list[int]]] = [(start_h, 0, start, [])]
-        visited: set[tuple[int, int]] = set()
-        expansions = 0
+        H, W = context.grid_shape
 
-        while open_set and expansions < max_expansions:
-            f, g, pos, path = heapq.heappop(open_set)
-            if pos in visited:
-                continue
-            visited.add(pos)
-            expansions += 1
-
-            # Check if we reached a goal
-            if pos in context.goal_positions:
-                logger.info(
-                    "CausalTheoryPlanner: Found path of %d actions (%d nodes expanded)",
-                    len(path),
-                    expansions,
+        def _eval_edge(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
+            r, c = pos
+            if r < 0 or c < 0 or r >= H or c >= W or feat in context.lethal_features:
+                return TransitionEdgeEvaluation(
+                    traversable=False,
+                    step_cost=1.0,
+                    risk_cost=50.0,
+                    goal_value=0.0,
+                    info_gain=0.0,
+                    mutates_state=False,
+                    confidence=1.0,
                 )
-                return path
+            safe = CausalTheoryPlanner.is_position_safe(pos, grid, context)
+            is_goal = pos in context.goal_positions
+            if context.transition_kb is not None:
+                ev = context.transition_kb.evaluate_transition(
+                    feat,
+                    locus=pos,
+                    active_state_tokens=context.active_state_tokens,
+                )
+                return TransitionEdgeEvaluation(
+                    traversable=safe,
+                    step_cost=float(ev.step_cost),
+                    risk_cost=float(ev.risk_cost),
+                    goal_value=(max(float(ev.goal_value), 1.0) if (is_goal and safe) else 0.0),
+                    info_gain=float(ev.info_gain),
+                    mutates_state=bool(ev.mutates_state),
+                    confidence=float(ev.confidence),
+                )
+            return TransitionEdgeEvaluation(
+                traversable=safe,
+                step_cost=1.0,
+                risk_cost=0.0,
+                goal_value=(1.0 if (is_goal and safe) else 0.0),
+                info_gain=0.0,
+                mutates_state=False,
+                confidence=1.0,
+            )
 
-            # Expand neighbors using discovered action dynamics
-            for act_id, (dr, dc) in context.action_displacements.items():
-                if act_id in context.inhibited_actions:
-                    continue
-                if (pos, act_id) in context.failed_transitions:
-                    continue
-                nr, nc = pos[0] + dr, pos[1] + dc
-                next_pos = (nr, nc)
-                if next_pos in visited:
-                    continue
-                if not CausalTheoryPlanner.is_stride_clear(pos, dr, dc, grid, context):
-                    continue
-                if not CausalTheoryPlanner.is_position_safe(next_pos, grid, context):
-                    continue
-                new_g = g + 1
-                new_h = CausalTheoryPlanner.compute_causal_heuristic(next_pos, context)
-                new_f = new_g + new_h
-                new_path = path + [act_id]
-                heapq.heappush(open_set, (new_f, new_g, next_pos, new_path))
-
-        return None
+        steps = GridTopologyGraph.shortest_path_from_kb(
+            grid,
+            start,
+            context.goal_positions,
+            context.action_displacements,
+            _eval_edge,
+            max_expansions=max_expansions,
+            failed_transitions=context.failed_transitions,
+            inhibited_actions=context.inhibited_actions,
+            allow_goal_entry=False,
+        )
+        if steps is None:
+            return None
+        return [int(act_id) for act_id, _ in steps]
 
     @staticmethod
     def plan_chained_path(
@@ -370,6 +422,27 @@ class CausalTheoryPlanner:
         direct = CausalTheoryPlanner.plan_path(start, grid, context, max_expansions=max_expansions)
         if direct is not None:
             return direct
+
+        if (
+            context.transition_kb is not None
+            and context.goal_positions
+            and context.transition_kb.query_causal_rules()
+        ):
+            from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
+
+            causal_steps = GridTopologyGraph.shortest_path_with_causal_ops(
+                grid,
+                start,
+                context.goal_positions,
+                context.action_displacements,
+                context.transition_kb,
+                initial_state_tokens=context.active_state_tokens,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
+                max_expansions=max_expansions * 2,
+            )
+            if causal_steps is not None:
+                return [int(act_id) for act_id, _ in causal_steps]
 
         if not tool_barrier_affinities or not context.goal_positions:
             return None
@@ -407,6 +480,8 @@ class CausalTheoryPlanner:
                 grid_shape=context.grid_shape,
                 failed_transitions=context.failed_transitions,
                 inhibited_actions=context.inhibited_actions,
+                transition_kb=context.transition_kb,
+                active_state_tokens=context.active_state_tokens,
             )
             path_to_tool = CausalTheoryPlanner.plan_path(
                 start, grid, stage1_context, max_expansions=max_expansions
@@ -441,6 +516,8 @@ class CausalTheoryPlanner:
                 grid_shape=context.grid_shape,
                 failed_transitions=context.failed_transitions,
                 inhibited_actions=context.inhibited_actions,
+                transition_kb=context.transition_kb,
+                active_state_tokens=context.active_state_tokens,
             )
             path_to_goal = CausalTheoryPlanner.plan_path(
                 curr_pos, grid, stage2_context, max_expansions=max_expansions
@@ -521,6 +598,8 @@ class CausalTheoryPlanner:
                 grid_shape=context.grid_shape,
                 failed_transitions=context.failed_transitions,
                 inhibited_actions=context.inhibited_actions,
+                transition_kb=context.transition_kb,
+                active_state_tokens=context.active_state_tokens,
             )
             segment_path = CausalTheoryPlanner.plan_path(
                 curr_start, grid, segment_context, max_expansions=max_expansions_per_segment

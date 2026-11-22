@@ -15,6 +15,7 @@ import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_assimilator import get_sub_attr
 from hbllm.hcir.world.cortex_causal import ActionAffordance
@@ -75,6 +76,16 @@ class EpistemicFeedbackAssimilator:
                 wf = int(view.prev_grid[r, c])
                 if wf in av:
                     continue
+                if (
+                    th.transition_kb.get_belief((r, c), scope="locus") is not None
+                    or not th.evaluate_transition(wf).traversable
+                ):
+                    th.transition_kb.record_outcome(
+                        (r, c),
+                        TransitionOutcome.TRAVERSED,
+                        scope="locus",
+                        evidence="traversal_override",
+                    )
                 if k == 0 and wf != bg_val and not th.is_walkable(wf):
                     th.mark_locus_explored((r, c), reason="traversal")
                     view.exhausted_candidate_goals.add((r, c))
@@ -1802,6 +1813,9 @@ class EpistemicFeedbackAssimilator:
                             )
                         if leading_cell_mutated:
                             view.learned_barriers.discard((adj_r, adj_c))
+                            view.symbolic_theory.transition_kb.retract_outcome(
+                                (adj_r, adj_c), TransitionOutcome.BLOCKED, scope="locus"
+                            )
                         elif (
                             0 <= adj_r < H and 0 <= adj_c < W and not possible_orthogonal_wall_slip
                         ):
@@ -1844,6 +1858,12 @@ class EpistemicFeedbackAssimilator:
                                 if val not in view.symbolic_theory.goal_features:
                                     view.learned_goal_positions.discard((adj_r, adj_c))
                                 view.record_learned_barrier((adj_r, adj_c))
+                                view.symbolic_theory.transition_kb.record_outcome(
+                                    (adj_r, adj_c),
+                                    TransitionOutcome.BLOCKED,
+                                    scope="locus",
+                                    evidence="collision",
+                                )
                             elif (
                                 not is_avatar
                                 and not is_confirmed_goal
@@ -1870,6 +1890,12 @@ class EpistemicFeedbackAssimilator:
                                             view.record_learned_barrier((adj_r, edge_c))
                                 else:
                                     view.record_learned_barrier((adj_r, adj_c))
+                                view.symbolic_theory.transition_kb.record_outcome(
+                                    (adj_r, adj_c),
+                                    TransitionOutcome.BLOCKED,
+                                    scope="locus",
+                                    evidence="collision",
+                                )
 
                                 has_discrete_non_disp = len(available_actions or []) > 4 and any(
                                     not view.is_displacement_action(a)
@@ -2358,6 +2384,12 @@ class EpistemicFeedbackAssimilator:
                         view.symbolic_theory.mark_locus_explored(
                             trigger_pos, reason="remote_mutation_triggered"
                         )
+                        view.symbolic_theory.transition_kb.record_outcome(
+                            trigger_pos,
+                            TransitionOutcome.MUTATED_STATE,
+                            scope="locus",
+                            evidence="remote_mutation_triggered",
+                        )
                         if action is not None and not view.is_displacement_action(action):
                             for oa in available_actions or ():
                                 if not view.is_displacement_action(
@@ -2369,10 +2401,21 @@ class EpistemicFeedbackAssimilator:
                                     )
                     view.mental_plan.clear()
                     mutated_set = {(int(mr), int(mc)) for mr, mc, _, _ in distant_mutations}
-                    for mr, mc in mutated_set:
+                    unlocked_rule_count = 0
+                    for mr, mc in sorted(mutated_set):
                         view.learned_barriers.discard((mr, mc))
                         view.symbolic_theory.unmark_locus_explored((mr, mc))
                         view.exhausted_candidate_goals.discard((mr, mc))
+                        view.symbolic_theory.transition_kb.retract_outcome(
+                            (mr, mc), TransitionOutcome.BLOCKED, scope="locus"
+                        )
+                        if trigger_pos is not None and unlocked_rule_count < 8:
+                            view.symbolic_theory.transition_kb.record_causal_rule(
+                                trigger_pos,
+                                f"unlocks:{(mr, mc)}",
+                                evidence="remote_mutation",
+                            )
+                            unlocked_rule_count += 1
                         for dr_m, dc_m in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
                             adj_m = (mr + dr_m, mc + dc_m)
                             for fp in [fp for fp in view.failed_transitions if fp[0] == adj_m]:
@@ -2598,6 +2641,13 @@ class EpistemicFeedbackAssimilator:
                         win_target = (gr_l, gc_l)
 
                 view.record_learned_goal(win_target)
+                if 0 <= win_target[0] < H and 0 <= win_target[1] < W:
+                    view.symbolic_theory.transition_kb.record_outcome(
+                        win_target,
+                        TransitionOutcome.TERMINAL_WIN,
+                        scope="locus",
+                        evidence=str(TerminalSignal.SUCCESS),
+                    )
                 if _prev_grid is not None and 0 <= win_target[0] < H and 0 <= win_target[1] < W:
                     goal_feat = int(_prev_grid[win_target[0], win_target[1]])
                     if (goal_feat == bg or goal_feat == _bg_feature) and _prev_grid is not None:
@@ -2789,6 +2839,13 @@ class EpistemicFeedbackAssimilator:
                     if is_direct_contact:
                         # Direct physical contact hazard at the destination cell
                         candidate_cells = {direct_feat}
+                        if direct_feat != bg:
+                            _sym_theory.transition_kb.record_outcome(
+                                target_pos,
+                                TransitionOutcome.TERMINAL_FAIL,
+                                scope="locus",
+                                evidence="fatal_direct_contact",
+                            )
                     else:
                         # Check adjacent mobile entities first (e.g. patroller stepping onto avatar)
                         mob_cands: set[int] = set()

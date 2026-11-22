@@ -235,6 +235,20 @@ class MentalSimulationPlanner:
                     if int(curr_grid[r, c]) == bg and (r, c) not in goals:
                         static_barriers.add((r, c))
 
+        # Fold sparse locus-scoped KB beliefs into static barriers (blocking exceptions
+        # and releasing loci empirically confirmed traversable/rewarding in this context).
+        for locus_pos in engine.symbolic_theory.transition_kb._locus_beliefs:
+            lr, lc = int(locus_pos[0]), int(locus_pos[1])
+            if not (0 <= lr < H and 0 <= lc < W):
+                continue
+            locus_eval = engine.symbolic_theory.evaluate_transition(
+                int(curr_grid[lr, lc]), locus=(lr, lc)
+            )
+            if not locus_eval.traversable and (lr, lc) not in goals:
+                static_barriers.add((lr, lc))
+            elif locus_eval.traversable and locus_eval.confidence > 0.0:
+                static_barriers.discard((lr, lc))
+
         # Enforce HCIR Attractor Invariant: Non-lethal goals must never be static barriers
         all_lethals = engine.current_context_hazards
         safe_goals = {
@@ -331,6 +345,51 @@ class MentalSimulationPlanner:
                         for c in range(W):
                             if int(curr_grid[r, c]) == m.trigger_feature:
                                 mutation_triggers.setdefault((r, c), set()).update(opened_cells)
+
+        # KB causal unlock rules (feature-scoped and locus-scoped)
+        for rule in engine.symbolic_theory.transition_kb.query_causal_rules():
+            eff = str(rule.effect_signature)
+            if not eff.startswith("unlocks:"):
+                continue
+            target_spec = eff[len("unlocks:") :].strip()
+            opened_cells_kb: set[tuple[int, int]] = set()
+            if target_spec.startswith("(") and target_spec.endswith(")"):
+                parts = target_spec[1:-1].split(",")
+                if len(parts) == 2:
+                    try:
+                        or_i, oc_i = int(parts[0].strip()), int(parts[1].strip())
+                    except ValueError:
+                        or_i, oc_i = -1, -1
+                    if 0 <= or_i < H and 0 <= oc_i < W:
+                        opened_cells_kb.add((or_i, oc_i))
+            else:
+                try:
+                    target_feat = int(target_spec)
+                except ValueError:
+                    target_feat = -1
+                if target_feat >= 0:
+                    for r in range(H):
+                        for c in range(W):
+                            if int(curr_grid[r, c]) == target_feat:
+                                opened_cells_kb.add((r, c))
+            if not opened_cells_kb:
+                continue
+            trig = rule.trigger_key
+            if isinstance(trig, tuple) and len(trig) == 2:
+                tr_r, tr_c = int(trig[0]), int(trig[1])
+                if 0 <= tr_r < H and 0 <= tr_c < W:
+                    mutation_triggers.setdefault((tr_r, tr_c), set()).update(opened_cells_kb)
+            elif isinstance(trig, int) and not isinstance(trig, bool):
+                trig_int = int(trig)
+                if (
+                    trig_int != bg
+                    and trig_int != engine.bg_feature
+                    and not engine.symbolic_theory.is_walkable(trig_int)
+                ):
+                    for r in range(H):
+                        for c in range(W):
+                            if int(curr_grid[r, c]) == trig_int:
+                                mutation_triggers.setdefault((r, c), set()).update(opened_cells_kb)
 
         return mutation_triggers
 

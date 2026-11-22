@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import heapq
 import logging
 import math
 from collections.abc import Sequence
@@ -291,108 +290,119 @@ class ObjectStateGraphPlanner:
         if start_pos in target_stances:
             return []
 
-        H, W = grid_shape
         from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
+        from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
+        from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
 
         bg_val = int(engine.bg_feature) if engine is not None else 0
-        max_step_span = max((abs(dr) + abs(dc) for _, dr, dc in movable_actions), default=1) or 1
-        target_list = list(target_stances)
-        seq = 0
-        h0 = (
-            min(abs(start_pos[0] - tr) + abs(start_pos[1] - tc) for tr, tc in target_list)
-            / max_step_span
-        )
-        heap: list[tuple[float, float, int, tuple[int, int]]] = [(h0, 0.0, seq, start_pos)]
-        best_cost: dict[tuple[int, int], float] = {start_pos: 0.0}
-        came_from: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+        action_deltas = {act: (int(dr), int(dc)) for act, dr, dc in movable_actions}
+        if not action_deltas:
+            return None
+
+        grid = curr_grid if curr_grid is not None else np.zeros(grid_shape, dtype=int)
         verified_cache: dict[int, bool] = {bg_val: True}
         unverified_penalty_cache: dict[int, float] = {}
-
         _budget = engine.compute_budget if engine is not None else None
-        while heap:
-            if _budget is not None and not _budget.allows("cheap"):
-                return None  # anytime: expansion budget exhausted
-            if _budget is not None:
-                _budget.charge(1)
-            _, cur_cost, _, cur_pos = heapq.heappop(heap)
-            if cur_cost > best_cost.get(cur_pos, float("inf")):
-                continue
-            if cur_pos in target_stances:
-                win_path: list[MentalSimulationStep] = []
-                node_cur = cur_pos
-                while node_cur in came_from:
-                    prev_p, prev_act = came_from[node_cur]
-                    win_path.append(
-                        MentalSimulationStep(action=prev_act, predicted_avatar_pos=node_cur)
-                    )
-                    node_cur = prev_p
-                win_path.reverse()
-                return win_path
 
-            cr, cc = cur_pos
-            for act, dr, dc in movable_actions:
-                if failed_transitions and (cur_pos, act) in failed_transitions:
-                    continue
-                nr, nc = cr + dr, cc + dc
-                if not (0 <= nr < H and 0 <= nc < W):
-                    continue
+        def _blocked_eval() -> TransitionEdgeEvaluation:
+            return TransitionEdgeEvaluation(
+                traversable=False,
+                step_cost=1.0,
+                risk_cost=50.0,
+                goal_value=0.0,
+                info_gain=0.0,
+                mutates_state=False,
+                confidence=1.0,
+            )
 
-                step_r = 1 if dr > 0 else (-1 if dr < 0 else 0)
-                step_c = 1 if dc > 0 else (-1 if dc < 0 else 0)
-                dist = max(abs(dr), abs(dc))
-                blocked = False
-                step_cost = 1.0
+        def _eval_edge(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
+            if pos in target_stances:
+                return TransitionEdgeEvaluation(
+                    traversable=True,
+                    step_cost=1.0,
+                    risk_cost=0.0,
+                    goal_value=1.0,
+                    info_gain=0.0,
+                    mutates_state=False,
+                    confidence=1.0,
+                )
+            if pos in static_barriers:
+                return _blocked_eval()
+            if percept is not None and not percept.is_passable(pos[0], pos[1]):
+                return _blocked_eval()
+            if curr_grid is None:
+                return TransitionEdgeEvaluation(
+                    traversable=True,
+                    step_cost=1.0,
+                    risk_cost=0.0,
+                    goal_value=0.0,
+                    info_gain=0.0,
+                    mutates_state=False,
+                    confidence=0.0,
+                )
+            val = int(feat)
+            if val in lethal_features:
+                return _blocked_eval()
 
-                for k in range(1, dist + 1):
-                    kr = cr + step_r * k
-                    kc = cc + step_c * k
-                    k_pos = (kr, kc)
-                    is_target = k_pos in target_stances and (nr, nc) in target_stances
-                    if not is_target:
-                        if k_pos in static_barriers:
-                            blocked = True
-                            break
-                        if percept is not None and not percept.is_passable(kr, kc):
-                            blocked = True
-                            break
-                    if curr_grid is not None:
-                        val = int(curr_grid[kr, kc])
-                        if not is_target and val in lethal_features:
-                            blocked = True
-                            break
-                        if not is_target and engine is not None:
-                            is_ver = verified_cache.get(val)
-                            if is_ver is None:
-                                is_ver = not engine.is_feature_unverified(val, bg_val)
-                                verified_cache[val] = is_ver
-                            if not is_ver:
-                                cached_pen = unverified_penalty_cache.get(val)
-                                if cached_pen is None:
-                                    risk = estimate_entity_risk(
-                                        engine, val, {k_pos}, curr_grid, bg_val, ledger=self.ledger
-                                    )
-                                    cached_pen = engine.UNVERIFIED_FEATURE_COST * 4.0 + risk * 50.0
-                                    if len(self.ledger.object_causal_effects) == 0:
-                                        unverified_penalty_cache[val] = cached_pen
-                                step_cost += cached_pen
+            kb_step = 1.0
+            kb_risk = 0.0
+            kb_goal = 0.0
+            kb_info = 0.0
+            kb_mut = False
+            kb_conf = 0.0
+            if engine is not None:
+                kb_ev = engine.symbolic_theory.evaluate_transition(val, locus=pos)
+                if not kb_ev.traversable:
+                    return kb_ev
+                kb_step = float(kb_ev.step_cost)
+                kb_risk = float(kb_ev.risk_cost)
+                kb_goal = float(kb_ev.goal_value)
+                kb_info = float(kb_ev.info_gain)
+                kb_mut = bool(kb_ev.mutates_state)
+                kb_conf = float(kb_ev.confidence)
 
-                if blocked:
-                    continue
-                nxt = (nr, nc)
-                if patroller_cells and nxt in patroller_cells:
-                    continue
+                is_ver = verified_cache.get(val)
+                if is_ver is None:
+                    is_ver = not engine.is_feature_unverified(val, bg_val)
+                    verified_cache[val] = is_ver
+                if not is_ver:
+                    cached_pen = unverified_penalty_cache.get(val)
+                    if cached_pen is None:
+                        risk = estimate_entity_risk(
+                            engine, val, {pos}, curr_grid, bg_val, ledger=self.ledger
+                        )
+                        cached_pen = engine.UNVERIFIED_FEATURE_COST * 4.0 + risk * 50.0
+                        if len(self.ledger.object_causal_effects) == 0:
+                            unverified_penalty_cache[val] = cached_pen
+                    kb_risk += cached_pen
 
-                next_cost = cur_cost + step_cost
-                if next_cost < best_cost.get(nxt, float("inf")):
-                    best_cost[nxt] = next_cost
-                    came_from[nxt] = (cur_pos, act)
-                    h_nxt = (
-                        min(abs(nr - tr) + abs(nc - tc) for tr, tc in target_list) / max_step_span
-                    )
-                    seq += 1
-                    heapq.heappush(heap, (next_cost + h_nxt, next_cost, seq, nxt))
+            return TransitionEdgeEvaluation(
+                traversable=True,
+                step_cost=kb_step,
+                risk_cost=kb_risk,
+                goal_value=kb_goal,
+                info_gain=kb_info,
+                mutates_state=kb_mut,
+                confidence=kb_conf,
+            )
 
-        return None
+        steps = GridTopologyGraph.shortest_path_from_kb(
+            grid,
+            start_pos,
+            target_stances,
+            action_deltas,
+            _eval_edge,
+            max_expansions=0,
+            failed_transitions=failed_transitions,
+            blocked_destinations=patroller_cells,
+            allow_goal_entry=True,
+            budget=_budget,
+        )
+        if steps is None:
+            return None
+        return [
+            MentalSimulationStep(action=act, predicted_avatar_pos=coord) for act, coord in steps
+        ]
 
     def plan_macro_option(
         self,

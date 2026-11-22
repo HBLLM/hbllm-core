@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import numpy as np
 
 from hbllm.hcir.graph import BeliefNode, LearnedRuleNode
 from hbllm.hcir.transactions import TransactionOp
+from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.cortex_causal import (
     CausalEffectRule,
     HCIRSymbolicWorldTheory,
@@ -16,6 +18,9 @@ from hbllm.hcir.world.cortex_causal import (
     TransitionKnowledgeBase,
     TransitionOutcome,
 )
+from hbllm.hcir.world.learning.causal_planner import CausalTheoryPlanner
+from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+from hbllm.hcir.world.objects.planner import ObjectStateGraphPlanner
 from hbllm.hcir.world.percept import TerminalSignal
 from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
 
@@ -213,3 +218,177 @@ def test_shortest_path_from_kb_stride1_and_stride5() -> None:
     assert path5 is not None
     assert path5[0] == (2, (7, 2))  # Must go South first to clear the (0..5, 5) wall
     assert path5[-1][1] == (12, 12)
+
+
+def test_shortest_path_with_causal_ops_multistep_chain() -> None:
+    """Verify two-stage precondition-gated causal op chaining unlocks blocked walls."""
+    kb = TransitionKnowledgeBase()
+    kb.record_outcome(0, TransitionOutcome.TRAVERSED, evidence="floor")
+    kb.record_outcome(5, TransitionOutcome.BLOCKED, evidence="locked_gate")
+    kb.record_outcome(8, TransitionOutcome.TERMINAL_WIN, evidence="exit")
+    kb.record_causal_rule(9, "token:primed", precondition_tokens=(), evidence="stage1_switch")
+    kb.record_causal_rule(
+        4, "unlocks:5", precondition_tokens=("token:primed",), evidence="stage2_switch"
+    )
+
+    grid = np.array(
+        [
+            [0, 9, 0, 5, 0],
+            [0, 0, 0, 5, 0],
+            [0, 0, 0, 5, 8],
+            [0, 0, 0, 5, 0],
+            [0, 4, 0, 5, 0],
+        ],
+        dtype=int,
+    )
+    actions = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+
+    # Without causal op chaining, column 3 (feature 5) blocks every direct path.
+    assert (
+        GridTopologyGraph.shortest_path_from_kb(
+            grid,
+            (2, 0),
+            {(2, 4)},
+            actions,
+            lambda pos, feat: kb.evaluate_transition(feat, locus=pos),
+        )
+        is None
+    )
+
+    plan = GridTopologyGraph.shortest_path_with_causal_ops(
+        grid,
+        (2, 0),
+        {(2, 4)},
+        actions,
+        kb,
+    )
+    assert plan is not None
+    visited = [coord for _, coord in plan]
+    assert visited[-1] == (2, 4)
+    # Must trigger stage 1 (0, 1) strictly before stage 2 (4, 1), then pass col 3.
+    idx_stage1 = visited.index((0, 1))
+    idx_stage2 = visited.index((4, 1))
+    idx_cross = next(i for i, (_, c) in enumerate(visited) if c == 3)
+    assert idx_stage1 < idx_stage2 < idx_cross
+
+
+def test_causal_theory_planner_uses_transition_kb_and_chained_ops() -> None:
+    """Verify CausalTheoryPlanner delegates to TransitionKB for locus overrides and causal ops."""
+    actions = {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}
+    grid = np.array(
+        [
+            [0, 9, 5, 0, 0],
+            [0, 0, 5, 0, 0],
+            [0, 0, 5, 0, 8],
+        ],
+        dtype=int,
+    )
+
+    # 1. Locus-scoped TRAVERSED override opens a direct path in CausalTheoryPlanner.plan_path.
+    engine = AutonomousEpistemicEngine()
+    for act_id, (dr, dc) in actions.items():
+        engine.action_dynamics[act_id] = ActionDynamicsModel(
+            act_id, delta_r=dr, delta_c=dc, confidence=1.0
+        )
+    engine.symbolic_theory.induce_walkable(0, evidence="floor")
+    engine.symbolic_theory.induce_barrier(5, evidence="wall")
+    engine.symbolic_theory.induce_goal(8, evidence=TerminalSignal.SUCCESS)
+    engine.symbolic_theory.transition_kb.record_outcome(
+        (1, 2), TransitionOutcome.TRAVERSED, scope="locus", evidence="secret_gap"
+    )
+
+    ctx = CausalTheoryPlanner.extract_planning_context(engine, grid)
+    direct = CausalTheoryPlanner.plan_path((2, 0), grid, ctx)
+    assert direct is not None
+    pos = (2, 0)
+    visited = []
+    for act in direct:
+        dr, dc = actions[act]
+        pos = (pos[0] + dr, pos[1] + dc)
+        visited.append(pos)
+    assert (1, 2) in visited
+    assert visited[-1] == (2, 4)
+
+    # 2. Locus causal rule in transition_kb enables plan_chained_path without tool_barrier_affinities.
+    engine2 = AutonomousEpistemicEngine()
+    for act_id, (dr, dc) in actions.items():
+        engine2.action_dynamics[act_id] = ActionDynamicsModel(
+            act_id, delta_r=dr, delta_c=dc, confidence=1.0
+        )
+    engine2.symbolic_theory.induce_walkable(0, evidence="floor")
+    engine2.symbolic_theory.induce_barrier(5, evidence="wall")
+    engine2.symbolic_theory.induce_goal(8, evidence=TerminalSignal.SUCCESS)
+    engine2.symbolic_theory.transition_kb.record_causal_rule(
+        (0, 1), "unlocks:(2, 2)", evidence="lever"
+    )
+
+    ctx2 = CausalTheoryPlanner.extract_planning_context(engine2, grid)
+    chained = CausalTheoryPlanner.plan_chained_path((2, 0), grid, ctx2, tool_barrier_affinities={})
+    assert chained is not None
+    pos2 = (2, 0)
+    visited2 = []
+    for act in chained:
+        dr, dc = actions[act]
+        pos2 = (pos2[0] + dr, pos2[1] + dc)
+        visited2.append(pos2)
+    assert visited2[-1] == (2, 4)
+    assert visited2.index((0, 1)) < visited2.index((2, 2))
+
+
+def test_object_planner_find_shortest_path_consults_transition_kb() -> None:
+    """Verify ObjectPlanner.find_shortest_path delegates to shortest_path_from_kb and honors KB."""
+    theory = HCIRSymbolicWorldTheory()
+    theory.induce_walkable(0, evidence="floor")
+    theory.induce_walkable(3, evidence="corridor")
+    theory.transition_kb.record_outcome(
+        (1, 1), TransitionOutcome.BLOCKED, scope="locus", evidence="hidden_lock"
+    )
+    stub_engine = SimpleNamespace(
+        bg_feature=0,
+        compute_budget=None,
+        symbolic_theory=theory,
+        is_feature_unverified=lambda val, bg: False,
+        UNVERIFIED_FEATURE_COST=2.0,
+    )
+    planner = ObjectStateGraphPlanner()
+    grid = np.array(
+        [
+            [0, 5, 0, 0],
+            [0, 3, 0, 0],
+            [0, 5, 0, 0],
+        ],
+        dtype=int,
+    )
+    movable = [(1, -1, 0), (2, 1, 0), (3, 0, -1), (4, 0, 1)]
+
+    blocked_path = planner.find_shortest_path(
+        start_pos=(1, 0),
+        target_stances={(1, 3)},
+        grid_shape=(3, 4),
+        movable_actions=movable,
+        engine=stub_engine,  # type: ignore[arg-type]
+        failed_transitions=set(),
+        static_barriers={(0, 1), (2, 1)},
+        percept=None,
+        curr_grid=grid,
+        lethal_features=set(),
+    )
+    assert blocked_path is None
+
+    theory.transition_kb.record_outcome(
+        (1, 1), TransitionOutcome.TRAVERSED, scope="locus", evidence="unlocked"
+    )
+    open_path = planner.find_shortest_path(
+        start_pos=(1, 0),
+        target_stances={(1, 3)},
+        grid_shape=(3, 4),
+        movable_actions=movable,
+        engine=stub_engine,  # type: ignore[arg-type]
+        failed_transitions=set(),
+        static_barriers={(0, 1), (2, 1)},
+        percept=None,
+        curr_grid=grid,
+        lethal_features=set(),
+    )
+    assert open_path is not None
+    assert [step.predicted_avatar_pos for step in open_path] == [(1, 1), (1, 2), (1, 3)]
