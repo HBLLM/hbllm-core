@@ -195,19 +195,23 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 return SafetyGateResult(is_safe=True)
 
             half_step = max(1, step_size // 2)
-            barrier_feats = view.symbolic_theory.barrier_features
             walkable_and_safe = view.symbolic_theory.walkable_features
             bg_is_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
             patrol_walls: set[tuple[int, int]] = set(view.learned_barriers)
+            kb = view.symbolic_theory.transition_kb
             for rr in range(H):
                 for cc in range(W):
                     v = int(curr_grid[rr, cc])
-                    if (
-                        view.symbolic_theory.is_barrier(v)
-                        or v in barrier_feats
-                        or (bg_is_void and v == bg)
-                    ):
+                    ev = view.symbolic_theory.evaluate_transition(v, locus=(rr, cc))
+                    if not ev.traversable or ev.risk_cost >= 40.0 or (bg_is_void and v == bg):
                         patrol_walls.add((rr, cc))
+                    elif (
+                        kb is not None
+                        and kb.get_belief((rr, cc), scope="locus") is not None
+                        and ev.traversable
+                        and ev.confidence > 0.0
+                    ):
+                        patrol_walls.discard((rr, cc))
 
             def _blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
                 probe = (p[0] + f[0] * half_step, p[1] + f[1] * half_step)

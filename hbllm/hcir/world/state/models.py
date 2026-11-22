@@ -86,12 +86,61 @@ class FrozenSymbolicTheory:
     cargo_features: frozenset[int] = frozenset()
     receptacle_features: frozenset[int] = frozenset()
     actuator_features: frozenset[int] = frozenset()
+    transition_kb: Any | None = None
 
     def is_barrier(self, feat: int) -> bool:
         return feat in self.barrier_features
 
     def is_walkable(self, feat: int) -> bool:
         return feat in self.walkable_features
+
+    def evaluate_transition(
+        self,
+        feature_id: Any,
+        *,
+        locus: tuple[int, int] | None = None,
+        active_state_tokens: frozenset[str] | set[str] | None = None,
+        unknown_traversable: bool = True,
+        unknown_cost_penalty: float = 0.0,
+        risk_weight: float = 50.0,
+    ) -> Any:
+        """Evaluate edge traversability from embedded TransitionKB or frozen feature sets."""
+        if self.transition_kb is not None:
+            return self.transition_kb.evaluate_transition(
+                feature_id,
+                locus=locus,
+                active_state_tokens=active_state_tokens,
+                unknown_traversable=unknown_traversable,
+                unknown_cost_penalty=unknown_cost_penalty,
+                risk_weight=risk_weight,
+            )
+        from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
+
+        is_goal = feature_id in self.goal_features
+        is_blocked = (feature_id in self.barrier_features) and not is_goal
+        is_walk = feature_id in self.walkable_features
+        is_trav = not is_blocked and (is_goal or is_walk or unknown_traversable)
+        known = (
+            is_goal
+            or is_blocked
+            or is_walk
+            or feature_id in self.cargo_features
+            or feature_id in self.receptacle_features
+            or feature_id in self.actuator_features
+        )
+        return TransitionEdgeEvaluation(
+            traversable=is_trav,
+            step_cost=(
+                (1.0 + max(0.0, unknown_cost_penalty) if not known else 1.0)
+                if is_trav
+                else float("inf")
+            ),
+            risk_cost=0.0,
+            goal_value=(1.0 if is_goal else 0.0),
+            info_gain=(0.0 if known else 1.0),
+            mutates_state=(feature_id in self.actuator_features),
+            confidence=(1.0 if known else 0.0),
+        )
 
     def is_tool_barrier_incompatible(self, tool_feat: int, barrier_feat: int) -> bool:
         return False

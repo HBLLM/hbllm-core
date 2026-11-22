@@ -799,7 +799,7 @@ class HippocampalEpisodicCortex:
         if new_context or not retain_dynamics:
             view.symbolic_theory.clear_candidate_goals()
             if new_context:
-                view.symbolic_theory.clear_barriers()
+                view.symbolic_theory.clear_barriers(preserve_lethal=True)
 
         _epoch = (
             ((view.context_epoch or 0) + 1 if new_context else (view.context_epoch or 0))
@@ -815,6 +815,7 @@ class HippocampalEpisodicCortex:
             delta.set("failed_transitions", _lft.setdefault(_epoch, set()))
             _llb = delta.mutate("context_barriers", view.context_barriers)
             delta.set("learned_barriers", _llb.setdefault(_epoch, set()))
+            view.symbolic_theory.transition_kb.clear_locus_beliefs()
             view.hazard_tracker.clear_lethal_positions()
             view.hazard_tracker.reset_episode()
             delta.mutate("exhausted_candidate_goals", view.exhausted_candidate_goals).clear()

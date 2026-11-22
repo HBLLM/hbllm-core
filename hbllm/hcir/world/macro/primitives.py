@@ -199,6 +199,7 @@ class NavigateTo(MacroAction):
             barrier_features=wall_feats,
             avatar_features=av_feats,
             max_candidate_goals=1,
+            transition_kb=engine.symbolic_theory.transition_kb,
         )
 
         if plan and len(plan) > 0:

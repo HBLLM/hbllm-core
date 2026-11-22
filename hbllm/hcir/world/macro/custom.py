@@ -245,6 +245,11 @@ def attribute_macro_action_outcome(
                 engine.working_memory.body_schema.register_resonance(tool_feat, barrier_feat)
                 engine.working_memory.body_schema.expend_tool(tool_feat)
                 engine.learned_barriers.discard((r, c))
+                from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                engine.symbolic_theory.transition_kb.retract_outcome(
+                    (r, c), TransitionOutcome.BLOCKED, scope="locus"
+                )
                 logger.info(
                     "Pearl do(a) causal attribution: tool %d cleared barrier %d at %s",
                     tool_feat,
@@ -253,6 +258,11 @@ def attribute_macro_action_outcome(
                 )
             elif cell_cleared:
                 engine.learned_barriers.discard((r, c))
+                from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                engine.symbolic_theory.transition_kb.retract_outcome(
+                    (r, c), TransitionOutcome.BLOCKED, scope="locus"
+                )
 
             if engine.subgoal_stack.has_pending_goals:
                 cur_sg = engine.subgoal_stack.current_subgoal
@@ -294,6 +304,11 @@ def attribute_macro_action_outcome(
                         or new_feat == bg
                     ):
                         engine.learned_barriers.discard((dr, dc))
+                        from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                        engine.symbolic_theory.transition_kb.retract_outcome(
+                            (dr, dc), TransitionOutcome.BLOCKED, scope="locus"
+                        )
                         engine.symbolic_theory.record_distal_actuation(
                             trig_feat, orig_feat, affected_pos=(dr, dc)
                         )

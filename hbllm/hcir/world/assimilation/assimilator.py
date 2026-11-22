@@ -887,6 +887,9 @@ class EpistemicFeedbackAssimilator:
                                         and int(np.count_nonzero(curr_grid == nf_u)) <= 2
                                     ):
                                         view.learned_barriers.discard((nr_u, nc_u))
+                                        view.symbolic_theory.transition_kb.retract_outcome(
+                                            (nr_u, nc_u), TransitionOutcome.BLOCKED, scope="locus"
+                                        )
                                         view.symbolic_theory.retract_barrier(
                                             nf_u, reason="unlocked_by_remote_door"
                                         )
@@ -2510,6 +2513,9 @@ class EpistemicFeedbackAssimilator:
                                 gate_pts.add((lb_r, lb_c))
                     for b_pt in gate_pts:
                         view.learned_barriers.discard(b_pt)
+                        _sym_theory.transition_kb.retract_outcome(
+                            b_pt, TransitionOutcome.BLOCKED, scope="locus"
+                        )
                         view.exhausted_candidate_goals.discard(b_pt)
                         _sym_theory.unmark_locus_explored(b_pt)
                         for dr_g, dc_g in ((-1, 0), (1, 0), (0, -1), (0, 1)):

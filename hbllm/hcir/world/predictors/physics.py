@@ -602,6 +602,8 @@ class PhysicsPredictor:
         step_size: int = 1,
         footprint_offsets: list[tuple[int, int]] | set[tuple[int, int]] | None = None,
         blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+        transition_kb: Any | None = None,
+        grid: np.ndarray | None = None,
     ) -> list[tuple[int, int]]:
         """Breadth-first search for shortest obstacle-clearing geodesic path, accounting for composite footprints."""
         H, W = grid_shape
@@ -623,8 +625,10 @@ class PhysicsPredictor:
         for off_r, off_c in offsets:
             effective_barriers.discard((goal_r + off_r, goal_c + off_c))
 
+        use_kb = transition_kb is not None and grid is not None
         if (
-            offsets == [(0, 0)]
+            not use_kb
+            and offsets == [(0, 0)]
             and _rust_graph is not None
             and hasattr(_rust_graph, "fast_geodesic_astar")
         ):
@@ -654,6 +658,10 @@ class PhysicsPredictor:
                     return False
                 if (fr, fc) in effective_barriers:
                     return False
+                if transition_kb is not None and grid is not None:
+                    ev = transition_kb.evaluate_transition(int(grid[fr, fc]), locus=(fr, fc))
+                    if ev.risk_cost >= 40.0 or (not ev.traversable and (r, c) != (goal_r, goal_c)):
+                        return False
             return True
 
         step = max(1, step_size)
@@ -733,6 +741,8 @@ class PhysicsPredictor:
         period: int | None = None,
         allow_wait: bool = True,
         max_time: int = 120,
+        transition_kb: Any | None = None,
+        grid: np.ndarray | None = None,
     ) -> list[tuple[int, int, int]] | None:
         """Spatiotemporal 4D geodesic pathfinding (r, c, t) with temporal waiting affordance.
 
@@ -756,6 +766,10 @@ class PhysicsPredictor:
                 return True
             if (r, c) in effective_barriers:
                 return True
+            if transition_kb is not None and grid is not None:
+                ev = transition_kb.evaluate_transition(int(grid[r, c]), locus=(r, c))
+                if ev.risk_cost >= 40.0 or (not ev.traversable and (r, c) != (goal_r, goal_c)):
+                    return True
             t_key = (t % period) if period and period > 0 else t
             if t_key in hazards and (r, c) in hazards[t_key]:
                 return True

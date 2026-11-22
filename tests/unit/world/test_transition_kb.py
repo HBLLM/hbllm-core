@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from types import SimpleNamespace
+from typing import Any
 
 import numpy as np
 
@@ -20,6 +21,7 @@ from hbllm.hcir.world.cortex_causal import (
     TransitionKnowledgeBase,
     TransitionOutcome,
 )
+from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
 from hbllm.hcir.world.learning.causal_planner import CausalTheoryPlanner
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from hbllm.hcir.world.objects.planner import ObjectStateGraphPlanner
@@ -482,3 +484,139 @@ def test_engine_hydrates_transition_kb_from_persistent_workspace() -> None:
     rules = engine.symbolic_theory.transition_kb.query_causal_rules(9)
     assert len(rules) == 1
     assert rules[0].effect_signature == "unlocks:5"
+
+
+def test_working_to_persistent_promotion_promotes_kb_nodes() -> None:
+    """Verify winning an episode promotes persisted kb_transition_* and kb_rule_* nodes."""
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    tiered = TieredWorkspace()
+    frame = engine.attach_tiered_workspace(
+        tiered, goal_id="kb_promote_test", hydrate_persistent=False
+    )
+
+    engine.symbolic_theory.induce_walkable(2, evidence="traversal")
+    engine.symbolic_theory.induce_barrier(7, evidence="lethal_hazard")
+    engine.symbolic_theory.induce_goal(8, evidence=TerminalSignal.SUCCESS)
+    engine.symbolic_theory.record_tool_barrier_affinity(9, 7)
+    engine.commit_working_memory_transactions()
+
+    assert frame.workspace.get_node("kb_transition_feature_int_2") is not None
+    assert frame.workspace.get_node("kb_transition_feature_int_7") is not None
+    assert frame.workspace.get_node("kb_transition_feature_int_8") is not None
+    assert frame.workspace.get_node("kb_rule_int_9_unlocks_7") is not None
+
+    curr_grid = np.zeros((6, 6), dtype=int)
+    curr_grid[3, 3] = 8
+    engine.avatar_pos = (3, 2)
+    engine.prev_grid = curr_grid.copy()
+    engine.assimilate_feedback(
+        curr_grid=curr_grid,
+        available_actions=[1, 2, 3, 4],
+        is_success=True,
+        action=4,
+    )
+
+    assert tiered.persistent.get_node("kb_transition_feature_int_2") is not None
+    assert tiered.persistent.get_node("kb_transition_feature_int_7") is not None
+    assert tiered.persistent.get_node("kb_transition_feature_int_8") is not None
+    assert tiered.persistent.get_node("kb_rule_int_9_unlocks_7") is not None
+
+
+def test_hydration_does_not_double_count_when_both_belief_and_legacy_nodes_exist() -> None:
+    """Verify hydrating canonical KB nodes skips redundant legacy ConceptNode re-induction."""
+    source = HCIRSymbolicWorldTheory()
+    source.induce_barrier(5, evidence="collision")
+    source.induce_goal(8, evidence=TerminalSignal.SUCCESS)
+
+    nodes: list[Any] = []
+    from hbllm.hcir.graph import ConceptNode
+
+    for op in source.to_transaction_operations():
+        assert op.node_data is not None
+        if op.node_id and op.node_id.startswith("kb_transition_"):
+            nodes.append(BeliefNode(**op.node_data))
+        elif op.node_id and op.node_id.startswith("ontology_"):
+            nodes.append(ConceptNode(**op.node_data))
+
+    restored = HCIRSymbolicWorldTheory()
+    restored.hydrate_from_nodes(nodes)
+
+    b5 = restored.transition_kb.get_belief(5)
+    b8 = restored.transition_kb.get_belief(8)
+    assert b5 is not None and b5.counts.get(TransitionOutcome.BLOCKED.value) == 1.0
+    assert b8 is not None and b8.counts.get(TransitionOutcome.TERMINAL_WIN.value) == 1.0
+
+
+def test_episode_resets_clear_locus_beliefs_and_preserve_cross_context_lethal() -> None:
+    """Verify retain_dynamics=False clears locus beliefs while new_context keeps lethal beliefs."""
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    engine.symbolic_theory.induce_barrier(5, evidence="collision")
+    engine.symbolic_theory.induce_barrier(7, evidence="lethal_hazard")
+    engine.symbolic_theory.transition_kb.record_outcome(
+        (2, 3), TransitionOutcome.BLOCKED, scope="locus", evidence="temp_door"
+    )
+
+    # New level keeps lethal TERMINAL_FAIL beliefs while clearing non-lethal BLOCKED barriers & loci
+    view = ReadOnlyEngineView(engine)
+    delta = StateDelta()
+    engine.episodic_cortex.consolidate_schema_and_reset(
+        view, delta, retain_dynamics=True, is_new_level=True
+    )
+    engine.apply_delta(delta, author="test")
+    assert 5 not in engine.symbolic_theory.barrier_features
+    assert 7 in engine.symbolic_theory.barrier_features
+    assert engine.symbolic_theory.transition_kb.get_belief((2, 3), scope="locus") is None
+
+    # Full reset (retain_dynamics=False) clears stale locus beliefs
+    engine.symbolic_theory.transition_kb.record_outcome(
+        (4, 4), TransitionOutcome.BLOCKED, scope="locus", evidence="stale"
+    )
+    view2 = ReadOnlyEngineView(engine)
+    delta2 = StateDelta()
+    engine.episodic_cortex.consolidate_schema_and_reset(
+        view2, delta2, retain_dynamics=False, is_new_level=False
+    )
+    engine.apply_delta(delta2, author="test")
+    assert engine.symbolic_theory.transition_kb.get_belief((4, 4), scope="locus") is None
+
+
+def test_tool_affinity_and_distal_actuation_register_kb_causal_rules() -> None:
+    """Verify legacy tool_barrier_affinity and distal_actuation APIs emit KB CausalEffectRules."""
+    theory = HCIRSymbolicWorldTheory()
+    theory.record_tool_barrier_affinity(9, 5)
+    theory.record_distal_actuation(trigger_coord=(1, 2), affected_pos=(4, 5))
+
+    rules_9 = theory.transition_kb.query_causal_rules(9)
+    rules_1_2 = theory.transition_kb.query_causal_rules((1, 2))
+    assert any(r.effect_signature == "unlocks:5" for r in rules_9)
+    assert any(r.effect_signature == "unlocks:(4, 5)" for r in rules_1_2)
+
+
+def test_is_feature_unverified_uses_kb_confidence() -> None:
+    """Verify is_feature_unverified checks empirical KB confidence across all outcomes."""
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    assert engine.is_feature_unverified(9, bg=0) is True
+
+    engine.symbolic_theory.induce_actuator(9, evidence="remote_trigger")
+    assert engine.is_feature_unverified(9, bg=0) is False
+
+    engine.symbolic_theory.induce_receptacle(6, evidence="docked")
+    assert engine.is_feature_unverified(6, bg=0) is False
+
+
+def test_has_verified_walkable_requires_traversal_rank_evidence() -> None:
+    """Verify has_verified_walkable enforces OntologyEvidenceRank >= TRAVERSAL."""
+    theory = HCIRSymbolicWorldTheory()
+    theory.induce_walkable(4, evidence="background_shift")
+    theory.induce_walkable(0, evidence="hydration:free_space_prior")
+    theory.induce_walkable(3, evidence="traversal")
+
+    assert 4 in theory.walkable_features
+    assert theory.has_verified_walkable(4) is False
+    assert theory.has_verified_walkable(0) is False
+    assert theory.has_verified_walkable(3) is True
+
+    theory.transition_kb.record_outcome(2, TransitionOutcome.TRAVERSED, evidence="traversal")
+    theory.transition_kb.record_outcome(6, TransitionOutcome.TRAVERSED, evidence="background_shift")
+    assert theory.has_verified_walkable(2) is True
+    assert theory.has_verified_walkable(6) is False

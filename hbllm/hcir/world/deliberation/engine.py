@@ -355,15 +355,18 @@ class PrefrontalDeliberationEngine:
                 nr, nc = curr_pos[0] + dr, curr_pos[1] + dc
                 if not (0 <= nr < H and 0 <= nc < W):
                     continue
-                if (nr, nc) in view.learned_barriers or (
-                    nr,
-                    nc,
-                ) in view.current_context_hazards:
+                if (nr, nc) in view.current_context_hazards:
                     continue
                 val = int(curr_grid[nr, nc])
+                ev = view.symbolic_theory.evaluate_transition(val, locus=(nr, nc))
+                locus_b = view.symbolic_theory.transition_kb.get_belief((nr, nc), scope="locus")
+                in_learned_b = (nr, nc) in view.learned_barriers and not (
+                    locus_b is not None and ev.traversable and ev.confidence > 0.0
+                )
                 if (
-                    view.symbolic_theory.is_barrier(val)
-                    or val in view.symbolic_theory.barrier_features
+                    in_learned_b
+                    or not ev.traversable
+                    or ev.risk_cost >= 40.0
                     or val in view.hazard_tracker.known_lethal_features
                     or (bg_is_impassable_void and val == bg)
                 ):
@@ -598,15 +601,20 @@ class PrefrontalDeliberationEngine:
                         bg_v = getattr(view, "bg_feature", 0)
                         theory = getattr(view, "symbolic_theory", None)
                         if theory is not None:
-                            if theory.is_barrier(cell_v) or (nr, nc) in getattr(
+                            ev = theory.evaluate_transition(cell_v, locus=(nr, nc))
+                            locus_b = (
+                                theory.transition_kb.get_belief((nr, nc), scope="locus")
+                                if theory.transition_kb is not None
+                                else None
+                            )
+                            in_learned_b = (nr, nc) in getattr(
                                 view, "learned_barriers", set()
-                            ):
+                            ) and not (
+                                locus_b is not None and ev.traversable and ev.confidence > 0.0
+                            )
+                            if in_learned_b or not ev.traversable or ev.risk_cost >= 40.0:
                                 return False
-                            if (
-                                not theory.is_walkable(cell_v)
-                                and cell_v != bg_v
-                                and cell_v not in theory.goal_features
-                            ):
+                            if ev.confidence == 0.0 and cell_v != bg_v:
                                 return False
                     # Abort if displacement moves into limit cycle or oscillation
                     rec = list(get_engine_state_attr(view, "recent_positions", []))
@@ -791,15 +799,18 @@ class PrefrontalDeliberationEngine:
                     if view.bg_feature is not None
                     else view.estimate_background(curr_grid)
                 )
+
+                def _is_open_cardinal(nr_c: int, nc_c: int) -> bool:
+                    v_u = int(curr_grid[nr_c, nc_c])
+                    if v_u == bg_u:
+                        return True
+                    ev_u = view.symbolic_theory.evaluate_transition(v_u, locus=(nr_c, nc_c))
+                    return bool(ev_u.traversable and ev_u.confidence > 0.0)
+
                 has_uncalibrated_cardinal = any(
                     0 <= ar_u + dr_u * stride_u < H_u
                     and 0 <= ac_u + dc_u * stride_u < W_u
-                    and (
-                        int(curr_grid[ar_u + dr_u * stride_u, ac_u + dc_u * stride_u]) == bg_u
-                        or view.symbolic_theory.is_walkable(
-                            int(curr_grid[ar_u + dr_u * stride_u, ac_u + dc_u * stride_u])
-                        )
-                    )
+                    and _is_open_cardinal(ar_u + dr_u * stride_u, ac_u + dc_u * stride_u)
                     for dr_u, dc_u in ((-1, 0), (1, 0), (0, -1), (0, 1))
                     if (dr_u, dc_u) not in cal_cardinal_dirs
                 )
@@ -948,17 +959,27 @@ class PrefrontalDeliberationEngine:
                                 continue
                             if (nr, nc) in view.hazard_tracker.static_lethal_positions:
                                 continue
-                            if (nr, nc) in view.learned_barriers:
-                                continue
                             feat_at_dest = int(curr_grid[nr, nc])
-                            if feat_at_dest in view.hazard_tracker.known_lethal_features:
-                                continue
-                            if view.symbolic_theory.is_barrier(feat_at_dest):
+                            ev = view.symbolic_theory.evaluate_transition(
+                                feat_at_dest, locus=(nr, nc)
+                            )
+                            locus_b = view.symbolic_theory.transition_kb.get_belief(
+                                (nr, nc), scope="locus"
+                            )
+                            in_learned_b = (nr, nc) in view.learned_barriers and not (
+                                locus_b is not None and ev.traversable and ev.confidence > 0.0
+                            )
+                            if (
+                                in_learned_b
+                                or feat_at_dest in view.hazard_tracker.known_lethal_features
+                                or not ev.traversable
+                                or ev.risk_cost >= 40.0
+                            ):
                                 continue
                             is_known_safe = (
                                 feat_at_dest == bg_feat
-                                or view.symbolic_theory.is_walkable(feat_at_dest)
-                                or feat_at_dest in view.symbolic_theory.goal_features
+                                or (ev.traversable and ev.confidence > 0.0)
+                                or ev.goal_value > 0.0
                                 or feat_at_dest in (view.avatar_features or ())
                             )
                             if not is_known_safe:
@@ -1029,6 +1050,20 @@ class PrefrontalDeliberationEngine:
                                         view.symbolic_theory.mark_verified_in_context(
                                             "lethal", cell_f
                                         )
+                                        if (
+                                            0 <= lr < curr_grid.shape[0]
+                                            and 0 <= lc < curr_grid.shape[1]
+                                        ):
+                                            from hbllm.hcir.world.causal.transition_kb import (
+                                                TransitionOutcome,
+                                            )
+
+                                            view.symbolic_theory.transition_kb.record_outcome(
+                                                (lr, lc),
+                                                TransitionOutcome.TERMINAL_FAIL,
+                                                scope="locus",
+                                                evidence="death_cluster",
+                                            )
                                         view.hazard_tracker.known_lethal_features.add(cell_f)
                                         if was_unverified_prior:
                                             invalidate_stale_context_ontology(

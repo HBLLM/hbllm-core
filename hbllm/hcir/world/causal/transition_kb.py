@@ -57,6 +57,19 @@ def _encode_context_key(key: Any) -> tuple[Any, str, str]:
     return str(key), "str", f"str_{key}"
 
 
+def _belief_node_id(scope: str, context_key: Any) -> tuple[Any, str, str]:
+    """Return (serialized_key, key_kind, node_id) for a transition belief."""
+    serialized_key, key_kind, token = _encode_context_key(context_key)
+    return serialized_key, key_kind, f"kb_transition_{scope}_{token}"
+
+
+def _rule_node_id(trigger_key: Any, effect_signature: str) -> tuple[Any, str, str]:
+    """Return (serialized_trigger, key_kind, node_id) for a causal rule."""
+    serialized_trig, key_kind, token = _encode_context_key(trigger_key)
+    safe_eff = effect_signature.replace(":", "_").replace(" ", "_")
+    return serialized_trig, key_kind, f"kb_rule_{token}_{safe_eff}"
+
+
 def _decode_context_key(raw: Any, key_kind: str) -> Any:
     """Reconstruct a typed context key from serialized HCIR node properties."""
     if key_kind == "tuple" and isinstance(raw, (list, tuple)):
@@ -149,8 +162,7 @@ class TransitionBelief:
 
     def to_belief_node(self) -> BeliefNode:
         """Serialize this transition belief as a canonical HCIR ``BeliefNode``."""
-        serialized_key, key_kind, token = _encode_context_key(self.context_key)
-        node_id = f"kb_transition_{self.scope}_{token}"
+        serialized_key, key_kind, node_id = _belief_node_id(self.scope, self.context_key)
         claim = (
             f"Transition outcome distribution for {self.scope}={serialized_key}: "
             f"P(trav)={self.traversability_posterior():.2f}"
@@ -214,9 +226,7 @@ class CausalEffectRule:
 
     def to_learned_rule_node(self) -> LearnedRuleNode:
         """Serialize this causal operator as a canonical HCIR ``LearnedRuleNode``."""
-        serialized_trig, key_kind, token = _encode_context_key(self.trigger_key)
-        safe_eff = self.effect_signature.replace(":", "_").replace(" ", "_")
-        node_id = f"kb_rule_{token}_{safe_eff}"
+        serialized_trig, key_kind, node_id = _rule_node_id(self.trigger_key, self.effect_signature)
         return LearnedRuleNode(
             id=node_id,
             condition=f"trigger={serialized_trig}",
@@ -491,12 +501,32 @@ class TransitionKnowledgeBase:
                 retained[k] = b
         self._feature_beliefs = retained
 
+    def clear_locus_beliefs(self) -> None:
+        """Clear coordinate-scoped locus transition beliefs without clearing feature beliefs."""
+        self._locus_beliefs.clear()
+
     def clear(self) -> None:
         """Reset all stored beliefs, causal rules, and context epoch counters."""
         self._feature_beliefs.clear()
         self._locus_beliefs.clear()
         self._causal_rules.clear()
         self._context_epoch = 0
+
+    def exported_node_ids(self) -> list[str]:
+        """Return deterministic HCIR node IDs for all non-empty beliefs and causal rules."""
+        node_ids: list[str] = []
+        for belief in self._feature_beliefs.values():
+            if belief.total_observations() > 0.0:
+                _, _, nid = _belief_node_id(belief.scope, belief.context_key)
+                node_ids.append(nid)
+        for belief in self._locus_beliefs.values():
+            if belief.total_observations() > 0.0:
+                _, _, nid = _belief_node_id(belief.scope, belief.context_key)
+                node_ids.append(nid)
+        for rule in self._causal_rules.values():
+            _, _, nid = _rule_node_id(rule.trigger_key, rule.effect_signature)
+            node_ids.append(nid)
+        return node_ids
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Export all transition beliefs and causal rules as HCIR graph transactions."""
@@ -534,9 +564,10 @@ class TransitionKnowledgeBase:
             )
         return ops
 
-    def hydrate_from_nodes(self, nodes: Sequence[Any]) -> int:
-        """Hydrate beliefs and causal rules from stored HCIR graph nodes."""
+    def hydrate_from_nodes_with_keys(self, nodes: Sequence[Any]) -> tuple[int, set[Any]]:
+        """Hydrate beliefs and causal rules from HCIR nodes, returning (count, feature_keys)."""
         hydrated = 0
+        hydrated_feature_keys: set[Any] = set()
         for node in nodes:
             if isinstance(node, BeliefNode):
                 belief = TransitionBelief.from_belief_node(node)
@@ -548,6 +579,7 @@ class TransitionKnowledgeBase:
                     ] = belief
                 else:
                     self._feature_beliefs[belief.context_key] = belief
+                    hydrated_feature_keys.add(belief.context_key)
                 hydrated += 1
             elif isinstance(node, LearnedRuleNode):
                 rule = CausalEffectRule.from_learned_rule_node(node)
@@ -556,6 +588,11 @@ class TransitionKnowledgeBase:
                 _, _, token = _encode_context_key(rule.trigger_key)
                 self._causal_rules[(token, rule.effect_signature)] = rule
                 hydrated += 1
+        return hydrated, hydrated_feature_keys
+
+    def hydrate_from_nodes(self, nodes: Sequence[Any]) -> int:
+        """Hydrate beliefs and causal rules from stored HCIR graph nodes."""
+        hydrated, _ = self.hydrate_from_nodes_with_keys(nodes)
         return hydrated
 
 

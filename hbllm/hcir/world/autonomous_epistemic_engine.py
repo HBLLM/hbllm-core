@@ -1177,7 +1177,9 @@ class AutonomousEpistemicEngine:
 
         persistent_ws = self.tiered_workspace.persistent
         res = persistent_ws.query(GraphQuery(limit=9999))
-        hydrated_count = self.symbolic_theory.transition_kb.hydrate_from_nodes(res.nodes)
+        hydrated_count, kb_hydrated_feats = (
+            self.symbolic_theory.transition_kb.hydrate_from_nodes_with_keys(res.nodes)
+        )
 
         for node in res.nodes:
             nid = node.id
@@ -1216,7 +1218,10 @@ class AutonomousEpistemicEngine:
                         feat = int(nid.removeprefix("ontology_goal_"))
                     except ValueError:
                         logger.debug("Non-integer ontology_goal suffix ignored: %s", nid)
-                if feat is not None:
+                if feat is not None and not (
+                    feat in kb_hydrated_feats
+                    or (str(feat).lstrip("-").isdigit() and int(feat) in kb_hydrated_feats)
+                ):
                     has_reward = (
                         props.get("has_terminal_reward") is True
                         or props.get("provenance")
@@ -2410,25 +2415,13 @@ class AutonomousEpistemicEngine:
     UNVERIFIED_FEATURE_COST: float = 8.0
 
     def is_feature_unverified(self, feat: int, bg: int) -> bool:
-        """True if the agent has neither experience nor theory about ``feat``.
-
-        A feature is 'known' if it is background, part of the avatar, walked on
-        and survived, or classified by the symbolic theory (walkable, barrier,
-        goal, candidate goal, cargo). Anything else is epistemically unknown.
-        """
-        if feat == bg or self.symbolic_theory.is_walkable(feat):
-            return False
+        """True if the agent has neither experience nor empirical TransitionKB belief for ``feat``."""
         av = self.avatar_features or (
-            {self.avatar_feature} if self.avatar_feature is not None else set()
+            {self.avatar_feature} if self.avatar_feature is not None else ()
         )
-        if feat in av:
+        if feat == bg or feat in av:
             return False
-        th = self.symbolic_theory
-        if th.is_walkable(feat) or th.is_barrier(feat):
-            return False
-        if feat in th.goal_features or feat in th.cargo_features:
-            return False
-        return True
+        return self.symbolic_theory.evaluate_transition(feat).confidence <= 0.0
 
     def _epistemic_uncertainty_cost(self, feat: int, bg: int) -> float:
         """Soft exploration cost for stepping onto an unverified feature."""
@@ -3044,29 +3037,19 @@ class AutonomousEpistemicEngine:
                 def _in_working(nid: str) -> bool:
                     return any(f.workspace.get_node(nid) is not None for f in active_frames)
 
-                for goal_feat in self.symbolic_theory.goal_features:
-                    node_id = f"ontology_goal_{goal_feat}"
-                    if _in_working(node_id):
-                        self.tiered_workspace.promote(
-                            node_id=node_id,
-                            from_tier=WorkspaceTier.WORKING,
-                            to_tier=WorkspaceTier.PERSISTENT,
-                        )
-
                 all_goals: set[tuple[int, int]] = set(self.learned_goal_positions)
                 for g_set in self.working_memory.visuospatial.context_goals.values():
                     all_goals.update(g_set)
-                for goal_pos in all_goals:
-                    node_id = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
-                    if _in_working(node_id):
-                        self.tiered_workspace.promote(
-                            node_id=node_id,
-                            from_tier=WorkspaceTier.WORKING,
-                            to_tier=WorkspaceTier.PERSISTENT,
-                        )
-
-                for schema_name in self.working_memory.procedural_library:
-                    node_id = f"procedural_skill_{schema_name}"
+                promote_ids = list(self.symbolic_theory.transition_kb.exported_node_ids())
+                promote_ids.extend(
+                    f"ontology_goal_{goal_feat}" for goal_feat in self.symbolic_theory.goal_features
+                )
+                promote_ids.extend(f"learned_goal_{gp[0]}_{gp[1]}" for gp in all_goals)
+                promote_ids.extend(
+                    f"procedural_skill_{schema_name}"
+                    for schema_name in self.working_memory.procedural_library
+                )
+                for node_id in promote_ids:
                     if _in_working(node_id):
                         self.tiered_workspace.promote(
                             node_id=node_id,
@@ -3626,6 +3609,16 @@ class AutonomousEpistemicEngine:
         """Record learned barrier locally and propose atomic state transaction."""
         if barrier_pos not in self.learned_barriers:
             self.learned_barriers.add(barrier_pos)
+            kb = self.symbolic_theory.transition_kb
+            if kb.get_belief(barrier_pos, scope="locus") is None:
+                from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                kb.record_outcome(
+                    barrier_pos,
+                    TransitionOutcome.BLOCKED,
+                    scope="locus",
+                    evidence="learned_barrier",
+                )
             bid = f"learned_barrier_{barrier_pos[0]}_{barrier_pos[1]}"
             bnode = ConstraintNode(
                 id=bid,

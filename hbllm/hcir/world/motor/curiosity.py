@@ -87,13 +87,21 @@ class EpistemicCuriosityExplorer:
         step_r = int(np.sign(dr))
         step_c = int(np.sign(dc))
         dist = max(abs(dr), abs(dc))
+        kb = engine.symbolic_theory.transition_kb
         for k in range(1, dist + 1):
             kr = r0 + step_r * k
             kc = c0 + step_c * k
             if not (0 <= kr < H and 0 <= kc < W):
                 return False
             feat = int(curr_grid[kr, kc])
-            if (kr, kc) in engine.learned_barriers or engine.symbolic_theory.is_barrier(feat):
+            ev = engine.symbolic_theory.evaluate_transition(feat, locus=(kr, kc))
+            locus_b = kb.get_belief((kr, kc), scope="locus") if kb is not None else None
+            in_learned_b = (kr, kc) in engine.learned_barriers and not (
+                locus_b is not None and ev.traversable and ev.confidence > 0.0
+            )
+            if ev.risk_cost >= 40.0 or feat in engine.hazard_tracker.known_lethal_features:
+                return False
+            if in_learned_b or not ev.traversable:
                 if not engine.working_memory.body_schema.is_barrier_permeable(feat):
                     return False
             if (
@@ -101,8 +109,6 @@ class EpistemicCuriosityExplorer:
                 and feat == bg
                 and (kr, kc) not in engine.learned_goal_positions
             ):
-                return False
-            if feat in engine.hazard_tracker.known_lethal_features:
                 return False
         return True
 
@@ -155,7 +161,8 @@ class EpistemicCuriosityExplorer:
                 candidates: list[tuple[int, int]] = []
                 for v, c in zip(vals, counts):
                     vf = int(v)
-                    if vf != bg and c <= 2 and not engine.symbolic_theory.is_barrier(vf):
+                    ev_f = engine.symbolic_theory.evaluate_transition(vf)
+                    if vf != bg and c <= 2 and ev_f.traversable and ev_f.risk_cost < 40.0:
                         coords = np.argwhere(curr_grid == vf)
                         for r, c_idx in coords:
                             candidates.append((int(r), int(c_idx)))
@@ -172,14 +179,18 @@ class EpistemicCuriosityExplorer:
                             nr, nc = r + dr, c_idx + dc
                             if 0 <= nr < H and 0 <= nc < W:
                                 cell_val = int(curr_grid[nr, nc])
+                                ev_c = engine.symbolic_theory.evaluate_transition(
+                                    cell_val, locus=(nr, nc)
+                                )
                                 if cell_val == bg:
                                     score += 2.0
                                 elif (
                                     cell_val in engine.hazard_tracker.known_lethal_features
                                     or (nr, nc) in engine.current_context_hazards
+                                    or ev_c.risk_cost >= 40.0
                                 ):
                                     score -= 10.0
-                                elif engine.symbolic_theory.is_barrier(cell_val):
+                                elif not ev_c.traversable:
                                     score -= 5.0
                                 else:
                                     score -= 1.0
@@ -207,7 +218,12 @@ class EpistemicCuriosityExplorer:
                         tr, tc = av_r + dr, av_c + dc
                         if 0 <= tr < H and 0 <= tc < W:
                             val = int(curr_grid[tr, tc])
-                            if val == bg or val == 0 or engine.symbolic_theory.is_walkable(val):
+                            ev_t = engine.symbolic_theory.evaluate_transition(val, locus=(tr, tc))
+                            if (
+                                val == bg
+                                or val == 0
+                                or (ev_t.traversable and ev_t.confidence > 0.0)
+                            ):
                                 open_space_acts.append(a)
                             else:
                                 occupied_acts.append(a)
@@ -250,7 +266,8 @@ class EpistemicCuriosityExplorer:
                 candidates: list[tuple[int, int]] = []
                 for v, c in zip(vals, counts):
                     vf = int(v)
-                    if vf != bg and c <= 2 and not engine.symbolic_theory.is_barrier(vf):
+                    ev_f = engine.symbolic_theory.evaluate_transition(vf)
+                    if vf != bg and c <= 2 and ev_f.traversable and ev_f.risk_cost < 40.0:
                         coords = np.argwhere(curr_grid == vf)
                         for r, c_idx in coords:
                             candidates.append((int(r), int(c_idx)))
@@ -265,14 +282,18 @@ class EpistemicCuriosityExplorer:
                             nr, nc = r + dr, c_idx + dc
                             if 0 <= nr < H and 0 <= nc < W:
                                 cell_val = int(curr_grid[nr, nc])
+                                ev_c = engine.symbolic_theory.evaluate_transition(
+                                    cell_val, locus=(nr, nc)
+                                )
                                 if cell_val == bg:
                                     score += 2.0
                                 elif (
                                     cell_val in engine.hazard_tracker.known_lethal_features
                                     or (nr, nc) in engine.current_context_hazards
+                                    or ev_c.risk_cost >= 40.0
                                 ):
                                     score -= 10.0
-                                elif engine.symbolic_theory.is_barrier(cell_val):
+                                elif not ev_c.traversable:
                                     score -= 5.0
                                 else:
                                     score -= 1.0
@@ -443,14 +464,19 @@ class EpistemicCuriosityExplorer:
             nc = engine.avatar_pos[1] + dc_cal
             if not (0 <= nr < H and 0 <= nc < W):
                 continue
+            _osc_feat = int(curr_grid[nr, nc])
+            ev_osc = engine.symbolic_theory.evaluate_transition(_osc_feat, locus=(nr, nc))
+            osc_locus_b = engine.symbolic_theory.transition_kb.get_belief((nr, nc), scope="locus")
+            in_learned_b = (nr, nc) in engine.learned_barriers and not (
+                osc_locus_b is not None and ev_osc.traversable and ev_osc.confidence > 0.0
+            )
             if (
                 (nr, nc) in engine.hazard_tracker.static_lethal_positions
-                or (nr, nc) in engine.learned_barriers
-                or engine.symbolic_theory.is_barrier(int(curr_grid[nr, nc]))
+                or in_learned_b
+                or not ev_osc.traversable
+                or ev_osc.risk_cost >= 40.0
+                or _osc_feat in engine.hazard_tracker.known_lethal_features
             ):
-                continue
-            _osc_feat = int(curr_grid[nr, nc])
-            if _osc_feat in engine.hazard_tracker.known_lethal_features:
                 continue
             uncertainty_pen = engine._epistemic_uncertainty_cost(_osc_feat, bg) * 3.0
             visits = engine.position_visit_counts.get((nr, nc), 0)
@@ -683,7 +709,6 @@ class EpistemicCuriosityExplorer:
         return None
 
     @staticmethod
-    @staticmethod
     def _probe_frontier_escape_with_target(
         engine: AutonomousEpistemicEngine,
         curr_grid: np.ndarray,
@@ -844,46 +869,46 @@ class EpistemicCuriosityExplorer:
             if osc_prop is not None:
                 return osc_prop
 
-            candidate_entities = [
-                e
-                for e in entities
-                if e.id not in engine.probed_entity_ids
-                and not engine.symbolic_theory.is_barrier(e.feature_id)
-                and e.feature_id not in engine.hazard_tracker.known_lethal_features
-                and (
+            candidate_entities_eval: list[tuple[SpatialEntity, Any]] = []
+            for e in entities:
+                if e.id in engine.probed_entity_ids:
+                    continue
+                if e.feature_id in engine.hazard_tracker.known_lethal_features:
+                    continue
+                if not (
                     e.feature_id not in engine.hazard_tracker.mobile_entities
                     or e.feature_id in engine.symbolic_theory.cargo_features
                     or e.feature_id in engine.learned_cargo_features
-                )
-                and e.feature_id != engine.working_memory.shroud_feature
-                and (
+                ):
+                    continue
+                if e.feature_id == engine.working_memory.shroud_feature:
+                    continue
+                if (
                     abs(e.grid_pos[0] - engine.avatar_pos[0])
                     + abs(e.grid_pos[1] - engine.avatar_pos[1])
-                )
-                > 1
-            ]
+                ) <= 1:
+                    continue
+                ev_ent = engine.symbolic_theory.evaluate_transition(e.feature_id, locus=e.grid_pos)
+                if not (ev_ent.traversable or ev_ent.confidence == 0.0) or ev_ent.risk_cost >= 40.0:
+                    continue
+                candidate_entities_eval.append((e, ev_ent))
 
             new_probe_target: tuple[int, int] | None = None
             new_probe_id: str | None = None
             entity_visits_to_inc: list[str] = []
             doorway_reg: tuple[tuple[int, int], int] | None = None
 
-            if engine.active_probe_target is None and candidate_entities:
+            if engine.active_probe_target is None and candidate_entities_eval:
                 scored: list[tuple[SpatialEntity, float]] = []
-                for e in candidate_entities:
+                for e, ev_ent in candidate_entities_eval:
                     dist = abs(e.grid_pos[0] - engine.avatar_pos[0]) + abs(
                         e.grid_pos[1] - engine.avatar_pos[1]
                     )
                     visits = engine.entity_visit_counts.get(e.id, 0)
-                    # Friston Expected Free Energy (EFE): Epistemic Information Gain
-                    # Shannon entropy of unverified affordance properties (permeability, tool role, causal trigger)
+                    # Friston Expected Free Energy (EFE): Epistemic Information Gain from TransitionKB
                     f_id = e.feature_id
-                    affordance_uncertainty = 1.0
-                    if f_id not in engine.symbolic_theory.walkable_features:
-                        affordance_uncertainty += 0.8
-                    if f_id not in engine.symbolic_theory.barrier_features:
-                        affordance_uncertainty += 0.8
-                    if not any(
+                    affordance_uncertainty = 1.0 + 1.6 * float(ev_ent.info_gain)
+                    if not ev_ent.mutates_state and not any(
                         m.trigger_feature == f_id
                         for m in get_engine_state_attr(engine, "state_mutations", [])
                     ):

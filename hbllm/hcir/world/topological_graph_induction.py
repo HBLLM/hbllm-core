@@ -672,13 +672,14 @@ class GeodesicManifoldRouter:
         prune_cavities: bool = False,
         preserve_goal_order: bool = False,
         soft_avoid_cells: set[tuple[int, int]] | None = None,
+        transition_kb: Any | None = None,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find deterministic action-space shortest path across the traversable manifold.
 
         1. Constructs boolean passable mask from static barriers, walls, and unknown obstacles.
-        2. Projects dynamic threat trajectories into evasion hazard cones.
-        3. Harmonizes multi-cell action strides.
-        4. Dispatches action-transition BFS search to nearest reachable goals.
+        2. Applies locus-scoped transition KB beliefs when supplied.
+        3. Projects dynamic threat trajectories into evasion hazard cones.
+        4. Harmonizes multi-cell action strides and delegates shortest-path search.
         """
         H, W = curr_grid.shape
         passable_mask = np.ones((H, W), dtype=bool)
@@ -691,6 +692,20 @@ class GeodesicManifoldRouter:
         for ur, uc in unknown_entity_cells:
             if 0 <= ur < H and 0 <= uc < W:
                 passable_mask[ur, uc] = False
+        if transition_kb is not None:
+            for locus_pos in transition_kb._locus_beliefs:
+                lr, lc = int(locus_pos[0]), int(locus_pos[1])
+                if not (0 <= lr < H and 0 <= lc < W):
+                    continue
+                l_ev = transition_kb.evaluate_transition(int(curr_grid[lr, lc]), locus=(lr, lc))
+                if not l_ev.traversable or l_ev.risk_cost >= 40.0:
+                    passable_mask[lr, lc] = False
+                elif (
+                    l_ev.traversable
+                    and l_ev.confidence > 0.0
+                    and (lr, lc) not in unknown_entity_cells
+                ):
+                    passable_mask[lr, lc] = True
 
         hazard_cells: set[tuple[int, int]] = set()
         effective_traj_barriers = set(barrier_features)
@@ -781,6 +796,55 @@ class GeodesicManifoldRouter:
 
         effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)
 
+        def _search_mask_for_goal(
+            mask: np.ndarray, cand_goal: tuple[int, int]
+        ) -> list[tuple[Any, tuple[int, int]]] | None:
+            if transition_kb is not None and effective_goal_radius == 0:
+                from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
+
+                action_map = {act: (int(dr), int(dc)) for act, dr, dc in effective_actions}
+
+                def _eval_mask_kb(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
+                    if pos == cand_goal:
+                        return TransitionEdgeEvaluation(
+                            traversable=True,
+                            step_cost=1.0,
+                            risk_cost=0.0,
+                            goal_value=1.0,
+                            info_gain=0.0,
+                            mutates_state=False,
+                            confidence=1.0,
+                        )
+                    if not bool(mask[pos[0], pos[1]]):
+                        return TransitionEdgeEvaluation(
+                            traversable=False,
+                            step_cost=float("inf"),
+                            risk_cost=0.0,
+                            goal_value=0.0,
+                            info_gain=0.0,
+                            mutates_state=False,
+                            confidence=1.0,
+                        )
+                    return transition_kb.evaluate_transition(feat, locus=pos)
+
+                return GridTopologyGraph.shortest_path_from_kb(
+                    curr_grid,
+                    start_pos,
+                    {cand_goal},
+                    action_map,
+                    _eval_mask_kb,
+                    max_expansions=0,
+                    allow_goal_entry=True,
+                )
+
+            return GridTopologyGraph.shortest_path_with_actions(
+                passable_mask=mask,
+                start_coord=start_pos,
+                goal_coord=cand_goal,
+                actions_with_deltas=effective_actions,
+                goal_radius=effective_goal_radius,
+            )
+
         if soft_avoid_cells:
             for cand_goal in candidate_goals[:max_candidate_goals]:
                 if not (0 <= cand_goal[0] < H and 0 <= cand_goal[1] < W):
@@ -790,13 +854,7 @@ class GeodesicManifoldRouter:
                     if 0 <= sr < H and 0 <= sc < W and (sr, sc) != start_pos:
                         buf_mask[sr, sc] = False
                 buf_mask[cand_goal[0], cand_goal[1]] = True
-                buf_plan = GridTopologyGraph.shortest_path_with_actions(
-                    passable_mask=buf_mask,
-                    start_coord=start_pos,
-                    goal_coord=cand_goal,
-                    actions_with_deltas=effective_actions,
-                    goal_radius=effective_goal_radius,
-                )
+                buf_plan = _search_mask_for_goal(buf_mask, cand_goal)
                 if buf_plan:
                     return buf_plan
 
@@ -805,13 +863,7 @@ class GeodesicManifoldRouter:
                 continue
             cand_mask = passable_mask.copy()
             cand_mask[cand_goal[0], cand_goal[1]] = True
-            action_plan = GridTopologyGraph.shortest_path_with_actions(
-                passable_mask=cand_mask,
-                start_coord=start_pos,
-                goal_coord=cand_goal,
-                actions_with_deltas=effective_actions,
-                goal_radius=effective_goal_radius,
-            )
+            action_plan = _search_mask_for_goal(cand_mask, cand_goal)
             if action_plan:
                 return action_plan
 

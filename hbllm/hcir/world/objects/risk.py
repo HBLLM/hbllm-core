@@ -226,11 +226,14 @@ def compute_stance_priority(
         return (0, 0.0, 0)
 
     p_feat_cell = int(curr_grid[p[0], p[1]])
+    kb_ev = th.evaluate_transition(p_feat_cell, locus=p)
+    if kb_ev.risk_cost >= 40.0 and p_feat_cell not in th.goal_features:
+        return (8, float(kb_ev.risk_cost), dist)
     meta = satisfied_when.get(p)
     is_inert_unverified_contact = (
         (meta is None or "entity_pos" not in meta)
         and p_feat_cell != bg
-        and not th.is_barrier(p_feat_cell)
+        and kb_ev.traversable
         and p_feat_cell not in th.goal_features
         and p not in engine.learned_goal_positions
         and engine.is_feature_unverified(p_feat_cell, bg)
@@ -324,8 +327,10 @@ def compute_stance_priority(
         if target_feat != bg
         else 0.0
     )
+    p_ev = th.evaluate_transition(p_feat, locus=p)
+    t_ev = th.evaluate_transition(target_feat, locus=p)
     if (
-        (hazard_score >= 0.65 or est_risk >= 0.60)
+        (hazard_score >= 0.65 or est_risk >= 0.60 or t_ev.risk_cost >= 40.0)
         and pref_score < 0.45
         and target_feat not in th.goal_features
     ):
@@ -333,11 +338,11 @@ def compute_stance_priority(
     if barrier_score >= 0.72 and pref_score < 0.40 and target_feat not in th.goal_features:
         return (8, barrier_score, dist)
     p_cnt = int(np.count_nonzero(curr_grid == p_feat)) if p_feat != bg else 0
-    if p_feat in th.goal_features or p in engine.learned_goal_positions:
+    if p_ev.goal_value > 0.5 or p_feat in th.goal_features or p in engine.learned_goal_positions:
         return (1, -round(pref_score, 3), dist)
     if (
         p_feat != bg
-        and not th.is_barrier(p_feat)
+        and p_ev.traversable
         and engine.is_feature_unverified(p_feat, bg)
         and any(
             0 <= p[0] + dr < H

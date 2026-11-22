@@ -854,6 +854,7 @@ class MacroPlanSynthesizer:
                 barrier_features=wall_f,
                 avatar_features=av_feats,
                 max_candidate_goals=1,
+                transition_kb=engine.symbolic_theory.transition_kb,
             )
             reached = p is not None and len(p) > 0
             _nav_cache[dest] = reached
@@ -1033,9 +1034,22 @@ class MacroPlanSynthesizer:
                     engine.has_displacement_capabilities(available_actions)
                     and engine.avatar_pos is not None
                 ):
-                    is_bar = (
+                    sw_ev = engine.symbolic_theory.evaluate_transition(
+                        best_switch.feature_id, locus=best_switch.pos
+                    )
+                    sw_locus = (
+                        engine.symbolic_theory.transition_kb.get_belief(
+                            best_switch.pos, scope="locus"
+                        )
+                        if engine.symbolic_theory.transition_kb is not None
+                        else None
+                    )
+                    is_bar = not sw_ev.traversable or (
                         best_switch.pos in engine.learned_barriers
-                    ) or engine.symbolic_theory.is_barrier(best_switch.feature_id)
+                        and not (
+                            sw_locus is not None and sw_ev.traversable and sw_ev.confidence > 0.0
+                        )
+                    )
                     switch_rad = 1 if is_bar else 0
                     plan.append(
                         NavigateTo(
@@ -1128,9 +1142,24 @@ class MacroPlanSynthesizer:
                         engine.has_displacement_capabilities(available_actions)
                         and engine.avatar_pos is not None
                     ):
-                        is_bar = (
+                        obj_ev = engine.symbolic_theory.evaluate_transition(
+                            best_obj.feature_id, locus=best_obj.pos
+                        )
+                        obj_locus = (
+                            engine.symbolic_theory.transition_kb.get_belief(
+                                best_obj.pos, scope="locus"
+                            )
+                            if engine.symbolic_theory.transition_kb is not None
+                            else None
+                        )
+                        is_bar = not obj_ev.traversable or (
                             best_obj.pos in engine.learned_barriers
-                        ) or engine.symbolic_theory.is_barrier(best_obj.feature_id)
+                            and not (
+                                obj_locus is not None
+                                and obj_ev.traversable
+                                and obj_ev.confidence > 0.0
+                            )
+                        )
                         obj_rad = 1 if is_bar else 0
                         plan.append(
                             NavigateTo(

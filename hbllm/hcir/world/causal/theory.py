@@ -761,6 +761,9 @@ class HCIRSymbolicWorldTheory:
     def record_tool_barrier_affinity(self, tool_feat: Any, barrier_feat: Any) -> None:
         """Record empirical causal resonance where tool_feat cleared barrier_feat."""
         self.tool_barrier_affinities.setdefault(tool_feat, set()).add(barrier_feat)
+        self.transition_kb.record_causal_rule(
+            tool_feat, f"unlocks:{barrier_feat}", evidence="tool_barrier_affinity"
+        )
 
     def record_tool_barrier_incompatibility(self, tool_feat: Any, barrier_feat: Any) -> None:
         """Record empirical causal failure where tool_feat failed to clear barrier_feat."""
@@ -803,19 +806,28 @@ class HCIRSymbolicWorldTheory:
         target_feat: int | None = None,
     ) -> None:
         """Record distal causal coupling between actuator switch and target gate."""
-        self.distal_actuations.append(
-            {
-                "trigger_coord": trigger_coord
-                or (trigger_feature if isinstance(trigger_feature, tuple) else None),
-                "target_coord": target_coord
-                or affected_pos
-                or (target_feature if isinstance(target_feature, tuple) else None),
-                "trigger_feat": trigger_feat
-                or (trigger_feature if isinstance(trigger_feature, int) else None),
-                "target_feat": target_feat
-                or (target_feature if isinstance(target_feature, int) else None),
-            }
+        entry = {
+            "trigger_coord": trigger_coord
+            or (trigger_feature if isinstance(trigger_feature, tuple) else None),
+            "target_coord": target_coord
+            or affected_pos
+            or (target_feature if isinstance(target_feature, tuple) else None),
+            "trigger_feat": trigger_feat
+            or (trigger_feature if isinstance(trigger_feature, int) else None),
+            "target_feat": target_feat
+            or (target_feature if isinstance(target_feature, int) else None),
+        }
+        self.distal_actuations.append(entry)
+        trig_key = (
+            entry["trigger_coord"] if entry["trigger_coord"] is not None else entry["trigger_feat"]
         )
+        targ_key = (
+            entry["target_coord"] if entry["target_coord"] is not None else entry["target_feat"]
+        )
+        if trig_key is not None and targ_key is not None:
+            self.transition_kb.record_causal_rule(
+                trig_key, f"unlocks:{targ_key}", evidence="distal_actuation"
+            )
 
     def _is_kb_goal(self, feature_id: Any) -> bool:
         return feature_id not in self._avatar_features and self.transition_kb.has_feature_outcome(
@@ -1587,14 +1599,25 @@ class HCIRSymbolicWorldTheory:
         """Backward-compatible alias for clear_explored_loci."""
         self.clear_explored_loci(clear_features=clear_features)
 
-    def clear_barriers(self) -> None:
-        """Clear all barrier rules and cached features."""
-        self.barrier_predicates.clear()
+    def clear_barriers(self, *, preserve_lethal: bool = False) -> None:
+        """Clear all barrier rules and cached features (optionally preserving lethal beliefs)."""
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
         self.transition_kb.retract_outcome_all(TransitionOutcome.BLOCKED, scope="feature")
-        self.transition_kb.retract_outcome_all(TransitionOutcome.TERMINAL_FAIL, scope="feature")
-        to_pop = [k for k in self._feature_evidence if k[0] == "barrier"]
+        if not preserve_lethal:
+            self.transition_kb.retract_outcome_all(TransitionOutcome.TERMINAL_FAIL, scope="feature")
+            self.barrier_predicates.clear()
+            to_pop = [k for k in self._feature_evidence if k[0] == "barrier"]
+            for k in to_pop:
+                self._feature_evidence.pop(k, None)
+            return
+        kept_feats = self.barrier_features
+        self.barrier_predicates = [
+            p
+            for p in self.barrier_predicates
+            if p.variable == "feature_id" and p.value in kept_feats
+        ]
+        to_pop = [k for k in self._feature_evidence if k[0] == "barrier" and k[1] not in kept_feats]
         for k in to_pop:
             self._feature_evidence.pop(k, None)
 
@@ -1688,7 +1711,14 @@ class HCIRSymbolicWorldTheory:
         rank, ev_str = self.get_feature_evidence("walkable", feature_id)
         if rank >= OntologyEvidenceRank.TRAVERSAL:
             return True
-        return False
+        belief = self.transition_kb.get_belief(feature_id)
+        return (
+            belief is not None
+            and belief.counts.get(TransitionOutcome.TRAVERSED.value, 0.0) > 0.0
+            and any(
+                parse_evidence(e)[0] >= OntologyEvidenceRank.TRAVERSAL for e in belief.evidence_log
+            )
+        )
 
     def seed_core_knowledge(self, bg_feature: Any = 0) -> None:
         """Seed domain-general Spelke core cognitive knowledge (Physics & Free Space axioms).
@@ -2014,8 +2044,8 @@ class HCIRSymbolicWorldTheory:
         return ops
 
     def hydrate_from_nodes(self, nodes: Sequence[Any]) -> None:
-        """Reconstruct symbolic world theory from stored HCIR ConceptNodes."""
-        self.transition_kb.hydrate_from_nodes(nodes)
+        """Reconstruct symbolic world theory from stored HCIR ConceptNodes and TransitionKB nodes."""
+        _, kb_hydrated_feats = self.transition_kb.hydrate_from_nodes_with_keys(nodes)
         for node in nodes:
             if not isinstance(node, ConceptNode):
                 continue
@@ -2030,6 +2060,9 @@ class HCIRSymbolicWorldTheory:
                         feat_val = int(feat)
                     except (ValueError, TypeError):
                         feat_val = feat
+
+                    if feat_val in kb_hydrated_feats:
+                        continue
 
                     if role == "goal":
                         has_reward = (

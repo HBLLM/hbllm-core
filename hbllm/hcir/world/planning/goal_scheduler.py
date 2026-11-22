@@ -98,14 +98,17 @@ class EpistemicGoalScheduler:
         """Return safe open-push-through approach stances if some approach sides would pin an unverified interior entity."""
         th = engine.symbolic_theory
         er, ec = entity_pos
+        f_ev = th.evaluate_transition(feature_id, locus=entity_pos)
         should_check_reversible = (
             not has_cargo_context
             and avatar_pos is not None
             and int(curr_grid[er, ec]) == int(feature_id)
-            and not th.is_walkable(feature_id)
+            and not (f_ev.traversable and f_ev.confidence > 0.0)
+            and f_ev.goal_value <= 0.5
             and feature_id not in th.goal_features
             and entity_pos not in engine.learned_goal_positions
-            and not th.is_barrier(feature_id)
+            and f_ev.traversable
+            and f_ev.risk_cost < 40.0
             and 1 <= entity_area <= 4
             and 0 < er < H - 1
             and 0 < ec < W - 1
@@ -115,14 +118,24 @@ class EpistemicGoalScheduler:
         goal_like = th.goal_features | th.candidate_goal_features | th.receptacle_features
         safe_stances: list[tuple[int, int]] = []
         unsafe_stances: list[tuple[int, int]] = []
+        kb = th.transition_kb
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             ap = (er + dr, ec + dc)
             if not (0 <= ap[0] < H and 0 <= ap[1] < W):
                 continue
-            if ap in engine.learned_barriers or ap in engine.current_context_hazards:
+            if ap in engine.current_context_hazards:
                 continue
             ap_feat = int(curr_grid[ap[0], ap[1]])
-            if not (ap_feat == bg or th.is_walkable(ap_feat) or ap == avatar_pos):
+            ev_ap = th.evaluate_transition(ap_feat, locus=ap)
+            if not ev_ap.traversable or ev_ap.risk_cost >= 40.0:
+                continue
+            if ap in engine.learned_barriers and not (
+                kb.get_belief(ap, scope="locus") is not None and ev_ap.confidence > 0.0
+            ):
+                continue
+            if not (
+                ap_feat == bg or (ev_ap.traversable and ev_ap.confidence > 0.0) or ap == avatar_pos
+            ):
                 continue
             b1 = (er - dr, ec - dc)
             b2 = (er - 2 * dr, ec - 2 * dc)
@@ -130,28 +143,40 @@ class EpistemicGoalScheduler:
             b2_open = False
             if 0 <= b1[0] < H and 0 <= b1[1] < W:
                 f1 = int(curr_grid[b1[0], b1[1]])
+                ev1 = th.evaluate_transition(f1, locus=b1)
+                b1_locus = kb.get_belief(b1, scope="locus")
+                b1_bar = b1 in engine.learned_barriers and not (
+                    b1_locus is not None and ev1.traversable and ev1.confidence > 0.0
+                )
                 b1_open = (
-                    b1 not in engine.learned_barriers
+                    not b1_bar
                     and b1 not in engine.current_context_hazards
-                    and not th.is_barrier(f1)
+                    and ev1.traversable
+                    and ev1.risk_cost < 40.0
                     and (
                         f1 == bg
                         or b1 == avatar_pos
                         or th.is_avatar_feature(f1)
-                        or th.is_walkable(f1)
+                        or ev1.confidence > 0.0
                         or f1 in goal_like
                     )
                 )
             if 0 <= b2[0] < H and 0 <= b2[1] < W:
                 f2 = int(curr_grid[b2[0], b2[1]])
+                ev2 = th.evaluate_transition(f2, locus=b2)
+                b2_locus = kb.get_belief(b2, scope="locus")
+                b2_bar = b2 in engine.learned_barriers and not (
+                    b2_locus is not None and ev2.traversable and ev2.confidence > 0.0
+                )
                 b2_open = (
-                    b2 not in engine.learned_barriers
-                    and not th.is_barrier(f2)
+                    not b2_bar
+                    and ev2.traversable
+                    and ev2.risk_cost < 40.0
                     and (
                         f2 == bg
                         or b2 == avatar_pos
                         or th.is_avatar_feature(f2)
-                        or th.is_walkable(f2)
+                        or ev2.confidence > 0.0
                         or f2 in goal_like
                     )
                 )
@@ -234,19 +259,19 @@ class EpistemicGoalScheduler:
         transient_blocked: set[tuple[int, int]] | None = None,
     ) -> None:
         """Queue unprobed adjacent stances first; escalate to contact only once all fail."""
-        adj_walkable = [
-            (entity_pos[0] + dr, entity_pos[1] + dc)
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-            if 0 <= entity_pos[0] + dr < H
-            and 0 <= entity_pos[1] + dc < W
-            and (
-                curr_grid[entity_pos[0] + dr, entity_pos[1] + dc] == bg
-                or engine.symbolic_theory.is_walkable(
-                    int(curr_grid[entity_pos[0] + dr, entity_pos[1] + dc])
-                )
-                or (entity_pos[0] + dr, entity_pos[1] + dc) == avatar_pos
-            )
-        ]
+        th = engine.symbolic_theory
+        adj_walkable: list[tuple[int, int]] = []
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            ap = (entity_pos[0] + dr, entity_pos[1] + dc)
+            if not (0 <= ap[0] < H and 0 <= ap[1] < W):
+                continue
+            ap_val = int(curr_grid[ap[0], ap[1]])
+            if ap_val == bg or ap == avatar_pos:
+                adj_walkable.append(ap)
+                continue
+            ap_ev = th.evaluate_transition(ap_val, locus=ap)
+            if ap_ev.traversable and ap_ev.confidence > 0.0 and ap_ev.risk_cost < 40.0:
+                adj_walkable.append(ap)
         last_act = getattr(engine, "last_action", None)
         acc = getattr(engine, "acc_conflict_monitor", None)
         osc = getattr(acc, "_motor_oscillation_monitor", acc) if acc is not None else None
@@ -285,14 +310,20 @@ class EpistemicGoalScheduler:
         allow_contact_escalation = added_adj == 0 or (
             any_adj_probed and (is_singleton or feature_id in engine.symbolic_theory.goal_features)
         )
+        feat_ev = th.evaluate_transition(feature_id, locus=entity_pos)
+        ent_locus_b = th.transition_kb.get_belief(entity_pos, scope="locus")
+        in_learned_bar = entity_pos in engine.learned_barriers and not (
+            ent_locus_b is not None and feat_ev.traversable and feat_ev.confidence > 0.0
+        )
         if (
             allow_contact_escalation
             and adj_walkable
             and entity_pos not in engine.exhausted_candidate_goals
             and not engine.symbolic_theory.is_locus_explored(entity_pos)
-            and entity_pos not in engine.learned_barriers
+            and not in_learned_bar
             and entity_pos not in engine.current_context_hazards
-            and not engine.symbolic_theory.is_barrier(feature_id)
+            and feat_ev.traversable
+            and feat_ev.risk_cost < 40.0
         ):
             if entity_pos not in target_goals:
                 target_goals.append(entity_pos)
@@ -337,11 +368,23 @@ class EpistemicGoalScheduler:
             val = int(curr_grid[r_np, c_np])
             if val in av_feats:
                 continue
-            if th.is_barrier(val) or val in lethal_feats:
+            ev_cell = th.evaluate_transition(val, locus=(r_np, c_np))
+            if not ev_cell.traversable or ev_cell.risk_cost >= 40.0 or val in lethal_feats:
                 hard_blocked.add((r_np, c_np))
                 unverified_blocked.add((r_np, c_np))
-            elif not th.is_walkable(val) and val not in th.goal_features:
+            elif ev_cell.confidence == 0.0:
                 unverified_blocked.add((r_np, c_np))
+        for locus_pos in th.transition_kb._locus_beliefs:
+            lr_l, lc_l = int(locus_pos[0]), int(locus_pos[1])
+            if not (0 <= lr_l < H and 0 <= lc_l < W) or (lr_l, lc_l) == avatar_pos:
+                continue
+            lev = th.evaluate_transition(int(curr_grid[lr_l, lc_l]), locus=(lr_l, lc_l))
+            if not lev.traversable or lev.risk_cost >= 40.0:
+                hard_blocked.add((lr_l, lc_l))
+                unverified_blocked.add((lr_l, lc_l))
+            elif lev.traversable and lev.confidence > 0.0:
+                hard_blocked.discard((lr_l, lc_l))
+                unverified_blocked.discard((lr_l, lc_l))
 
         opened_portals.difference_update(unverified_blocked)
         reachable_comp = TopologicalCutSetAnalyzer.get_reachable_component(
@@ -1392,7 +1435,7 @@ class EpistemicGoalScheduler:
             if novel_entity_goals:
                 goals = novel_entity_goals
 
-        if avatar_pos is not None and goals and satisfied_when:
+        if avatar_pos is not None and goals and (satisfied_when or not confirmed_goals):
             from hbllm.hcir.world.object_state_graph import compute_stance_priority
 
             th = engine.symbolic_theory
@@ -1705,6 +1748,17 @@ class EpistemicGoalScheduler:
             bad_feats = set(barrier_feats) | set(lethal_feats) | prior_hazard_feats
             if bad_feats:
                 blocked |= np.isin(curr_grid, list(bad_feats))
+            for locus_pos in engine.symbolic_theory.transition_kb._locus_beliefs:
+                lr_l, lc_l = int(locus_pos[0]), int(locus_pos[1])
+                if not (0 <= lr_l < H and 0 <= lc_l < W):
+                    continue
+                l_ev = engine.symbolic_theory.evaluate_transition(
+                    int(curr_grid[lr_l, lc_l]), locus=(lr_l, lc_l)
+                )
+                if not l_ev.traversable or l_ev.risk_cost >= 40.0:
+                    blocked[lr_l, lc_l] = True
+                elif l_ev.traversable and l_ev.confidence > 0.0:
+                    blocked[lr_l, lc_l] = False
             passable = ~blocked
             passable[avatar_pos[0], avatar_pos[1]] = True
             labeled_reach, _ = _scipy_label(passable)
