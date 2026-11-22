@@ -44,10 +44,49 @@ def _indefinite_article(word: str) -> str:
 
 
 def _clean_concept_name(name: str) -> str:
-    """Normalize concept name (strip prefixes like 't4_concept_')."""
-    clean = re.sub(r"^t4_concept_", "", name.strip())
+    """Normalize concept name (strip prefixes like 't4_concept_', 'web_concept_', etc.)."""
+    clean = re.sub(r"^(?:t4_concept_|web_concept_|concept_|sem_)", "", name.strip())
     clean = clean.replace("_", " ").strip()
     return clean
+
+
+def _resolve_concept_node_ids(p_graph: Any, name: str) -> list[str]:
+    """Resolve persistent graph node IDs matching a concept name or label."""
+    from hbllm.hcir.graph import ConceptNode, HCIRNodeType
+
+    clean = name.strip().lower()
+    if not clean:
+        return []
+    clean_under = clean.replace(" ", "_")
+    candidates = (
+        clean,
+        clean_under,
+        f"t4_concept_{clean_under}",
+        f"t4_concept_{clean}",
+        f"web_concept_{clean_under}",
+        f"web_concept_{clean}",
+        f"concept_{clean_under}",
+        f"concept_{clean}",
+        f"sem_{clean_under}",
+    )
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for cid in candidates:
+        if cid not in seen and p_graph.get_node(cid) is not None:
+            resolved.append(cid)
+            seen.add(cid)
+
+    if getattr(p_graph, "node_count", 0) <= 2000:
+        for node in p_graph.nodes_by_type(HCIRNodeType.CONCEPT):
+            if (
+                isinstance(node, ConceptNode)
+                and node.label
+                and node.label.strip().lower() in (clean, clean_under)
+                and node.id not in seen
+            ):
+                resolved.append(node.id)
+                seen.add(node.id)
+    return resolved
 
 
 @dataclass
@@ -229,11 +268,13 @@ class ConceptExplainer:
             tiers=[WorkspaceTier.PERSISTENT, WorkspaceTier.BRAIN, WorkspaceTier.WORKING],
         )
 
+        clean_under = concept.replace(" ", "_")
         for node in result.nodes:
             # ConceptNode definition fallback
             if isinstance(node, ConceptNode):
                 if node.label.lower() == concept or node.id.lower() in (
                     f"t4_concept_{concept}",
+                    f"web_concept_{clean_under}",
                     f"concept_{concept}",
                 ):
                     if not snapshot.definition and node.definition:
@@ -287,20 +328,9 @@ class ConceptExplainer:
         # Inspect graph edges from persistent tier for typed relational traversal (O(degree))
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
         if p_graph is not None:
-            clean_under = concept.replace(" ", "_")
-            candidate_node_ids = (
-                concept,
-                clean_under,
-                f"t4_concept_{clean_under}",
-                f"t4_concept_{concept}",
-                f"concept_{clean_under}",
-                f"concept_{concept}",
-                f"sem_{clean_under}",
-            )
+            candidate_node_ids = _resolve_concept_node_ids(p_graph, concept)
             seen_edges: set[str] = set()
             for cid in candidate_node_ids:
-                if p_graph.get_node(cid) is None:
-                    continue
                 for edge in p_graph.edges_from(cid):
                     if edge.id in seen_edges:
                         continue
@@ -491,17 +521,9 @@ class ConceptExplainer:
                 chain = [direct_cause]
                 curr = direct_cause
                 for _ in range(max_depth - 1):
-                    curr_under = curr.replace(" ", "_")
-                    curr_ids = (
-                        curr,
-                        curr_under,
-                        f"t4_concept_{curr_under}",
-                        f"concept_{curr_under}",
-                    )
+                    curr_ids = _resolve_concept_node_ids(p_graph, curr)
                     parent_cause: str | None = None
                     for cid in curr_ids:
-                        if p_graph.get_node(cid) is None:
-                            continue
                         for edge in p_graph.edges_to(cid):
                             if edge.edge_type == HCIREdgeType.CAUSES:
                                 for s in edge.sources:
@@ -596,17 +618,9 @@ class ConceptExplainer:
                 chain = [direct_req]
                 curr = direct_req
                 for _ in range(max_depth - 1):
-                    curr_under = curr.replace(" ", "_")
-                    curr_ids = (
-                        curr,
-                        curr_under,
-                        f"t4_concept_{curr_under}",
-                        f"concept_{curr_under}",
-                    )
+                    curr_ids = _resolve_concept_node_ids(p_graph, curr)
                     next_req: str | None = None
                     for cid in curr_ids:
-                        if p_graph.get_node(cid) is None:
-                            continue
                         for edge in p_graph.edges_from(cid):
                             if edge.edge_type == HCIREdgeType.REQUIRES:
                                 for t in edge.targets:

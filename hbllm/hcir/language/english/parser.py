@@ -35,6 +35,27 @@ from hbllm.hcir.language.english.syntax import (
 logger = logging.getLogger(__name__)
 
 
+_PRIORITY_IMPERATIVE_VERBS: frozenset[str] = frozenset(
+    {
+        "why",
+        "how",
+        "tell",
+        "remember",
+        "recall",
+        "forget",
+        "explain",
+        "describe",
+        "define",
+        "summarize",
+        "search",
+        "websearch",
+        "google",
+        "fetch",
+        "browse",
+    }
+)
+
+
 class EnglishParser:
     """Parses English utterances into language-neutral SemanticFrames."""
 
@@ -73,20 +94,9 @@ class EnglishParser:
         if content:
             first_lemma = content[0].lemma
             is_copular_noun = len(content) >= 2 and content[1].pos == EnglishPOS.AUX
-            if first_lemma in {
-                "why",
-                "how",
-                "tell",
-                "remember",
-                "explain",
-                "describe",
-                "define",
-                "search",
-                "websearch",
-                "google",
-                "fetch",
-                "browse",
-            } and (not is_copular_noun or first_lemma in ("why", "how")):
+            if first_lemma in _PRIORITY_IMPERATIVE_VERBS and (
+                not is_copular_noun or first_lemma in ("why", "how")
+            ):
                 imp_priority = self._try_parse_imperative_command(tokens, meta)
                 if imp_priority is not None:
                     return imp_priority
@@ -146,8 +156,10 @@ class EnglishParser:
                 return None
             if content[1].pos in (EnglishPOS.AUX, EnglishPOS.VERB):
                 return None
-            if "noun" in first.features.get("alt_pos", "") and any(
-                t.pos in (EnglishPOS.AUX, EnglishPOS.VERB) for t in content[1:]
+            if (
+                first.lemma not in _PRIORITY_IMPERATIVE_VERBS
+                and "noun" in first.features.get("alt_pos", "")
+                and any(t.pos in (EnglishPOS.AUX, EnglishPOS.VERB) for t in content[1:])
             ):
                 return None
 
