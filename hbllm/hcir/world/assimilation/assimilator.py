@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.grounding.contracts.observation import CoordinateType
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
@@ -66,6 +67,8 @@ class EpistemicFeedbackAssimilator:
         th = view.symbolic_theory
         wm = view.working_memory
         lethal = view.hazard_tracker.known_lethal_features
+        rf = wm.reference_frame
+        is_continuous = rf is not None and rf.coordinate_type == CoordinateType.CONTINUOUS
         for cr, cc in landing_cells:
             for k in range(0, max(steps, 1)):
                 r, c = cr - sr * k, cc - sc * k
@@ -76,7 +79,7 @@ class EpistemicFeedbackAssimilator:
                 wf = int(view.prev_grid[r, c])
                 if wf in av:
                     continue
-                if (
+                if (not is_continuous or wf == bg_val) and (
                     th.transition_kb.get_belief((r, c), scope="locus") is not None
                     or not th.evaluate_transition(wf).traversable
                 ):
@@ -89,8 +92,10 @@ class EpistemicFeedbackAssimilator:
                 if k == 0 and wf != bg_val and not th.is_walkable(wf):
                     th.mark_locus_explored((r, c), reason="traversal")
                     view.exhausted_candidate_goals.add((r, c))
-                # Detect cross-context label contradiction when safely traversing prior beliefs
-                if th.has_prior_context_transition and wf != bg_val:
+                # Detect cross-context label contradiction when safely traversing prior beliefs.
+                # Under continuous coordinates, quantized grid cells can overlap adjacent
+                # obstacles or unentered goal radii without genuine feature traversal.
+                if not is_continuous and th.has_prior_context_transition and wf != bg_val:
                     prior_lethal_falsified = wf in lethal and not th.is_verified_in_context(
                         "lethal", wf
                     )
@@ -136,7 +141,8 @@ class EpistemicFeedbackAssimilator:
                     or wf in view.hazard_tracker.mobile_entities
                 ):
                     continue
-                th.induce_walkable(wf, evidence="traversal")
+                if not is_continuous or wf == bg_val:
+                    th.induce_walkable(wf, evidence="traversal")
 
     @staticmethod
     def _synchronize_lattice_stride(view: Any, stride: int) -> None:
@@ -1923,19 +1929,36 @@ class EpistemicFeedbackAssimilator:
                                     and int(np.count_nonzero(curr_grid == val)) <= 2
                                 )
 
-                                if (
-                                    view.symbolic_theory.has_verified_walkable(val)
-                                    and view.symbolic_theory.has_prior_context_transition
-                                    and not view.symbolic_theory.is_verified_in_context(
-                                        "walkable", val
+                                rf_col = view.working_memory.reference_frame
+                                is_continuous_col = (
+                                    rf_col is not None
+                                    and rf_col.coordinate_type == CoordinateType.CONTINUOUS
+                                )
+                                th_col = view.symbolic_theory
+                                is_known_gated_barrier = (
+                                    val in th_col.conditional_affordances
+                                    or any(
+                                        val in bs for bs in th_col.tool_barrier_affinities.values()
                                     )
+                                    or any(
+                                        val in bs
+                                        for bs in view.working_memory.tool_barrier_affinities.values()
+                                    )
+                                )
+                                if (
+                                    not is_continuous_col
+                                    and not is_known_gated_barrier
+                                    and int(np.count_nonzero(curr_grid == val)) > 2
+                                    and th_col.has_verified_walkable(val)
+                                    and th_col.has_prior_context_transition
+                                    and not th_col.is_verified_in_context("walkable", val)
                                 ):
                                     from hbllm.hcir.world.cortex_causal import (
                                         invalidate_stale_context_ontology,
                                     )
 
                                     invalidate_stale_context_ontology(
-                                        view.symbolic_theory,
+                                        th_col,
                                         hazard_tracker=view.hazard_tracker,
                                         episodic_cortex=view.episodic_cortex,
                                         working_memory=view.working_memory,

@@ -925,6 +925,7 @@ class HippocampalEpisodicCortex:
                 # Coordinate-keyed distal links are layout-specific; the feature-level
                 # law survives in symbolic_theory.conditional_affordances.
                 view.working_memory.remote_causal.reset_episode(retain_long_term=False)
+            view.working_memory.exogenous_tracker.reset_episode(retain_long_term=False)
             if hasattr(view, "feature_quiescent_counts"):
                 view.feature_quiescent_counts.clear()
             if hasattr(view, "_feature_quiescent_counts"):

@@ -103,7 +103,8 @@ class StaticLethalHazardPredicate(PlanSafetyPredicate):
                 feat = int(curr_grid[fr, fc])
                 if feat in view.mobile_threat_features:
                     continue
-                if feat in view.hazard_tracker.known_lethal_features:
+                ev = view.symbolic_theory.evaluate_transition(feat, locus=(fr, fc))
+                if feat in view.hazard_tracker.known_lethal_features or ev.risk_cost >= 40.0:
                     return SafetyGateResult(
                         is_safe=False, reason=f"Lethal feature {feat} at ({fr}, {fc})"
                     )

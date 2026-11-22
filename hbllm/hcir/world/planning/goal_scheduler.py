@@ -14,6 +14,7 @@ from scipy.ndimage import label as _scipy_label
 from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.engine_state import get_engine_state_attr
@@ -345,7 +346,7 @@ class EpistemicGoalScheduler:
         th = engine.symbolic_theory
         hz = engine.hazard_tracker
         lethal_feats = set(getattr(th, "lethal_features", frozenset()) or ())
-        lethal_feats.update(hz.known_lethal_features)
+        lethal_feats.update(EpistemicGoalScheduler._effective_lethal_features(engine))
         opened_portals: set[tuple[int, int]] = set()
         for mut in engine.state_mutations:
             mut_meta = mut.metadata or {}
@@ -466,6 +467,16 @@ class EpistemicGoalScheduler:
         }
 
     @classmethod
+    def _effective_lethal_features(cls, engine: Any) -> set[int]:
+        """Return lethal features combining hazard tracker and TransitionKB fatal beliefs."""
+        th = engine.symbolic_theory
+        lethal: set[int] = {int(f) for f in engine.hazard_tracker.known_lethal_features}
+        for f in th.transition_kb.features_with_outcome(TransitionOutcome.TERMINAL_FAIL):
+            if isinstance(f, int) and th.evaluate_transition(f).risk_cost >= 40.0:
+                lethal.add(int(f))
+        return lethal
+
+    @classmethod
     def compute_frontier_candidates(
         cls,
         engine: Any,
@@ -522,6 +533,7 @@ class EpistemicGoalScheduler:
             for a in available_actions
         )
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
+        lethal_feats = cls._effective_lethal_features(engine)
         if curr_grid.size > 0 and np.issubdtype(curr_grid.dtype, np.integer):
             _amin, _amax = int(curr_grid.min()), int(curr_grid.max())
             if 0 <= _amin and _amax < 256:
@@ -559,7 +571,7 @@ class EpistemicGoalScheduler:
                 continue
             if (
                 e.feature_id in engine.mobile_threat_features
-                or e.feature_id in engine.hazard_tracker.known_lethal_features
+                or e.feature_id in lethal_feats
                 or (
                     e.feature_id in engine.hazard_tracker.mobile_entities
                     and e.feature_id not in engine.symbolic_theory.cargo_features
@@ -735,7 +747,7 @@ class EpistemicGoalScheduler:
         ):
             cond_affs = engine.symbolic_theory.conditional_affordances
             held_ids = engine.working_memory.held_feature_ids
-            lethal_cond_feats = engine.hazard_tracker.known_lethal_features
+            lethal_cond_feats = lethal_feats
             unfulfilled = [
                 aff
                 for aff in cond_affs.values()
@@ -1202,7 +1214,7 @@ class EpistemicGoalScheduler:
                 ):
                     continue
                 if (
-                    e.feature_id in engine.hazard_tracker.known_lethal_features
+                    e.feature_id in lethal_feats
                     or e.feature_id in engine.mobile_threat_features
                     or (
                         e.feature_id in engine.hazard_tracker.mobile_entities
@@ -1347,7 +1359,7 @@ class EpistemicGoalScheduler:
                 if (
                     (engine.symbolic_theory.is_barrier(e.feature_id) and not is_isolated_interior)
                     or (e.role == EntityRole.OBSTACLE and not is_isolated_interior)
-                    or e.feature_id in engine.hazard_tracker.known_lethal_features
+                    or e.feature_id in lethal_feats
                     or e.feature_id in engine.mobile_threat_features
                     or int(e.feature_id) in prior_hazard_feats
                 ):
@@ -1527,7 +1539,7 @@ class EpistemicGoalScheduler:
                     feat = None
                 if feat is not None and (
                     (feat in av_feats and not sg.get("is_midpoint"))
-                    or feat in engine.hazard_tracker.known_lethal_features
+                    or feat in lethal_feats
                     or (
                         engine.symbolic_theory.is_barrier(feat)
                         and feat not in engine.symbolic_theory.goal_features
@@ -1564,10 +1576,7 @@ class EpistemicGoalScheduler:
                             ):
                                 continue
                             cp_feat = int(curr_grid[cp[0], cp[1]])
-                            if (
-                                cp_feat in engine.hazard_tracker.known_lethal_features
-                                or _is_prior_blocked_feat(cp_feat)
-                            ):
+                            if cp_feat in lethal_feats or _is_prior_blocked_feat(cp_feat):
                                 continue
                             if cp not in goals:
                                 goals.append(cp)
@@ -1591,10 +1600,7 @@ class EpistemicGoalScheduler:
                         ):
                             continue
                         pos_feat = int(curr_grid[pos[0], pos[1]])
-                        if (
-                            pos_feat in engine.hazard_tracker.known_lethal_features
-                            or _is_prior_blocked_feat(pos_feat)
-                        ):
+                        if pos_feat in lethal_feats or _is_prior_blocked_feat(pos_feat):
                             continue
                         if pos not in goals:
                             goals.append(pos)
@@ -1654,7 +1660,7 @@ class EpistemicGoalScheduler:
         ):
             th = engine.symbolic_theory
             verified_lethal = th.context_verified_features("lethal")
-            unverified_lethals = set(engine.hazard_tracker.known_lethal_features) - verified_lethal
+            unverified_lethals = set(lethal_feats) - verified_lethal
             if unverified_lethals and any(f in unverified_lethals for f in feat_counts):
                 from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
 
@@ -1668,12 +1674,14 @@ class EpistemicGoalScheduler:
                     preserve_current_context=True,
                     reason="frontier_exhausted_over_prior_blacklist",
                 )
+                lethal_feats = cls._effective_lethal_features(engine)
                 for e_blk in entities:
                     if (
                         e_blk.feature_id != bg
                         and e_blk.feature_id not in av_feats
                         and e_blk.grid_pos != avatar_pos
                         and not th.is_barrier(e_blk.feature_id)
+                        and e_blk.feature_id not in lethal_feats
                         and e_blk.grid_pos not in engine.learned_barriers
                         and e_blk.grid_pos not in engine.current_context_hazards
                     ):
@@ -1725,6 +1733,7 @@ class EpistemicGoalScheduler:
             g
             for g in goals
             if g not in all_lethals
+            and int(curr_grid[g[0], g[1]]) not in lethal_feats
             and not wm_exog.is_exogenous_locus(
                 g, lattice=curr_grid, bg=bg, include_outer_edge=False
             )
@@ -1732,13 +1741,16 @@ class EpistemicGoalScheduler:
         new_learned_positions = {
             p
             for p in new_learned_positions
-            if not wm_exog.is_exogenous_locus(p, lattice=curr_grid, bg=bg, include_outer_edge=False)
+            if p not in all_lethals
+            and int(curr_grid[p[0], p[1]]) not in lethal_feats
+            and not wm_exog.is_exogenous_locus(
+                p, lattice=curr_grid, bg=bg, include_outer_edge=False
+            )
         }
 
         # Reachability Gating: Discard goals physically disconnected from avatar
         if avatar_pos is not None and goals:
             barrier_feats = engine.symbolic_theory.barrier_features
-            lethal_feats = engine.hazard_tracker.known_lethal_features
             learned_b = engine.learned_barriers
 
             # Vectorized 4-connected flood fill over passable cells —

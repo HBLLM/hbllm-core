@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from hbllm.hcir.graph import BeliefNode, LearnedRuleNode
+from hbllm.hcir.grounding.contracts.observation import CoordinateType, ReferenceFrame
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.transactions import TransactionOp
 from hbllm.hcir.workspace_tiers import TieredWorkspace
@@ -21,12 +22,21 @@ from hbllm.hcir.world.cortex_causal import (
     TransitionKnowledgeBase,
     TransitionOutcome,
 )
+from hbllm.hcir.world.deliberation.safety_predicates import StaticLethalHazardPredicate
 from hbllm.hcir.world.engine_state import ReadOnlyEngineView, StateDelta
 from hbllm.hcir.world.learning.causal_planner import CausalTheoryPlanner
 from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
 from hbllm.hcir.world.objects.planner import ObjectStateGraphPlanner
-from hbllm.hcir.world.percept import TerminalSignal
-from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
+from hbllm.hcir.world.percept import (
+    EpisodeBoundary,
+    EpisodeBoundaryKind,
+    TerminalSignal,
+)
+from hbllm.hcir.world.planning.goal_scheduler import EpistemicGoalScheduler
+from hbllm.hcir.world.topological_graph_induction import (
+    GeodesicManifoldRouter,
+    GridTopologyGraph,
+)
 
 
 def test_empirical_outcomes_emerge_without_hardcoded_labels() -> None:
@@ -830,3 +840,185 @@ def test_spatial_affordance_model_honors_kb_locus_and_causal_rules() -> None:
     )
     snap_locus = SpatialAffordanceModel.evaluate(engine, grid, bg=0, av_feats={1}, goals=[(2, 3)])
     assert snap_locus.is_passable((2, 2))
+
+
+def test_kb_lethal_gating_survives_context_reset_and_rare_door_collision() -> None:
+    """Verify KB fatal outcomes enforce gating after CONTEXT_RESET and rare doors do not wipe ontology."""
+    from hbllm.hcir.spatial_planner import EntityRole
+    from hbllm.hcir.world.planning.mental_simulation import MentalSimulationStep
+
+    engine = AutonomousEpistemicEngine()
+    engine.symbolic_theory.induce_barrier(5, evidence="wall")
+    engine.symbolic_theory.induce_goal(8, evidence="exit")
+    engine.symbolic_theory.induce_walkable(9, evidence="unlocked_door")
+    engine.symbolic_theory.transition_kb.record_outcome(
+        12, TransitionOutcome.TERMINAL_FAIL, evidence="fatal_hazard"
+    )
+    engine.hazard_tracker.known_lethal_features.add(12)
+
+    engine.on_boundary(
+        EpisodeBoundary(
+            kind=EpisodeBoundaryKind.CONTEXT_RESET,
+            retain_dynamics=True,
+            same_context=False,
+        )
+    )
+    # Explicitly ensure hazard_tracker does not carry 12 while transition_kb keeps TERMINAL_FAIL.
+    engine.hazard_tracker.known_lethal_features.clear()
+    assert engine.symbolic_theory.has_prior_context_transition
+    assert engine.symbolic_theory.evaluate_transition(12).risk_cost >= 40.0
+
+    grid = np.array(
+        [
+            [5, 5, 5, 5, 5, 5, 5, 5],
+            [5, 9, 0, 0, 0, 0, 0, 5],
+            [5, 1, 12, 8, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 5, 5, 5, 5, 5, 5, 5],
+        ],
+        dtype=int,
+    )
+    walls = {(r, c) for r in range(8) for c in range(8) if grid[r, c] == 5}
+    engine.avatar_feature = 1
+    engine.avatar_features = {1}
+    engine.avatar_pos = (2, 1)
+    engine.bg_feature = 0
+    engine.prev_grid = grid.copy()
+
+    lethal_step = MentalSimulationStep(action=4, predicted_avatar_pos=(2, 2))
+    gate_res = StaticLethalHazardPredicate().evaluate(
+        engine,
+        grid,
+        lethal_step,
+        [lethal_step],
+        [1, 2, 3, 4],
+    )
+    assert not gate_res.is_safe
+
+    movable = [(1, -1, 0), (2, 1, 0), (3, 0, -1), (4, 0, 1)]
+    lethal_route = GeodesicManifoldRouter.route_geodesic(
+        curr_grid=grid,
+        start_pos=(2, 1),
+        goals=[(2, 2)],
+        static_barriers=set(),
+        grid_walls=walls,
+        unknown_entity_cells=set(),
+        oriented_threats=(),
+        movable_actions=movable,
+        bg=0,
+        barrier_features={5},
+        avatar_features={1},
+        transition_kb=engine.symbolic_theory.transition_kb,
+    )
+    assert lethal_route is None
+
+    safe_route = GeodesicManifoldRouter.route_geodesic(
+        curr_grid=grid,
+        start_pos=(2, 1),
+        goals=[(2, 3)],
+        static_barriers=set(),
+        grid_walls=walls,
+        unknown_entity_cells=set(),
+        oriented_threats=(),
+        movable_actions=movable,
+        bg=0,
+        barrier_features={5},
+        avatar_features={1},
+        transition_kb=engine.symbolic_theory.transition_kb,
+    )
+    assert safe_route is not None
+    assert all(pos != (2, 2) for _, pos in safe_route)
+
+    entities = engine.extract_entities(grid, 0)
+    proposal = EpistemicGoalScheduler.schedule_goals(
+        engine=engine,
+        curr_grid=grid,
+        entities=entities,
+        bg=0,
+        av_feats={1},
+        target_role=EntityRole.GOAL,
+        available_actions=[1, 2, 3, 4],
+    )
+    assert (2, 2) not in proposal.goals
+    assert (2, 3) in proposal.goals or any(
+        meta.get("target_feature") == 8 for meta in proposal.satisfied_when.values()
+    )
+
+    # Colliding with rare state-gated barrier (feature=9, count == 1 <= 2) must not wipe ontology.
+    engine.action_dynamics[1] = ActionDynamicsModel(
+        action_id=1, delta_r=-1, delta_c=0, confidence=1.0, probes_tested=3
+    )
+    engine.last_action = 1
+    engine.assimilate_feedback(grid.copy(), [1, 2, 3, 4], action=1)
+    assert engine.symbolic_theory.labels_non_stationary is False
+    assert engine.symbolic_theory.evaluate_transition(12).risk_cost >= 40.0
+
+
+def test_continuous_multi_step_resets_exogenous_and_avoids_quantized_invalidation() -> None:
+    """Verify CONTEXT_RESET clears exogenous loci and CONTINUOUS mode guards quantization noise."""
+    engine = AutonomousEpistemicEngine()
+    engine.symbolic_theory.induce_barrier(5, evidence="wall")
+    engine.symbolic_theory.induce_goal(8, evidence="exit")
+    engine.working_memory.exogenous_tracker.mark_exogenous([(4, 4)])
+    assert (4, 4) in engine.working_memory.exogenous_tracker.exogenous_loci
+
+    engine.on_boundary(
+        EpisodeBoundary(
+            kind=EpisodeBoundaryKind.CONTEXT_RESET,
+            retain_dynamics=True,
+            same_context=False,
+        )
+    )
+    assert (4, 4) not in engine.working_memory.exogenous_tracker.exogenous_loci
+    assert engine.symbolic_theory.has_prior_context_transition
+
+    engine.working_memory.reference_frame = ReferenceFrame.generic_nd(
+        dimensions=2,
+        coordinate_type=CoordinateType.CONTINUOUS,
+        frame_id="continuous_test",
+        axes=("x", "y"),
+        bounds=((0.0, 8.0), (0.0, 8.0)),
+    )
+    prev_grid = np.array(
+        [
+            [5, 5, 5, 5, 5, 5, 5, 5],
+            [5, 0, 0, 0, 0, 0, 8, 5],
+            [5, 1, 5, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 5, 5, 5, 5, 5, 5, 5],
+        ],
+        dtype=int,
+    )
+    curr_grid = np.array(
+        [
+            [5, 5, 5, 5, 5, 5, 5, 5],
+            [5, 0, 0, 0, 0, 0, 8, 5],
+            [5, 0, 1, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 5, 5, 5, 5, 5, 5, 5],
+        ],
+        dtype=int,
+    )
+    engine.avatar_feature = 1
+    engine.avatar_features = {1}
+    engine.avatar_pos = (2, 1)
+    engine.bg_feature = 0
+    engine.prev_grid = prev_grid
+    engine.action_dynamics[4] = ActionDynamicsModel(
+        action_id=4, delta_r=0, delta_c=1, confidence=1.0, probes_tested=3
+    )
+    engine.last_action = 4
+    engine.assimilate_feedback(curr_grid, [1, 2, 3, 4], action=4, is_success=False)
+
+    assert engine.symbolic_theory.labels_non_stationary is False
+    assert 5 in engine.symbolic_theory.barrier_features
+    assert not engine.symbolic_theory.is_walkable(5)

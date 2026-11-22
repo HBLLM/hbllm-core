@@ -247,8 +247,9 @@ class GridTopologyGraph:
                             break
                         mid_feat = int(grid_rows[ir][ic])
                         mid_ev = evaluate_edge((ir, ic), mid_feat)
-                        if not mid_ev.traversable and (
-                            not allow_goal_entry or (ir, ic) not in goal_coords
+                        if (mid_ev.risk_cost >= 40.0 and mid_ev.goal_value <= 0.0) or (
+                            not mid_ev.traversable
+                            and (not allow_goal_entry or (ir, ic) not in goal_coords)
                         ):
                             ray_clear = False
                             break
@@ -261,8 +262,9 @@ class GridTopologyGraph:
 
                 edge_ev = evaluate_edge(next_coord, int(grid_rows[nr][nc]))
                 is_goal = next_coord in goal_coords
-                if not edge_ev.traversable and not (
-                    is_goal and (edge_ev.goal_value > 0.0 or allow_goal_entry)
+                if (edge_ev.risk_cost >= 40.0 and edge_ev.goal_value <= 0.0) or (
+                    not edge_ev.traversable
+                    and not (is_goal and (edge_ev.goal_value > 0.0 or allow_goal_entry))
                 ):
                     continue
 
@@ -808,6 +810,9 @@ class GeodesicManifoldRouter:
 
                 def _eval_mask_kb(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
                     if pos == cand_goal:
+                        ev = transition_kb.evaluate_transition(feat, locus=pos)
+                        if ev.risk_cost >= 40.0:
+                            return ev
                         return TransitionEdgeEvaluation(
                             traversable=True,
                             step_cost=1.0,
