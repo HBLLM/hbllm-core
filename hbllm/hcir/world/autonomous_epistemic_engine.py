@@ -3264,7 +3264,9 @@ class AutonomousEpistemicEngine:
                     ) or (
                         min_r == max_r and (min_r == 0 or min_r == H - 1) and (max_c - min_c >= 4)
                     )
-                    if not is_enclosing_frame:
+                    if not is_enclosing_frame and not self.working_memory.is_exogenous_locus(
+                        (r, c), lattice=curr_grid, bg=self.bg_feature, include_outer_edge=True
+                    ):
                         comp_area = len(coords)
                         if self.avatar_size == 0 or (
                             0.25 * self.avatar_size <= comp_area <= 2.5 * self.avatar_size
@@ -3291,6 +3293,10 @@ class AutonomousEpistemicEngine:
                     int(round(float(np.mean(coords[:, 0])))),
                     int(round(float(np.mean(coords[:, 1])))),
                 )
+                if self.working_memory.is_exogenous_locus(
+                    centroid, lattice=curr_grid, bg=self.bg_feature, include_outer_edge=True
+                ):
+                    continue
                 if self.avatar_pos is not None:
                     dist = abs(centroid[0] - self.avatar_pos[0]) + abs(
                         centroid[1] - self.avatar_pos[1]

@@ -719,7 +719,13 @@ class PrefrontalDeliberationEngine:
 
                 ctx = CausalTheoryPlanner.extract_planning_context(view, curr_grid)
                 rel_path = CausalTheoryPlanner.plan_relational_macro(
-                    view.avatar_pos, curr_grid, ctx, rel_macro
+                    view.avatar_pos,
+                    curr_grid,
+                    ctx,
+                    rel_macro,
+                    visited_cells=view.working_memory.visited_cells,
+                    working_memory=view.working_memory,
+                    bg=view.bg_feature,
                 )
                 if rel_path:
                     from hbllm.hcir.world.cortex_planner import MentalSimulationStep
@@ -1708,7 +1714,11 @@ class PrefrontalDeliberationEngine:
             if confirmed_feats:
                 for r in range(grid.shape[0]):
                     for c in range(grid.shape[1]):
-                        if int(grid[r, c]) in confirmed_feats:
+                        if int(
+                            grid[r, c]
+                        ) in confirmed_feats and not view.working_memory.is_exogenous_locus(
+                            (r, c), lattice=grid, bg=view.bg_feature, include_outer_edge=True
+                        ):
                             goal_target = (r, c)
                             goal_source = "reward"
                             break

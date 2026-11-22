@@ -2485,21 +2485,61 @@ class EpistemicFeedbackAssimilator:
             cargo_win_target = None
             cargo_feat = None
             receptacle_feat = None
+            is_layout_transition = bool(
+                diff
+                and (
+                    diff.diff_type == FrameDiffType.GLOBAL_TRANSITION
+                    or diff.changed_pixel_count
+                    > max(4 * max(1, view.avatar_size), int(H * W * 0.08))
+                )
+            )
+            obstacle_feats = {
+                pe.feature_id for pe in prev_entities if pe.role == EntityRole.OBSTACLE
+            }
+            max_compact_extent = max(4, int(H * W * 0.08))
+
+            def _is_valid_global_goal_feat(feat: int) -> bool:
+                if (
+                    feat == bg
+                    or feat == _bg_feature
+                    or feat in av_feats
+                    or _sym_theory.is_barrier(feat)
+                    or feat in _sym_theory.walkable_features
+                    or feat in obstacle_feats
+                ):
+                    return False
+                if (
+                    _prev_grid is not None
+                    and int(np.count_nonzero(_prev_grid == feat)) > max_compact_extent
+                ):
+                    return False
+                return True
 
             # Detect non-ego entity displacement to goal on winning step (e.g. block push / cargo delivery)
-            if diff and diff.mutated_pixels:
+            if not is_layout_transition and diff and diff.mutated_pixels:
                 for r_m, c_m, old_m, new_m in diff.mutated_pixels:
+                    new_i = int(new_m)
+                    old_i = int(old_m)
                     if (
                         (r_m, c_m) != view.avatar_pos
                         and (r_m, c_m) != prev_avatar_pos
-                        and new_m not in av_feats
-                        and new_m != bg
-                        and new_m != _bg_feature
+                        and new_i not in av_feats
+                        and new_i != bg
+                        and new_i != _bg_feature
+                        and not _sym_theory.is_barrier(new_i)
+                        and new_i not in _sym_theory.walkable_features
+                        and (
+                            _prev_grid is None
+                            or int(np.count_nonzero(_prev_grid == new_i)) <= max_compact_extent
+                        )
+                        and not _wm_exog.is_exogenous_locus(
+                            (r_m, c_m), lattice=curr_grid, bg=bg, include_outer_edge=True
+                        )
                     ):
                         cargo_win_target = (r_m, c_m)
-                        cargo_feat = int(new_m)
-                        if old_m != bg and old_m != _bg_feature and old_m not in av_feats:
-                            receptacle_feat = int(old_m)
+                        cargo_feat = new_i
+                        if _is_valid_global_goal_feat(old_i):
+                            receptacle_feat = old_i
                         break
 
             if cargo_win_target is not None:
@@ -2511,8 +2551,10 @@ class EpistemicFeedbackAssimilator:
                     _sym_theory.induce_goal(receptacle_feat, evidence=TerminalSignal.SUCCESS)
                     _sym_theory.mark_verified_in_context("goal", receptacle_feat)
                     view.learned_receptacle_positions.add(cargo_win_target)
-            elif view.avatar_pos is not None and (
-                prev_avatar_pos is None or view.avatar_pos != prev_avatar_pos
+            elif (
+                not is_layout_transition
+                and view.avatar_pos is not None
+                and (prev_avatar_pos is None or view.avatar_pos != prev_avatar_pos)
             ):
                 win_target = view.avatar_pos
             elif prev_avatar_pos is not None:
@@ -2579,19 +2621,7 @@ class EpistemicFeedbackAssimilator:
                                         break
                             if goal_feat != bg and goal_feat != _bg_feature:
                                 break
-                    is_distant_target = (
-                        prev_avatar_pos is None
-                        or abs(win_target[0] - prev_avatar_pos[0]) > 0
-                        or abs(win_target[1] - prev_avatar_pos[1]) > 0
-                    )
-                    feat_extent = int(np.count_nonzero(_prev_grid == goal_feat))
-                    is_substrate = goal_feat in _sym_theory.walkable_features or feat_extent > 64
-                    if (
-                        goal_feat != bg
-                        and goal_feat != _bg_feature
-                        and (goal_feat not in av_feats or is_distant_target)
-                        and not is_substrate
-                    ):
+                    if _is_valid_global_goal_feat(goal_feat):
                         _sym_theory.induce_goal(goal_feat, evidence=TerminalSignal.SUCCESS)
                         _sym_theory.mark_verified_in_context("goal", goal_feat)
                         view.learned_barriers.discard(win_target)
@@ -2603,15 +2633,9 @@ class EpistemicFeedbackAssimilator:
 
                 max_entity_area = max(64, int(H * W * 0.15))
                 for pe in prev_entities:
-                    is_distant_pe = (
-                        prev_avatar_pos is None
-                        or abs(pe.grid_pos[0] - prev_avatar_pos[0]) > 2
-                        or abs(pe.grid_pos[1] - prev_avatar_pos[1]) > 2
-                    )
                     if (
-                        (pe.feature_id not in av_feats or is_distant_pe)
-                        and pe.feature_id != bg
-                        and pe.feature_id != _bg_feature
+                        pe.role not in (EntityRole.OBSTACLE, EntityRole.AGENT)
+                        and _is_valid_global_goal_feat(pe.feature_id)
                         and 1 <= pe.area <= max_entity_area
                     ):
                         pe_cells = pe.properties.get("cells", [pe.grid_pos])
@@ -2629,16 +2653,7 @@ class EpistemicFeedbackAssimilator:
                 sr, sc = view.current_simulated_goal
                 if 0 <= sr < H and 0 <= sc < W:
                     sim_feat = int(_prev_grid[sr, sc])
-                    sim_extent = int(np.count_nonzero(_prev_grid == sim_feat))
-                    max_sim_extent = max(64, int(H * W * 0.15))
-                    if (
-                        sim_feat != bg
-                        and sim_feat != _bg_feature
-                        and sim_feat not in av_feats
-                        and not (
-                            sim_feat in _sym_theory.walkable_features or sim_extent > max_sim_extent
-                        )
-                    ):
+                    if _is_valid_global_goal_feat(sim_feat):
                         _sym_theory.induce_goal(sim_feat, evidence=TerminalSignal.SUCCESS)
                         _sym_theory.mark_verified_in_context("goal", sim_feat)
 

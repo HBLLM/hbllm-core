@@ -464,6 +464,10 @@ class CausalTheoryPlanner:
         context: CausalPlanningContext,
         macro: RelationalSubgoalMacro,
         max_expansions_per_segment: int = 300,
+        *,
+        visited_cells: set[tuple[int, int]] | None = None,
+        working_memory: Any = None,
+        bg: int = 0,
     ) -> list[int] | None:
         """Plan composite path dynamically through a sequence of relational waypoints."""
         if not macro.waypoints:
@@ -476,12 +480,33 @@ class CausalTheoryPlanner:
         total_path: list[int] = []
 
         for wp in macro.waypoints:
+            if (
+                wp.feature in context.barrier_features
+                or wp.feature in context.walkable_features
+                or wp.feature in context.lethal_features
+            ):
+                return None
+
             target_positions: list[tuple[int, int]] = []
+            already_visited = (
+                0 <= curr_start[0] < H
+                and 0 <= curr_start[1] < W
+                and int(grid[curr_start[0], curr_start[1]]) == wp.feature
+            )
             for r in range(H):
                 for c in range(W):
-                    if int(grid[r, c]) == wp.feature and (r, c) != curr_start:
-                        target_positions.append((r, c))
+                    if int(grid[r, c]) == wp.feature:
+                        if working_memory is not None and working_memory.is_exogenous_locus(
+                            (r, c), lattice=grid, bg=bg, include_outer_edge=True
+                        ):
+                            continue
+                        if visited_cells and (r, c) in visited_cells:
+                            already_visited = True
+                        if (r, c) != curr_start:
+                            target_positions.append((r, c))
 
+            if already_visited:
+                continue
             if not target_positions:
                 return None
 
@@ -494,6 +519,8 @@ class CausalTheoryPlanner:
                 walkable_features=context.walkable_features,
                 action_displacements=context.action_displacements,
                 grid_shape=context.grid_shape,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
             )
             segment_path = CausalTheoryPlanner.plan_path(
                 curr_start, grid, segment_context, max_expansions=max_expansions_per_segment

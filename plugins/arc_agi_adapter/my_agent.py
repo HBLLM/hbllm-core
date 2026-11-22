@@ -496,6 +496,29 @@ class MyAgent(Agent):
             )
         return SensoryThalamus.normalize(raw_arr)
 
+    def _extract_pre_transition_grid(
+        self, latest_frame: Any, fallback_grid: np.ndarray
+    ) -> np.ndarray:
+        """Extract final pre-transition frame from multi-frame level-transition observations."""
+        raw_seq = getattr(latest_frame, "frame", None)
+        if raw_seq is None:
+            raw_seq = getattr(latest_frame, "grid", None)
+        pre_layer: Any = None
+        if isinstance(raw_seq, (list, tuple)) and len(raw_seq) >= 2:
+            pre_layer = raw_seq[-2]
+        elif isinstance(raw_seq, np.ndarray) and raw_seq.ndim == 3 and raw_seq.shape[0] >= 2:
+            pre_layer = raw_seq[-2]
+        if pre_layer is not None:
+            try:
+                arr = np.asarray(pre_layer)
+                if arr.ndim == 2:
+                    norm = SensoryThalamus.normalize(arr)
+                    if norm.shape == fallback_grid.shape:
+                        return norm
+            except (TypeError, ValueError):
+                pass
+        return fallback_grid
+
     def _extract_available_actions(self, latest_frame: Any) -> list[int]:
         if hasattr(latest_frame, "available_actions"):
             raw = latest_frame.available_actions
@@ -610,8 +633,9 @@ class MyAgent(Agent):
                     hasattr(self.internal_engine, "assimilate_feedback")
                     and getattr(self.internal_engine, "prev_grid", None) is not None
                 ):
+                    pre_grid = self._extract_pre_transition_grid(latest_frame, grid)
                     self.internal_engine.assimilate_feedback(
-                        grid, available_actions, is_success=True
+                        pre_grid, available_actions, is_success=True
                     )
             else:
                 print(

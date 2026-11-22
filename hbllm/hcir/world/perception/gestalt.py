@@ -85,9 +85,11 @@ class SpatialRoleClassifier:
             and (grid_pos == avatar_pos or (cell_set is not None and avatar_pos in cell_set))
         ):
             return EntityRole.AGENT
+        elif is_border:
+            return EntityRole.OBSTACLE
         elif is_confirmed_goal:
             return EntityRole.GOAL
-        elif is_theory_barrier or is_border:
+        elif is_theory_barrier:
             return EntityRole.OBSTACLE
         elif is_theory_cargo:
             return EntityRole.MANIPULABLE

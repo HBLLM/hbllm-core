@@ -639,19 +639,48 @@ class HippocampalEpisodicCortex:
                 extracted_waypoints: list[RelationalWaypoint] = []
                 seen_features: set[int] = set()
                 bg_val = get_engine_state_attr(view, "bg_feature", 0)
+                wm_ref = get_engine_state_attr(view, "working_memory", None)
+                sym_ref = get_engine_state_attr(view, "symbolic_theory", None)
+                av_feats_ref = set(get_engine_state_attr(view, "avatar_features", ()) or ())
+                av_single = get_engine_state_attr(view, "avatar_feature", None)
+                if av_single is not None:
+                    av_feats_ref.add(av_single)
+                walkable_ref = sym_ref.walkable_features if sym_ref is not None else set()
+                barrier_ref = sym_ref.barrier_features if sym_ref is not None else set()
                 for idx, step_t in enumerate(winning_trajectory):
+                    ref_grid = (
+                        winning_trajectory[idx - 1].grid_snapshot
+                        if idx > 0 and winning_trajectory[idx - 1].grid_snapshot is not None
+                        else step_t.grid_snapshot
+                    )
                     if (
-                        step_t.grid_snapshot is not None
+                        ref_grid is not None
                         and isinstance(step_t.avatar_pos, tuple)
                         and len(step_t.avatar_pos) >= 2
                         and isinstance(step_t.avatar_pos[0], (int, float))
                         and isinstance(step_t.avatar_pos[1], (int, float))
                     ):
                         ar, ac = int(step_t.avatar_pos[0]), int(step_t.avatar_pos[1])
-                        H_s, W_s = step_t.grid_snapshot.shape[:2]
+                        H_s, W_s = ref_grid.shape[:2]
                         if 0 <= ar < H_s and 0 <= ac < W_s:
-                            f_val = int(step_t.grid_snapshot[ar, ac])
-                            if f_val != bg_val and f_val not in seen_features:
+                            f_val = int(ref_grid[ar, ac])
+                            is_exog = (
+                                wm_ref.is_exogenous_locus(
+                                    (ar, ac), lattice=ref_grid, bg=bg_val, include_outer_edge=True
+                                )
+                                if wm_ref is not None
+                                else False
+                            )
+                            if (
+                                f_val != bg_val
+                                and f_val not in seen_features
+                                and f_val not in av_feats_ref
+                                and f_val not in walkable_ref
+                                and f_val not in barrier_ref
+                                and not is_exog
+                                and int(np.count_nonzero(ref_grid == f_val))
+                                <= max(4, int(H_s * W_s * 0.08))
+                            ):
                                 seen_features.add(f_val)
                                 extracted_waypoints.append(
                                     RelationalWaypoint(
@@ -872,9 +901,12 @@ class HippocampalEpisodicCortex:
                 delta.mutate("mobile_threat_features", view.mobile_threat_features).clear()
 
             # Carry forward hypotheses & semantics as priors
+            retained_av_feats = set(view.avatar_features or ())
             if view.avatar_feature is not None:
                 delta.set("prior_avatar_feature", view.avatar_feature)
-                delta.set("avatar_features", {view.avatar_feature})
+                retained_av_feats.add(view.avatar_feature)
+            if retained_av_feats:
+                delta.set("avatar_features", retained_av_feats)
             else:
                 view.avatar_features.clear()
             view._avatar_controllability_evidence.clear()
