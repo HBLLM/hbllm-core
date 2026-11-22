@@ -7,8 +7,9 @@ Inductively discovers non-local topological geodesic mechanisms:
 from __future__ import annotations
 
 import collections
+import heapq
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -153,6 +154,100 @@ class GridTopologyGraph:
             path.append(curr)
         path.reverse()
         return path
+
+    @staticmethod
+    def shortest_path_from_kb(
+        grid: np.ndarray,
+        start_coord: tuple[int, int],
+        goal_coords: set[tuple[int, int]],
+        action_deltas: Mapping[Any, tuple[int, int]],
+        evaluate_edge: Callable[[tuple[int, int], int], Any],
+        *,
+        max_expansions: int = 2000,
+    ) -> list[tuple[Any, tuple[int, int]]] | None:
+        """Find minimum-expected-cost path querying only empirical KB transition evaluations."""
+        if not goal_coords or grid.ndim < 2:
+            return None
+        H, W = int(grid.shape[0]), int(grid.shape[1])
+        sr, sc = int(start_coord[0]), int(start_coord[1])
+        if (sr, sc) in goal_coords:
+            return []
+        if not (0 <= sr < H and 0 <= sc < W):
+            return None
+
+        valid_actions = [
+            (act, int(d[0]), int(d[1]))
+            for act, d in action_deltas.items()
+            if len(d) >= 2 and (int(d[0]) != 0 or int(d[1]) != 0)
+        ]
+        if not valid_actions:
+            return None
+
+        max_stride = max(abs(dr) + abs(dc) for _, dr, dc in valid_actions)
+        inv_stride = 1.0 / max(1, max_stride)
+
+        def _heuristic(r: int, c: int) -> float:
+            return min(abs(r - gr) + abs(c - gc) for gr, gc in goal_coords) * inv_stride
+
+        open_heap: list[tuple[float, float, int, int, int]] = [(_heuristic(sr, sc), 0.0, 0, sr, sc)]
+        best_cost: dict[tuple[int, int], float] = {(sr, sc): 0.0}
+        came_from: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+        counter = 0
+        expansions = 0
+
+        while open_heap and expansions < max_expansions:
+            _, g_cost, _, cr, cc = heapq.heappop(open_heap)
+            if (cr, cc) in goal_coords:
+                plan: list[tuple[Any, tuple[int, int]]] = []
+                cur = (cr, cc)
+                while cur != (sr, sc):
+                    prev_coord, via_act = came_from[cur]
+                    plan.append((via_act, cur))
+                    cur = prev_coord
+                plan.reverse()
+                return plan
+
+            if g_cost > best_cost.get((cr, cc), float("inf")) + 1e-9:
+                continue
+            expansions += 1
+
+            for act, dr, dc in valid_actions:
+                nr, nc = cr + dr, cc + dc
+                if not (0 <= nr < H and 0 <= nc < W):
+                    continue
+
+                steps = max(abs(dr), abs(dc))
+                ray_clear = True
+                if steps > 1 and (dr == 0 or dc == 0 or abs(dr) == abs(dc)):
+                    step_r = (dr > 0) - (dr < 0)
+                    step_c = (dc > 0) - (dc < 0)
+                    for k in range(1, steps):
+                        ir, ic = cr + step_r * k, cc + step_c * k
+                        if not (0 <= ir < H and 0 <= ic < W):
+                            ray_clear = False
+                            break
+                        mid_ev = evaluate_edge((ir, ic), int(grid[ir, ic]))
+                        if not mid_ev.traversable and (ir, ic) not in goal_coords:
+                            ray_clear = False
+                            break
+                if not ray_clear:
+                    continue
+
+                next_coord = (nr, nc)
+                edge_ev = evaluate_edge(next_coord, int(grid[nr, nc]))
+                is_goal = next_coord in goal_coords
+                if not edge_ev.traversable and not (is_goal and edge_ev.goal_value > 0.0):
+                    continue
+
+                move_cost = (edge_ev.step_cost if edge_ev.traversable else 1.0) + edge_ev.risk_cost
+                new_g = g_cost + move_cost
+                if new_g < best_cost.get(next_coord, float("inf")) - 1e-9:
+                    best_cost[next_coord] = new_g
+                    came_from[next_coord] = ((cr, cc), act)
+                    counter += 1
+                    heapq.heappush(open_heap, (new_g + _heuristic(nr, nc), new_g, counter, nr, nc))
+
+        return None
 
     @staticmethod
     def shortest_path_with_actions(

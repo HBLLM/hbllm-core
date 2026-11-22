@@ -21,11 +21,16 @@ from __future__ import annotations
 
 from hbllm.hcir.world.causal import (
     ActionAffordance,
+    CausalEffectRule,
     ConditionalAffordance,
     GovernedSetView,
     HCIRSymbolicWorldTheory,
     OntologyEvidenceRank,
     SpelkePhysicalAxiom,
+    TransitionBelief,
+    TransitionEdgeEvaluation,
+    TransitionKnowledgeBase,
+    TransitionOutcome,
     invalidate_stale_context_ontology,
     parse_evidence,
 )
@@ -33,12 +38,17 @@ from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 __all__ = [
     "ActionAffordance",
+    "CausalEffectRule",
     "CausalPredicate",
     "ConditionalAffordance",
     "GovernedSetView",
     "HCIRSymbolicWorldTheory",
     "OntologyEvidenceRank",
     "SpelkePhysicalAxiom",
+    "TransitionBelief",
+    "TransitionEdgeEvaluation",
+    "TransitionKnowledgeBase",
+    "TransitionOutcome",
     "invalidate_stale_context_ontology",
     "parse_evidence",
 ]

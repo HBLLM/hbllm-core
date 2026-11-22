@@ -1,0 +1,515 @@
+"""Unified Transition-Outcome Knowledge Base backed by HCIR Graph Beliefs.
+
+Replaces brittle hardcoded feature-role buckets with a single, context-indexed
+empirical transition model storing Dirichlet/Beta outcome sufficient statistics
+and learned state-transition causal rules as canonical HCIR ``BeliefNode`` and
+``LearnedRuleNode`` entities.
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
+
+from hbllm.hcir.graph import BeliefNode, LearnedRuleNode
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+
+class TransitionOutcome(StrEnum):
+    """Empirical outcomes observed after executing an action in a local context."""
+
+    TRAVERSED = "traversed"
+    BLOCKED = "blocked"
+    TERMINAL_WIN = "terminal_win"
+    TERMINAL_FAIL = "terminal_fail"
+    DISPLACED_OTHER = "displaced_other"
+    MUTATED_STATE = "mutated_state"
+
+
+@dataclass(frozen=True)
+class TransitionEdgeEvaluation:
+    """Universal search edge evaluation returned by the transition knowledge base."""
+
+    traversable: bool
+    step_cost: float
+    risk_cost: float
+    goal_value: float
+    info_gain: float
+    mutates_state: bool
+    confidence: float
+
+
+def _encode_context_key(key: Any) -> tuple[Any, str, str]:
+    """Encode an arbitrary context key into (json_value, key_kind, safe_id_token)."""
+    if isinstance(key, tuple):
+        vals = [int(x) if isinstance(x, int) and not isinstance(x, bool) else x for x in key]
+        token = "tuple_" + "_".join(str(v) for v in vals)
+        return vals, "tuple", token
+    if isinstance(key, list):
+        token = "tuple_" + "_".join(str(v) for v in key)
+        return list(key), "tuple", token
+    if isinstance(key, int) and not isinstance(key, bool):
+        return int(key), "int", f"int_{key}"
+    return str(key), "str", f"str_{key}"
+
+
+def _decode_context_key(raw: Any, key_kind: str) -> Any:
+    """Reconstruct a typed context key from serialized HCIR node properties."""
+    if key_kind == "tuple" and isinstance(raw, (list, tuple)):
+        return tuple(int(x) if isinstance(x, (int, float)) else x for x in raw)
+    if key_kind == "int":
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return raw
+    return raw
+
+
+@dataclass
+class TransitionBelief:
+    """Empirical Dirichlet/Beta transition-outcome statistics for a context or locus."""
+
+    scope: str
+    context_key: Any
+    counts: dict[str, float] = field(default_factory=dict)
+    observed_effects: dict[str, int] = field(default_factory=dict)
+    evidence_log: list[str] = field(default_factory=list)
+    verified_epoch: int | None = None
+
+    def record(
+        self,
+        outcome: TransitionOutcome,
+        *,
+        weight: float = 1.0,
+        effect_signature: str = "",
+        evidence: str = "",
+        epoch: int | None = None,
+    ) -> None:
+        """Record an observed transition outcome and optional effect signature."""
+        inc = max(0.0, float(weight))
+        if inc > 0.0:
+            key = outcome.value
+            self.counts[key] = self.counts.get(key, 0.0) + inc
+        if effect_signature:
+            self.observed_effects[effect_signature] = (
+                self.observed_effects.get(effect_signature, 0) + 1
+            )
+        if evidence:
+            if evidence in self.evidence_log:
+                self.evidence_log.remove(evidence)
+            self.evidence_log.append(evidence)
+            if len(self.evidence_log) > 8:
+                del self.evidence_log[: len(self.evidence_log) - 8]
+        if epoch is not None:
+            self.verified_epoch = epoch
+
+    def decay_or_clear_outcome(self, outcome: TransitionOutcome) -> None:
+        """Remove accumulated counts for an invalidated outcome."""
+        self.counts.pop(outcome.value, None)
+
+    def total_observations(self) -> float:
+        """Return total weighted outcome observations."""
+        return float(sum(self.counts.values()))
+
+    def traversability_posterior(self, prior: float = 0.5) -> float:
+        """Return Beta posterior mean P(traversable | observations)."""
+        pos = self.counts.get(TransitionOutcome.TRAVERSED.value, 0.0) + self.counts.get(
+            TransitionOutcome.TERMINAL_WIN.value, 0.0
+        )
+        neg = self.counts.get(TransitionOutcome.BLOCKED.value, 0.0) + self.counts.get(
+            TransitionOutcome.TERMINAL_FAIL.value, 0.0
+        )
+        denom = pos + neg + 2.0 * prior
+        if denom <= 0.0:
+            return 0.5
+        return float((pos + prior) / denom)
+
+    def outcome_prob(self, outcome: TransitionOutcome, prior: float = 0.0) -> float:
+        """Return empirical probability of ``outcome`` across all recorded observations."""
+        total = self.total_observations()
+        if total <= 0.0:
+            return float(prior / (1.0 + prior)) if prior > 0.0 else 0.0
+        return float((self.counts.get(outcome.value, 0.0) + prior) / (total + prior))
+
+    def epistemic_uncertainty(self) -> float:
+        """Return epistemic uncertainty shrinking smoothly with experience."""
+        return float(1.0 / (1.0 + self.total_observations()))
+
+    def confidence(self) -> float:
+        """Return epistemic confidence in [0, 1)."""
+        return float(1.0 - self.epistemic_uncertainty())
+
+    def to_belief_node(self) -> BeliefNode:
+        """Serialize this transition belief as a canonical HCIR ``BeliefNode``."""
+        serialized_key, key_kind, token = _encode_context_key(self.context_key)
+        node_id = f"kb_transition_{self.scope}_{token}"
+        claim = (
+            f"Transition outcome distribution for {self.scope}={serialized_key}: "
+            f"P(trav)={self.traversability_posterior():.2f}"
+        )
+        return BeliefNode(
+            id=node_id,
+            claim=claim,
+            statement=claim,
+            epistemic_confidence=self.confidence(),
+            belief_type="causal",
+            evidence_sources=list(self.evidence_log),
+            properties={
+                "domain": "transition_kb",
+                "scope": self.scope,
+                "context_key": serialized_key,
+                "key_kind": key_kind,
+                "counts": dict(self.counts),
+                "observed_effects": dict(self.observed_effects),
+                "verified_epoch": self.verified_epoch,
+            },
+        )
+
+    @classmethod
+    def from_belief_node(cls, node: BeliefNode) -> TransitionBelief | None:
+        """Reconstruct a ``TransitionBelief`` from a stored HCIR ``BeliefNode``."""
+        props = node.properties or {}
+        if props.get("domain") != "transition_kb":
+            return None
+        scope = str(props.get("scope", "feature"))
+        key_kind = str(props.get("key_kind", "str"))
+        context_key = _decode_context_key(props.get("context_key"), key_kind)
+        raw_counts = props.get("counts") or {}
+        counts = {str(k): float(v) for k, v in raw_counts.items()}
+        raw_effects = props.get("observed_effects") or {}
+        effects = {str(k): int(v) for k, v in raw_effects.items()}
+        verified_epoch = props.get("verified_epoch")
+        return cls(
+            scope=scope,
+            context_key=context_key,
+            counts=counts,
+            observed_effects=effects,
+            evidence_log=list(node.evidence_sources or ()),
+            verified_epoch=int(verified_epoch) if verified_epoch is not None else None,
+        )
+
+
+@dataclass
+class CausalEffectRule:
+    """Learned state-transition operator mapping an intervention to an effect."""
+
+    trigger_key: Any
+    effect_signature: str
+    precondition_tokens: tuple[str, ...] = ()
+    occurrences: int = 1
+    confidence: float = 0.8
+    evidence: str = ""
+
+    def to_learned_rule_node(self) -> LearnedRuleNode:
+        """Serialize this causal operator as a canonical HCIR ``LearnedRuleNode``."""
+        serialized_trig, key_kind, token = _encode_context_key(self.trigger_key)
+        safe_eff = self.effect_signature.replace(":", "_").replace(" ", "_")
+        node_id = f"kb_rule_{token}_{safe_eff}"
+        return LearnedRuleNode(
+            id=node_id,
+            condition=f"trigger={serialized_trig}",
+            prediction=self.effect_signature,
+            confidence=max(0.0, min(1.0, float(self.confidence))),
+            source_error_count=max(0, int(self.occurrences)),
+            domain="transition_kb",
+            properties={
+                "trigger_key": serialized_trig,
+                "key_kind": key_kind,
+                "effect_signature": self.effect_signature,
+                "precondition_tokens": list(self.precondition_tokens),
+                "occurrences": int(self.occurrences),
+                "evidence": self.evidence,
+            },
+        )
+
+    @classmethod
+    def from_learned_rule_node(cls, node: LearnedRuleNode) -> CausalEffectRule | None:
+        """Reconstruct a ``CausalEffectRule`` from a stored HCIR ``LearnedRuleNode``."""
+        if node.domain != "transition_kb":
+            return None
+        props = node.properties or {}
+        key_kind = str(props.get("key_kind", "str"))
+        trigger_key = _decode_context_key(props.get("trigger_key"), key_kind)
+        eff = str(props.get("effect_signature") or node.prediction)
+        preconds = tuple(str(t) for t in (props.get("precondition_tokens") or ()))
+        return cls(
+            trigger_key=trigger_key,
+            effect_signature=eff,
+            precondition_tokens=preconds,
+            occurrences=int(props.get("occurrences", node.source_error_count or 1)),
+            confidence=float(node.confidence),
+            evidence=str(props.get("evidence", "")),
+        )
+
+
+@dataclass
+class TransitionKnowledgeBase:
+    """Unified empirical transition & causal-rule knowledge base backed by HCIR nodes."""
+
+    _feature_beliefs: dict[Any, TransitionBelief] = field(default_factory=dict)
+    _locus_beliefs: dict[tuple[int, int], TransitionBelief] = field(default_factory=dict)
+    _causal_rules: dict[tuple[str, str], CausalEffectRule] = field(default_factory=dict)
+    _context_epoch: int = 0
+
+    def record_outcome(
+        self,
+        context_key: Any,
+        outcome: TransitionOutcome,
+        *,
+        scope: str = "feature",
+        weight: float = 1.0,
+        effect_signature: str = "",
+        evidence: str = "",
+        mark_verified: bool = True,
+    ) -> TransitionBelief:
+        """Record an empirical transition outcome under a feature or locus key."""
+        epoch = self._context_epoch if mark_verified else None
+        if scope == "locus":
+            locus = (int(context_key[0]), int(context_key[1]))
+            belief = self._locus_beliefs.get(locus)
+            if belief is None:
+                belief = TransitionBelief(scope="locus", context_key=locus)
+                self._locus_beliefs[locus] = belief
+        else:
+            belief = self._feature_beliefs.get(context_key)
+            if belief is None:
+                belief = TransitionBelief(scope="feature", context_key=context_key)
+                self._feature_beliefs[context_key] = belief
+        belief.record(
+            outcome,
+            weight=weight,
+            effect_signature=effect_signature,
+            evidence=evidence,
+            epoch=epoch,
+        )
+        return belief
+
+    def retract_outcome(
+        self,
+        context_key: Any,
+        outcome: TransitionOutcome,
+        *,
+        scope: str = "feature",
+    ) -> None:
+        """Retract accumulated counts for a specific outcome under a context key."""
+        if scope == "locus":
+            locus = (int(context_key[0]), int(context_key[1]))
+            belief = self._locus_beliefs.get(locus)
+        else:
+            belief = self._feature_beliefs.get(context_key)
+        if belief is not None:
+            belief.decay_or_clear_outcome(outcome)
+
+    def retract_outcome_all(self, outcome: TransitionOutcome, *, scope: str = "feature") -> None:
+        """Retract an outcome across all recorded beliefs within ``scope``."""
+        store = self._locus_beliefs if scope == "locus" else self._feature_beliefs
+        for belief in store.values():
+            belief.decay_or_clear_outcome(outcome)
+
+    def record_causal_rule(
+        self,
+        trigger_key: Any,
+        effect_signature: str,
+        *,
+        precondition_tokens: Sequence[str] = (),
+        evidence: str = "",
+        confidence: float = 0.8,
+    ) -> CausalEffectRule:
+        """Register or reinforce a learned state-transition causal rule."""
+        _, _, token = _encode_context_key(trigger_key)
+        rule_key = (token, effect_signature)
+        existing = self._causal_rules.get(rule_key)
+        if existing is not None:
+            existing.occurrences += 1
+            existing.confidence = max(existing.confidence, float(confidence))
+            if precondition_tokens:
+                existing.precondition_tokens = tuple(precondition_tokens)
+            if evidence:
+                existing.evidence = evidence
+            return existing
+        rule = CausalEffectRule(
+            trigger_key=trigger_key,
+            effect_signature=effect_signature,
+            precondition_tokens=tuple(precondition_tokens),
+            occurrences=1,
+            confidence=float(confidence),
+            evidence=evidence,
+        )
+        self._causal_rules[rule_key] = rule
+        return rule
+
+    def get_belief(
+        self,
+        context_key: Any,
+        *,
+        scope: str = "feature",
+    ) -> TransitionBelief | None:
+        """Return stored belief for ``context_key``, if present."""
+        if scope == "locus":
+            locus = (int(context_key[0]), int(context_key[1]))
+            return self._locus_beliefs.get(locus)
+        return self._feature_beliefs.get(context_key)
+
+    def query_causal_rules(self, trigger_key: Any | None = None) -> list[CausalEffectRule]:
+        """Return all causal effect rules, optionally filtered by trigger key."""
+        if trigger_key is None:
+            return list(self._causal_rules.values())
+        _, _, token = _encode_context_key(trigger_key)
+        return [rule for (r_tok, _), rule in self._causal_rules.items() if r_tok == token]
+
+    def evaluate_transition(
+        self,
+        feature_id: Any,
+        *,
+        locus: tuple[int, int] | None = None,
+        active_state_tokens: frozenset[str] | set[str] | None = None,
+        unknown_traversable: bool = True,
+        unknown_cost_penalty: float = 0.0,
+        risk_weight: float = 50.0,
+    ) -> TransitionEdgeEvaluation:
+        """Evaluate edge traversability, cost, risk, goal value, and uncertainty."""
+        belief: TransitionBelief | None = None
+        if locus is not None:
+            locus_key = (int(locus[0]), int(locus[1]))
+            locus_belief = self._locus_beliefs.get(locus_key)
+            if locus_belief is not None and locus_belief.total_observations() > 0.0:
+                belief = locus_belief
+        if belief is None:
+            feat_belief = self._feature_beliefs.get(feature_id)
+            if feat_belief is not None and feat_belief.total_observations() > 0.0:
+                belief = feat_belief
+
+        if belief is None:
+            return TransitionEdgeEvaluation(
+                traversable=unknown_traversable,
+                step_cost=(1.0 + max(0.0, unknown_cost_penalty))
+                if unknown_traversable
+                else math.inf,
+                risk_cost=0.0,
+                goal_value=0.0,
+                info_gain=1.0,
+                mutates_state=False,
+                confidence=0.0,
+            )
+
+        p_trav = belief.traversability_posterior()
+        p_fatal = belief.outcome_prob(TransitionOutcome.TERMINAL_FAIL)
+        p_win = belief.outcome_prob(TransitionOutcome.TERMINAL_WIN)
+        p_mut = belief.outcome_prob(TransitionOutcome.MUTATED_STATE) + belief.outcome_prob(
+            TransitionOutcome.DISPLACED_OTHER
+        )
+
+        if active_state_tokens:
+            unlock_tokens = {f"unlocks:{feature_id}"}
+            if locus is not None:
+                unlock_tokens.add(f"unlocks:{(int(locus[0]), int(locus[1]))}")
+            if not unlock_tokens.isdisjoint(active_state_tokens):
+                p_trav = max(p_trav, 0.9)
+
+        traversable = (p_win > 0.0 or p_trav >= 0.5) and p_fatal < 0.5
+        step_cost = (1.0 + max(0.0, 1.0 - p_trav)) if traversable else math.inf
+        return TransitionEdgeEvaluation(
+            traversable=traversable,
+            step_cost=float(step_cost),
+            risk_cost=float(risk_weight * p_fatal),
+            goal_value=float(p_win),
+            info_gain=belief.epistemic_uncertainty(),
+            mutates_state=p_mut > 0.0,
+            confidence=belief.confidence(),
+        )
+
+    def begin_context_epoch(self, epoch: int | None = None) -> None:
+        """Advance context epoch and drop episode-local coordinate beliefs."""
+        self._context_epoch = (self._context_epoch + 1) if epoch is None else int(epoch)
+        self._locus_beliefs.clear()
+
+    def clear_context_beliefs(self, *, preserve_current_epoch: bool = False) -> None:
+        """Drop locus beliefs and unverified feature beliefs across context shifts."""
+        self._locus_beliefs.clear()
+        if not preserve_current_epoch:
+            self._feature_beliefs.clear()
+            return
+        self._feature_beliefs = {
+            k: b
+            for k, b in self._feature_beliefs.items()
+            if b.verified_epoch == self._context_epoch
+        }
+
+    def clear(self) -> None:
+        """Reset all stored beliefs, causal rules, and context epoch counters."""
+        self._feature_beliefs.clear()
+        self._locus_beliefs.clear()
+        self._causal_rules.clear()
+        self._context_epoch = 0
+
+    def to_transaction_operations(self) -> list[TransactionOperation]:
+        """Export all transition beliefs and causal rules as HCIR graph transactions."""
+        ops: list[TransactionOperation] = []
+        for belief in self._feature_beliefs.values():
+            if belief.total_observations() <= 0.0:
+                continue
+            node = belief.to_belief_node()
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            )
+        for belief in self._locus_beliefs.values():
+            if belief.total_observations() <= 0.0:
+                continue
+            node = belief.to_belief_node()
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            )
+        for rule in self._causal_rules.values():
+            node = rule.to_learned_rule_node()
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node.id,
+                    node_data=node.model_dump(),
+                )
+            )
+        return ops
+
+    def hydrate_from_nodes(self, nodes: Sequence[Any]) -> int:
+        """Hydrate beliefs and causal rules from stored HCIR graph nodes."""
+        hydrated = 0
+        for node in nodes:
+            if isinstance(node, BeliefNode):
+                belief = TransitionBelief.from_belief_node(node)
+                if belief is None:
+                    continue
+                if belief.scope == "locus" and isinstance(belief.context_key, tuple):
+                    self._locus_beliefs[
+                        (int(belief.context_key[0]), int(belief.context_key[1]))
+                    ] = belief
+                else:
+                    self._feature_beliefs[belief.context_key] = belief
+                hydrated += 1
+            elif isinstance(node, LearnedRuleNode):
+                rule = CausalEffectRule.from_learned_rule_node(node)
+                if rule is None:
+                    continue
+                _, _, token = _encode_context_key(rule.trigger_key)
+                self._causal_rules[(token, rule.effect_signature)] = rule
+                hydrated += 1
+        return hydrated
+
+
+__all__ = [
+    "CausalEffectRule",
+    "TransitionBelief",
+    "TransitionEdgeEvaluation",
+    "TransitionKnowledgeBase",
+    "TransitionOutcome",
+]
