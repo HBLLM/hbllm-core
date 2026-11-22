@@ -26,6 +26,7 @@ class TransitionOutcome(StrEnum):
     TERMINAL_WIN = "terminal_win"
     TERMINAL_FAIL = "terminal_fail"
     DISPLACED_OTHER = "displaced_other"
+    RECEIVED_ENTITY = "received_entity"
     MUTATED_STATE = "mutated_state"
 
 
@@ -78,6 +79,7 @@ class TransitionBelief:
     observed_effects: dict[str, int] = field(default_factory=dict)
     evidence_log: list[str] = field(default_factory=list)
     verified_epoch: int | None = None
+    outcome_epochs: dict[str, int] = field(default_factory=dict)
 
     def record(
         self,
@@ -93,6 +95,8 @@ class TransitionBelief:
         if inc > 0.0:
             key = outcome.value
             self.counts[key] = self.counts.get(key, 0.0) + inc
+            if epoch is not None:
+                self.outcome_epochs[key] = epoch
         if effect_signature:
             self.observed_effects[effect_signature] = (
                 self.observed_effects.get(effect_signature, 0) + 1
@@ -109,6 +113,7 @@ class TransitionBelief:
     def decay_or_clear_outcome(self, outcome: TransitionOutcome) -> None:
         """Remove accumulated counts for an invalidated outcome."""
         self.counts.pop(outcome.value, None)
+        self.outcome_epochs.pop(outcome.value, None)
 
     def total_observations(self) -> float:
         """Return total weighted outcome observations."""
@@ -165,6 +170,7 @@ class TransitionBelief:
                 "counts": dict(self.counts),
                 "observed_effects": dict(self.observed_effects),
                 "verified_epoch": self.verified_epoch,
+                "outcome_epochs": dict(self.outcome_epochs),
             },
         )
 
@@ -181,6 +187,8 @@ class TransitionBelief:
         counts = {str(k): float(v) for k, v in raw_counts.items()}
         raw_effects = props.get("observed_effects") or {}
         effects = {str(k): int(v) for k, v in raw_effects.items()}
+        raw_outcome_epochs = props.get("outcome_epochs") or {}
+        outcome_epochs = {str(k): int(v) for k, v in raw_outcome_epochs.items()}
         verified_epoch = props.get("verified_epoch")
         return cls(
             scope=scope,
@@ -189,6 +197,7 @@ class TransitionBelief:
             observed_effects=effects,
             evidence_log=list(node.evidence_sources or ()),
             verified_epoch=int(verified_epoch) if verified_epoch is not None else None,
+            outcome_epochs=outcome_epochs,
         )
 
 
@@ -421,6 +430,42 @@ class TransitionKnowledgeBase:
             confidence=belief.confidence(),
         )
 
+    def has_feature_outcome(self, feature_id: Any, outcome: TransitionOutcome) -> bool:
+        """Return True if ``feature_id`` has recorded observations of ``outcome``."""
+        belief = self._feature_beliefs.get(feature_id)
+        return belief is not None and belief.counts.get(outcome.value, 0.0) > 0.0
+
+    def features_with_outcome(
+        self, outcome: TransitionOutcome, *, min_count: float = 0.0
+    ) -> frozenset[Any]:
+        """Return feature keys having observed ``outcome`` above ``min_count``."""
+        key = outcome.value
+        return frozenset(
+            k for k, b in self._feature_beliefs.items() if b.counts.get(key, 0.0) > min_count
+        )
+
+    def impassable_features(self) -> frozenset[Any]:
+        """Return feature keys empirically evaluated as non-traversable."""
+        blocked_k = TransitionOutcome.BLOCKED.value
+        fail_k = TransitionOutcome.TERMINAL_FAIL.value
+        return frozenset(
+            k
+            for k, b in self._feature_beliefs.items()
+            if (b.counts.get(blocked_k, 0.0) > 0.0 or b.counts.get(fail_k, 0.0) > 0.0)
+            and not self.evaluate_transition(k).traversable
+        )
+
+    def traversable_features(self) -> frozenset[Any]:
+        """Return feature keys empirically evaluated as safely traversable."""
+        trav_k = TransitionOutcome.TRAVERSED.value
+        win_k = TransitionOutcome.TERMINAL_WIN.value
+        return frozenset(
+            k
+            for k, b in self._feature_beliefs.items()
+            if (b.counts.get(trav_k, 0.0) > 0.0 or b.counts.get(win_k, 0.0) > 0.0)
+            and self.evaluate_transition(k).traversable
+        )
+
     def begin_context_epoch(self, epoch: int | None = None) -> None:
         """Advance context epoch and drop episode-local coordinate beliefs."""
         self._context_epoch = (self._context_epoch + 1) if epoch is None else int(epoch)
@@ -432,11 +477,19 @@ class TransitionKnowledgeBase:
         if not preserve_current_epoch:
             self._feature_beliefs.clear()
             return
-        self._feature_beliefs = {
-            k: b
-            for k, b in self._feature_beliefs.items()
-            if b.verified_epoch == self._context_epoch
-        }
+        retained: dict[Any, TransitionBelief] = {}
+        for k, b in self._feature_beliefs.items():
+            stale_keys = [
+                ok
+                for ok in b.counts
+                if b.outcome_epochs.get(ok, b.verified_epoch) != self._context_epoch
+            ]
+            for ok in stale_keys:
+                b.counts.pop(ok, None)
+                b.outcome_epochs.pop(ok, None)
+            if b.total_observations() > 0.0:
+                retained[k] = b
+        self._feature_beliefs = retained
 
     def clear(self) -> None:
         """Reset all stored beliefs, causal rules, and context epoch counters."""

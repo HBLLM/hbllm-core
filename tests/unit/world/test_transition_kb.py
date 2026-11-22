@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from hbllm.hcir.graph import BeliefNode, LearnedRuleNode
+from hbllm.hcir.kernel.transaction_manager import TransactionManager
 from hbllm.hcir.transactions import TransactionOp
+from hbllm.hcir.workspace_tiers import TieredWorkspace
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 from hbllm.hcir.world.cortex_causal import (
     CausalEffectRule,
@@ -392,3 +394,91 @@ def test_object_planner_find_shortest_path_consults_transition_kb() -> None:
     )
     assert open_path is not None
     assert [step.predicted_avatar_pos for step in open_path] == [(1, 1), (1, 2), (1, 3)]
+
+
+def test_theory_derives_ontology_views_solely_from_transition_kb() -> None:
+    """Verify HCIRSymbolicWorldTheory derives all ontology properties solely from TransitionKB BeliefNodes."""
+    kb = TransitionKnowledgeBase()
+    kb.record_outcome(0, TransitionOutcome.TRAVERSED, evidence="traversal")
+    kb.record_outcome(5, TransitionOutcome.BLOCKED, evidence="collision")
+    kb.record_outcome(7, TransitionOutcome.TERMINAL_FAIL, evidence="lethal_hazard")
+    kb.record_outcome(8, TransitionOutcome.TERMINAL_WIN, evidence=TerminalSignal.SUCCESS)
+    kb.record_outcome(4, TransitionOutcome.DISPLACED_OTHER, evidence="push")
+    kb.record_outcome(6, TransitionOutcome.RECEIVED_ENTITY, evidence="dock")
+    kb.record_outcome(9, TransitionOutcome.MUTATED_STATE, evidence="toggle")
+
+    nodes: list[BeliefNode] = []
+    for op in kb.to_transaction_operations():
+        assert op.op == TransactionOp.UPSERT_NODE
+        assert op.node_data is not None
+        assert op.node_id is not None and op.node_id.startswith("kb_transition_")
+        nodes.append(BeliefNode(**op.node_data))
+
+    theory = HCIRSymbolicWorldTheory()
+    theory.hydrate_from_nodes(nodes)
+
+    assert 0 in theory.walkable_features
+    assert 5 in theory.barrier_features
+    assert 7 in theory.barrier_features
+    assert 8 in theory.goal_features
+    assert 4 in theory.cargo_features
+    assert 6 in theory.receptacle_features
+    assert 9 in theory.actuator_features
+
+    assert theory.is_walkable(0) is True
+    assert theory.is_barrier(5) is True
+    assert theory.is_barrier(7) is True
+    assert theory.is_goal(8) is True
+    assert theory.is_cargo(4) is True
+    assert theory.is_receptacle(6) is True
+    assert theory.is_actuator(9) is True
+
+    for private_attr in (
+        "_goal_features",
+        "_barrier_features",
+        "_walkable_features",
+        "_cargo_features",
+        "_receptacle_features",
+        "_actuator_features",
+    ):
+        assert not hasattr(theory, private_attr)
+
+
+def test_transition_kb_per_outcome_epoch_revision() -> None:
+    """Verify per-outcome epoch revision prunes stale epoch outcomes while retaining fresh ones."""
+    theory = HCIRSymbolicWorldTheory()
+    theory.induce_goal(3, evidence="terminal_reward")
+    assert 3 in theory.goal_features
+
+    theory.begin_context_epoch()
+    theory.induce_walkable(3, evidence="traversal")
+    theory.clear_context_feature_ontology(preserve_current_context=True)
+
+    assert 3 not in theory.goal_features
+    assert not theory.transition_kb.has_feature_outcome(3, TransitionOutcome.TERMINAL_WIN)
+    assert 3 in theory.walkable_features
+    assert theory.is_walkable(3) is True
+
+
+def test_engine_hydrates_transition_kb_from_persistent_workspace() -> None:
+    """Verify AutonomousEpistemicEngine hydrates TransitionKB beliefs and rules from TieredWorkspace."""
+    kb = TransitionKnowledgeBase()
+    kb.record_outcome(5, TransitionOutcome.BLOCKED, evidence="wall")
+    kb.record_outcome(8, TransitionOutcome.TERMINAL_WIN, evidence="exit")
+    kb.record_causal_rule(9, "unlocks:5", evidence="lever")
+
+    tiered = TieredWorkspace()
+    tm = TransactionManager(workspace=tiered.persistent)
+    tiered.persistent.attach_transaction_manager(tm, replace=True)
+    tiered.persistent.commit_operations(kb.to_transaction_operations(), author="test_seed")
+
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    engine.attach_tiered_workspace(tiered, goal_id="kb_hydrate_test", hydrate_persistent=True)
+
+    assert 5 in engine.symbolic_theory.barrier_features
+    assert 8 in engine.symbolic_theory.goal_features
+    assert engine.symbolic_theory.evaluate_transition(5).traversable is False
+    assert engine.symbolic_theory.evaluate_transition(8).goal_value > 0.5
+    rules = engine.symbolic_theory.transition_kb.query_causal_rules(9)
+    assert len(rules) == 1
+    assert rules[0].effect_signature == "unlocks:5"

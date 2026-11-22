@@ -1177,7 +1177,7 @@ class AutonomousEpistemicEngine:
 
         persistent_ws = self.tiered_workspace.persistent
         res = persistent_ws.query(GraphQuery(limit=9999))
-        hydrated_count = 0
+        hydrated_count = self.symbolic_theory.transition_kb.hydrate_from_nodes(res.nodes)
 
         for node in res.nodes:
             nid = node.id

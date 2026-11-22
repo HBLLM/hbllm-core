@@ -1687,6 +1687,25 @@ class MentalSimulationPlanner:
                                     if not is_flanked_threat:
                                         epistemic_cost = float("inf")
                                         break
+                            kb_ev = engine.symbolic_theory.evaluate_transition(
+                                cell_feat, locus=(kr, kc)
+                            )
+                            if (
+                                kb_ev.risk_cost >= 40.0
+                                and cell_feat not in engine.mobile_threat_features
+                                and (kr, kc) not in (init_threats - cur_threats)
+                            ):
+                                is_flanked_threat = (
+                                    (kr, kc) in cur_threats
+                                    and (kr, kc) == (nr, nc)
+                                    and threat_map.get((kr, kc)) is not None
+                                    and cur_pos != threat_map[(kr, kc)].gaze_pos
+                                )
+                                if not is_flanked_threat:
+                                    epistemic_cost = float("inf")
+                                    break
+                            elif kb_ev.traversable and kb_ev.step_cost > 1.05:
+                                epistemic_cost += float(kb_ev.step_cost) - 1.0
                             if (kr, kc) in goals:
                                 g_rank = goals.index((kr, kc)) if (kr, kc) in goals else 0
                                 if g_rank > 0 and k == dist:
