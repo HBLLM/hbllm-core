@@ -93,10 +93,15 @@ class ObjectStateGraphPlanner:
         known_goal_features = set(engine.symbolic_theory.goal_features)
 
         salient_objects: list[SalientObject] = []
+        grid_arr = percept.metadata.get("grid")
+        bg_val = int(percept.metadata.get("bg", engine.bg_feature or 0))
         for e in percept.entities:
-            # Skip avatar
-            if e.feature_id in av_feats or (
-                bool(av_feats) and av_pos is not None and e.grid_pos == av_pos
+            # Skip avatar (rely on EntityRole.AGENT lifted by perception so disjoint
+            # non-avatar objects sharing a palette color with the avatar remain visible)
+            if e.role == EntityRole.AGENT or (av_pos is None and e.feature_id in av_feats):
+                continue
+            if grid_arr is not None and engine.working_memory.is_exogenous_locus(
+                e.grid_pos, lattice=grid_arr, bg=bg_val, include_outer_edge=False
             ):
                 continue
             # Skip massive background or bulk perimeter walls
@@ -132,6 +137,12 @@ class ObjectStateGraphPlanner:
                 or e.feature_id in known_goal_features
                 or any(cp in known_goal_positions for cp in entity_cells)
             )
+            if not is_goal and all(
+                engine.symbolic_theory.is_locus_explored(cp)
+                or cp in engine.exhausted_candidate_goals
+                for cp in entity_cells
+            ):
+                continue
             is_switch = (
                 (
                     bool(engine.symbolic_theory)
@@ -336,7 +347,7 @@ class ObjectStateGraphPlanner:
                     kr = cr + step_r * k
                     kc = cc + step_c * k
                     k_pos = (kr, kc)
-                    is_target = k == dist and k_pos in target_stances
+                    is_target = k_pos in target_stances and (nr, nc) in target_stances
                     if not is_target:
                         if k_pos in static_barriers:
                             blocked = True
@@ -434,6 +445,7 @@ class ObjectStateGraphPlanner:
         # Extract calibrated movable actions and spatial effector actions
         movable_actions: list[tuple[Any, int, int]] = []
         spatial_effector_actions: list[Any] = []
+        action_deltas = engine.action_deltas
         for act in available_actions:
             if (
                 get_engine_state_attr(engine, "inhibited_actions", None)
@@ -453,9 +465,8 @@ class ObjectStateGraphPlanner:
                 and engine.inhibited_actions.get(act, 0) > 0
             ):
                 continue
-            dyn = engine.action_dynamics.get(act)
-            if dyn is not None and dyn.is_displacement_action():
-                dr, dc = dyn.get_displacement()
+            if act in action_deltas:
+                dr, dc = action_deltas[act]
                 movable_actions.append((act, dr, dc))
 
         if not movable_actions and not spatial_effector_actions:
@@ -958,51 +969,6 @@ class ObjectStateGraphPlanner:
                                 action=uncalibrated_acts[0],
                                 predicted_avatar_pos=av_pos,
                                 expected_mutation="CALIBRATE_OBJECT_HEADING",
-                            )
-                        ]
-
-                    # 2. Greedy displacement step towards target stance
-                    best_step_act = None
-                    min_dist = abs(dr_target) + abs(dc_target)
-                    rec = list(get_engine_state_attr(engine, "recent_positions", []))
-                    ior = getattr(
-                        get_engine_state_attr(engine, "working_memory", None), "habenular_ior", None
-                    )
-                    for act, dr, dc in movable_actions:
-                        if failed_transitions and (av_pos, act) in failed_transitions:
-                            continue
-                        if engine.inhibited_actions.get(act, 0) > 0:
-                            continue
-                        if ior is not None and ior.is_action_inhibited(av_pos, act):
-                            continue
-                        nr, nc = av_pos[0] + dr, av_pos[1] + dc
-                        if not (0 <= nr < H and 0 <= nc < W):
-                            continue
-                        if not percept.is_passable(nr, nc):
-                            continue
-                        if patroller_cells and (nr, nc) in patroller_cells:
-                            continue
-                        if rec:
-                            if len(rec) >= 2 and (nr, nc) == rec[-2]:
-                                continue
-                            if len(rec) >= 4 and (nr, nc) in rec[-4:]:
-                                continue
-                            if len(rec) >= 6 and rec[-6:].count((nr, nc)) >= 2:
-                                continue
-                        cand_dist = abs(target_stance[0] - nr) + abs(target_stance[1] - nc)
-                        if cand_dist < min_dist:
-                            min_dist = cand_dist
-                            best_step_act = (act, nr, nc)
-
-                    if best_step_act is not None:
-                        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
-
-                        self.active_target_object_id = best_candidate_obj.object_id
-                        return [
-                            MentalSimulationStep(
-                                action=best_step_act[0],
-                                predicted_avatar_pos=(best_step_act[1], best_step_act[2]),
-                                expected_mutation="APPROACH_OBJECT",
                             )
                         ]
 

@@ -112,10 +112,21 @@ class CausalTheoryPlanner:
         )
         shroud_f = engine.working_memory.shroud_feature
 
+        wm_exog = engine.working_memory
+        visited_cells = wm_exog.visited_cells
+        exhausted = get_sub_attr(wm_exog, "exhausted_candidate_goals", set())
+        bg_val = 0
+        if curr_grid.size > 0:
+            vals, cnts = np.unique(curr_grid, return_counts=True)
+            bg_val = int(vals[int(np.argmax(cnts))])
+
         # Fallback to candidate goal features if no concrete goal cells located
         if not goal_positions and theory.candidate_goal_features:
             for r in range(curr_grid.shape[0]):
                 for c in range(curr_grid.shape[1]):
+                    cp = (r, c)
+                    if cp in visited_cells or cp in exhausted or theory.is_locus_explored(cp):
+                        continue
                     feat = int(curr_grid[r, c])
                     if (
                         feat in theory.candidate_goal_features
@@ -123,13 +134,7 @@ class CausalTheoryPlanner:
                         and feat not in mob_feats
                         and feat != shroud_f
                     ):
-                        goal_positions.add((r, c))
-
-        wm_exog = engine.working_memory
-        bg_val = 0
-        if curr_grid.size > 0:
-            vals, cnts = np.unique(curr_grid, return_counts=True)
-            bg_val = int(vals[int(np.argmax(cnts))])
+                        goal_positions.add(cp)
 
         # Fallback to structural perception goals if still empty
         if not goal_positions:
@@ -146,14 +151,23 @@ class CausalTheoryPlanner:
                     added_nonexog = False
                     if sg.get("cells"):
                         for cp in sg["cells"]:
-                            if cp != engine.avatar_pos and not wm_exog.is_exogenous_locus(
-                                cp, lattice=curr_grid, bg=bg_val, include_outer_edge=False
+                            if (
+                                cp != engine.avatar_pos
+                                and cp not in visited_cells
+                                and cp not in exhausted
+                                and not theory.is_locus_explored(cp)
+                                and not wm_exog.is_exogenous_locus(
+                                    cp, lattice=curr_grid, bg=bg_val, include_outer_edge=False
+                                )
                             ):
                                 goal_positions.add(cp)
                                 added_nonexog = True
                     elif (
                         sg.get("position")
                         and sg["position"] != engine.avatar_pos
+                        and sg["position"] not in visited_cells
+                        and sg["position"] not in exhausted
+                        and not theory.is_locus_explored(sg["position"])
                         and not wm_exog.is_exogenous_locus(
                             sg["position"], lattice=curr_grid, bg=bg_val, include_outer_edge=False
                         )

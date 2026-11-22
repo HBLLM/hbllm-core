@@ -267,6 +267,24 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
             lethal_features = set(context.hazard_tracker.known_lethal_features)
             lethal_positions = set(context.hazard_tracker.static_lethal_positions)
 
+        av_feats: set[int] = set()
+        ref_av_pos: tuple[int, int] | None = None
+        if context is not None:
+            try:
+                if context.avatar_features:
+                    av_feats.update(context.avatar_features)
+            except AttributeError:
+                pass
+            try:
+                if context.avatar_feature is not None:
+                    av_feats.add(context.avatar_feature)
+            except AttributeError:
+                pass
+            try:
+                ref_av_pos = context.avatar_pos
+            except AttributeError:
+                ref_av_pos = None
+
         entities: list[SpatialEntity] = []
         unique_feats = [int(x) for x in np.unique(grid) if int(x) != bg]
         for feat in unique_feats:
@@ -288,11 +306,7 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
                         role = EntityRole.GOAL
                     elif context.symbolic_theory.is_barrier(feat):
                         role = EntityRole.OBSTACLE
-                if (
-                    context
-                    and hasattr(context, "avatar_feature")
-                    and context.avatar_feature == feat
-                ):
+                if feat in av_feats:
                     role = EntityRole.AGENT
 
                 ent = SpatialEntity(
@@ -307,9 +321,66 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
                 )
                 entities.append(ent)
 
+        agent_candidates = [e for e in entities if e.role == EntityRole.AGENT]
+        if len(agent_candidates) > 1 and ref_av_pos is not None:
+            exact_ag = [
+                e
+                for e in agent_candidates
+                if ref_av_pos in e.properties.get("cells", [e.grid_pos]) or e.grid_pos == ref_av_pos
+            ]
+            best_ag = (
+                exact_ag[0]
+                if exact_ag
+                else min(
+                    agent_candidates,
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - ref_av_pos[0]) + abs(e.grid_pos[1] - ref_av_pos[1])
+                    ),
+                )
+            )
+
+            def _boxes_touch(b1: tuple[int, int, int, int], b2: tuple[int, int, int, int]) -> bool:
+                r_gap = max(0, b1[0] - b2[1] - 1, b2[0] - b1[1] - 1)
+                c_gap = max(0, b1[2] - b2[3] - 1, b2[2] - b1[3] - 1)
+                return (b1[0] <= b2[1] and b2[0] <= b1[1] and c_gap == 0) or (
+                    b1[2] <= b2[3] and b2[2] <= b1[3] and r_gap == 0
+                )
+
+            avatar_body = [best_ag]
+            body_ids = {id(best_ag)}
+            grew = True
+            while grew:
+                grew = False
+                for e in agent_candidates:
+                    if id(e) in body_ids:
+                        continue
+                    if any(_boxes_touch(e.bounding_box, b.bounding_box) for b in avatar_body):
+                        avatar_body.append(e)
+                        body_ids.add(id(e))
+                        grew = True
+            learned_gp_set: set[tuple[int, int]] = set()
+            if context is not None:
+                try:
+                    learned_gp_set = set(context.learned_goal_positions or ())
+                except AttributeError:
+                    learned_gp_set = set()
+            for e in agent_candidates:
+                if id(e) not in body_ids:
+                    is_sym_goal = (
+                        context is not None
+                        and hasattr(context, "symbolic_theory")
+                        and context.symbolic_theory.is_goal(e.feature_id)
+                    )
+                    e.role = (
+                        EntityRole.GOAL
+                        if e.grid_pos in learned_gp_set or is_sym_goal
+                        else EntityRole.UNKNOWN
+                    )
+
         barriers: set[tuple[int, int]] = set()
         goals: list[tuple[int, int]] = []
         avatar_pos: tuple[int, int] | None = None
+        final_agents: list[SpatialEntity] = []
         lethal_cells: set[tuple[int, int]] = set(lethal_positions)
         for e in entities:
             if e.role == EntityRole.DYNAMIC_HAZARD or (
@@ -321,7 +392,13 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
             elif e.role == EntityRole.GOAL:
                 goals.append(e.grid_pos)
             elif e.role == EntityRole.AGENT:
-                avatar_pos = e.grid_pos
+                final_agents.append(e)
+        if final_agents:
+            tot_area = sum(max(1, e.area) for e in final_agents)
+            avatar_pos = (
+                int(round(sum(e.centroid[0] * max(1, e.area) for e in final_agents) / tot_area)),
+                int(round(sum(e.centroid[1] * max(1, e.area) for e in final_agents) / tot_area)),
+            )
 
         if context and hasattr(context, "learned_barriers"):
             barriers.update(context.learned_barriers)

@@ -734,10 +734,18 @@ class MentalSimulationPlanner:
 
         # Unknown solid entity cells: risk-aware path planning
         unknown_entity_cells: set[tuple[int, int]] = set()
+        goal_set_coords = set(goals)
         for e in entities:
+            ent_cells = set(e.properties.get("cells", [e.grid_pos]))
+            if (
+                e.role == EntityRole.AGENT
+                or e.grid_pos in goal_set_coords
+                or not ent_cells.isdisjoint(goal_set_coords)
+            ):
+                continue
             if (
                 e.feature_id != bg
-                and e.feature_id not in av_feats
+                and (start_pos is None and e.feature_id not in av_feats or start_pos is not None)
                 and not engine.symbolic_theory.is_walkable(e.feature_id)
                 and e.feature_id not in engine.symbolic_theory.goal_features
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
@@ -745,7 +753,7 @@ class MentalSimulationPlanner:
                 and e.feature_id not in engine.learned_cargo_features
                 and e.role != EntityRole.MANIPULABLE
             ):
-                for cell in e.properties.get("cells", [e.grid_pos]):
+                for cell in ent_cells:
                     unknown_entity_cells.add(cell)
 
         # Determine movement displacement scale
@@ -2553,7 +2561,16 @@ class MentalSimulationPlanner:
         )
 
         for e in entities:
-            if e.grid_pos == start_pos or e.feature_id in av_feats or e.feature_id == bg:
+            if (
+                e.grid_pos == start_pos
+                or e.role == EntityRole.AGENT
+                or (start_pos is None and e.feature_id in av_feats)
+                or e.feature_id == bg
+            ):
+                continue
+            if engine.working_memory.is_exogenous_locus(
+                e.grid_pos, lattice=curr_grid, bg=bg, include_outer_edge=False
+            ):
                 continue
             if engine.symbolic_theory.is_locus_explored(e.grid_pos):
                 continue

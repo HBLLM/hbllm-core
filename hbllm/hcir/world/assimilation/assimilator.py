@@ -70,9 +70,14 @@ class EpistemicFeedbackAssimilator:
                 r, c = cr - sr * k, cc - sc * k
                 if not (0 <= r < H and 0 <= c < W):
                     continue
+                if k == 0:
+                    wm.visited_cells.add((r, c))
                 wf = int(view.prev_grid[r, c])
                 if wf in av:
                     continue
+                if k == 0 and wf != bg_val and not th.is_walkable(wf):
+                    th.mark_locus_explored((r, c), reason="traversal")
+                    view.exhausted_candidate_goals.add((r, c))
                 # Detect cross-context label contradiction when safely traversing prior beliefs
                 if th.has_prior_context_transition and wf != bg_val:
                     prior_lethal_falsified = wf in lethal and not th.is_verified_in_context(
@@ -1394,6 +1399,7 @@ class EpistemicFeedbackAssimilator:
                             len(view._avatar_controllability_evidence),
                         )
 
+        landing_cells_now: list[tuple[int, int]] = []
         if not is_effector_action:
             known_av_feats = view.avatar_features or (
                 {view.avatar_feature} if view.avatar_feature is not None else set()
@@ -1528,6 +1534,7 @@ class EpistemicFeedbackAssimilator:
                     for cell in ce.properties.get("cells", [ce.grid_pos])
                 ]
                 if all_cells:
+                    landing_cells_now = list(all_cells)
                     view.state.avatar_pos = (
                         int(round(sum(c[0] for c in all_cells) / len(all_cells))),
                         int(round(sum(c[1] for c in all_cells) / len(all_cells))),
@@ -1538,6 +1545,19 @@ class EpistemicFeedbackAssimilator:
                     view.state.avatar_w = (
                         max(c[1] for c in all_cells) - min(c[1] for c in all_cells) + 1
                     )
+                    view.working_memory.visited_cells.add(view.state.avatar_pos)
+                    av_cell_set = set(all_cells)
+                    for t_pos in list(satisfied_when_map.keys()):
+                        if t_pos == view.state.avatar_pos or t_pos in av_cell_set:
+                            cond = satisfied_when_map[t_pos]
+                            visits = cond.get("visits", 0) + 1
+                            cond["visits"] = visits
+                            if visits >= cond.get("max_visits", 2):
+                                view.symbolic_theory.mark_locus_explored(
+                                    t_pos, reason="visited_target"
+                                )
+                                view.exhausted_candidate_goals.add(t_pos)
+                                satisfied_when_map.pop(t_pos, None)
                 if not is_success and not is_failure:
                     EpistemicFeedbackAssimilator._record_safe_traversal(
                         view, all_cells, (dr, dc), H, W
@@ -2220,8 +2240,22 @@ class EpistemicFeedbackAssimilator:
                 or trigger_feat == _bg_feature
                 or trigger_feat in av_feats
             ):
+                found_trigger = False
+                for cr_l, cc_l in landing_cells_now:
+                    if 0 <= cr_l < H and 0 <= cc_l < W:
+                        cand_l = int(_prev_grid[cr_l, cc_l])
+                        if (
+                            cand_l != bg
+                            and cand_l != _bg_feature
+                            and cand_l not in av_feats
+                            and not view.symbolic_theory.is_walkable(cand_l)
+                        ):
+                            trigger_pos = (cr_l, cc_l)
+                            trigger_feat = cand_l
+                            found_trigger = True
+                            break
                 agent_origin = prev_avatar_pos or _avatar_pos_now
-                if agent_origin is not None:
+                if not found_trigger and agent_origin is not None:
                     ar, ac = agent_origin
                     for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                         nr, nc = ar + dr, ac + dc
@@ -2334,21 +2368,39 @@ class EpistemicFeedbackAssimilator:
                                         trigger_pos
                                     )
                     view.mental_plan.clear()
-                    for mr, mc, old_val, new_val in distant_mutations:
+                    mutated_set = {(int(mr), int(mc)) for mr, mc, _, _ in distant_mutations}
+                    for mr, mc in mutated_set:
                         view.learned_barriers.discard((mr, mc))
+                        view.symbolic_theory.unmark_locus_explored((mr, mc))
+                        view.exhausted_candidate_goals.discard((mr, mc))
                         for dr_m, dc_m in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
-                            adj_m = (int(mr) + dr_m, int(mc) + dc_m)
+                            adj_m = (mr + dr_m, mc + dc_m)
                             for fp in [fp for fp in view.failed_transitions if fp[0] == adj_m]:
                                 view.failed_transitions.discard(fp)
+                    mutated_adj_set = {
+                        (mr + dr_m, mc + dc_m)
+                        for mr, mc in mutated_set
+                        for dr_m, dc_m in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1))
+                    }
                     for ent in view.extract_entities(curr_grid, view.bg_feature):
                         if (
                             ent.feature_id != view.bg_feature
-                            and ent.feature_id not in (view.avatar_features or ())
-                            and ent.area <= 64
-                        ):
-                            view.symbolic_theory.induce_candidate_goal(
-                                ent.feature_id, evidence="post_mutation_exploration"
+                            and ent.role not in (EntityRole.AGENT, EntityRole.OBSTACLE)
+                            and not _wm_exog.is_exogenous_locus(
+                                ent.grid_pos, lattice=curr_grid, bg=bg, include_outer_edge=False
                             )
+                        ):
+                            if ent.area <= 64:
+                                view.symbolic_theory.induce_candidate_goal(
+                                    ent.feature_id, evidence="post_mutation_exploration"
+                                )
+                            ent_cells = ent.properties.get("cells", [ent.grid_pos])
+                            if any(tuple(ec) in mutated_adj_set for ec in ent_cells):
+                                view.symbolic_theory.unmark_locus_explored(ent.grid_pos)
+                                view.exhausted_candidate_goals.discard(ent.grid_pos)
+                                for ec in ent_cells:
+                                    view.symbolic_theory.unmark_locus_explored(tuple(ec))
+                                    view.exhausted_candidate_goals.discard(tuple(ec))
                     if view.subgoal_stack.has_pending_goals:
                         cur_sg = view.subgoal_stack.current_subgoal
                         if cur_sg is not None:

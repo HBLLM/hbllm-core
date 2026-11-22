@@ -524,14 +524,7 @@ class EpistemicGoalScheduler:
                 )
             ):
                 continue
-            if e.feature_id in av_feats:
-                if (
-                    avatar_pos is not None
-                    and (abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1]))
-                    > 4
-                    and e.role == EntityRole.GOAL
-                ):
-                    confirmed_goals.append(e.grid_pos)
+            if e.role == EntityRole.AGENT or (avatar_pos is None and e.feature_id in av_feats):
                 continue
             # Causal Disambiguation: Pervasive walkable substrates (e.g. tracks, floors)
             # that recur in large quantities cannot be the singular exit/goal.
@@ -1176,13 +1169,7 @@ class EpistemicGoalScheduler:
                     or int(e.feature_id) in prior_hazard_feats
                 ):
                     continue
-                if avatar_pos is not None and e.feature_id in av_feats:
-                    if (
-                        abs(e.grid_pos[0] - avatar_pos[0]) <= 3
-                        and abs(e.grid_pos[1] - avatar_pos[1]) <= 3
-                    ):
-                        continue
-                elif e.feature_id in av_feats:
+                if e.role == EntityRole.AGENT or (avatar_pos is None and e.feature_id in av_feats):
                     continue
                 if e.grid_pos in interactive_cluster_loci:
                     continue
@@ -1300,7 +1287,8 @@ class EpistemicGoalScheduler:
                     or e.feature_id in engine.learned_cargo_features
                 )
                 if (
-                    e.feature_id in av_feats
+                    e.role == EntityRole.AGENT
+                    or (avatar_pos is None and e.feature_id in av_feats)
                     or e.feature_id == engine.working_memory.shroud_feature
                     or (e.feature_id in engine.hazard_tracker.mobile_entities and not is_cargo_cand)
                     or e.grid_pos in interactive_cluster_loci
@@ -1522,6 +1510,13 @@ class EpistemicGoalScheduler:
                             and cp not in interactive_cluster_loci
                             and int(curr_grid[cp[0], cp[1]]) != bg
                         ):
+                            if (
+                                feat is None or feat not in engine.symbolic_theory.goal_features
+                            ) and (
+                                engine.symbolic_theory.is_locus_explored(cp)
+                                or cp in engine.exhausted_candidate_goals
+                            ):
+                                continue
                             cp_feat = int(curr_grid[cp[0], cp[1]])
                             if (
                                 cp_feat in engine.hazard_tracker.known_lethal_features
@@ -1544,6 +1539,11 @@ class EpistemicGoalScheduler:
                         and pos not in interactive_cluster_loci
                         and int(curr_grid[pos[0], pos[1]]) != bg
                     ):
+                        if (feat is None or feat not in engine.symbolic_theory.goal_features) and (
+                            engine.symbolic_theory.is_locus_explored(pos)
+                            or pos in engine.exhausted_candidate_goals
+                        ):
+                            continue
                         pos_feat = int(curr_grid[pos[0], pos[1]])
                         if (
                             pos_feat in engine.hazard_tracker.known_lethal_features
@@ -1710,6 +1710,13 @@ class EpistemicGoalScheduler:
             labeled_reach, _ = _scipy_label(passable)
             av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
 
+            reach_offsets = (
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+                *engine.action_deltas.values(),
+            )
             reachable_goals = [
                 g
                 for g in goals
@@ -1718,7 +1725,7 @@ class EpistemicGoalScheduler:
                     0 <= g[0] + dr < H
                     and 0 <= g[1] + dc < W
                     and int(labeled_reach[g[0] + dr, g[1] + dc]) == av_lbl
-                    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    for dr, dc in reach_offsets
                 )
             ]
             if reachable_goals:

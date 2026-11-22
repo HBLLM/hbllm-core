@@ -177,6 +177,8 @@ class PerceptionEngine:
 
         unique_vals = [int(v) for v in _fast_unique_counts(grid)[0].tolist() if int(v) != bg]
         geom_comps = PerceptionEngine._get_cached_component_geometry(grid, bg, unique_vals)
+        obstacle_vals: set[int] = set()
+        non_obstacle_vals: set[int] = set()
         for val, area, bbox, centroid, grid_pos, cells in geom_comps:
             cells_list = list(cells)
             min_r, max_r, min_c, max_c = bbox
@@ -208,15 +210,25 @@ class PerceptionEngine:
                 feature_id=val,
                 properties={"cells": cells_list, "feature": val, "feature_id": val},
             )
-            if role == EntityRole.OBSTACLE and symbolic_theory is not None:
-                if val in symbolic_theory.candidate_goal_features:
-                    symbolic_theory.retract_candidate_goal(val, reason="perimeter_border_obstacle")
-                if not symbolic_theory.is_barrier(val):
-                    symbolic_theory.induce_barrier(val, evidence="topology:border")
+            if role == EntityRole.OBSTACLE:
+                obstacle_vals.add(val)
+            else:
+                non_obstacle_vals.add(val)
             entities.append(ent)
 
+        if symbolic_theory is not None:
+            for border_val in obstacle_vals - non_obstacle_vals:
+                if border_val in symbolic_theory.candidate_goal_features:
+                    symbolic_theory.retract_candidate_goal(
+                        border_val, reason="perimeter_border_obstacle"
+                    )
+                if not symbolic_theory.is_barrier(border_val):
+                    symbolic_theory.induce_barrier(border_val, evidence="topology:border")
+
         # Disambiguate when multiple distinct entities share avatar features (e.g. templates, twins, sockets)
-        agent_entities = [e for e in entities if e.feature_id in av_feats]
+        agent_entities = [
+            e for e in entities if e.feature_id in av_feats or e.role == EntityRole.AGENT
+        ]
         if len(agent_entities) > 1 and avatar_pos is not None:
             exact_matches = [
                 e
@@ -233,16 +245,37 @@ class PerceptionEngine:
                     ),
                 )
             )
+
+            def _boxes_touch(b1: tuple[int, int, int, int], b2: tuple[int, int, int, int]) -> bool:
+                r_gap = max(0, b1[0] - b2[1] - 1, b2[0] - b1[1] - 1)
+                c_gap = max(0, b1[2] - b2[3] - 1, b2[2] - b1[3] - 1)
+                return (b1[0] <= b2[1] and b2[0] <= b1[1] and c_gap == 0) or (
+                    b1[2] <= b2[3] and b2[2] <= b1[3] and r_gap == 0
+                )
+
+            avatar_body: list[SpatialEntity] = [best_agent]
+            body_ids = {id(best_agent)}
+            grew = True
+            while grew:
+                grew = False
+                for e in agent_entities:
+                    if id(e) in body_ids:
+                        continue
+                    if any(_boxes_touch(e.bounding_box, b.bounding_box) for b in avatar_body):
+                        avatar_body.append(e)
+                        body_ids.add(id(e))
+                        grew = True
             for e in agent_entities:
-                if e is not best_agent:
-                    if (
-                        e.grid_pos in goal_pos
-                        or e.grid_pos in receptacle_pos
-                        or (symbolic_theory and symbolic_theory.is_goal(e.feature_id))
-                    ):
-                        e.role = EntityRole.GOAL
-                    else:
-                        e.role = EntityRole.MANIPULABLE
+                if id(e) in body_ids:
+                    e.role = EntityRole.AGENT
+                elif (
+                    e.grid_pos in goal_pos
+                    or e.grid_pos in receptacle_pos
+                    or (symbolic_theory and symbolic_theory.is_goal(e.feature_id))
+                ):
+                    e.role = EntityRole.GOAL
+                else:
+                    e.role = EntityRole.MANIPULABLE
 
         return entities
 
