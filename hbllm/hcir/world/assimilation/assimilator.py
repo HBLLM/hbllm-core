@@ -39,6 +39,91 @@ class EpistemicFeedbackAssimilator:
     """Assimilates environmental feedback into motor dynamics and neuro-symbolic theory."""
 
     @staticmethod
+    def _localize_stationary_avatar(
+        curr_grid: np.ndarray,
+        curr_entities: Sequence[SpatialEntity],
+        known_av_feats: set[Any],
+        prev_avatar_pos: tuple[int, int] | None,
+        avatar_size: int,
+        avatar_h: int | None,
+        avatar_w: int | None,
+        bg_feature: Any,
+        working_memory: Any,
+    ) -> tuple[int, int] | None:
+        """Preserve stationary composite avatar locus without jumping to same-feature decoys."""
+        if not known_av_feats or curr_grid.ndim < 2 or curr_grid.size == 0:
+            return prev_avatar_pos
+        H, W = int(curr_grid.shape[0]), int(curr_grid.shape[1])
+        if prev_avatar_pos is not None:
+            pr, pc = int(prev_avatar_pos[0]), int(prev_avatar_pos[1])
+            tol_r = max(int(avatar_h or 1), 2)
+            tol_c = max(int(avatar_w or 1), 2)
+            if (0 <= pr < H and 0 <= pc < W and int(curr_grid[pr, pc]) in known_av_feats) or any(
+                ce.feature_id in known_av_feats
+                and abs(int(ce.grid_pos[0]) - pr) <= tol_r
+                and abs(int(ce.grid_pos[1]) - pc) <= tol_c
+                for ce in curr_entities
+            ):
+                return prev_avatar_pos
+
+        from scipy.ndimage import label as _scipy_label
+
+        mask = np.isin(curr_grid, list(known_av_feats))
+        if np.any(mask):
+            labeled, num_components = _scipy_label(mask)
+            best_pos: tuple[int, int] | None = None
+            best_score = float("inf")
+            max_area = max(49, int(H * W * 0.15))
+            for lbl in range(1, int(num_components) + 1):
+                coords = np.argwhere(labeled == lbl)
+                area = int(len(coords))
+                if not (1 <= area <= max_area):
+                    continue
+                min_r, max_r = int(np.min(coords[:, 0])), int(np.max(coords[:, 0]))
+                min_c, max_c = int(np.min(coords[:, 1])), int(np.max(coords[:, 1]))
+                is_enclosing_frame = (
+                    min_c == max_c and min_c in (0, W - 1) and (max_r - min_r >= 4)
+                ) or (min_r == max_r and min_r in (0, H - 1) and (max_c - min_c >= 4))
+                if is_enclosing_frame:
+                    continue
+                centroid = (
+                    int(round(float(np.mean(coords[:, 0])))),
+                    int(round(float(np.mean(coords[:, 1])))),
+                )
+                if working_memory.is_exogenous_locus(
+                    centroid, lattice=curr_grid, bg=bg_feature, include_outer_edge=True
+                ):
+                    continue
+                comp_feats = {int(curr_grid[int(r), int(c)]) for r, c in coords}
+                missing_feats = len(known_av_feats - comp_feats)
+                dist = (
+                    abs(centroid[0] - prev_avatar_pos[0]) + abs(centroid[1] - prev_avatar_pos[1])
+                    if prev_avatar_pos is not None
+                    else 0
+                )
+                size_diff = abs(area - avatar_size) if avatar_size > 0 else 0
+                score = missing_feats * 100.0 + dist + size_diff * 0.5
+                if score < best_score:
+                    best_score = score
+                    best_pos = centroid
+            if best_pos is not None:
+                return best_pos
+
+        matching = [ce for ce in curr_entities if ce.feature_id in known_av_feats]
+        if not matching:
+            return prev_avatar_pos
+        if prev_avatar_pos is not None:
+            closest = min(
+                matching,
+                key=lambda ce: (
+                    abs(ce.grid_pos[0] - prev_avatar_pos[0])
+                    + abs(ce.grid_pos[1] - prev_avatar_pos[1])
+                ),
+            )
+            return closest.grid_pos
+        return matching[0].grid_pos
+
+    @staticmethod
     def _record_safe_traversal(
         view: Any,
         landing_cells: list[tuple[int, int]],
@@ -1490,10 +1575,19 @@ class EpistemicFeedbackAssimilator:
             )
             if avatar_still_present and not av_moved:
                 # Avatar is present but stationary (e.g., bumped a wall or barrier)
-                for ce in curr_entities:
-                    if ce.feature_id in known_av_feats:
-                        view.state.avatar_pos = ce.grid_pos
-                        break
+                stationary_pos = EpistemicFeedbackAssimilator._localize_stationary_avatar(
+                    curr_grid=curr_grid,
+                    curr_entities=curr_entities,
+                    known_av_feats=known_av_feats,
+                    prev_avatar_pos=prev_avatar_pos,
+                    avatar_size=view.state.avatar_size,
+                    avatar_h=view.state.avatar_h,
+                    avatar_w=view.state.avatar_w,
+                    bg_feature=view.state.bg_feature,
+                    working_memory=view.working_memory,
+                )
+                if stationary_pos is not None:
+                    view.state.avatar_pos = stationary_pos
             if (
                 not is_success
                 and not is_failure

@@ -1022,3 +1022,41 @@ def test_continuous_multi_step_resets_exogenous_and_avoids_quantized_invalidatio
     assert engine.symbolic_theory.labels_non_stationary is False
     assert 5 in engine.symbolic_theory.barrier_features
     assert not engine.symbolic_theory.is_walkable(5)
+
+
+def test_stationary_composite_avatar_does_not_teleport_to_same_color_decoy_on_collision() -> None:
+    """Verify stationary collision preserves composite avatar position over earlier same-color decoys."""
+    engine = AutonomousEpistemicEngine()
+    grid = np.array(
+        [
+            [5, 5, 5, 5, 5, 5, 5, 5],
+            [5, 9, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 0, 0, 0, 12, 5, 0, 5],
+            [5, 0, 0, 0, 9, 5, 0, 5],
+            [5, 0, 0, 0, 0, 0, 0, 5],
+            [5, 5, 5, 5, 5, 5, 5, 5],
+        ],
+        dtype=int,
+    )
+    engine.avatar_feature = 9
+    engine.avatar_features = {9, 12}
+    engine.avatar_pos = (4, 4)
+    engine.state.avatar_size = 2
+    engine.state.avatar_h = 2
+    engine.state.avatar_w = 1
+    engine.bg_feature = 0
+    engine.prev_grid = grid.copy()
+    engine.action_dynamics[4] = ActionDynamicsModel(
+        action_id=4, delta_r=0, delta_c=1, confidence=1.0, probes_tested=3
+    )
+    engine.last_action = 4
+
+    engine.assimilate_feedback(grid.copy(), [1, 2, 3, 4], action=4)
+
+    assert engine.avatar_pos == (4, 4)
+    assert engine.consecutive_stuck_steps >= 1
+    assert ((4, 4), 4) in engine.failed_transitions
+    assert ((1, 1), 4) not in engine.failed_transitions
+    assert (4, 5) in engine.learned_barriers
