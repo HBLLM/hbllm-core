@@ -151,29 +151,55 @@ class ConceptExplainer:
         return snapshot
 
     def _fuzzy_resolve_concept(self, concept: str) -> str | None:
-        """Attempt bounded edit-distance recovery against ConceptNodes and ontology store."""
+        """Attempt precision-bounded edit-distance recovery against ConceptNodes and ontology store."""
         from hbllm.hcir.graph import ConceptNode, HCIRNodeType
         from hbllm.hcir.language.core.normalizer import damerau_levenshtein
 
-        # Avoid overwriting valid trusted English words (except corpus OCR noise)
-        if self._ontology_store is not None and hasattr(self._ontology_store, "is_trusted_word"):
-            if self._ontology_store.is_trusted_word(concept, language="en"):
+        # Never overwrite valid/high-frequency words
+        if self._ontology_store is not None:
+            if hasattr(
+                self._ontology_store, "is_trusted_word"
+            ) and self._ontology_store.is_trusted_word(concept, language="en"):
+                return None
+            if (
+                hasattr(self._ontology_store, "get_word_frequency")
+                and self._ontology_store.get_word_frequency(concept, language="en") >= 5
+            ):
                 return None
 
-        max_dist = 2 if len(concept) >= 6 else 1
+        def _is_high_precision_typo(cand: str) -> bool:
+            if abs(len(cand) - len(concept)) > 1:
+                return False
+            if sorted(cand) == sorted(concept):
+                return True
+            if cand == concept + "e":
+                return True
+            if re.sub(r"(.)\1+", r"\1", concept) == re.sub(r"(.)\1+", r"\1", cand):
+                return True
+            if len(concept) >= 6 and cand[:4] == concept[:4]:
+                return True
+            return False
+
         best_label: str | None = None
-        best_dist = max_dist + 1
+        best_dist = 2
 
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
         if p_graph is not None:
             for node in p_graph.nodes_by_type(HCIRNodeType.CONCEPT):
                 if isinstance(node, ConceptNode) and node.label:
                     cand = node.label.lower()
-                    d = damerau_levenshtein(concept, cand, max_dist)
-                    if d <= max_dist and (d < 2 or cand[0] == concept[0]):
-                        if d < best_dist:
-                            best_dist = d
-                            best_label = cand
+                    if abs(len(cand) - len(concept)) > 1:
+                        continue
+                    if cand[0] != concept[0] and not (
+                        len(cand) >= 2 and cand[1] == concept[0] and cand[0] == concept[1]
+                    ):
+                        continue
+                    if not _is_high_precision_typo(cand):
+                        continue
+                    d = damerau_levenshtein(concept, cand, 1)
+                    if d <= 1 and d < best_dist:
+                        best_dist = d
+                        best_label = cand
         if best_label is not None:
             return best_label
 
@@ -181,20 +207,8 @@ class ConceptExplainer:
             hits = self._ontology_store.fuzzy_lookup(concept, language="en", limit=3)
             for raw_cand in hits:
                 cand = str(raw_cand).lower()
-                is_anagram_transposition = sorted(cand) == sorted(concept)
-                is_missing_trailing_e = cand == concept + "e"
-                is_double_letter = re.sub(r"(.)\1+", r"\1", concept) == re.sub(
-                    r"(.)\1+", r"\1", cand
-                )
-                is_strong_prefix = len(concept) >= 6 and cand[:4] == concept[:4]
-                if (
-                    is_anagram_transposition
-                    or is_missing_trailing_e
-                    or is_double_letter
-                    or is_strong_prefix
-                ):
-                    if damerau_levenshtein(concept, cand, 1) <= 1:
-                        return cand
+                if _is_high_precision_typo(cand) and damerau_levenshtein(concept, cand, 1) <= 1:
+                    return cand
 
         return None
 
@@ -270,40 +284,62 @@ class ConceptExplainer:
                     if clean_c not in snapshot.beliefs and len(clean_c) > 10:
                         snapshot.beliefs.append(clean_c)
 
-        # Inspect graph edges from persistent tier for typed relational traversal
+        # Inspect graph edges from persistent tier for typed relational traversal (O(degree))
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
         if p_graph is not None:
-            candidate_node_ids = {
+            clean_under = concept.replace(" ", "_")
+            candidate_node_ids = (
                 concept,
+                clean_under,
+                f"t4_concept_{clean_under}",
                 f"t4_concept_{concept}",
+                f"concept_{clean_under}",
                 f"concept_{concept}",
-                f"sem_{concept}",
-            }
-            for edge in p_graph.edges.values():
-                src_matches = any(
-                    cid in s.lower() for s in edge.sources for cid in candidate_node_ids
-                )
-                dst_matches = any(
-                    cid in t.lower() for t in edge.targets for cid in candidate_node_ids
-                )
-
-                if src_matches:
+                f"sem_{clean_under}",
+            )
+            seen_edges: set[str] = set()
+            for cid in candidate_node_ids:
+                if p_graph.get_node(cid) is None:
+                    continue
+                for edge in p_graph.edges_from(cid):
+                    if edge.id in seen_edges:
+                        continue
+                    seen_edges.add(edge.id)
+                    if edge.edge_type == HCIREdgeType.CONTRADICTS:
+                        continue
+                    props = getattr(edge, "properties", {}) or {}
+                    if props.get("polarity") is False:
+                        continue
+                    rel = str(props.get("relation", "")).lower()
+                    if rel.startswith("not_"):
+                        continue
                     for target_id in edge.targets:
                         target_clean = _clean_concept_name(target_id)
-                        if edge.edge_type in (HCIREdgeType.CAUSES,):
+                        if edge.edge_type == HCIREdgeType.CAUSES or rel in ("causes", "enables"):
                             snapshot.causes.append(target_clean)
-                        elif edge.edge_type in (HCIREdgeType.REQUIRES,):
+                        elif edge.edge_type == HCIREdgeType.REQUIRES or rel == "requires":
                             snapshot.requires.append(target_clean)
-                        elif edge.edge_type in (HCIREdgeType.GENERALIZES,):
+                        elif edge.edge_type == HCIREdgeType.GENERALIZES or rel == "is_a":
                             if target_clean not in snapshot.hypernyms:
                                 snapshot.hypernyms.append(target_clean)
 
-                if dst_matches:
+                for edge in p_graph.edges_to(cid):
+                    if edge.id in seen_edges:
+                        continue
+                    seen_edges.add(edge.id)
+                    if edge.edge_type == HCIREdgeType.CONTRADICTS:
+                        continue
+                    props = getattr(edge, "properties", {}) or {}
+                    if props.get("polarity") is False:
+                        continue
+                    rel = str(props.get("relation", "")).lower()
+                    if rel.startswith("not_"):
+                        continue
                     for source_id in edge.sources:
                         source_clean = _clean_concept_name(source_id)
-                        if edge.edge_type in (HCIREdgeType.CAUSES,):
+                        if edge.edge_type == HCIREdgeType.CAUSES or rel in ("causes", "enables"):
                             snapshot.caused_by.append(source_clean)
-                        elif edge.edge_type in (HCIREdgeType.REQUIRES,):
+                        elif edge.edge_type == HCIREdgeType.REQUIRES or rel == "requires":
                             snapshot.required_by.append(source_clean)
 
         # De-duplicate lists
@@ -340,12 +376,15 @@ class ConceptExplainer:
             defn = snapshot.definition.rstrip(".")
             lower_defn = defn.lower()
             name_lower = name.lower()
-            # Ensure definition begins smoothly
+            # Ensure definition begins smoothly (including plural forms like "Florbs are...")
             if (
                 lower_defn.startswith(f"a {name_lower} is")
                 or lower_defn.startswith(f"an {name_lower} is")
                 or lower_defn.startswith(f"{name_lower} is")
                 or lower_defn.startswith(f"{name_lower} was")
+                or lower_defn.startswith(f"{name_lower}s are")
+                or lower_defn.startswith(f"{name_lower}es are")
+                or lower_defn.startswith(f"{name_lower} are")
             ):
                 sentences.append(f"{defn[0].upper() + defn[1:]}.")
             elif lower_defn.startswith("is ") or lower_defn.startswith("are "):
@@ -426,10 +465,24 @@ class ConceptExplainer:
         """
         if snapshot is None:
             snapshot = self.gather_knowledge(concept_query)
+        if not snapshot.caused_by and " " in concept_query.strip():
+            # Multi-word event queries (e.g. "river flood") probe compound and head forms
+            parts = concept_query.strip().lower().split()
+            for alt in (concept_query.strip().lower().replace(" ", "_"), parts[-1]):
+                alt_snap = self.gather_knowledge(alt, _allow_fuzzy=False)
+                if alt_snap.caused_by:
+                    snapshot.caused_by = list(
+                        dict.fromkeys([*snapshot.caused_by, *alt_snap.caused_by])
+                    )[:5]
+                    if alt_snap.causes and not snapshot.causes:
+                        snapshot.causes = alt_snap.causes
+                    if alt_snap.beliefs and not snapshot.beliefs:
+                        snapshot.beliefs = alt_snap.beliefs
+                    break
         name = snapshot.concept
         article = _indefinite_article(name)
 
-        # Multi-hop backwards traversal across persistent graph
+        # Multi-hop backwards traversal across persistent graph (O(degree) via edges_to)
         causal_chains: list[list[str]] = []
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
 
@@ -438,16 +491,26 @@ class ConceptExplainer:
                 chain = [direct_cause]
                 curr = direct_cause
                 for _ in range(max_depth - 1):
-                    curr_ids = {curr, f"t4_concept_{curr}", f"concept_{curr}"}
+                    curr_under = curr.replace(" ", "_")
+                    curr_ids = (
+                        curr,
+                        curr_under,
+                        f"t4_concept_{curr_under}",
+                        f"concept_{curr_under}",
+                    )
                     parent_cause: str | None = None
-                    for edge in p_graph.edges.values():
-                        if edge.edge_type == HCIREdgeType.CAUSES:
-                            if any(cid in t.lower() for t in edge.targets for cid in curr_ids):
+                    for cid in curr_ids:
+                        if p_graph.get_node(cid) is None:
+                            continue
+                        for edge in p_graph.edges_to(cid):
+                            if edge.edge_type == HCIREdgeType.CAUSES:
                                 for s in edge.sources:
                                     s_clean = _clean_concept_name(s)
                                     if s_clean not in chain:
                                         parent_cause = s_clean
                                         break
+                            if parent_cause:
+                                break
                         if parent_cause:
                             break
                     if parent_cause:
@@ -524,7 +587,7 @@ class ConceptExplainer:
         name = snapshot.concept
         article = _indefinite_article(name)
 
-        # Multi-hop forward dependency traversal
+        # Multi-hop forward dependency traversal (O(degree) via edges_from)
         dep_chains: list[list[str]] = []
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
 
@@ -533,16 +596,26 @@ class ConceptExplainer:
                 chain = [direct_req]
                 curr = direct_req
                 for _ in range(max_depth - 1):
-                    curr_ids = {curr, f"t4_concept_{curr}", f"concept_{curr}"}
+                    curr_under = curr.replace(" ", "_")
+                    curr_ids = (
+                        curr,
+                        curr_under,
+                        f"t4_concept_{curr_under}",
+                        f"concept_{curr_under}",
+                    )
                     next_req: str | None = None
-                    for edge in p_graph.edges.values():
-                        if edge.edge_type == HCIREdgeType.REQUIRES:
-                            if any(cid in s.lower() for s in edge.sources for cid in curr_ids):
+                    for cid in curr_ids:
+                        if p_graph.get_node(cid) is None:
+                            continue
+                        for edge in p_graph.edges_from(cid):
+                            if edge.edge_type == HCIREdgeType.REQUIRES:
                                 for t in edge.targets:
                                     t_clean = _clean_concept_name(t)
                                     if t_clean not in chain:
                                         next_req = t_clean
                                         break
+                            if next_req:
+                                break
                         if next_req:
                             break
                     if next_req:

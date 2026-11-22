@@ -55,16 +55,26 @@ class RawBookDownloader:
     """Fetches real educational texts across open web repositories."""
 
     USER_AGENT = "HBLLM-Developmental-Learning/1.0 (Cognitive Curriculum Ingestion)"
+    last_error: str = ""
 
     @classmethod
-    def download_gutenberg(cls, book_id: int | str, timeout: int = 20, retries: int = 3) -> str:
+    def download_gutenberg(
+        cls,
+        book_id: int | str,
+        timeout: int = 20,
+        retries: int = 3,
+        *,
+        raise_on_error: bool = False,
+    ) -> str:
         """Download raw book text from Project Gutenberg cache with automatic retries and incomplete-read safety."""
         clean_id = str(book_id).strip()
         url = f"https://www.gutenberg.org/cache/epub/{clean_id}/pg{clean_id}.txt"
         logger.info(f"Fetching Project Gutenberg title #{clean_id} from {url}...")
         req = urllib.request.Request(url, headers={"User-Agent": cls.USER_AGENT})
+        cls.last_error = ""
 
         raw = ""
+        last_exc: Exception | None = None
         for attempt in range(1, retries + 1):
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -81,6 +91,8 @@ class RawBookDownloader:
                 if raw:
                     break
             except Exception as e:
+                last_exc = e
+                cls.last_error = str(e)
                 logger.warning(
                     f"Download attempt {attempt}/{retries} failed for Gutenberg #{clean_id}: {e}"
                 )
@@ -88,8 +100,12 @@ class RawBookDownloader:
                     time.sleep(1.0 * attempt)
                 else:
                     logger.error(
-                        f"Exhausted {retries} retries for Gutenberg #{clean_id}. Using offline fallback."
+                        f"Exhausted {retries} retries for Gutenberg #{clean_id}: {cls.last_error}"
                     )
+                    if raise_on_error:
+                        raise RuntimeError(
+                            f"Download failed for Gutenberg #{clean_id}: {cls.last_error}"
+                        ) from last_exc
                     return ""
 
         # Strip Gutenberg header and license trailer

@@ -132,13 +132,24 @@ class EnglishParser:
         if len(content) < 2:
             return None
         first = content[0]
-        # Reject immediately if followed by an auxiliary verb ("Focus is ...", "Coffee was ...")
-        if (
-            len(content) >= 2
-            and content[1].pos == EnglishPOS.AUX
-            and first.lemma not in ("why", "how")
-        ):
-            return None
+        # Reject immediately if followed by an auxiliary/verb ("Focus is ...", "Plants absorb ...")
+        # or if first token is inflected (plural/3s/past/progressive) or typo-guessed in long prose.
+        if first.lemma not in ("why", "how"):
+            if (
+                first.features.get("number") == "plural"
+                or first.features.get("person") == "3s"
+                or first.features.get("tense") == "past"
+                or first.features.get("aspect") == "progressive"
+            ):
+                return None
+            if first.features.get("corrected_from") and len(content) > 6:
+                return None
+            if content[1].pos in (EnglishPOS.AUX, EnglishPOS.VERB):
+                return None
+            if "noun" in first.features.get("alt_pos", "") and any(
+                t.pos in (EnglishPOS.AUX, EnglishPOS.VERB) for t in content[1:]
+            ):
+                return None
 
         _KNOWN_COMMAND_VERBS = (
             frozenset(
@@ -252,13 +263,23 @@ class EnglishParser:
         props: dict[str, Any] = {}
         if len(rest) > 1:
             props["modifier"] = " ".join(t.lemma for t in rest[:-1])
+            props["head"] = head.lemma
 
         is_anaphoric = head.lemma in {"it", "this", "that", "they", "them", "these", "those"}
-        head_name = head.surface if head.features.get("is_path") == "true" else head.lemma
+        if is_anaphoric:
+            head_name = ""
+        elif verb_pred in ("why", "how") and len(rest) > 1:
+            head_name = " ".join(t.lemma for t in rest)
+        elif head.features.get("is_path") == "true":
+            head_name = head.surface
+        else:
+            head_name = head.lemma
         patient = EntityReference(
-            concept_name="" if is_anaphoric else head_name,
+            concept_name=head_name,
             specifier="anaphoric" if is_anaphoric else "generic",
-            raw_text=head.surface,
+            raw_text=" ".join(t.surface for t in rest)
+            if verb_pred in ("why", "how")
+            else head.surface,
             properties=props,
         )
         frame = SemanticFrame(
@@ -269,17 +290,66 @@ class EnglishParser:
         frame.set_role(ThematicRole.PATIENT, patient)
         return frame
 
+    def _attach_pps(
+        self,
+        frame: SemanticFrame,
+        pps: list[Any],
+    ) -> None:
+        """Attach prepositional phrases to LOCATION / INSTRUMENT roles with prep metadata."""
+        if not pps:
+            return
+        instrument_preps = {"through", "with", "by", "via", "using"}
+        for pp in pps:
+            ref = self._np_to_reference(pp.noun_phrase)
+            if ref is None:
+                continue
+            prep_lem = pp.preposition.lemma
+            enriched = EntityReference(
+                concept_name=ref.concept_name,
+                properties={**ref.properties, "prep": prep_lem},
+                specifier=ref.specifier,
+                raw_text=ref.raw_text,
+                discourse_id=ref.discourse_id,
+            )
+            if prep_lem in instrument_preps:
+                if frame.get_role(ThematicRole.INSTRUMENT) is None:
+                    frame.set_role(ThematicRole.INSTRUMENT, enriched)
+            else:
+                if frame.get_role(ThematicRole.LOCATION) is None:
+                    frame.set_role(ThematicRole.LOCATION, enriched)
+
     # ── AST to SemanticFrame Translation ──────────────────────────────
 
     def _ast_to_semantic_frame(self, ast: SentenceNode, meta: LanguageMetadata) -> SemanticFrame:
         """Map typed AST node to language-neutral SemanticFrame."""
+        if ast.verb_phrase and ast.verb_phrase.head_verb:
+            tense = ast.verb_phrase.head_verb.features.get("tense")
+            if not tense and ast.auxiliary is not None:
+                tense = ast.auxiliary.features.get("tense")
+            if tense:
+                meta.tense = tense
+        meta.polarity = not ast.is_negated
 
-        # 1. WH-QUESTIONS ("Where is the ball?", "What color is the box?")
+        # 1. WH-QUESTIONS ("Where is the ball?", "What do florbs eat?", "Who was tired?")
         if ast.construction == ConstructionType.WH_QUESTION:
             subject_ref = self._np_to_reference(ast.subject)
             wh_word = ast.wh_word.lemma if ast.wh_word else "what"
 
             if wh_word == "where":
+                if (
+                    ast.verb_phrase
+                    and ast.verb_phrase.head_verb.pos == EnglishPOS.VERB
+                    and ast.verb_phrase.head_verb.lemma != "be"
+                ):
+                    frame = SemanticFrame(
+                        frame_type=FrameType.QUERY,
+                        predicate=ast.verb_phrase.head_verb.lemma,
+                        query_target="svo_location",
+                        metadata=meta,
+                    )
+                    if subject_ref:
+                        frame.set_role(ThematicRole.THEME, subject_ref)
+                    return frame
                 frame = SemanticFrame(
                     frame_type=FrameType.QUERY,
                     predicate="located_on",
@@ -291,6 +361,70 @@ class EnglishParser:
                 return frame
 
             elif wh_word == "who":
+                if subject_ref is None and ast.verb_phrase:
+                    if ast.verb_phrase.adjective_complement is not None:
+                        adj_tok = ast.verb_phrase.adjective_complement
+                        adj_props = self._get_properties_for_adj(adj_tok.lemma)
+                        frame = SemanticFrame(
+                            frame_type=FrameType.QUERY,
+                            predicate="has_property",
+                            query_target="svo_subject",
+                            metadata=meta,
+                        )
+                        frame.set_role(
+                            ThematicRole.PATIENT,
+                            EntityReference(
+                                concept_name=adj_tok.lemma,
+                                properties=adj_props,
+                                specifier="generic",
+                                raw_text=adj_tok.surface,
+                            ),
+                        )
+                        return frame
+                    if ast.verb_phrase.prepositional_phrases:
+                        pp = ast.verb_phrase.prepositional_phrases[0]
+                        target_ref = self._np_to_reference(pp.noun_phrase)
+                        prep_pred = self._get_predicate_for_prep(pp.preposition.lemma)
+                        frame = SemanticFrame(
+                            frame_type=FrameType.QUERY,
+                            predicate=prep_pred,
+                            query_target="svo_subject",
+                            metadata=meta,
+                        )
+                        if target_ref:
+                            frame.set_role(ThematicRole.LOCATION, target_ref)
+                        return frame
+                    if ast.verb_phrase.head_verb.lemma == "be" and ast.verb_phrase.direct_object:
+                        pred_ref = self._np_to_reference(ast.verb_phrase.direct_object)
+                        frame = SemanticFrame(
+                            frame_type=FrameType.QUERY,
+                            predicate="is_a",
+                            query_target="svo_subject",
+                            metadata=meta,
+                        )
+                        if pred_ref:
+                            frame.set_role(ThematicRole.PATIENT, pred_ref)
+                        return frame
+                    if (
+                        ast.verb_phrase.head_verb.pos == EnglishPOS.VERB
+                        and ast.verb_phrase.head_verb.lemma != "be"
+                    ):
+                        obj_ref = (
+                            self._np_to_reference(ast.verb_phrase.direct_object)
+                            if ast.verb_phrase.direct_object
+                            else None
+                        )
+                        frame = SemanticFrame(
+                            frame_type=FrameType.QUERY,
+                            predicate=ast.verb_phrase.head_verb.lemma,
+                            query_target="svo_subject",
+                            metadata=meta,
+                        )
+                        if obj_ref:
+                            frame.set_role(ThematicRole.PATIENT, obj_ref)
+                        self._attach_pps(frame, ast.verb_phrase.prepositional_phrases)
+                        return frame
+
                 frame = SemanticFrame(
                     frame_type=FrameType.QUERY,
                     predicate="identity",
@@ -355,6 +489,38 @@ class EnglishParser:
                         frame.set_role(ThematicRole.PATIENT, obj_ref)
                     return frame
 
+                if (
+                    ast.verb_phrase
+                    and ast.verb_phrase.head_verb.pos == EnglishPOS.VERB
+                    and ast.verb_phrase.head_verb.lemma != "be"
+                ):
+                    verb_lem = ast.verb_phrase.head_verb.lemma
+                    if subject_ref is not None:
+                        frame = SemanticFrame(
+                            frame_type=FrameType.QUERY,
+                            predicate=verb_lem,
+                            query_target="svo_object",
+                            metadata=meta,
+                        )
+                        frame.set_role(ThematicRole.THEME, subject_ref)
+                        self._attach_pps(frame, ast.verb_phrase.prepositional_phrases)
+                        return frame
+                    obj_ref = (
+                        self._np_to_reference(ast.verb_phrase.direct_object)
+                        if ast.verb_phrase.direct_object
+                        else None
+                    )
+                    frame = SemanticFrame(
+                        frame_type=FrameType.QUERY,
+                        predicate=verb_lem,
+                        query_target="svo_subject",
+                        metadata=meta,
+                    )
+                    if obj_ref:
+                        frame.set_role(ThematicRole.PATIENT, obj_ref)
+                    self._attach_pps(frame, ast.verb_phrase.prepositional_phrases)
+                    return frame
+
                 prop_name = ast.wh_property.lemma if ast.wh_property else "property"
                 frame = SemanticFrame(
                     frame_type=FrameType.QUERY,
@@ -388,12 +554,19 @@ class EnglishParser:
                     frame.set_role(ThematicRole.THEME, subject_ref)
                 return frame
 
-        # 2. YES/NO QUESTIONS ("Is the ball on the table?", "Is the ball red?")
+        # 2. YES/NO QUESTIONS ("Is the ball on the table?", "Is a drell warm-blooded?", "Do florbs eat meat?")
         elif ast.construction == ConstructionType.YES_NO_QUESTION:
             subject_ref = self._np_to_reference(ast.subject)
 
             # Spatial query: "Is the ball on the table?"
-            if ast.verb_phrase and ast.verb_phrase.prepositional_phrases:
+            if (
+                ast.verb_phrase
+                and ast.verb_phrase.prepositional_phrases
+                and (
+                    ast.verb_phrase.head_verb.pos != EnglishPOS.VERB
+                    or ast.verb_phrase.head_verb.lemma == "be"
+                )
+            ):
                 pp = ast.verb_phrase.prepositional_phrases[0]
                 target_ref = self._np_to_reference(pp.noun_phrase)
                 prep_pred = self._get_predicate_for_prep(pp.preposition.lemma)
@@ -410,7 +583,7 @@ class EnglishParser:
                     frame.set_role(ThematicRole.LOCATION, target_ref)
                 return frame
 
-            # Property verification: "Is the ball red?"
+            # Property verification: "Is the ball red?", "Is a drell warm-blooded?"
             if ast.verb_phrase and ast.verb_phrase.adjective_complement:
                 adj_tok = ast.verb_phrase.adjective_complement
                 adj_props = self._get_properties_for_adj(adj_tok.lemma)
@@ -424,6 +597,15 @@ class EnglishParser:
                 )
                 if subject_ref:
                     frame.set_role(ThematicRole.THEME, subject_ref)
+                frame.set_role(
+                    ThematicRole.PATIENT,
+                    EntityReference(
+                        concept_name=adj_tok.lemma,
+                        properties=adj_props,
+                        specifier="generic",
+                        raw_text=adj_tok.surface,
+                    ),
+                )
                 return frame
 
             # Causal verification: "Does overflow cause crash?"
@@ -491,6 +673,30 @@ class EnglishParser:
                     frame.set_role(ThematicRole.PATIENT, obj_ref)
                 return frame
 
+            # General SVO verb verification: "Do florbs eat meat?", "Do florbs fly?", "Do florbs live in caves?"
+            if (
+                ast.verb_phrase
+                and ast.verb_phrase.head_verb.pos == EnglishPOS.VERB
+                and ast.verb_phrase.head_verb.lemma != "be"
+            ):
+                obj_ref = (
+                    self._np_to_reference(ast.verb_phrase.direct_object)
+                    if ast.verb_phrase.direct_object
+                    else None
+                )
+                frame = SemanticFrame(
+                    frame_type=FrameType.QUERY,
+                    predicate=ast.verb_phrase.head_verb.lemma,
+                    query_target="verification",
+                    metadata=meta,
+                )
+                if subject_ref:
+                    frame.set_role(ThematicRole.THEME, subject_ref)
+                if obj_ref:
+                    frame.set_role(ThematicRole.PATIENT, obj_ref)
+                self._attach_pps(frame, ast.verb_phrase.prepositional_phrases)
+                return frame
+
             # Nominal verification: "Is Pluto a planet?"
             if ast.verb_phrase and ast.verb_phrase.direct_object:
                 pred_ref = self._np_to_reference(ast.verb_phrase.direct_object)
@@ -538,7 +744,14 @@ class EnglishParser:
             subject_ref = self._np_to_reference(ast.subject)
 
             # Spatial assertion: "The ball is on the table"
-            if ast.verb_phrase and ast.verb_phrase.prepositional_phrases:
+            if (
+                ast.verb_phrase
+                and ast.verb_phrase.prepositional_phrases
+                and (
+                    ast.verb_phrase.head_verb.pos != EnglishPOS.VERB
+                    or ast.verb_phrase.head_verb.lemma == "be"
+                )
+            ):
                 pp = ast.verb_phrase.prepositional_phrases[0]
                 target_ref = self._np_to_reference(pp.noun_phrase)
                 prep_pred = self._get_predicate_for_prep(pp.preposition.lemma)
@@ -554,12 +767,15 @@ class EnglishParser:
                     frame.set_role(ThematicRole.LOCATION, target_ref)
                 return frame
 
-            # Copular property assertion: "The box is red"
+            # Copular property assertion: "The box is red", "Mira was tired", "A drell is warm-blooded"
             if ast.verb_phrase and ast.verb_phrase.adjective_complement:
                 adj_tok = ast.verb_phrase.adjective_complement
                 adj_props = self._get_properties_for_adj(adj_tok.lemma)
                 prop_ref = EntityReference(
-                    properties=adj_props, raw_text=adj_tok.surface, specifier="generic"
+                    concept_name=adj_tok.lemma,
+                    properties=adj_props,
+                    raw_text=adj_tok.surface,
+                    specifier="generic",
                 )
 
                 frame = SemanticFrame(
@@ -591,7 +807,8 @@ class EnglishParser:
                     frame.set_role(ThematicRole.PATIENT, pred_ref)
                 return frame
 
-            # SVO action assertion: "The robot pushed the box", "Gravity enables orbit", "Heat does not cause rust"
+            # SVO action assertion: "The robot pushed the box", "Florbs live in caves",
+            # "Heavy rain caused the river to flood", "Heat does not cause rust"
             if ast.verb_phrase and ast.verb_phrase.head_verb:
                 verb_lemma = ast.verb_phrase.head_verb.lemma
                 meta.polarity = not ast.is_negated
@@ -607,6 +824,17 @@ class EnglishParser:
                     verb_pred = verb_lemma
 
                 obj_ref = self._np_to_reference(ast.verb_phrase.direct_object)
+                if obj_ref is not None and ast.verb_phrase.infinitive_verb is not None:
+                    obj_ref = EntityReference(
+                        concept_name=obj_ref.concept_name,
+                        properties={
+                            **obj_ref.properties,
+                            "infinitive_verb": ast.verb_phrase.infinitive_verb.lemma,
+                        },
+                        specifier=obj_ref.specifier,
+                        raw_text=obj_ref.raw_text,
+                        discourse_id=obj_ref.discourse_id,
+                    )
 
                 frame = SemanticFrame(
                     frame_type=FrameType.ASSERTION,
@@ -617,6 +845,7 @@ class EnglishParser:
                     frame.set_role(ThematicRole.AGENT, subject_ref)
                 if obj_ref:
                     frame.set_role(ThematicRole.PATIENT, obj_ref)
+                self._attach_pps(frame, ast.verb_phrase.prepositional_phrases)
                 return frame
 
         # Fallback error

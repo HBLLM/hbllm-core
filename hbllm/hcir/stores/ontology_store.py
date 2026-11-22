@@ -9,9 +9,10 @@ node budget while giving ``hcir/language`` full open-vocabulary coverage.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from typing import Any
 DEFAULT_ONTOLOGY_DB = (
     Path(__file__).resolve().parents[3] / "checkpoints" / "t1_ontology" / "lexical_ontology.db"
 )
+_CORPUS_FREQ_RE = re.compile(r"\(freq=(\d+)\)")
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class StoredLexicalEntry:
     thematic_roles: tuple[str, ...] = ()
     domain: str = "general"
     source: str = ""
+    frequency: int = 0
 
 
 class LexicalOntologyStore:
@@ -46,6 +49,7 @@ class LexicalOntologyStore:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._trusted_cache: dict[tuple[str, str], bool] = {}
+        self._freq_cache: dict[tuple[str, str], int] = {}
         self._lookup_cache: dict[tuple[str, str], list[StoredLexicalEntry]] = {}
         self._hypernyms_cache: dict[tuple[str, str], list[str]] = {}
         self._is_a_cache: dict[tuple[str, str, str], bool] = {}
@@ -64,6 +68,7 @@ class LexicalOntologyStore:
                 thematic_roles_json TEXT NOT NULL DEFAULT '[]',
                 domain TEXT NOT NULL DEFAULT 'general',
                 source TEXT NOT NULL DEFAULT '',
+                frequency INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (language, lemma, pos)
             );
             CREATE INDEX IF NOT EXISTS idx_lex_lang_lemma
@@ -79,6 +84,13 @@ class LexicalOntologyStore:
                 ON hypernym_edges (language, child);
             """
         )
+        cols = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(lexical_entries);").fetchall()
+        }
+        if "frequency" not in cols:
+            self._conn.execute(
+                "ALTER TABLE lexical_entries ADD COLUMN frequency INTEGER NOT NULL DEFAULT 0;"
+            )
         self._conn.commit()
 
         cur = self._conn.execute("SELECT count(*) FROM lexical_entries;")
@@ -95,7 +107,7 @@ class LexicalOntologyStore:
         source: str = "",
     ) -> tuple[int, int]:
         """Bulk-upsert lexical records and hypernym edges in one SQLite transaction."""
-        entry_rows: list[tuple[str, str, str, str, str, str, str, str, str]] = []
+        entry_rows: list[tuple[str, str, str, str, str, str, str, str, str, int]] = []
         edge_rows: list[tuple[str, str, str, str]] = []
 
         for rec in records:
@@ -107,17 +119,24 @@ class LexicalOntologyStore:
             hyps = [str(h).strip().lower() for h in rec.hypernyms if str(h).strip()]
             syns = [str(s).strip().lower() for s in rec.synonyms if str(s).strip()]
             roles = [str(r).strip() for r in rec.thematic_roles if str(r).strip()]
+            defn = str(rec.definition or "")
+            freq = int(getattr(rec, "frequency", 0) or 0)
+            if freq == 0 and defn:
+                m_freq = _CORPUS_FREQ_RE.search(defn)
+                if m_freq:
+                    freq = int(m_freq.group(1))
             entry_rows.append(
                 (
                     lang,
                     lemma,
                     pos,
-                    str(rec.definition or ""),
+                    defn,
                     json.dumps(hyps, ensure_ascii=False),
                     json.dumps(syns, ensure_ascii=False),
                     json.dumps(roles, ensure_ascii=False),
                     str(rec.domain or "general"),
                     source,
+                    freq,
                 )
             )
             for parent in hyps:
@@ -129,15 +148,16 @@ class LexicalOntologyStore:
                 """
                 INSERT INTO lexical_entries (
                     language, lemma, pos, definition,
-                    hypernyms_json, synonyms_json, thematic_roles_json, domain, source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    hypernyms_json, synonyms_json, thematic_roles_json, domain, source, frequency
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(language, lemma, pos) DO UPDATE SET
                     definition = CASE WHEN excluded.definition != '' THEN excluded.definition ELSE lexical_entries.definition END,
                     hypernyms_json = CASE WHEN excluded.hypernyms_json != '[]' THEN excluded.hypernyms_json ELSE lexical_entries.hypernyms_json END,
                     synonyms_json = CASE WHEN excluded.synonyms_json != '[]' THEN excluded.synonyms_json ELSE lexical_entries.synonyms_json END,
                     thematic_roles_json = CASE WHEN excluded.thematic_roles_json != '[]' THEN excluded.thematic_roles_json ELSE lexical_entries.thematic_roles_json END,
                     domain = excluded.domain,
-                    source = excluded.source
+                    source = excluded.source,
+                    frequency = MAX(lexical_entries.frequency, excluded.frequency)
                 """,
                 entry_rows,
             )
@@ -150,6 +170,7 @@ class LexicalOntologyStore:
                     edge_rows,
                 )
         self._trusted_cache.clear()
+        self._freq_cache.clear()
         self._lookup_cache.clear()
         self._hypernyms_cache.clear()
         self._is_a_cache.clear()
@@ -166,7 +187,7 @@ class LexicalOntologyStore:
         cur = self._conn.execute(
             """
             SELECT lemma, pos, language, definition,
-                   hypernyms_json, synonyms_json, thematic_roles_json, domain, source
+                   hypernyms_json, synonyms_json, thematic_roles_json, domain, source, frequency
             FROM lexical_entries
             WHERE language = ? AND lemma = ?
             ORDER BY
@@ -201,6 +222,7 @@ class LexicalOntologyStore:
                     thematic_roles=tuple(json.loads(row[6])),
                     domain=row[7],
                     source=row[8],
+                    frequency=int(row[9] or 0),
                 )
             )
         if len(self._lookup_cache) < 32768:
@@ -220,8 +242,54 @@ class LexicalOntologyStore:
         )
         return cur.fetchone() is not None
 
-    def is_trusted_word(self, lemma: str, *, language: str = "en") -> bool:
-        """Return True if *lemma* exists in curated/WordNet/curriculum sources (not Gutenberg OCR noise)."""
+    def get_word_frequency(self, lemma: str, *, language: str = "en") -> int:
+        """Return max recorded corpus frequency for *lemma* (0 if unknown)."""
+        key = lemma.strip().lower()
+        if not key:
+            return 0
+        cache_key = (language, key)
+        if cache_key in self._freq_cache:
+            return self._freq_cache[cache_key]
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(frequency), 0), definition FROM lexical_entries "
+            "WHERE language = ? AND lemma = ?",
+            (language, key),
+        ).fetchone()
+        freq = int(row[0] or 0) if row else 0
+        if freq == 0 and row and row[1]:
+            m = _CORPUS_FREQ_RE.search(str(row[1]))
+            if m:
+                freq = int(m.group(1))
+        if len(self._freq_cache) < 16384:
+            self._freq_cache[cache_key] = freq
+        return freq
+
+    def record_frequencies(self, counts: Mapping[str, int], *, language: str = "en") -> None:
+        """Persist or increment word frequencies for existing entries in SQLite."""
+        rows = [
+            (int(freq), language, str(word).strip().lower())
+            for word, freq in counts.items()
+            if word and int(freq) > 0
+        ]
+        if not rows:
+            return
+        with self._conn:
+            self._conn.executemany(
+                "UPDATE lexical_entries SET frequency = MAX(frequency, ?) "
+                "WHERE language = ? AND lemma = ?",
+                rows,
+            )
+        self._freq_cache.clear()
+        self._trusted_cache.clear()
+
+    def is_trusted_word(
+        self,
+        lemma: str,
+        *,
+        language: str = "en",
+        min_corpus_freq: int = 5,
+    ) -> bool:
+        """Return True if *lemma* is curated/WordNet/curriculum OR meets corpus frequency threshold."""
         key = lemma.strip().lower()
         if not key:
             return False
@@ -230,8 +298,8 @@ class LexicalOntologyStore:
             return self._trusted_cache[cache_key]
         cur = self._conn.execute(
             "SELECT 1 FROM lexical_entries WHERE language = ? AND lemma = ? "
-            "AND source != 'corpus:gutenberg_cache' LIMIT 1",
-            (language, key),
+            "AND (source != 'corpus:gutenberg_cache' OR frequency >= ?) LIMIT 1",
+            (language, key, int(min_corpus_freq)),
         )
         trusted = cur.fetchone() is not None
         if len(self._trusted_cache) < 8192:

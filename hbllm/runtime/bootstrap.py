@@ -44,6 +44,63 @@ class CognitiveSystemConfig:
     max_events_per_store: int | None = 2000
 
 
+def _format_capability_result(receipt: Any) -> str:
+    """Format a CapabilityDispatcher receipt safely without leaking raw Python dicts or enums."""
+    res = getattr(receipt, "result", None)
+    if not isinstance(res, dict):
+        return f"Completed {getattr(receipt, 'verb', 'action')}."
+
+    content = res.get("content")
+    if isinstance(content, str) and content.strip():
+        return content
+
+    entries = res.get("entries")
+    if isinstance(entries, list) and entries:
+        return "\n".join(
+            str(e.get("name", e)) if isinstance(e, dict) else str(e) for e in entries[:20]
+        )
+
+    matches = res.get("matches")
+    if isinstance(matches, list) and matches:
+        return "\n".join(
+            str(m.get("name", m.get("path", m))) if isinstance(m, dict) else str(m)
+            for m in matches[:20]
+        )
+
+    stdout = res.get("stdout")
+    if isinstance(stdout, str) and stdout.strip():
+        return stdout.strip()
+
+    lines = res.get("lines")
+    if isinstance(lines, list) and lines:
+        return "\n".join(str(line) for line in lines[:30])
+
+    if "functions" in res or "classes" in res:
+        fns = res.get("functions") or []
+        clss = res.get("classes") or []
+        return f"Code AST analyzed ({len(clss)} classes, {len(fns)} functions)."
+
+    if "candidates_generated" in res:
+        count = int(res.get("candidates_generated", 0) or 0)
+        selected = res.get("selected_plan", "none")
+        return f"Generated {count} candidate plans (selected {selected})."
+
+    if "valid" in res:
+        valid = bool(res.get("valid"))
+        reasons = res.get("reasons") or []
+        detail = f": {'; '.join(str(r) for r in reasons)}" if reasons else "."
+        return ("Plan validation passed" if valid else "Plan validation failed") + detail
+
+    subgoal_desc = res.get("active_subgoal_description")
+    if isinstance(subgoal_desc, str) and subgoal_desc.strip():
+        return f"Active subgoal: {subgoal_desc.strip()}."
+
+    if res.get("error"):
+        return str(res["error"])
+
+    return f"Executed {getattr(receipt, 'verb', 'command')}."
+
+
 @dataclass
 class CognitiveSystem:
     """Container holding all components of a booted cognitive runtime."""
@@ -61,10 +118,22 @@ class CognitiveSystem:
     _loop: Any = field(default=None, init=False, repr=False)
 
     def attach_ontology_store(self, store: Any) -> None:
-        """Attach or update a LexicalOntologyStore across language runtime and parsers."""
+        """Attach or update a LexicalOntologyStore across language runtime, parsers, and capability executors."""
         lang_rt = self.services.extensions.get("language_runtime")
         if lang_rt is not None and hasattr(lang_rt, "attach_ontology_store"):
             lang_rt.attach_ontology_store(store)
+        for cap_name in (
+            "knowledge.explain",
+            "knowledge.explain_why",
+            "knowledge.explain_how",
+            "memory.recall",
+        ):
+            for impl in self.services.capability_resolver.list_implementations(cap_name):
+                ex = getattr(impl, "executor", None)
+                if ex is not None and hasattr(ex, "_ontology_store"):
+                    ex._ontology_store = store
+                    if hasattr(ex, "_explainer"):
+                        ex._explainer = None
         self.services.extensions["ontology_store"] = store
 
     def _execute_language_turn(self, turn: Any, lang_rt: Any, speaker: str) -> Any:
@@ -188,17 +257,8 @@ class CognitiveSystem:
                     )
 
                 if receipt.success:
-                    result_summary = receipt.result.get("content", "")
-                    if not result_summary:
-                        entries = receipt.result.get("entries", [])
-                        if entries:
-                            result_summary = "\n".join(e.get("name", str(e)) for e in entries[:20])
-                    if not result_summary:
-                        result_summary = str(receipt.result)
-
-                    turn.response_text = (
-                        result_summary if result_summary else f"Executed {receipt.verb}."
-                    )
+                    result_summary = _format_capability_result(receipt)
+                    turn.response_text = result_summary
                     from hbllm.hcir.language.core.epistemic_policy import CognitiveEpistemicState
 
                     concept_target = str(receipt.result.get("concept", receipt.verb))
@@ -283,19 +343,27 @@ class CognitiveSystem:
                 lang_rt._gateway._tiered_workspace = self.tiered_workspace
             self.services.extensions["language_runtime"] = lang_rt
 
-        if language in lang_rt._parsers:
-            lang_rt._sync_dynamic_vocabulary(lang_rt._parsers[language])
-        else:
-            lang_rt._sync_dynamic_vocabulary(lang_rt._parsers["en"])
+        active_parser = (
+            lang_rt._parsers[language] if language in lang_rt._parsers else lang_rt._parsers["en"]
+        )
+        lang_rt._sync_dynamic_vocabulary(active_parser)
         segments = DiscourseSegmenter.segment(text)
         prose_proc = ExpositoryProseProcessor()
 
         if len(segments) <= 1:
             turn = lang_rt.process_utterance(text, language=language, speaker=speaker)
+            has_complex_clause = any(
+                kw in text.lower()
+                for kw in (" and ", " because ", " that ", " which ", " who ", " to ")
+            )
             if (
                 not turn.is_success
                 and turn.error_type == LanguageErrorType.UNRESOLVED_LANGUAGE
-                and len(text.split()) >= 6
+                and len(text.split()) >= 5
+            ) or (
+                turn.is_success
+                and turn.semantic_frame.frame_type == FrameType.ASSERTION
+                and has_complex_clause
             ):
                 summary = prose_proc.ingest_prose(
                     text,
@@ -303,8 +371,9 @@ class CognitiveSystem:
                     tiered_workspace=self.tiered_workspace,
                     ontology_store=lang_rt._ontology_store,
                     reference_resolver=lang_rt._ref_resolver,
+                    parser=active_parser,
                 )
-                if summary.propositions:
+                if summary.propositions and not turn.is_success:
                     turn = LanguageTurnResult(
                         raw_input=text,
                         language="en",
@@ -336,6 +405,7 @@ class CognitiveSystem:
                         tiered_workspace=self.tiered_workspace,
                         ontology_store=lang_rt._ontology_store,
                         reference_resolver=lang_rt._ref_resolver,
+                        parser=active_parser,
                     )
                     if summary.propositions:
                         from hbllm.hcir.language.core.epistemic_policy import (
@@ -382,6 +452,7 @@ class CognitiveSystem:
                     tiered_workspace=self.tiered_workspace,
                     ontology_store=lang_rt._ontology_store,
                     reference_resolver=lang_rt._ref_resolver,
+                    parser=active_parser,
                 )
             else:
                 holistic = None

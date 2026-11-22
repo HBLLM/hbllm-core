@@ -156,6 +156,22 @@ class DiscourseSegmenter:
         return [_restore(seg).strip() for seg in final_segments if _restore(seg).strip()]
 
 
+def _humanize_relation(rel: str) -> str:
+    """Format an internal relation key into natural English prose (no internal tokens)."""
+    r = rel.strip().lower()
+    if r == "is_a":
+        return "is"
+    if r == "has_property":
+        return "is"
+    if r == "not_is_a":
+        return "is not"
+    if r == "not_has_property":
+        return "is not"
+    if r.startswith("not_"):
+        return f"does not {r[4:].replace('_', ' ')}"
+    return r.replace("_", " ")
+
+
 class ExpositoryProseProcessor:
     """Extracts and transactionally commits propositions from long expository prose/essays."""
 
@@ -167,6 +183,7 @@ class ExpositoryProseProcessor:
         tiered_workspace: Any | None = None,
         ontology_store: Any | None = None,
         reference_resolver: Any | None = None,
+        parser: Any | None = None,
         source_label: str = "dialogue_prose",
     ) -> ExpositoryIngestionSummary:
         """Extract extended propositions and commit Concept/Belief/Edge nodes transactionally."""
@@ -174,6 +191,7 @@ class ExpositoryProseProcessor:
             text,
             source_file=source_label,
             include_extended=True,
+            parser=parser,
         )
         if not props:
             return ExpositoryIngestionSummary()
@@ -194,6 +212,8 @@ class ExpositoryProseProcessor:
             grant=grant,
             author="discourse_expository",
         )
+        if tiered_workspace is not None and hasattr(tiered_workspace, "notify_commit"):
+            tiered_workspace.notify_commit()
 
         # Collect distinct concepts and register them for follow-up coreference
         concepts: list[str] = []
@@ -210,7 +230,7 @@ class ExpositoryProseProcessor:
                 reference_resolver.register_topic(concept)
 
         sample_str = "; ".join(
-            f"{p.subject.replace('_', ' ')} {p.relation} {p.obj.replace('_', ' ')}"
+            f"{p.subject.replace('_', ' ')} {_humanize_relation(p.relation)} {p.obj.replace('_', ' ')}"
             for p in props[:4]
         )
         summary = f"Understood. Extracted and stored {len(props)} structured facts ({sample_str})."

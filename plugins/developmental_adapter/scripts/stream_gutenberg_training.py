@@ -19,6 +19,11 @@ from plugins.developmental_adapter.gutenberg_streamer import (
     GutenbergIndexManager,
     KnowledgeGainTracker,
 )
+from plugins.developmental_adapter.raw_book_pipeline import (
+    AutomatedCurriculumCompiler,
+    BookCurriculumItem,
+    BookSourceType,
+)
 from plugins.developmental_adapter.trainer import (
     ContinuousTextbookSchoolTrainer,
     TextbookSchoolConfig,
@@ -90,6 +95,11 @@ def parse_args() -> argparse.Namespace:
         default=42,
         help="Random seed for reproducibility.",
     )
+    parser.add_argument(
+        "--allow-offline-fallback",
+        action="store_true",
+        help="Exit with code 0 even when gutenberg.org is unreachable and only synthetic stubs were processed.",
+    )
     return parser.parse_args()
 
 
@@ -98,7 +108,14 @@ def main() -> int:
 
     # 1. Fetch / Load Master Gutenberg Index
     logger.info("Accessing Project Gutenberg master catalog...")
-    index_text = GutenbergIndexManager.fetch_or_load_index(cache_dir=args.cache_dir)
+    index_text, index_source, index_err = GutenbergIndexManager.fetch_or_load_index_with_status(
+        cache_dir=args.cache_dir
+    )
+    if index_source == "offline_fallback":
+        logger.error(
+            "OFFLINE, no index fetched (%s). Swapped in built-in curated stub list.",
+            index_err,
+        )
     books = GutenbergIndexManager.parse_index(
         index_text=index_text,
         filter_domains=args.domains,
@@ -185,8 +202,19 @@ def main() -> int:
         for idx, book_meta in enumerate(books, start=len(processed_bids) + 1):
             logger.info(f"\n>>> STREAMING BOOK {idx}: #{book_meta.book_id} — {book_meta.title} <<<")
             try:
-                raw_text = streamer.fetch_book_text(book_meta)
-                chapter = next(streamer.stream_curriculum_chapters([book_meta]))
+                raw_text, source_mode, fetch_err = streamer.fetch_book_with_status(book_meta)
+                book_meta.domain = GutenbergIndexManager.refine_domain_from_text(
+                    raw_text, book_meta.domain
+                )
+                item = BookCurriculumItem(
+                    item_id=f"gutenberg_{book_meta.book_id}",
+                    source_type=BookSourceType.GUTENBERG,
+                    identifier=str(book_meta.book_id),
+                    title=book_meta.title,
+                    domain=book_meta.domain,
+                    grade_level=book_meta.estimated_grade,
+                )
+                chapter = AutomatedCurriculumCompiler.compile_chapter(raw_text, item)
 
                 save_named = (
                     args.checkpoint_interval <= 1
@@ -199,10 +227,16 @@ def main() -> int:
                     save_named_checkpoint=save_named,
                 )
 
-                snap = tracker.record_progress(trainer, book_meta, len(raw_text))
+                snap = tracker.record_progress(
+                    trainer,
+                    book_meta,
+                    len(raw_text),
+                    source_mode=source_mode,
+                    fetch_error=fetch_err,
+                )
                 tracker.save_state(tracker_state_file)
                 logger.info(
-                    f"Knowledge State after Book #{idx}: "
+                    f"Knowledge State after Book #{idx} [{source_mode}]: "
                     f"Vocab: {snap.vocabulary_size} words | "
                     f"Accuracy: {snap.mean_examination_accuracy * 100:.1f}% | "
                     f"Brier: {snap.mean_brier_score:.4f} | "
@@ -227,6 +261,16 @@ def main() -> int:
     with open(export_path, "w", encoding="utf-8") as f:
         f.write(report)
     logger.info(f"Exported Knowledge Gain Report to {export_path}")
+
+    if (
+        tracker.snapshots
+        and all(s.source_mode == "offline_fallback" for s in tracker.snapshots)
+        and not args.allow_offline_fallback
+    ):
+        logger.error(
+            "OFFLINE, no text fetched. Failing because --allow-offline-fallback was not set."
+        )
+        return 2
 
     return 0
 

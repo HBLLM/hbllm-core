@@ -14,7 +14,7 @@ from hbllm.hcir.language.core.semantic_frame import EntityReference
 logger = logging.getLogger(__name__)
 
 ANAPHORIC_PRONOUNS: frozenset[str] = frozenset(
-    {"it", "this", "that", "they", "them", "these", "those"}
+    {"it", "this", "that", "they", "them", "these", "those", "he", "she", "him", "her"}
 )
 
 

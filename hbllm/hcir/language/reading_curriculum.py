@@ -18,6 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from hbllm.hcir.graph import HCIREdge
+from hbllm.hcir.language.english.morphology import (
+    INVARIANT_S_NOUNS,
+    singularize_noun,
+)
 from hbllm.hcir.language.ontology_bootstrap import LexicalOntologyRecord
 from hbllm.hcir.nodes import BeliefNode, ConceptNode, HCIREdgeType
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
@@ -158,13 +162,17 @@ _SKIP_SUBJECTS = frozenset(
 
 @dataclass(frozen=True)
 class ExtractedProposition:
-    """A structured taxonomic, causal, or dependency proposition extracted from text."""
+    """A structured taxonomic, causal, dependency, or SVO proposition extracted from text."""
 
     subject: str
-    relation: str  # "is_a" | "causes" | "requires"
+    relation: (
+        str  # "is_a" | "causes" | "requires" | "enables" | "has_property" | <verb> | "not_<rel>"
+    )
     obj: str
     source_file: str
     sentence: str
+    polarity: bool = True
+    modifiers: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -176,6 +184,7 @@ class ReadingCurriculumStats:
     taxonomic_extracted: int = 0
     causal_extracted: int = 0
     dependency_extracted: int = 0
+    relational_extracted: int = 0
     nodes_committed: int = 0
     edges_committed: int = 0
     store_hypernyms_added: int = 0
@@ -188,15 +197,18 @@ def _clean_term(raw: str) -> str:
 
 
 def _singularize_basic(term: str) -> str:
-    if len(term) > 4 and term.endswith("ies"):
-        return term[:-3] + "y"
-    if len(term) >= 4 and term.endswith("s") and not term.endswith("ss"):
-        return term[:-1]
-    return term
+    return singularize_noun(term)
+
+
+_NP_BOUNDARY_RE = re.compile(
+    r"\s+(?:that|which|who|whom|whose|where|when|because|while|although|though|"
+    r"with|toward|towards|from|for|by|in|on|at|into|to|through|across|between|under|over)\b|[,;]",
+    re.IGNORECASE,
+)
 
 
 def _extract_head_from_np(np_text: str) -> str:
-    """Extract semantic head noun from noun phrase, stripping modifiers & 'type of'."""
+    """Extract semantic head noun from noun phrase, truncating relative/PP clauses & 'type of'."""
     m_type = re.search(
         r"\b(?:type|kind|form|sort)\s+of\s+(?:the\s+|a\s+|an\s+)?([a-zA-Z0-9_-]+)",
         np_text,
@@ -204,15 +216,172 @@ def _extract_head_from_np(np_text: str) -> str:
     )
     if m_type:
         return _singularize_basic(_clean_term(m_type.group(1)))
-    if " of " in np_text:
-        np_text = np_text.split(" of ", 1)[0]
-    words = re.findall(r"[a-zA-Z0-9_-]+", np_text)
+    head_span = _NP_BOUNDARY_RE.split(np_text, maxsplit=1)[0]
+    if " of " in head_span:
+        head_span = head_span.split(" of ", 1)[0]
+    words = re.findall(r"[a-zA-Z0-9_-]+", head_span)
     content_words = [
-        w for w in words if w.lower() not in {"a", "an", "the", "this", "that", "these", "those"}
+        w
+        for w in words
+        if w.lower() not in {"a", "an", "the", "this", "that", "these", "those", "very", "quite"}
     ]
     if not content_words:
         return ""
     return _singularize_basic(_clean_term(content_words[-1]))
+
+
+def _extract_np_modifiers(np_text: str) -> tuple[tuple[str, str], ...]:
+    """Extract pre-head adjectival/nominal modifiers from a noun phrase."""
+    head_span = _NP_BOUNDARY_RE.split(np_text, maxsplit=1)[0]
+    if " of " in head_span:
+        head_span = head_span.split(" of ", 1)[0]
+    words = [
+        w.lower()
+        for w in re.findall(r"[a-zA-Z0-9_-]+", head_span)
+        if w.lower()
+        not in {
+            "a",
+            "an",
+            "the",
+            "this",
+            "that",
+            "these",
+            "those",
+            "very",
+            "quite",
+            "type",
+            "kind",
+            "form",
+            "sort",
+            "of",
+        }
+    ]
+    if len(words) <= 1:
+        return ()
+    return tuple(("adj", _clean_term(w)) for w in words[:-1] if len(w) >= 2)
+
+
+_PROTECTED_ABBREV_RE = re.compile(
+    r"\b(mr|mrs|ms|dr|prof|st|e\.g|i\.e|vs|etc)\.",
+    re.IGNORECASE,
+)
+
+
+def _split_sentences_safe(text: str) -> list[str]:
+    """Split prose into sentences while preserving honorifics & abbreviations (Mr., Dr., e.g.)."""
+    holders: dict[str, str] = {}
+
+    def _mask(match: re.Match[str]) -> str:
+        tok = f"__ABBR{len(holders)}__"
+        holders[tok] = match.group(0)
+        return tok
+
+    masked = _PROTECTED_ABBREV_RE.sub(_mask, text)
+    parts = _SENT_SPLIT_RE.split(masked)
+    out: list[str] = []
+    for part in parts:
+        restored = part
+        for tok, orig in holders.items():
+            restored = restored.replace(tok, orig)
+        if restored.strip():
+            out.append(restored.strip())
+    return out
+
+
+_CORE_PARSER_SINGLETON: Any | None = None
+
+
+def _get_parser(parser: Any | None) -> Any:
+    global _CORE_PARSER_SINGLETON
+    if parser is not None:
+        return parser
+    if _CORE_PARSER_SINGLETON is None:
+        from hbllm.hcir.language.english.parser import EnglishParser
+
+        _CORE_PARSER_SINGLETON = EnglishParser()
+    return _CORE_PARSER_SINGLETON
+
+
+def _split_coordinated_vps(sent: str, parser: Any) -> list[str]:
+    """Split 'Subj VP1 and VP2' into ['Subj VP1', 'Subj VP2'] when RHS starts with a verb."""
+    if " and " not in sent.lower():
+        return [sent]
+    from hbllm.hcir.language.english.lexicon import EnglishPOS
+
+    tokens = parser._morphology.lemmatize_sequence(sent)
+    content = [t for t in tokens if t.pos != EnglishPOS.PUNCT]
+    # Find subject NP span (Det? Adj* Noun+) before first VERB/AUX
+    subj_end = -1
+    for i, t in enumerate(content):
+        if i > 0 and t.pos in (EnglishPOS.VERB, EnglishPOS.AUX):
+            subj_end = i
+            break
+    if subj_end <= 0:
+        return [sent]
+
+    subject_surface = " ".join(t.surface for t in content[:subj_end])
+    rest = content[subj_end:]
+    # Pass 1: Prefer "and" followed strictly by a primary VERB (e.g. "... and releases oxygen")
+    for i in range(1, len(rest) - 1):
+        if rest[i].surface.lower() == "and" and rest[i + 1].pos == EnglishPOS.VERB:
+            lhs = f"{subject_surface} " + " ".join(t.surface for t in rest[:i])
+            rhs = f"{subject_surface} " + " ".join(t.surface for t in rest[i + 1 :])
+            return [lhs.strip(), rhs.strip()]
+    # Pass 2: Fall back to verb-capable token only if not a noun inside a coordinated NP
+    for i in range(2, len(rest) - 1):
+        if rest[i].surface.lower() == "and":
+            nxt = rest[i + 1]
+            if (
+                "verb" in nxt.features.get("alt_pos", "")
+                and nxt.pos != EnglishPOS.NOUN
+                and i + 2 < len(rest)
+                and rest[i + 2].pos != EnglishPOS.PREP
+            ):
+                lhs = f"{subject_surface} " + " ".join(t.surface for t in rest[:i])
+                rhs = f"{subject_surface} " + " ".join(t.surface for t in rest[i + 1 :])
+                return [lhs.strip(), rhs.strip()]
+    return [sent]
+
+
+def _extract_subject_label(ref: Any) -> str:
+    if ref is None:
+        return ""
+    raw = (getattr(ref, "raw_text", "") or "").strip()
+    concept = (getattr(ref, "concept_name", "") or "").strip()
+    # Preserve multi-word proper names like "Elizabeth Bennet" or "Mr. Darcy"
+    if concept and " " in concept:
+        return _clean_term(concept)
+    # If raw_text has 2+ capitalized tokens (e.g. "Elizabeth Bennet"), keep full proper name
+    raw_words = [
+        w
+        for w in re.findall(r"[A-Za-z0-9_'-]+", raw)
+        if w.lower() not in {"a", "an", "the", "this", "that"}
+    ]
+    if len(raw_words) >= 2 and all(w[0].isupper() for w in raw_words):
+        return _clean_term("_".join(raw_words))
+    # Preserve compound subjects when raw has Adj + Noun only for proper/capitalized compounds;
+    # for common nouns like "heavy rain", include compound modifier when needed or keep concept_name.
+    cleaned = _clean_term(concept or (raw_words[-1] if raw_words else ""))
+    if cleaned in INVARIANT_S_NOUNS:
+        return cleaned
+    if raw_words and raw_words[-1][0].isupper() and cleaned.endswith(("as", "os")):
+        return cleaned
+    return _singularize_basic(cleaned)
+
+
+def _extract_object_label(ref: Any, *, preserve_head: bool = False) -> str:
+    if ref is None:
+        return ""
+    raw = (getattr(ref, "raw_text", "") or "").strip()
+    concept = (getattr(ref, "concept_name", "") or "").strip()
+    if preserve_head and raw:
+        head = _extract_head_from_np(raw)
+        if head:
+            return head
+    cleaned = _clean_term(concept or raw)
+    if cleaned in INVARIANT_S_NOUNS:
+        return cleaned
+    return _singularize_basic(cleaned)
 
 
 def _strip_intro_clause(sent: str) -> str:
@@ -251,20 +420,29 @@ def extract_propositions_from_text(
     source_file: str = "",
     *,
     include_extended: bool = False,
+    parser: Any | None = None,
 ) -> list[ExtractedProposition]:
-    """Deterministically extract structured propositions from prose.
+    """Deterministically extract SVO, taxonomic, causal, and property propositions via EnglishParser.
 
-    With ``include_extended=False`` (default), extracts core ``is_a``, ``causes``,
-    and ``requires`` triples for high-precision batch reading. With
-    ``include_extended=True``, also extracts exemplification (``such as`` / ``like``),
-    purpose (``to maintain ...``), enablement verbs (``improves`` / ``maintains``),
-    and subordinate clauses for live multi-sentence dialogue & essay comprehension.
+    Extracts subject-verb-object triples with explicit polarity (``not_<rel>`` when
+    negated) and modifiers (adjectival/prepositional) directly from syntactic parses.
     """
-    found: list[ExtractedProposition] = []
-    seen: set[tuple[str, str, str]] = set()
-    max_len = 600 if include_extended else 220
+    from hbllm.hcir.language.core.semantic_frame import FrameType, ThematicRole
 
-    def _add(subj_raw: str, rel: str, obj_raw: str, sentence: str) -> bool:
+    found: list[ExtractedProposition] = []
+    seen: set[tuple[str, str, str, bool]] = set()
+    max_len = 600 if include_extended else 240
+    active_parser = _get_parser(parser)
+
+    def _add(
+        subj_raw: str,
+        rel: str,
+        obj_raw: str,
+        sentence: str,
+        *,
+        polarity: bool = True,
+        modifiers: tuple[tuple[str, str], ...] = (),
+    ) -> bool:
         subj = _clean_term(subj_raw)
         obj = _clean_term(obj_raw)
         if (
@@ -277,25 +455,186 @@ def extract_propositions_from_text(
             or len(obj) < 2
         ):
             return False
-        key = (subj, rel, obj)
+        final_rel = rel if polarity or rel.startswith("not_") else f"not_{rel}"
+        key = (subj, final_rel, obj, polarity)
         if key in seen:
             return False
         seen.add(key)
         found.append(
             ExtractedProposition(
                 subject=subj,
-                relation=rel,
+                relation=final_rel,
                 obj=obj,
                 source_file=source_file,
                 sentence=sentence[:200],
+                polarity=polarity,
+                modifiers=modifiers,
             )
         )
         return True
 
-    for raw_sent in _SENT_SPLIT_RE.split(text):
+    def _extract_clause_via_parser(clause: str, orig_sent: str) -> bool:
+        added_any = False
+        frame = active_parser.parse(clause)
+        if frame.is_error or frame.frame_type != FrameType.ASSERTION:
+            return False
+
+        polarity = bool(getattr(frame.metadata, "polarity", True))
+        subj_ref = frame.get_role(ThematicRole.THEME) or frame.get_role(ThematicRole.AGENT)
+        subj = _extract_subject_label(subj_ref)
+        if not subj:
+            return False
+
+        pat_ref = frame.get_role(ThematicRole.PATIENT)
+        loc_ref = frame.get_role(ThematicRole.LOCATION)
+        dest_ref = frame.get_role(ThematicRole.DESTINATION)
+        inst_ref = frame.get_role(ThematicRole.INSTRUMENT)
+
+        mod_list: list[tuple[str, str]] = []
+        for role_ref in (loc_ref, dest_ref, inst_ref):
+            if role_ref is not None and role_ref.concept_name and frame.predicate != "is_property":
+                prep = str(role_ref.properties.get("prep", "")).strip().lower()
+                tgt_mod = _clean_term(role_ref.concept_name)
+                if prep and tgt_mod:
+                    mod_list.append((prep, tgt_mod))
+
+        if frame.predicate == "is_a" and pat_ref is not None:
+            pat_raw = pat_ref.raw_text or pat_ref.concept_name or ""
+            obj = _extract_head_from_np(pat_raw) or _extract_object_label(pat_ref)
+            adj_mods = _extract_np_modifiers(pat_raw)
+            if obj and obj not in _GARBAGE_OBJ:
+                if _add(subj, "is_a", obj, orig_sent, polarity=polarity, modifiers=adj_mods):
+                    added_any = True
+            return added_any
+
+        if frame.predicate == "is_property" and loc_ref is not None:
+            prop_val = loc_ref.concept_name or (
+                str(next(iter(loc_ref.properties.values()))) if loc_ref.properties else ""
+            )
+            prop_clean = _clean_term(prop_val)
+            if prop_clean and prop_clean not in _GARBAGE_OBJ:
+                if _add(subj, "has_property", prop_clean, orig_sent, polarity=polarity):
+                    added_any = True
+            return added_any
+
+        if frame.predicate in ("causes", "requires", "enables") and pat_ref is not None:
+            obj = _extract_object_label(pat_ref, preserve_head=True)
+            inf_verb = str(pat_ref.properties.get("infinitive_verb", "")).strip().lower()
+            if inf_verb and frame.predicate == "causes":
+                # "Heavy rain caused the river to flood" -> causes river_flood & flood
+                if obj:
+                    added_any |= _add(
+                        subj, "causes", f"{obj}_{inf_verb}", orig_sent, polarity=polarity
+                    )
+                added_any |= _add(subj, "causes", inf_verb, orig_sent, polarity=polarity)
+                # Also record compound subject if subj_ref has modifier (e.g. heavy_rain)
+                if subj_ref and subj_ref.raw_text:
+                    raw_subj_clean = _clean_term(subj_ref.raw_text)
+                    if raw_subj_clean and raw_subj_clean != subj:
+                        if obj:
+                            added_any |= _add(
+                                raw_subj_clean,
+                                "causes",
+                                f"{obj}_{inf_verb}",
+                                orig_sent,
+                                polarity=polarity,
+                            )
+                        added_any |= _add(
+                            raw_subj_clean, "causes", inf_verb, orig_sent, polarity=polarity
+                        )
+            elif obj:
+                added_any |= _add(
+                    subj,
+                    frame.predicate,
+                    obj,
+                    orig_sent,
+                    polarity=polarity,
+                    modifiers=tuple(mod_list),
+                )
+            return added_any
+
+        # Spatial predicates ("on", "in", "under", ...)
+        if frame.predicate.startswith("located_") or frame.predicate in (
+            "below",
+            "above",
+            "near",
+        ):
+            if loc_ref is not None:
+                loc_obj = _extract_object_label(loc_ref)
+                if loc_obj:
+                    added_any |= _add(
+                        subj,
+                        frame.predicate,
+                        loc_obj,
+                        orig_sent,
+                        polarity=polarity,
+                        modifiers=tuple(mod_list),
+                    )
+            return added_any
+
+        # General SVO verb (eat, live, absorb, release, walk, sleep, hunt, attract, convert, ...)
+        verb_rel = _clean_term(frame.predicate or "")
+        if not verb_rel or verb_rel in ("be", "do", "have"):
+            return False
+
+        if pat_ref is not None:
+            pat_raw = pat_ref.raw_text or ""
+            # Handle coordinated direct objects ("sunlight and water")
+            if " and " in pat_raw.lower():
+                obj_parts = [
+                    p.strip() for p in re.split(r"\band\b", pat_raw, flags=re.I) if p.strip()
+                ]
+                for op in obj_parts:
+                    op_head = _extract_head_from_np(op)
+                    if op_head:
+                        added_any |= _add(
+                            subj,
+                            verb_rel,
+                            op_head,
+                            orig_sent,
+                            polarity=polarity,
+                            modifiers=tuple(mod_list),
+                        )
+            else:
+                obj = _extract_object_label(pat_ref, preserve_head=True)
+                if obj and obj not in _GARBAGE_OBJ:
+                    added_any |= _add(
+                        subj,
+                        verb_rel,
+                        obj,
+                        orig_sent,
+                        polarity=polarity,
+                        modifiers=tuple(mod_list),
+                    )
+            # "convert X into Y" also records production/result edge -> Y
+            for prep, tgt in mod_list:
+                if prep == "into" and verb_rel in ("convert", "turn", "transform"):
+                    added_any |= _add(subj, "produce", tgt, orig_sent, polarity=polarity)
+        elif loc_ref is not None or dest_ref is not None:
+            obl = loc_ref or dest_ref
+            obl_obj = _extract_object_label(obl)
+            if obl_obj:
+                added_any |= _add(
+                    subj,
+                    verb_rel,
+                    obl_obj,
+                    orig_sent,
+                    polarity=polarity,
+                    modifiers=tuple(mod_list),
+                )
+
+        return added_any
+
+    last_subject_raw = ""
+    last_plural_subject_raw = ""
+
+    for raw_sent in _split_sentences_safe(text):
         raw_trimmed = raw_sent.strip()
-        # 0. Reject negated sentences and hedged causal claims
-        if _NEGATION_RE.search(raw_trimmed) or _HEDGE_RE.search(raw_trimmed):
+        if not raw_trimmed:
+            continue
+
+        # 0. Reject hedged causal claims (keep explicit negation handling via parser)
+        if _HEDGE_RE.search(raw_trimmed):
             continue
 
         # 1. Check structured glossary definition pattern first
@@ -319,40 +658,112 @@ def extract_propositions_from_text(
             continue
 
         sent = raw_trimmed.lstrip("#>-*` ")
-        if len(sent) < 12 or len(sent) > max_len:
+        if len(sent) < 10 or len(sent) > max_len:
             continue
 
         sent_clean = (
             _strip_intro_clause(sent) if include_extended else _INTRO_STRIP_RE.sub("", sent)
         )
 
-        matched_primary = False
-        m_isa = _IS_A_RE.match(sent_clean)
-        if m_isa:
-            subj = _singularize_basic(_clean_term(m_isa.group(1)))
-            obj = _extract_head_from_np(m_isa.group(2))
-            if subj and obj and subj != obj and obj not in _GARBAGE_OBJ:
-                if _add(subj, "is_a", obj, sent):
-                    matched_primary = True
+        # Intra-paragraph pronoun subject coreference ("It hunts beetles", "She was tired")
+        if include_extended and last_subject_raw:
+            m_pron = re.match(r"^(it|he|she|they)\s+(.+)$", sent_clean, re.IGNORECASE)
+            if m_pron:
+                pron = m_pron.group(1).lower()
+                antecedent = (
+                    last_plural_subject_raw
+                    if pron == "they" and last_plural_subject_raw
+                    else last_subject_raw
+                )
+                sent_clean = f"{antecedent} {m_pron.group(2)}"
 
-        if not matched_primary:
-            for rel, pattern in (
-                ("causes", _CAUSES_RE),
-                ("requires", _REQUIRES_RE),
-                ("enables", _ENABLES_RE),
-            ):
-                m = pattern.match(sent_clean)
-                if not m:
-                    continue
-                if _add(m.group(1), rel, m.group(2), sent):
-                    matched_primary = True
-                break
+        # 2. Relative clause decomposition: "<Subj> is/are <NP> that/which/who <RelVP>"
+        m_rc = re.match(
+            r"^((?:the\s+|a\s+|an\s+)?[a-zA-Z][a-zA-Z0-9_\s-]{1,35}?)\s+(?:is|are)\s+(.+?)\s+(?:that|which|who)\s+(.+)$",
+            sent_clean,
+            re.IGNORECASE,
+        )
+        if m_rc:
+            subj_phrase = m_rc.group(1).strip()
+            head_np = m_rc.group(2).strip()
+            rel_vp = m_rc.group(3).strip()
+            subj_clean = _singularize_basic(
+                _clean_term(re.sub(r"^(?:the|a|an)\s+", "", subj_phrase, flags=re.I))
+            )
+            obj_head = _extract_head_from_np(head_np)
+            if subj_clean and obj_head and obj_head not in _GARBAGE_OBJ:
+                _add(
+                    subj_clean,
+                    "is_a",
+                    obj_head,
+                    sent,
+                    modifiers=_extract_np_modifiers(head_np),
+                )
+                last_subject_raw = subj_phrase
+            _extract_clause_via_parser(f"{subj_phrase} {rel_vp}", sent)
+            continue
+
+        # 3. Coordinated VP splitting ("Photosynthesis converts X and releases Y")
+        sub_clauses = (
+            _split_coordinated_vps(sent_clean, active_parser) if include_extended else [sent_clean]
+        )
+
+        clause_matched = False
+        for clause in sub_clauses:
+            if _extract_clause_via_parser(clause, sent):
+                clause_matched = True
+
+        # Regex fallback for legacy nominal/causal/enables structures if parser couldn't resolve
+        if not clause_matched and not _NEGATION_RE.search(sent_clean):
+            m_isa = _IS_A_RE.match(sent_clean)
+            if m_isa:
+                subj = _singularize_basic(_clean_term(m_isa.group(1)))
+                obj = _extract_head_from_np(m_isa.group(2))
+                if subj and obj and subj != obj and obj not in _GARBAGE_OBJ:
+                    if _add(
+                        subj, "is_a", obj, sent, modifiers=_extract_np_modifiers(m_isa.group(2))
+                    ):
+                        clause_matched = True
+
+            if not clause_matched:
+                for rel, pattern in (
+                    ("causes", _CAUSES_RE),
+                    ("requires", _REQUIRES_RE),
+                    ("enables", _ENABLES_RE),
+                ):
+                    m = pattern.match(sent_clean)
+                    if m and _add(m.group(1), rel, m.group(2), sent):
+                        clause_matched = True
+                        break
+
+        # Update intra-paragraph subject memory from parsed subject (never swallowing the verb)
+        if clause_matched and found:
+            parsed_last = active_parser.parse(sent_clean)
+            s_ref = parsed_last.get_role(ThematicRole.THEME) or parsed_last.get_role(
+                ThematicRole.AGENT
+            )
+            cand_subj = (
+                (s_ref.raw_text or s_ref.concept_name or "").strip() if s_ref is not None else ""
+            )
+            if cand_subj:
+                cand_words = [
+                    w
+                    for w in cand_subj.split()
+                    if w.lower() not in {"a", "an", "the", "this", "that"}
+                ]
+                if cand_words and cand_words[0].lower() not in _SKIP_SUBJECTS:
+                    last_subject_raw = cand_subj
+                    if (
+                        cand_words[-1].lower().endswith("s")
+                        and cand_words[-1].lower() not in INVARIANT_S_NOUNS
+                    ):
+                        last_plural_subject_raw = cand_subj
 
         if not include_extended:
             continue
 
         # Extended patterns for long paragraphs / essays
-        if not matched_primary:
+        if not clause_matched:
             m_rel = _REL_CLAUSE_ENABLES_RE.search(sent_clean)
             if m_rel:
                 _add(m_rel.group(1), "enables", m_rel.group(2), sent)
@@ -364,7 +775,6 @@ def extract_propositions_from_text(
         # Exemplification: "many challenges such as X, Y, and Z" / "consensus algorithms like Raft and Paxos"
         for m_ex in _EXEMPLIFY_RE.finditer(sent_clean):
             raw_head = m_ex.group(1).strip()
-            # Filter leading quantifiers ("many challenges" -> "challenges")
             head_words = [
                 w
                 for w in raw_head.split()
@@ -378,7 +788,6 @@ def extract_propositions_from_text(
             items_chunk = re.split(r",|\band\b|\bor\b", m_ex.group(2), flags=re.IGNORECASE)
             for item_raw in items_chunk:
                 item_clean = item_raw.strip().strip(".,;:")
-                # Drop leading determiners inside items
                 item_words = [
                     w
                     for w in item_clean.split()
@@ -418,7 +827,6 @@ def extract_propositions_from_text(
                 and w.lower() not in {"can", "may", "will", "be", "is", "are", "to", "like", "and"}
             ]
             if c1_words and len(c2_words) >= 2:
-                # Link antecedent subject/event to consequent mechanism
                 _add(c1_words[0], "causes", c2_words[1] if len(c2_words) > 2 else c2_words[0], sent)
 
     return found
@@ -440,7 +848,8 @@ def commit_propositions(
     node_ops: list[TransactionOperation] = []
     edge_ops: list[TransactionOperation] = []
     created_concepts: set[str] = set()
-    existing_edges = getattr(getattr(workspace, "graph", None), "edges", {})
+    ws_graph = getattr(workspace, "graph", None)
+    existing_edges = getattr(ws_graph, "edges", {})
     store_records: list[LexicalOntologyRecord] = []
 
     edge_type_map = {
@@ -448,6 +857,7 @@ def commit_propositions(
         "causes": HCIREdgeType.CAUSES,
         "requires": HCIREdgeType.REQUIRES,
         "enables": HCIREdgeType.CAUSES,
+        "has_property": HCIREdgeType.SUPPORTS,
     }
 
     for prop in propositions:
@@ -458,14 +868,14 @@ def commit_propositions(
                 created_concepts.add(cid)
                 display = term.replace("_", " ")
                 defn = ""
-                if term == prop.subject and prop.relation == "is_a":
+                if term == prop.subject and prop.relation == "is_a" and prop.polarity:
                     from hbllm.hcir.language.english.realizer import MASS_NOUNS
 
                     clean_obj = prop.obj.replace("_", " ").strip()
                     lower_obj = clean_obj.lower()
                     if (
                         lower_obj in MASS_NOUNS
-                        or clean_obj[0].isupper()
+                        or (clean_obj and clean_obj[0].isupper())
                         or lower_obj.startswith(("a ", "an ", "the "))
                     ):
                         art_pfx = ""
@@ -474,6 +884,15 @@ def commit_propositions(
                     else:
                         art_pfx = "a "
                     defn = f"{art_pfx}{clean_obj} ({prop.sentence[:120]})"
+
+                existing_node = ws_graph.get_node(cid) if ws_graph is not None else None
+                existing_def = (
+                    getattr(existing_node, "definition", None)
+                    if existing_node is not None
+                    else None
+                )
+                if existing_node is not None and not defn and existing_def:
+                    continue
                 cnode = ConceptNode(
                     id=cid,
                     label=display,
@@ -489,12 +908,27 @@ def commit_propositions(
                     )
                 )
 
+        mod_dict: dict[str, Any] = {}
+        adjs: list[str] = []
+        for k, v in prop.modifiers:
+            if k == "adj":
+                adjs.append(v)
+            else:
+                mod_dict[k] = v
+        if adjs:
+            mod_dict["adj"] = adjs
+
         belief = BeliefNode(
             id=f"t4_belief_{prop.subject}_{prop.relation}_{prop.obj}",
             statement=f"{prop.subject.replace('_', ' ')} {prop.relation} {prop.obj.replace('_', ' ')}",
-            confidence=0.82,
+            confidence=0.88 if not prop.polarity else 0.82,
             tags=["t4_reading_curriculum", prop.relation, prop.source_file],
-            properties={"source_file": prop.source_file, "sentence": prop.sentence[:160]},
+            properties={
+                "source_file": prop.source_file,
+                "sentence": prop.sentence[:160],
+                "polarity": prop.polarity,
+                "modifiers": mod_dict,
+            },
         )
         node_ops.append(
             TransactionOperation(
@@ -504,24 +938,64 @@ def commit_propositions(
             )
         )
 
-        edge_id = f"t4_{prop.relation}_{src_id}__{dst_id}"
-        if edge_id not in existing_edges:
+        is_neg = (not prop.polarity) or prop.relation.startswith("not_")
+        if is_neg:
+            pos_rel = prop.relation[4:] if prop.relation.startswith("not_") else prop.relation
+            pos_edge_id = f"t4_{pos_rel}_{src_id}__{dst_id}"
+            if pos_edge_id in existing_edges:
+                edge_ops.append(
+                    TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=pos_edge_id)
+                )
+            neg_edge_id = f"t4_contradicts_{src_id}__{dst_id}__{prop.relation}"
             edge = HCIREdge(
-                id=edge_id,
-                edge_type=edge_type_map.get(prop.relation, HCIREdgeType.SUPPORTS),
+                id=neg_edge_id,
+                edge_type=HCIREdgeType.CONTRADICTS,
                 sources=[src_id],
                 targets=[dst_id],
-                weight=0.82,
-                properties={"source_file": prop.source_file, "relation": prop.relation},
+                weight=0.95,
+                properties={
+                    "source_file": prop.source_file,
+                    "relation": prop.relation,
+                    "polarity": False,
+                    "modifiers": mod_dict,
+                    "sentence": prop.sentence[:160],
+                },
             )
             edge_ops.append(
                 TransactionOperation(
-                    op=TransactionOp.ADD_EDGE,
+                    op=TransactionOp.UPSERT_EDGE,
+                    edge_id=edge.id,
                     edge_data=edge.model_dump(),
                 )
             )
+        else:
+            edge_id = f"t4_{prop.relation}_{src_id}__{dst_id}"
+            if edge_id not in existing_edges or mod_dict:
+                edge = HCIREdge(
+                    id=edge_id,
+                    edge_type=edge_type_map.get(prop.relation, HCIREdgeType.SUPPORTS),
+                    sources=[src_id],
+                    targets=[dst_id],
+                    weight=0.82,
+                    properties={
+                        "source_file": prop.source_file,
+                        "relation": prop.relation,
+                        "polarity": True,
+                        "modifiers": mod_dict,
+                        "sentence": prop.sentence[:160],
+                    },
+                )
+                edge_ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_EDGE
+                        if edge_id in existing_edges
+                        else TransactionOp.ADD_EDGE,
+                        edge_id=edge.id,
+                        edge_data=edge.model_dump(),
+                    )
+                )
 
-        if prop.relation == "is_a":
+        if prop.relation == "is_a" and prop.polarity:
             subj_display = prop.subject.replace("_", " ")
             obj_display = prop.obj.replace("_", " ")
             store_records.append(
@@ -596,12 +1070,16 @@ class ReadingCurriculumIngestor:
                         continue
                     seen_global.add(key)
                     propositions.append(prop)
-                    if prop.relation == "is_a":
+                    if not prop.polarity or prop.relation.startswith("not_"):
+                        stats.relational_extracted += 1
+                    elif prop.relation == "is_a":
                         stats.taxonomic_extracted += 1
-                    elif prop.relation == "causes":
+                    elif prop.relation in ("causes", "enables"):
                         stats.causal_extracted += 1
-                    else:
+                    elif prop.relation == "requires":
                         stats.dependency_extracted += 1
+                    else:
+                        stats.relational_extracted += 1
                     if len(propositions) >= max_propositions:
                         break
 

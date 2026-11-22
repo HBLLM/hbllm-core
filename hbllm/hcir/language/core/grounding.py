@@ -203,6 +203,11 @@ class GroundingResolver:
             )
 
             # 4. Evaluate Definite vs Indefinite/Generic matching
+            is_conceptual_query = frame.frame_type == FrameType.QUERY and (
+                frame.query_target in ("svo_object", "svo_location", "svo_subject", "identity")
+                or is_conceptual_pred
+                or (frame.query_target == "verification" and not is_spatial_pred)
+            )
             if ref.specifier == "definite":  # "the red ball"
                 if len(matching_entities) == 0:
                     # ── Open-world auto-creation policy ──
@@ -220,6 +225,9 @@ class GroundingResolver:
                         pass
                     # CONCEPTUAL ASSERTION ("is_a", "causes", "requires"): keep conceptual
                     elif frame.frame_type == FrameType.ASSERTION and is_conceptual_pred:
+                        pass
+                    # CONCEPTUAL / SVO QUERY: allow persistent conceptual/SVO resolution
+                    elif is_conceptual_query:
                         pass
                     else:
                         # QUERY: Strict grounding
