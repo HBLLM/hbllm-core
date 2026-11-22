@@ -1609,6 +1609,8 @@ class HCIRSpatialEntityPlanner:
         step_size: int = 1,
         footprint_offsets: list[tuple[int, int]] | None = None,
         blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+        transition_kb: Any | None = None,
+        grid: np.ndarray | None = None,
     ) -> list[tuple[int, int]]:
         """Computes a collision-free geodesic path accounting for carried object footprint offsets."""
         offsets = footprint_offsets or [(0, 0)]
@@ -1624,6 +1626,8 @@ class HCIRSpatialEntityPlanner:
             grid_shape=grid_shape,
             step_size=step_size,
             footprint_offsets=offsets,
+            transition_kb=transition_kb,
+            grid=grid,
         )
 
     # ═══════════════════════════════════════════════════════════════════════

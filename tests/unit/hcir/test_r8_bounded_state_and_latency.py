@@ -267,3 +267,22 @@ def test_cortical_pipeline_records_per_stage_timings() -> None:
     assert "motor_stage" in timings
     assert all(v >= 0.0 for v in timings.values())
     assert engine.cortical_pipeline.last_duration_ms > 0.0
+
+
+def test_sqlite_auto_compaction_uses_hysteresis_without_thrashing(tmp_path: Path) -> None:
+    """Auto-compaction retains half-budget tail so subsequent appends do not thrash every write."""
+    db_path = tmp_path / "hysteresis.db"
+    store = SQLiteEventStore(db_path, max_events=20)
+    mgr = SnapshotManager(store)
+
+    for i in range(1, 22):
+        mgr.record_node_added(ConceptNode(id=f"h_{i}", label=f"lbl_{i}"), author="test")
+    assert store.event_count <= 11
+
+    for i in range(22, 61):
+        mgr.record_node_added(ConceptNode(id=f"h_{i}", label=f"lbl_{i}"), author="test")
+
+    assert store.event_count <= 20
+    assert store.verify_chain_integrity() is True
+    assert mgr.replay(store).node_count == 60
+    store.close()

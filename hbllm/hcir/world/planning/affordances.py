@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole
+from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
 if TYPE_CHECKING:
@@ -169,37 +170,94 @@ class SpatialAffordanceModel:
                     passable_coords.add(coord)
                     continue
 
+                ev_cell = (
+                    theory.evaluate_transition(val, locus=coord) if theory is not None else None
+                )
                 if val == bg or val in walkable_feats:
+                    passable_coords.add(coord)
+                elif (
+                    ev_cell is not None
+                    and ev_cell.traversable
+                    and ev_cell.confidence > 0.0
+                    and ev_cell.risk_cost < 40.0
+                ):
                     passable_coords.add(coord)
                 elif theory is not None and theory.is_walkable(val, agent_state=agent_state):
                     passable_coords.add(coord)
 
-                if (
+                is_bar_cell = (
                     theory is not None
-                    and theory.is_barrier(val, agent_state=agent_state)
-                    or val in barrier_feats
+                    and (
+                        (
+                            ev_cell is not None
+                            and (not ev_cell.traversable or ev_cell.risk_cost >= 40.0)
+                        )
+                        or theory.is_barrier(val, agent_state=agent_state)
+                    )
+                ) or val in barrier_feats
+                if (
+                    ev_cell is not None
+                    and ev_cell.traversable
+                    and ev_cell.confidence > 0.0
+                    and ev_cell.risk_cost < 40.0
+                    and theory is not None
+                    and theory.transition_kb._locus_beliefs
+                    and theory.transition_kb.get_belief(coord, scope="locus") is not None
                 ):
-                    # Check if permeable via held inventory
+                    is_bar_cell = False
+
+                if is_bar_cell:
+                    # Check if permeable via held inventory (wm affinities or KB causal rules)
                     is_permeable = False
                     for h in held_items:
                         if h in tool_affinities and val in tool_affinities[h]:
                             is_permeable = True
+                            break
+                        if theory is not None:
+                            for rule in theory.transition_kb.query_causal_rules(h):
+                                if rule.effect_signature in (
+                                    f"unlocks:{val}",
+                                    f"unlocks:{coord}",
+                                ):
+                                    is_permeable = True
+                                    break
+                        if is_permeable:
                             break
                     if is_permeable:
                         permeable_barriers.add(coord)
                     else:
                         solid_barriers.add(coord)
 
-                if val in cargo_feats or (theory is not None and theory.is_cargo(val)):
+                if val in cargo_feats or (
+                    theory is not None
+                    and (
+                        theory.transition_kb.has_feature_outcome(
+                            val,
+                            TransitionOutcome.DISPLACED_OTHER,
+                        )
+                        or theory.is_cargo(val)
+                    )
+                ):
                     cargo_coords.add(coord)
 
-                if val in goal_feats or (theory is not None and theory.is_confirmed_goal(val)):
+                if (
+                    val in goal_feats
+                    or (ev_cell is not None and ev_cell.goal_value > 0.5)
+                    or (theory is not None and theory.is_goal_feature(val))
+                ):
                     goal_coords.add(coord)
 
-                if val in lethal_feats:
+                if val in lethal_feats or (ev_cell is not None and ev_cell.risk_cost >= 40.0):
                     lethal_coords.add(coord)
 
-                if theory is not None and theory.is_actuator_feature(val):
+                if theory is not None and (
+                    (ev_cell is not None and ev_cell.mutates_state)
+                    or theory.transition_kb.has_feature_outcome(
+                        val,
+                        TransitionOutcome.MUTATED_STATE,
+                    )
+                    or theory.is_actuator(val)
+                ):
                     actuator_coords.add(coord)
 
         # 4. Integrate discrete entities

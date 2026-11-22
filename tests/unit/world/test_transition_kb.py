@@ -620,3 +620,213 @@ def test_has_verified_walkable_requires_traversal_rank_evidence() -> None:
     theory.transition_kb.record_outcome(6, TransitionOutcome.TRAVERSED, evidence="background_shift")
     assert theory.has_verified_walkable(2) is True
     assert theory.has_verified_walkable(6) is False
+
+
+def test_transition_kb_versioned_cache_invalidates_on_mutations() -> None:
+    """Verify TransitionKB caches stay exact across record, retract, locus, and context clears."""
+    kb = TransitionKnowledgeBase()
+    assert kb.evaluate_transition(5).traversable is True
+    assert kb.impassable_features() == frozenset()
+
+    kb.record_outcome(5, TransitionOutcome.BLOCKED, evidence="wall")
+    assert kb.evaluate_transition(5).traversable is False
+    assert 5 in kb.impassable_features()
+    assert 5 in kb.features_with_outcome(TransitionOutcome.BLOCKED)
+    assert any(op.node_id == "kb_transition_feature_int_5" for op in kb.to_transaction_operations())
+
+    kb.record_outcome((2, 3), TransitionOutcome.TRAVERSED, scope="locus", evidence="secret_gap")
+    assert kb.evaluate_transition(5, locus=(2, 3)).traversable is True
+    assert kb.evaluate_transition(5).traversable is False
+
+    kb.clear_locus_beliefs()
+    assert kb.evaluate_transition(5, locus=(2, 3)).traversable is False
+
+    kb.retract_outcome(5, TransitionOutcome.BLOCKED)
+    kb.record_outcome(5, TransitionOutcome.TRAVERSED, evidence="opened")
+    assert kb.evaluate_transition(5).traversable is True
+    assert 5 in kb.traversable_features()
+    assert 5 not in kb.impassable_features()
+
+    kb.begin_context_epoch()
+    kb.clear_context_beliefs(preserve_current_epoch=True)
+    assert kb.evaluate_transition(5).confidence == 0.0
+    assert kb.traversable_features() == frozenset()
+
+
+def test_hollow_perimeter_obstacle_not_scheduled_as_candidate_goal() -> None:
+    """Ensure EntityRole.OBSTACLE hollow perimeter frames never leak empty centroids as goals."""
+    from hbllm.hcir.spatial_planner import EntityRole
+    from hbllm.hcir.world.planning.goal_scheduler import EpistemicGoalScheduler
+
+    grid = np.zeros((8, 8), dtype=int)
+    grid[0, :] = 5
+    grid[-1, :] = 5
+    grid[:, 0] = 5
+    grid[:, -1] = 5
+    grid[5, 2] = 5
+    grid[3, 3] = 8
+    grid[5, 5] = 1
+
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    engine.avatar_pos = (5, 5)
+    engine.bg_feature = 0
+    engine.symbolic_theory.induce_walkable(0, evidence="traversal")
+    engine.symbolic_theory.induce_candidate_goal(5, evidence="heuristic")
+
+    entities = engine.extract_entities(grid, bg=0)
+    proposal = EpistemicGoalScheduler.schedule_goals(
+        engine=engine,
+        curr_grid=grid,
+        entities=entities,
+        bg=0,
+        av_feats={1},
+        target_role=EntityRole.GOAL,
+        available_actions=[1, 2, 3, 4],
+    )
+    assert (4, 4) not in proposal.goals
+
+
+def test_multi_candidate_block_delivery_succeeds_with_fewer_blocks_than_goals() -> None:
+    """Verify block delivery plans when goals outnumber blocks and GridPush seed 33 solves."""
+    from benchmarks.envs.grid_push import GridPushEnvironment
+    from hbllm.hcir.world.planning.mental_simulation import MentalSimulationPlanner
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    grid = np.zeros((7, 7), dtype=int)
+    grid[0, :] = 5
+    grid[-1, :] = 5
+    grid[:, 0] = 5
+    grid[:, -1] = 5
+    grid[4, 3] = 1
+    grid[3, 3] = 4
+    grid[2, 3] = 8
+    grid[5, 5] = 9
+
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    engine.avatar_pos = (4, 3)
+    engine.avatar_feature = 1
+    engine.bg_feature = 0
+    for act_id, (dr, dc) in {1: (-1, 0), 2: (1, 0), 3: (0, -1), 4: (0, 1)}.items():
+        engine.action_dynamics[act_id] = ActionDynamicsModel(
+            act_id, delta_r=dr, delta_c=dc, confidence=1.0
+        )
+    engine.symbolic_theory.induce_walkable(0, evidence="traversal")
+    engine.symbolic_theory.induce_walkable(8, evidence="traversal")
+    engine.symbolic_theory.induce_barrier(5, evidence="collision")
+    engine.symbolic_theory.induce_cargo(4, evidence="contact_displacement")
+    engine.symbolic_theory.induce_candidate_goal(8, evidence="heuristic")
+    engine.symbolic_theory.induce_candidate_goal(9, evidence="heuristic")
+    engine.record_learned_goal((2, 3))
+    engine.record_learned_goal((5, 5))
+
+    plan = MentalSimulationPlanner.simulate_in_mind(
+        engine=engine, curr_grid=grid, available_actions=[1, 2, 3, 4]
+    )
+    assert plan is not None and len(plan) >= 1 and int(plan[0].action) == 1
+
+    env = GridPushEnvironment(max_steps=60)
+    obs = env.reset(seed=33)
+    sys_eng = build_cognitive_system(
+        CognitiveSystemConfig(world_id="test_push_33", memory_dir=None, enable_grounding=False)
+    ).engine
+    solved = False
+    for _ in range(60):
+        act, _ = sys_eng.step(obs)
+        obs, rew, done, _ = env.step(act)
+        if done:
+            solved = rew > 0
+            break
+    assert solved is True
+
+
+def test_inventory_state_change_preserves_lethal_terminal_fail() -> None:
+    """Verify retract_barrier(preserve_lethal=True) and pickup assimilation keep TERMINAL_FAIL."""
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    engine.bg_feature = 0
+    engine.symbolic_theory.induce_walkable(0, evidence="traversal")
+    engine.symbolic_theory.induce_barrier(12, evidence="lethal_hazard")
+    engine.symbolic_theory.induce_barrier(3, evidence="collision")
+    engine.hazard_tracker.known_lethal_features.add(12)
+
+    engine.symbolic_theory.retract_barrier(
+        12, reason="inventory_state_change", preserve_lethal=True
+    )
+    assert engine.symbolic_theory.transition_kb.has_feature_outcome(
+        12, TransitionOutcome.TERMINAL_FAIL
+    )
+    assert 12 in engine.symbolic_theory.barrier_features
+
+    prev_grid = np.zeros((5, 5), dtype=int)
+    prev_grid[2, 2] = 1
+    prev_grid[2, 3] = 2
+    prev_grid[1, 4] = 3
+    prev_grid[3, 4] = 12
+    curr_grid = np.zeros((5, 5), dtype=int)
+    curr_grid[2, 3] = 1
+    curr_grid[1, 4] = 3
+    curr_grid[3, 4] = 12
+
+    engine.avatar_pos = (2, 2)
+    engine.avatar_feature = 1
+    engine.prev_grid = prev_grid
+    engine.assimilate_feedback(curr_grid=curr_grid, available_actions=[1, 2, 3, 4], action=4)
+    assert engine.symbolic_theory.transition_kb.has_feature_outcome(
+        12, TransitionOutcome.TERMINAL_FAIL
+    )
+    assert 3 not in engine.symbolic_theory.barrier_features
+
+
+def test_fov_shroud_transitions_excluded_from_exogenous_tracker() -> None:
+    """Verify partial-observability shroud pixels never taint visible doors as exogenous."""
+    from benchmarks.envs.widened_dev_envs import PartialObsMazeEnv
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    env = PartialObsMazeEnv(max_steps=40)
+    obs = env.reset(seed=1000)
+    eng = build_cognitive_system(
+        CognitiveSystemConfig(world_id="test_po_shroud", memory_dir=None, enable_grounding=False)
+    ).engine
+    for _ in range(18):
+        act, _ = eng.step(obs)
+        obs, _, done, _ = env.step(act)
+        if done:
+            break
+    assert eng.working_memory.shroud_feature == 9
+    assert not eng.working_memory.is_exogenous_locus(
+        env.door_pos, lattice=obs.lattice, bg=0, include_outer_edge=False
+    )
+
+
+def test_spatial_affordance_model_honors_kb_locus_and_causal_rules() -> None:
+    """Verify SpatialAffordanceModel evaluates KB locus overrides and KB causal unlock rules."""
+    from hbllm.hcir.world.planning.affordances import SpatialAffordanceModel
+
+    grid = np.zeros((5, 5), dtype=int)
+    grid[2, 1] = 1
+    grid[2, 2] = 5
+    grid[2, 3] = 8
+
+    engine = AutonomousEpistemicEngine(enable_logging=False)
+    engine.avatar_pos = (2, 1)
+    engine.bg_feature = 0
+    engine.symbolic_theory.induce_walkable(0, evidence="traversal")
+    engine.symbolic_theory.induce_barrier(5, evidence="collision")
+    engine.symbolic_theory.induce_goal(8, evidence=TerminalSignal.SUCCESS)
+
+    snap_locked = SpatialAffordanceModel.evaluate(engine, grid, bg=0, av_feats={1}, goals=[(2, 3)])
+    assert snap_locked.is_solid_barrier((2, 2))
+    assert snap_locked.is_goal((2, 3))
+
+    engine.working_memory.acquire_item(9, role="tool", step=1, position=(2, 1))
+    engine.symbolic_theory.transition_kb.record_causal_rule(9, "unlocks:5", evidence="key")
+    snap_unlocked = SpatialAffordanceModel.evaluate(
+        engine, grid, bg=0, av_feats={1}, goals=[(2, 3)]
+    )
+    assert snap_unlocked.is_permeable_barrier((2, 2))
+
+    engine.working_memory.expend_item(9)
+    engine.symbolic_theory.transition_kb.record_outcome(
+        (2, 2), TransitionOutcome.TRAVERSED, scope="locus", evidence="secret_gap"
+    )
+    snap_locus = SpatialAffordanceModel.evaluate(engine, grid, bg=0, av_feats={1}, goals=[(2, 3)])
+    assert snap_locus.is_passable((2, 2))

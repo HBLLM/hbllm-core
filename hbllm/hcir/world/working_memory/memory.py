@@ -386,6 +386,7 @@ class PrefrontalWorkingMemory:
                         if newly_hidden >= 3 and newly_revealed >= 3:
                             self.shroud_feature = cand_s
                             self.allocentric_belief_grid = prev.copy()
+                            self.exogenous_tracker.reset_episode(retain_long_term=False)
                             break
             elif H >= 7 and W >= 7:
                 c0 = int(arr[0, 0])
@@ -408,6 +409,7 @@ class PrefrontalWorkingMemory:
                     if inner_rings >= 2 and non_s.size >= 9 and len(np.unique(non_s)) >= 2:
                         self.shroud_feature = c0
                         self.allocentric_belief_grid = arr.copy()
+                        self.exogenous_tracker.reset_episode(retain_long_term=False)
 
         self.prev_raw_sensory_grid = arr.copy()
         if self.shroud_feature is None:

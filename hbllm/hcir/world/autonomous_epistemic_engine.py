@@ -3049,13 +3049,13 @@ class AutonomousEpistemicEngine:
                     f"procedural_skill_{schema_name}"
                     for schema_name in self.working_memory.procedural_library
                 )
-                for node_id in promote_ids:
-                    if _in_working(node_id):
-                        self.tiered_workspace.promote(
-                            node_id=node_id,
-                            from_tier=WorkspaceTier.WORKING,
-                            to_tier=WorkspaceTier.PERSISTENT,
-                        )
+                working_promote_ids = [nid for nid in promote_ids if _in_working(nid)]
+                if working_promote_ids:
+                    self.tiered_workspace.promote_batch(
+                        working_promote_ids,
+                        from_tier=WorkspaceTier.WORKING,
+                        to_tier=WorkspaceTier.PERSISTENT,
+                    )
 
         # Attribute environmental mutations to active object interaction
         active_obj_id = getattr(self.object_planner, "active_target_object_id", None)

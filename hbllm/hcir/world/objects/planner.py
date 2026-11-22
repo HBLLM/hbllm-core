@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole
+from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.objects.ledger import ObjectStateLedger
 from hbllm.hcir.world.objects.models import (
@@ -86,10 +87,12 @@ class ObjectStateGraphPlanner:
             or engine.avatar_features
             or ({engine.avatar_feature} if engine.avatar_feature is not None else set())
         )
-        barrier_features = engine.symbolic_theory.barrier_features
+        theory = engine.symbolic_theory
+        kb = theory.transition_kb
+        barrier_features = theory.barrier_features
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
         known_goal_positions = set(percept.candidate_goals)
-        known_goal_features = set(engine.symbolic_theory.goal_features)
+        known_goal_features = set(theory.goal_features)
 
         salient_objects: list[SalientObject] = []
         grid_arr = percept.metadata.get("grid")
@@ -111,42 +114,76 @@ class ObjectStateGraphPlanner:
                 e.feature_id in lethal_features or e.role == EntityRole.DYNAMIC_HAZARD
             ) and e.area > 9:
                 continue
+
+            ev = theory.evaluate_transition(e.feature_id, locus=e.grid_pos)
+            kb_goal = (
+                ev.goal_value > 0.5
+                or e.feature_id in known_goal_features
+                or (
+                    kb is not None
+                    and kb.has_feature_outcome(e.feature_id, TransitionOutcome.TERMINAL_WIN)
+                )
+            )
+            kb_actuator = (
+                ev.mutates_state
+                or (
+                    kb is not None
+                    and kb.has_feature_outcome(e.feature_id, TransitionOutcome.MUTATED_STATE)
+                )
+                or e.feature_id in theory.actuator_features
+            )
+            kb_cargo = (
+                (
+                    kb is not None
+                    and kb.has_feature_outcome(e.feature_id, TransitionOutcome.DISPLACED_OTHER)
+                )
+                or e.feature_id in theory.cargo_features
+                or theory.is_cargo(e.feature_id)
+            )
+            kb_walk = (
+                ev.traversable and ev.confidence > 0.0 and ev.risk_cost < 40.0
+            ) or theory.is_walkable(e.feature_id)
             # Skip known walkable floor substrates unless they carry an interactive/goal role
             if (
-                engine.symbolic_theory.is_walkable(e.feature_id)
-                and e.feature_id not in known_goal_features
-                and not engine.symbolic_theory.is_goal(e)
-                and e.feature_id not in engine.symbolic_theory.actuator_features
-                and e.feature_id not in engine.symbolic_theory.cargo_features
+                kb_walk
+                and not kb_goal
+                and not theory.is_goal(e)
+                and not kb_actuator
+                and not kb_cargo
                 and e.role not in (EntityRole.GOAL, EntityRole.ACTUATOR, EntityRole.MANIPULABLE)
             ):
                 continue
 
             entity_cells = set(e.properties.get("cells", [e.grid_pos]))
 
-            # Categorize object based on role, symbolic theory, and known goals
-            is_barrier = (
+            locus_open = bool(
+                kb is not None
+                and kb._locus_beliefs
+                and kb.get_belief(e.grid_pos, scope="locus") is not None
+                and ev.traversable
+                and ev.confidence > 0.0
+                and ev.risk_cost < 40.0
+            )
+            # Categorize object based on role, TransitionKB beliefs, and known goals
+            is_barrier = not locus_open and (
                 e.role == EntityRole.OBSTACLE
-                or engine.symbolic_theory.is_barrier(e.feature_id)
+                or (not ev.traversable or ev.risk_cost >= 40.0)
+                or theory.is_barrier(e.feature_id)
                 or e.feature_id in barrier_features
             )
             is_goal = not is_barrier and (
                 e.role == EntityRole.GOAL
-                or engine.symbolic_theory.is_goal(e)
-                or e.feature_id in known_goal_features
+                or kb_goal
+                or theory.is_goal(e)
                 or any(cp in known_goal_positions for cp in entity_cells)
             )
             if not is_goal and all(
-                engine.symbolic_theory.is_locus_explored(cp)
-                or cp in engine.exhausted_candidate_goals
+                theory.is_locus_explored(cp) or cp in engine.exhausted_candidate_goals
                 for cp in entity_cells
             ):
                 continue
             is_switch = (
-                (
-                    bool(engine.symbolic_theory)
-                    and e.feature_id in engine.symbolic_theory.actuator_features
-                )
+                kb_actuator
                 or e.role == EntityRole.ACTUATOR
                 or any(
                     m.trigger_pos in entity_cells
@@ -154,13 +191,7 @@ class ObjectStateGraphPlanner:
                     for m in engine.state_mutations
                 )
             )
-            is_cargo = e.role == EntityRole.MANIPULABLE or (
-                bool(engine.symbolic_theory)
-                and (
-                    e.feature_id in engine.symbolic_theory.cargo_features
-                    or engine.symbolic_theory.is_cargo(e.feature_id)
-                )
-            )
+            is_cargo = e.role == EntityRole.MANIPULABLE or kb_cargo
 
             if is_goal:
                 category = ObjectCategory.EXIT

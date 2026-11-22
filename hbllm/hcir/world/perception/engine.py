@@ -179,6 +179,7 @@ class PerceptionEngine:
         geom_comps = PerceptionEngine._get_cached_component_geometry(grid, bg, unique_vals)
         obstacle_vals: set[int] = set()
         non_obstacle_vals: set[int] = set()
+        full_perimeter_vals: set[int] = set()
         for val, area, bbox, centroid, grid_pos, cells in geom_comps:
             cells_list = list(cells)
             min_r, max_r, min_c, max_c = bbox
@@ -212,12 +213,16 @@ class PerceptionEngine:
             )
             if role == EntityRole.OBSTACLE:
                 obstacle_vals.add(val)
+                if min_r == 0 and max_r == H - 1 and min_c == 0 and max_c == W - 1:
+                    full_perimeter_vals.add(val)
             else:
                 non_obstacle_vals.add(val)
             entities.append(ent)
 
         if symbolic_theory is not None:
-            for border_val in obstacle_vals - non_obstacle_vals:
+            for border_val in (obstacle_vals - non_obstacle_vals) | full_perimeter_vals:
+                if border_val in av_feats or symbolic_theory.is_walkable(border_val):
+                    continue
                 if border_val in symbolic_theory.candidate_goal_features:
                     symbolic_theory.retract_candidate_goal(
                         border_val, reason="perimeter_border_obstacle"

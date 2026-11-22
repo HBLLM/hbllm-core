@@ -30,6 +30,15 @@ class TransitionOutcome(StrEnum):
     MUTATED_STATE = "mutated_state"
 
 
+_OUT_TRAVERSED: str = TransitionOutcome.TRAVERSED.value
+_OUT_BLOCKED: str = TransitionOutcome.BLOCKED.value
+_OUT_DISPLACED_OTHER: str = TransitionOutcome.DISPLACED_OTHER.value
+_OUT_RECEIVED_ENTITY: str = TransitionOutcome.RECEIVED_ENTITY.value
+_OUT_MUTATED_STATE: str = TransitionOutcome.MUTATED_STATE.value
+_OUT_TERMINAL_WIN: str = TransitionOutcome.TERMINAL_WIN.value
+_OUT_TERMINAL_FAIL: str = TransitionOutcome.TERMINAL_FAIL.value
+
+
 @dataclass(frozen=True)
 class TransitionEdgeEvaluation:
     """Universal search edge evaluation returned by the transition knowledge base."""
@@ -93,6 +102,10 @@ class TransitionBelief:
     evidence_log: list[str] = field(default_factory=list)
     verified_epoch: int | None = None
     outcome_epochs: dict[str, int] = field(default_factory=dict)
+    _total_obs: float = field(default=0.0, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._total_obs = float(sum(self.counts.values()))
 
     def record(
         self,
@@ -108,6 +121,7 @@ class TransitionBelief:
         if inc > 0.0:
             key = outcome.value
             self.counts[key] = self.counts.get(key, 0.0) + inc
+            self._total_obs += inc
             if epoch is not None:
                 self.outcome_epochs[key] = epoch
         if effect_signature:
@@ -125,36 +139,39 @@ class TransitionBelief:
 
     def decay_or_clear_outcome(self, outcome: TransitionOutcome) -> None:
         """Remove accumulated counts for an invalidated outcome."""
-        self.counts.pop(outcome.value, None)
-        self.outcome_epochs.pop(outcome.value, None)
+        key = outcome.value
+        removed = self.counts.pop(key, 0.0)
+        if removed:
+            self._total_obs = max(0.0, self._total_obs - removed)
+        self.outcome_epochs.pop(key, None)
 
     def total_observations(self) -> float:
         """Return total weighted outcome observations."""
-        return float(sum(self.counts.values()))
+        return self._total_obs
 
     def traversability_posterior(self, prior: float = 0.5) -> float:
         """Return Beta posterior mean P(traversable | observations)."""
-        pos = self.counts.get(TransitionOutcome.TRAVERSED.value, 0.0) + self.counts.get(
-            TransitionOutcome.TERMINAL_WIN.value, 0.0
-        )
-        neg = self.counts.get(TransitionOutcome.BLOCKED.value, 0.0) + self.counts.get(
-            TransitionOutcome.TERMINAL_FAIL.value, 0.0
-        )
+        pos = self.counts.get(_OUT_TRAVERSED, 0.0) + self.counts.get(_OUT_TERMINAL_WIN, 0.0)
+        neg = self.counts.get(_OUT_BLOCKED, 0.0) + self.counts.get(_OUT_TERMINAL_FAIL, 0.0)
         denom = pos + neg + 2.0 * prior
         if denom <= 0.0:
             return 0.5
         return float((pos + prior) / denom)
 
-    def outcome_prob(self, outcome: TransitionOutcome, prior: float = 0.0) -> float:
-        """Return empirical probability of ``outcome`` across all recorded observations."""
-        total = self.total_observations()
+    def _outcome_prob_key(self, key: str, prior: float = 0.0) -> float:
+        total = self._total_obs
         if total <= 0.0:
             return float(prior / (1.0 + prior)) if prior > 0.0 else 0.0
-        return float((self.counts.get(outcome.value, 0.0) + prior) / (total + prior))
+        return float((self.counts.get(key, 0.0) + prior) / (total + prior))
+
+    def outcome_prob(self, outcome: TransitionOutcome, prior: float = 0.0) -> float:
+        """Return empirical probability of ``outcome`` across all recorded observations."""
+        key = outcome.value if isinstance(outcome, TransitionOutcome) else str(outcome)
+        return self._outcome_prob_key(key, prior=prior)
 
     def epistemic_uncertainty(self) -> float:
         """Return epistemic uncertainty shrinking smoothly with experience."""
-        return float(1.0 / (1.0 + self.total_observations()))
+        return float(1.0 / (1.0 + self._total_obs))
 
     def confidence(self) -> float:
         """Return epistemic confidence in [0, 1)."""
@@ -272,6 +289,25 @@ class TransitionKnowledgeBase:
     _locus_beliefs: dict[tuple[int, int], TransitionBelief] = field(default_factory=dict)
     _causal_rules: dict[tuple[str, str], CausalEffectRule] = field(default_factory=dict)
     _context_epoch: int = 0
+    _version: int = field(default=0, init=False, repr=False)
+    _feature_eval_cache: dict[tuple[Any, bool, float, float], TransitionEdgeEvaluation] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _outcome_features_cache: dict[tuple[str, float], frozenset[Any]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _impassable_cache: frozenset[Any] | None = field(default=None, init=False, repr=False)
+    _traversable_cache: frozenset[Any] | None = field(default=None, init=False, repr=False)
+    _cached_tx_version: int = field(default=-1, init=False, repr=False)
+    _cached_tx_ops: list[TransactionOperation] | None = field(default=None, init=False, repr=False)
+
+    def _invalidate_caches(self) -> None:
+        self._version += 1
+        self._feature_eval_cache.clear()
+        self._outcome_features_cache.clear()
+        self._impassable_cache = None
+        self._traversable_cache = None
+        self._cached_tx_ops = None
 
     def record_outcome(
         self,
@@ -304,6 +340,7 @@ class TransitionKnowledgeBase:
             evidence=evidence,
             epoch=epoch,
         )
+        self._invalidate_caches()
         return belief
 
     def retract_outcome(
@@ -321,12 +358,14 @@ class TransitionKnowledgeBase:
             belief = self._feature_beliefs.get(context_key)
         if belief is not None:
             belief.decay_or_clear_outcome(outcome)
+            self._invalidate_caches()
 
     def retract_outcome_all(self, outcome: TransitionOutcome, *, scope: str = "feature") -> None:
         """Retract an outcome across all recorded beliefs within ``scope``."""
         store = self._locus_beliefs if scope == "locus" else self._feature_beliefs
         for belief in store.values():
             belief.decay_or_clear_outcome(outcome)
+        self._invalidate_caches()
 
     def record_causal_rule(
         self,
@@ -348,6 +387,7 @@ class TransitionKnowledgeBase:
                 existing.precondition_tokens = tuple(precondition_tokens)
             if evidence:
                 existing.evidence = evidence
+            self._invalidate_caches()
             return existing
         rule = CausalEffectRule(
             trigger_key=trigger_key,
@@ -358,6 +398,7 @@ class TransitionKnowledgeBase:
             evidence=evidence,
         )
         self._causal_rules[rule_key] = rule
+        self._invalidate_caches()
         return rule
 
     def get_belief(
@@ -391,18 +432,28 @@ class TransitionKnowledgeBase:
     ) -> TransitionEdgeEvaluation:
         """Evaluate edge traversability, cost, risk, goal value, and uncertainty."""
         belief: TransitionBelief | None = None
-        if locus is not None:
-            locus_key = (int(locus[0]), int(locus[1]))
-            locus_belief = self._locus_beliefs.get(locus_key)
-            if locus_belief is not None and locus_belief.total_observations() > 0.0:
+        if locus is not None and self._locus_beliefs:
+            locus_belief = self._locus_beliefs.get((int(locus[0]), int(locus[1])))
+            if locus_belief is not None and locus_belief._total_obs > 0.0:
                 belief = locus_belief
+        use_cache = belief is None and not active_state_tokens
+        cache_key = (
+            (feature_id, unknown_traversable, unknown_cost_penalty, risk_weight)
+            if use_cache
+            else None
+        )
+        if cache_key is not None:
+            cached_ev = self._feature_eval_cache.get(cache_key)
+            if cached_ev is not None:
+                return cached_ev
+
         if belief is None:
             feat_belief = self._feature_beliefs.get(feature_id)
-            if feat_belief is not None and feat_belief.total_observations() > 0.0:
+            if feat_belief is not None and feat_belief._total_obs > 0.0:
                 belief = feat_belief
 
         if belief is None:
-            return TransitionEdgeEvaluation(
+            res = TransitionEdgeEvaluation(
                 traversable=unknown_traversable,
                 step_cost=(1.0 + max(0.0, unknown_cost_penalty))
                 if unknown_traversable
@@ -413,12 +464,15 @@ class TransitionKnowledgeBase:
                 mutates_state=False,
                 confidence=0.0,
             )
+            if cache_key is not None:
+                self._feature_eval_cache[cache_key] = res
+            return res
 
         p_trav = belief.traversability_posterior()
-        p_fatal = belief.outcome_prob(TransitionOutcome.TERMINAL_FAIL)
-        p_win = belief.outcome_prob(TransitionOutcome.TERMINAL_WIN)
-        p_mut = belief.outcome_prob(TransitionOutcome.MUTATED_STATE) + belief.outcome_prob(
-            TransitionOutcome.DISPLACED_OTHER
+        p_fatal = belief._outcome_prob_key(_OUT_TERMINAL_FAIL)
+        p_win = belief._outcome_prob_key(_OUT_TERMINAL_WIN)
+        p_mut = belief._outcome_prob_key(_OUT_MUTATED_STATE) + belief._outcome_prob_key(
+            _OUT_DISPLACED_OTHER
         )
 
         if active_state_tokens:
@@ -430,15 +484,19 @@ class TransitionKnowledgeBase:
 
         traversable = (p_win > 0.0 or p_trav >= 0.5) and p_fatal < 0.5
         step_cost = (1.0 + max(0.0, 1.0 - p_trav)) if traversable else math.inf
-        return TransitionEdgeEvaluation(
+        info_gain = belief.epistemic_uncertainty()
+        res = TransitionEdgeEvaluation(
             traversable=traversable,
             step_cost=float(step_cost),
             risk_cost=float(risk_weight * p_fatal),
             goal_value=float(p_win),
-            info_gain=belief.epistemic_uncertainty(),
+            info_gain=info_gain,
             mutates_state=p_mut > 0.0,
-            confidence=belief.confidence(),
+            confidence=float(1.0 - info_gain),
         )
+        if cache_key is not None:
+            self._feature_eval_cache[cache_key] = res
+        return res
 
     def has_feature_outcome(self, feature_id: Any, outcome: TransitionOutcome) -> bool:
         """Return True if ``feature_id`` has recorded observations of ``outcome``."""
@@ -450,42 +508,59 @@ class TransitionKnowledgeBase:
     ) -> frozenset[Any]:
         """Return feature keys having observed ``outcome`` above ``min_count``."""
         key = outcome.value
-        return frozenset(
+        ck = (key, min_count)
+        cached = self._outcome_features_cache.get(ck)
+        if cached is not None:
+            return cached
+        res = frozenset(
             k for k, b in self._feature_beliefs.items() if b.counts.get(key, 0.0) > min_count
         )
+        self._outcome_features_cache[ck] = res
+        return res
 
     def impassable_features(self) -> frozenset[Any]:
         """Return feature keys empirically evaluated as non-traversable."""
-        blocked_k = TransitionOutcome.BLOCKED.value
-        fail_k = TransitionOutcome.TERMINAL_FAIL.value
-        return frozenset(
+        if self._impassable_cache is not None:
+            return self._impassable_cache
+        res = frozenset(
             k
             for k, b in self._feature_beliefs.items()
-            if (b.counts.get(blocked_k, 0.0) > 0.0 or b.counts.get(fail_k, 0.0) > 0.0)
+            if (
+                b.counts.get(_OUT_BLOCKED, 0.0) > 0.0 or b.counts.get(_OUT_TERMINAL_FAIL, 0.0) > 0.0
+            )
             and not self.evaluate_transition(k).traversable
         )
+        self._impassable_cache = res
+        return res
 
     def traversable_features(self) -> frozenset[Any]:
         """Return feature keys empirically evaluated as safely traversable."""
-        trav_k = TransitionOutcome.TRAVERSED.value
-        win_k = TransitionOutcome.TERMINAL_WIN.value
-        return frozenset(
+        if self._traversable_cache is not None:
+            return self._traversable_cache
+        res = frozenset(
             k
             for k, b in self._feature_beliefs.items()
-            if (b.counts.get(trav_k, 0.0) > 0.0 or b.counts.get(win_k, 0.0) > 0.0)
+            if (
+                b.counts.get(_OUT_TRAVERSED, 0.0) > 0.0
+                or b.counts.get(_OUT_TERMINAL_WIN, 0.0) > 0.0
+            )
             and self.evaluate_transition(k).traversable
         )
+        self._traversable_cache = res
+        return res
 
     def begin_context_epoch(self, epoch: int | None = None) -> None:
         """Advance context epoch and drop episode-local coordinate beliefs."""
         self._context_epoch = (self._context_epoch + 1) if epoch is None else int(epoch)
         self._locus_beliefs.clear()
+        self._invalidate_caches()
 
     def clear_context_beliefs(self, *, preserve_current_epoch: bool = False) -> None:
         """Drop locus beliefs and unverified feature beliefs across context shifts."""
         self._locus_beliefs.clear()
         if not preserve_current_epoch:
             self._feature_beliefs.clear()
+            self._invalidate_caches()
             return
         retained: dict[Any, TransitionBelief] = {}
         for k, b in self._feature_beliefs.items():
@@ -497,13 +572,17 @@ class TransitionKnowledgeBase:
             for ok in stale_keys:
                 b.counts.pop(ok, None)
                 b.outcome_epochs.pop(ok, None)
+            if stale_keys:
+                b._total_obs = float(sum(b.counts.values()))
             if b.total_observations() > 0.0:
                 retained[k] = b
         self._feature_beliefs = retained
+        self._invalidate_caches()
 
     def clear_locus_beliefs(self) -> None:
         """Clear coordinate-scoped locus transition beliefs without clearing feature beliefs."""
         self._locus_beliefs.clear()
+        self._invalidate_caches()
 
     def clear(self) -> None:
         """Reset all stored beliefs, causal rules, and context epoch counters."""
@@ -511,16 +590,17 @@ class TransitionKnowledgeBase:
         self._locus_beliefs.clear()
         self._causal_rules.clear()
         self._context_epoch = 0
+        self._invalidate_caches()
 
     def exported_node_ids(self) -> list[str]:
         """Return deterministic HCIR node IDs for all non-empty beliefs and causal rules."""
         node_ids: list[str] = []
         for belief in self._feature_beliefs.values():
-            if belief.total_observations() > 0.0:
+            if belief._total_obs > 0.0:
                 _, _, nid = _belief_node_id(belief.scope, belief.context_key)
                 node_ids.append(nid)
         for belief in self._locus_beliefs.values():
-            if belief.total_observations() > 0.0:
+            if belief._total_obs > 0.0:
                 _, _, nid = _belief_node_id(belief.scope, belief.context_key)
                 node_ids.append(nid)
         for rule in self._causal_rules.values():
@@ -530,9 +610,11 @@ class TransitionKnowledgeBase:
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
         """Export all transition beliefs and causal rules as HCIR graph transactions."""
+        if self._cached_tx_ops is not None and self._cached_tx_version == self._version:
+            return list(self._cached_tx_ops)
         ops: list[TransactionOperation] = []
         for belief in self._feature_beliefs.values():
-            if belief.total_observations() <= 0.0:
+            if belief._total_obs <= 0.0:
                 continue
             node = belief.to_belief_node()
             ops.append(
@@ -543,7 +625,7 @@ class TransitionKnowledgeBase:
                 )
             )
         for belief in self._locus_beliefs.values():
-            if belief.total_observations() <= 0.0:
+            if belief._total_obs <= 0.0:
                 continue
             node = belief.to_belief_node()
             ops.append(
@@ -562,7 +644,9 @@ class TransitionKnowledgeBase:
                     node_data=node.model_dump(),
                 )
             )
-        return ops
+        self._cached_tx_ops = ops
+        self._cached_tx_version = self._version
+        return list(ops)
 
     def hydrate_from_nodes_with_keys(self, nodes: Sequence[Any]) -> tuple[int, set[Any]]:
         """Hydrate beliefs and causal rules from HCIR nodes, returning (count, feature_keys)."""
@@ -588,6 +672,8 @@ class TransitionKnowledgeBase:
                 _, _, token = _encode_context_key(rule.trigger_key)
                 self._causal_rules[(token, rule.effect_signature)] = rule
                 hydrated += 1
+        if hydrated > 0:
+            self._invalidate_caches()
         return hydrated, hydrated_feature_keys
 
     def hydrate_from_nodes(self, nodes: Sequence[Any]) -> int:

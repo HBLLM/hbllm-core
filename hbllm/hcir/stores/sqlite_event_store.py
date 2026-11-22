@@ -156,8 +156,9 @@ class SQLiteEventStore(IEventStore):
         self._max_events: int | None = max_events
         self._last_hash: str = ""
         self._sequence: int = 0
+        self._event_count: int = 0
         self._batch_depth: int = 0
-        self._batch_saved_state: tuple[str, int] | None = None
+        self._batch_saved_state: tuple[str, int, int] | None = None
         self._initialize()
 
     def _initialize(self) -> None:
@@ -170,13 +171,16 @@ class SQLiteEventStore(IEventStore):
             + _CREATE_EDGES_INDEX
         )
         self._conn.commit()
-        # Recover last hash and sequence
+        # Recover last hash, sequence, and count
         row = self._conn.execute(
             "SELECT sequence, content_hash FROM hcir_events ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if row:
             self._sequence = row["sequence"]
             self._last_hash = row["content_hash"]
+        self._event_count = int(
+            self._conn.execute("SELECT COUNT(*) FROM hcir_events").fetchone()[0]
+        )
 
     # ── IEventStore interface ────────────────────────────────────────
 
@@ -184,7 +188,7 @@ class SQLiteEventStore(IEventStore):
     def batch(self) -> Iterator[None]:
         """Coalesce all appends/updates inside a block into one SQLite commit."""
         if self._batch_depth == 0:
-            self._batch_saved_state = (self._last_hash, self._sequence)
+            self._batch_saved_state = (self._last_hash, self._sequence, self._event_count)
         self._batch_depth += 1
         try:
             yield
@@ -192,7 +196,7 @@ class SQLiteEventStore(IEventStore):
             if self._batch_depth == 1:
                 self._conn.rollback()
                 if self._batch_saved_state is not None:
-                    self._last_hash, self._sequence = self._batch_saved_state
+                    self._last_hash, self._sequence, self._event_count = self._batch_saved_state
                 self._batch_saved_state = None
             raise
         else:
@@ -229,6 +233,7 @@ class SQLiteEventStore(IEventStore):
                 self._last_hash,
             ),
         )
+        self._event_count += 1
         if self._batch_depth == 0:
             self._conn.commit()
         self._last_hash = content_hash
@@ -330,6 +335,7 @@ class SQLiteEventStore(IEventStore):
         if self._batch_depth == 0:
             self._conn.commit()
         self._last_hash = prev_hash
+        self._event_count = len(rebuilt_rows)
         return len(rows) - len(rebuilt_rows)
 
     def get_events(
@@ -381,6 +387,7 @@ class SQLiteEventStore(IEventStore):
         self._conn.commit()
         self._last_hash = ""
         self._sequence = 0
+        self._event_count = 0
 
     # ── Snapshot management ──────────────────────────────────────────
 
@@ -514,8 +521,7 @@ class SQLiteEventStore(IEventStore):
 
     @property
     def event_count(self) -> int:
-        cursor = self._conn.execute("SELECT COUNT(*) FROM hcir_events")
-        return cursor.fetchone()[0]
+        return self._event_count
 
     def close(self) -> None:
         self._conn.close()

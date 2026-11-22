@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -673,6 +674,64 @@ class TieredWorkspace:
             to_tier,
         )
         return True
+
+    def promote_batch(
+        self,
+        node_ids: Sequence[str],
+        from_tier: WorkspaceTier,
+        to_tier: WorkspaceTier,
+        *,
+        batch_size: int = 400,
+    ) -> int:
+        """Promote multiple nodes in chunked atomic transactions, skipping unchanged entries."""
+        if not node_ids:
+            return 0
+        dest_ws = self.get_tier(to_tier)
+        if dest_ws is None:
+            logger.warning("promote_batch: invalid destination tier %s", to_tier)
+            return 0
+
+        seen: set[str] = set()
+        ops: list[TransactionOperation] = []
+        for node_id in node_ids:
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            source_node = self._find_node_in_tier(node_id, from_tier)
+            if source_node is None:
+                continue
+            promoted_dump = source_node.model_copy(deep=True).model_dump()
+            existing = dest_ws.get_node(source_node.id)
+            if existing is not None and existing.model_dump() == promoted_dump:
+                continue
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=source_node.id,
+                    node_data=promoted_dump,
+                )
+            )
+        if not ops:
+            return 0
+
+        promoted_count = 0
+        chunk_lim = max(1, int(batch_size))
+        grant = getattr(self, "_system_grant", None)
+        author = f"promotion:{from_tier}→{to_tier}"
+        meta = {"tier_transfer": "promote", "from": str(from_tier), "to": str(to_tier)}
+        for i in range(0, len(ops), chunk_lim):
+            chunk = ops[i : i + chunk_lim]
+            result = dest_ws.commit_operations(chunk, author=author, grant=grant, metadata=meta)
+            if result.is_committed:
+                promoted_count += len(chunk)
+            else:
+                logger.warning(
+                    "promote_batch: chunk rejected (%d ops) %s → %s",
+                    len(chunk),
+                    from_tier,
+                    to_tier,
+                )
+        return promoted_count
 
     def demote(
         self,

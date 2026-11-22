@@ -177,7 +177,8 @@ def _resolve_compaction_split(
             cut += 1
     elif max_events is not None and len(events) > max(1, max_events):
         budget = max(1, max_events)
-        tail_len = min(max(0, retain_tail if retain_tail is not None else budget - 1), budget - 1)
+        default_tail = max(0, (budget - 1) // 2)
+        tail_len = min(max(0, retain_tail if retain_tail is not None else default_tail), budget - 1)
         cut = len(events) - tail_len
     else:
         return [], events

@@ -91,18 +91,28 @@ class CausalTheoryPlanner:
         """Extract a frozen planning context from the engine's current causal theory."""
         theory = engine.symbolic_theory
 
-        # Extract goal positions from grid using discovered goal features
+        # Extract goal positions from grid using discovered TransitionKB / theory beliefs
         goal_positions: set[tuple[int, int]] = set(engine.learned_goal_positions)
         barrier_positions: set[tuple[int, int]] = set(engine.learned_barriers)
+        has_loci = bool(theory.transition_kb._locus_beliefs)
 
         # Scan grid for goal and barrier cells
         for r in range(curr_grid.shape[0]):
             for c in range(curr_grid.shape[1]):
+                pos = (r, c)
                 feat = int(curr_grid[r, c])
-                if feat in theory.goal_features:
-                    goal_positions.add((r, c))
-                if feat in theory.barrier_features:
-                    barrier_positions.add((r, c))
+                ev = theory.evaluate_transition(feat, locus=pos)
+                if ev.goal_value > 0.5 or feat in theory.goal_features:
+                    goal_positions.add(pos)
+                if not ev.traversable or ev.risk_cost >= 40.0 or feat in theory.barrier_features:
+                    barrier_positions.add(pos)
+                elif (
+                    has_loci
+                    and ev.traversable
+                    and ev.confidence > 0.0
+                    and theory.transition_kb.get_belief(pos, scope="locus") is not None
+                ):
+                    barrier_positions.discard(pos)
 
         lethal_features = set(engine.episodic_cortex.discovered_lethal_features) | set(
             engine.hazard_tracker.known_lethal_features

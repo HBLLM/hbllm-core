@@ -1186,7 +1186,6 @@ class EpistemicGoalScheduler:
                     and e.feature_id not in engine.symbolic_theory.goal_features
                 ) or (
                     e.role == EntityRole.OBSTACLE
-                    and e.feature_id not in engine.symbolic_theory.candidate_goal_features
                     and e.feature_id not in engine.symbolic_theory.goal_features
                 ):
                     continue
@@ -1435,7 +1434,11 @@ class EpistemicGoalScheduler:
             if novel_entity_goals:
                 goals = novel_entity_goals
 
-        if avatar_pos is not None and goals and (satisfied_when or not confirmed_goals):
+        if (
+            avatar_pos is not None
+            and goals
+            and (satisfied_when or (not confirmed_goals and len(goals) > 1))
+        ):
             from hbllm.hcir.world.object_state_graph import compute_stance_priority
 
             th = engine.symbolic_theory

@@ -523,7 +523,10 @@ class EpistemicFeedbackAssimilator:
                     for r, c, _, new_v in diff.mutated_pixels
                     if int(new_v) in av_set_exog
                     and not _wm_exog_early.exogenous_tracker.is_partitioned_or_enclosing(
-                        (int(r), int(c)), view.prev_grid, bg=_bg_exog_early
+                        (int(r), int(c)),
+                        view.prev_grid,
+                        bg=_bg_exog_early,
+                        tracker=_wm_exog_early.exogenous_tracker,
                     )
                 ]
                 if av_set_exog
@@ -540,13 +543,20 @@ class EpistemicFeedbackAssimilator:
             if view.avatar_pos is not None and action in view.action_deltas:
                 dr_p, dc_p = view.action_deltas[action]
                 pred_av_pos = (view.avatar_pos[0] + dr_p, view.avatar_pos[1] + dc_p)
-            _wm_exog_early.exogenous_tracker.observe_transition(
-                [(int(r), int(c)) for r, c, _, _ in diff.mutated_pixels],
-                action,
-                avatar_locus=est_av_now,
-                target_locus=target_coord,
-                extra_local_loci=(view.avatar_pos, pred_av_pos),
-            )
+            _shroud_f = _wm_exog_early.shroud_feature
+            exog_muts = [
+                (int(r), int(c))
+                for r, c, old_v, new_v in diff.mutated_pixels
+                if _shroud_f is None or (int(old_v) != _shroud_f and int(new_v) != _shroud_f)
+            ]
+            if exog_muts:
+                _wm_exog_early.exogenous_tracker.observe_transition(
+                    exog_muts,
+                    action,
+                    avatar_locus=est_av_now,
+                    target_locus=target_coord,
+                    extra_local_loci=(view.avatar_pos, pred_av_pos),
+                )
 
         # Active Manipulandum Effector Binding (Modal Select-Then-Direct):
         if target_coord is not None:
@@ -2492,9 +2502,18 @@ class EpistemicFeedbackAssimilator:
                         view.working_memory.pending_gate_check = True
                     gate_pts: set[tuple[int, int]] = set()
                     for b_feat in list(_sym_theory.barrier_features):
+                        if (
+                            b_feat in _hazard_tracker.known_lethal_features
+                            or _sym_theory.transition_kb.has_feature_outcome(
+                                b_feat, TransitionOutcome.TERMINAL_FAIL
+                            )
+                        ):
+                            continue
                         b_pts = np.argwhere(curr_grid == b_feat)
                         if 1 <= len(b_pts) <= 2:
-                            _sym_theory.retract_barrier(b_feat, reason="inventory_state_change")
+                            _sym_theory.retract_barrier(
+                                b_feat, reason="inventory_state_change", preserve_lethal=True
+                            )
                             _sym_theory._explored_features.discard(b_feat)
                             for br_i, bc_i in b_pts:
                                 gate_pts.add((int(br_i), int(bc_i)))
@@ -2506,9 +2525,14 @@ class EpistemicFeedbackAssimilator:
                                 and lb_v != _bg_feature
                                 and lb_v != view.working_memory.shroud_feature
                                 and lb_v not in _hazard_tracker.known_lethal_features
+                                and not _sym_theory.transition_kb.has_feature_outcome(
+                                    lb_v, TransitionOutcome.TERMINAL_FAIL
+                                )
                                 and int(np.count_nonzero(curr_grid == lb_v)) <= 2
                             ):
-                                _sym_theory.retract_barrier(lb_v, reason="inventory_state_change")
+                                _sym_theory.retract_barrier(
+                                    lb_v, reason="inventory_state_change", preserve_lethal=True
+                                )
                                 _sym_theory._explored_features.discard(lb_v)
                                 gate_pts.add((lb_r, lb_c))
                     for b_pt in gate_pts:

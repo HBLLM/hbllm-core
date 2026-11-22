@@ -197,8 +197,9 @@ class MentalSimulationPlanner:
         for r, c in engine.learned_barriers:
             if 0 <= r < H and 0 <= c < W:
                 val = int(curr_grid[r, c])
+                ev_lb = engine.symbolic_theory.evaluate_transition(val, locus=(r, c))
                 if (r, c) in engine.hazard_tracker.static_lethal_positions or (
-                    val != bg and not engine.symbolic_theory.is_walkable(val)
+                    val != bg and not (ev_lb.traversable and ev_lb.confidence > 0.0)
                 ):
                     static_barriers.add((r, c))
 
@@ -206,11 +207,19 @@ class MentalSimulationPlanner:
         prior_hazard_feats = EpistemicGoalScheduler._high_confidence_prior_hazards(
             engine, bg, av_feats
         )
+        has_cond_aff = bool(engine.symbolic_theory._conditional_affordances)
         for r in range(H):
             for c in range(W):
                 val = int(curr_grid[r, c])
+                if has_cond_aff:
+                    is_bar_cell = engine.symbolic_theory.is_barrier(val, agent_state=agent_state)
+                else:
+                    ev_cell = engine.symbolic_theory.evaluate_transition(val, locus=(r, c))
+                    is_bar_cell = (
+                        not ev_cell.traversable or ev_cell.risk_cost >= 40.0
+                    ) and engine.symbolic_theory.is_barrier(val)
                 if (
-                    engine.symbolic_theory.is_barrier(val, agent_state=agent_state)
+                    is_bar_cell
                     or (
                         val in engine.hazard_tracker.known_lethal_features
                         and val not in engine.mobile_threat_features
@@ -1046,6 +1055,7 @@ class MentalSimulationPlanner:
                     max_candidate_goals=5,
                     preserve_goal_order=True,
                     soft_avoid_cells=soft_avoid or None,
+                    transition_kb=engine.symbolic_theory.transition_kb,
                 )
                 if geodesic_movable_actions
                 else None
@@ -1054,17 +1064,18 @@ class MentalSimulationPlanner:
                 plan_valid = True
                 curr_p = start_pos
                 for act, next_p in action_plan:
-                    next_is_open = (
-                        0 <= next_p[0] < H
-                        and 0 <= next_p[1] < W
-                        and (
-                            int(curr_grid[next_p[0], next_p[1]]) == bg
-                            or engine.symbolic_theory.is_walkable(
-                                int(curr_grid[next_p[0], next_p[1]])
+                    next_is_open = False
+                    if 0 <= next_p[0] < H and 0 <= next_p[1] < W:
+                        next_feat = int(curr_grid[next_p[0], next_p[1]])
+                        if next_feat == bg or next_p in goals:
+                            next_is_open = True
+                        else:
+                            ev_n = engine.symbolic_theory.evaluate_transition(
+                                next_feat, locus=next_p
                             )
-                            or next_p in goals
-                        )
-                    )
+                            next_is_open = bool(
+                                ev_n.traversable and ev_n.confidence > 0.0 and ev_n.risk_cost < 40.0
+                            )
                     is_failed = (curr_p, act) in engine.failed_transitions and (
                         not next_is_open or engine.working_memory.reference_frame is not None
                     )
@@ -1180,8 +1191,12 @@ class MentalSimulationPlanner:
                 )
             elif is_block_delivery and blocks:
                 b_list = list(blocks)
-                if len(goals) == 1:
+                if len(goals) == 1 or len(b_list) == 1:
                     goal_dist = float(min(grid_dist_field[b[0], b[1]] for b in b_list))
+                elif len(b_list) < len(goals):
+                    goal_dist = float(
+                        sum(min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for g in goals) for b in b_list)
+                    )
                 else:
                     goal_dist = 0.0
                     for g in goals:
@@ -1383,7 +1398,12 @@ class MentalSimulationPlanner:
                 visited_states.add(state_key)
 
                 if is_block_delivery:
-                    if all(g in cur_blocks for g in goals) and path_len > 0:
+                    required_deliveries = min(len(cur_blocks), len(goals))
+                    if (
+                        required_deliveries > 0
+                        and len(cur_blocks.intersection(goals)) >= required_deliveries
+                        and path_len > 0
+                    ):
                         path = _reconstruct_path(node_id)
                         logger.info(
                             "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",

@@ -197,6 +197,7 @@ class GridTopologyGraph:
         def _heuristic(r: int, c: int) -> float:
             return min(abs(r - gr) + abs(c - gc) for gr, gc in goal_coords) * inv_stride
 
+        grid_rows = grid.tolist()
         open_heap: list[tuple[float, float, int, int, int]] = [(_heuristic(sr, sc), 0.0, 0, sr, sc)]
         best_cost: dict[tuple[int, int], float] = {(sr, sc): 0.0}
         came_from: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
@@ -244,7 +245,7 @@ class GridTopologyGraph:
                         if not (0 <= ir < H and 0 <= ic < W):
                             ray_clear = False
                             break
-                        mid_feat = int(grid[ir, ic])
+                        mid_feat = int(grid_rows[ir][ic])
                         mid_ev = evaluate_edge((ir, ic), mid_feat)
                         if not mid_ev.traversable and (
                             not allow_goal_entry or (ir, ic) not in goal_coords
@@ -258,7 +259,7 @@ class GridTopologyGraph:
                 if not ray_clear:
                     continue
 
-                edge_ev = evaluate_edge(next_coord, int(grid[nr, nc]))
+                edge_ev = evaluate_edge(next_coord, int(grid_rows[nr][nc]))
                 is_goal = next_coord in goal_coords
                 if not edge_ev.traversable and not (
                     is_goal and (edge_ev.goal_value > 0.0 or allow_goal_entry)
@@ -803,6 +804,7 @@ class GeodesicManifoldRouter:
                 from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
 
                 action_map = {act: (int(dr), int(dc)) for act, dr, dc in effective_actions}
+                mask_rows = mask.tolist()
 
                 def _eval_mask_kb(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
                     if pos == cand_goal:
@@ -815,7 +817,7 @@ class GeodesicManifoldRouter:
                             mutates_state=False,
                             confidence=1.0,
                         )
-                    if not bool(mask[pos[0], pos[1]]):
+                    if not bool(mask_rows[pos[0]][pos[1]]):
                         return TransitionEdgeEvaluation(
                             traversable=False,
                             step_cost=float("inf"),

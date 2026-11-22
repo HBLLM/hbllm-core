@@ -19,7 +19,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 
@@ -545,6 +545,7 @@ class ExogenousSignalTracker:
     )
     _cached_partition_key: tuple[Any, ...] | None = field(default=None, init=False, repr=False)
     _cached_partition_rows: Any | None = field(default=None, init=False, repr=False)
+    _PARTITION_CACHE: ClassVar[dict[tuple[Any, ...], Any]] = {}
 
     def reset_episode(self, *, retain_long_term: bool = True) -> None:
         """Reset transient empirical exogeneity statistics on episode boundary."""
@@ -643,14 +644,21 @@ class ExogenousSignalTracker:
         except (TypeError, ValueError):
             bg_val = 0
 
+        use_shared_cache = arr.size <= 16384
         cache_sig = (
             H,
             W,
             bg_val,
-            arr.tobytes() if arr.size <= 16384 else id(lattice),
+            arr.tobytes() if use_shared_cache else id(lattice),
         )
         if self._cached_partition_key == cache_sig and self._cached_partition_rows is not None:
             return self._cached_partition_rows
+        if use_shared_cache:
+            shared_cached = self._PARTITION_CACHE.get(cache_sig)
+            if shared_cached is not None:
+                self._cached_partition_key = cache_sig
+                self._cached_partition_rows = shared_cached
+                return shared_cached
 
         flags = np.zeros(H, dtype=bool)
         max_val = int(arr.max())
@@ -793,6 +801,11 @@ class ExogenousSignalTracker:
                             flags[div_r:] = True
                             break
 
+        flags.setflags(write=False)
+        if use_shared_cache:
+            if len(self._PARTITION_CACHE) >= 8:
+                self._PARTITION_CACHE.pop(next(iter(self._PARTITION_CACHE)))
+            self._PARTITION_CACHE[cache_sig] = flags
         self._cached_partition_key = cache_sig
         self._cached_partition_rows = flags
         return flags

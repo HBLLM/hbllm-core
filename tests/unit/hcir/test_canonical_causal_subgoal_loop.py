@@ -16,6 +16,7 @@ from __future__ import annotations
 import numpy as np
 
 from hbllm.hcir.world.autonomous_epistemic_engine import (
+    ActionDynamicsModel,
     AutonomousEpistemicEngine,
 )
 from hbllm.hcir.world.cortex_planner import (
@@ -129,50 +130,10 @@ def test_hierarchical_subgoal_decomposition_with_causal_prerequisite():
 
     # Register known directional movements
     engine.action_dynamics = {
-        1: type(
-            "Dyn",
-            (),
-            {
-                "is_displacement_action": lambda s: True,
-                "get_displacement": lambda s: (-1, 0),
-                "delta_r": -1,
-                "delta_c": 0,
-                "confidence": 1.0,
-            },
-        )(),
-        2: type(
-            "Dyn",
-            (),
-            {
-                "is_displacement_action": lambda s: True,
-                "get_displacement": lambda s: (1, 0),
-                "delta_r": 1,
-                "delta_c": 0,
-                "confidence": 1.0,
-            },
-        )(),
-        3: type(
-            "Dyn",
-            (),
-            {
-                "is_displacement_action": lambda s: True,
-                "get_displacement": lambda s: (0, -1),
-                "delta_r": 0,
-                "delta_c": -1,
-                "confidence": 1.0,
-            },
-        )(),
-        4: type(
-            "Dyn",
-            (),
-            {
-                "is_displacement_action": lambda s: True,
-                "get_displacement": lambda s: (0, 1),
-                "delta_r": 0,
-                "delta_c": 1,
-                "confidence": 1.0,
-            },
-        )(),
+        1: ActionDynamicsModel(action_id=1, delta_r=-1, delta_c=0, confidence=1.0, probes_tested=1),
+        2: ActionDynamicsModel(action_id=2, delta_r=1, delta_c=0, confidence=1.0, probes_tested=1),
+        3: ActionDynamicsModel(action_id=3, delta_r=0, delta_c=-1, confidence=1.0, probes_tested=1),
+        4: ActionDynamicsModel(action_id=4, delta_r=0, delta_c=1, confidence=1.0, probes_tested=1),
     }
 
     # Feed causal knowledge that switch at (1, 5) clears door at (3, 3)

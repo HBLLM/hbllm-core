@@ -9,6 +9,7 @@ may only decrease over time.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -155,3 +156,30 @@ def test_decision_core_file_size_ratchet() -> None:
     assert episodic_loc <= MAX_EPISODIC_LOC, (
         f"cortex_episodic.py has {episodic_loc} LOC > ratchet {MAX_EPISODIC_LOC}"
     )
+
+
+def test_transition_kb_and_topology_ontology_free_ratchet() -> None:
+    """Ensure TransitionKB & topology router contain no hardcoded domain ontology labels or deleted private sets."""
+    forbidden_literals = frozenset({"barrier", "walkable", "cargo", "receptacle", "key", "door"})
+    ontology_free_files = (
+        WORLD_DIR / "causal" / "transition_kb.py",
+        WORLD_DIR / "topological_graph_induction.py",
+    )
+    for target in ontology_free_files:
+        src = target.read_text(encoding="utf-8")
+        tree = ast.parse(src, filename=str(target))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert node.value.strip().lower() not in forbidden_literals, (
+                    f"Forbidden domain ontology literal {node.value!r} found in {target}"
+                )
+
+    deleted_private_re = re.compile(
+        r"\._(goal|barrier|walkable|cargo|receptacle|actuator)_features\b"
+    )
+    for path in _iter_python_files(HBLLM_DIR):
+        src = path.read_text(encoding="utf-8", errors="ignore")
+        match = deleted_private_re.search(src)
+        assert match is None, (
+            f"Deleted private ontology attribute {match.group(0)!r} referenced in {path}"
+        )

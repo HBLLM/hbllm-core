@@ -1517,18 +1517,25 @@ class HCIRSymbolicWorldTheory:
         self._candidate_goal_features.discard(feature_id)
         self._feature_evidence.pop(("candidate_goal", feature_id), None)
 
-    def retract_barrier(self, feature_id: Any, reason: str = "") -> None:
+    def retract_barrier(
+        self, feature_id: Any, reason: str = "", *, preserve_lethal: bool = False
+    ) -> None:
         """Retract a barrier feature and clear evaluation caches."""
         self.transition_kb.retract_outcome(feature_id, TransitionOutcome.BLOCKED)
-        self.transition_kb.retract_outcome(feature_id, TransitionOutcome.TERMINAL_FAIL)
-        self.barrier_predicates = [
-            p
-            for p in self.barrier_predicates
-            if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
-        ]
+        if not preserve_lethal:
+            self.transition_kb.retract_outcome(feature_id, TransitionOutcome.TERMINAL_FAIL)
+        still_lethal = preserve_lethal and self.transition_kb.has_feature_outcome(
+            feature_id, TransitionOutcome.TERMINAL_FAIL
+        )
+        if not still_lethal:
+            self.barrier_predicates = [
+                p
+                for p in self.barrier_predicates
+                if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
+            ]
+            self._feature_evidence.pop(("barrier", feature_id), None)
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
-        self._feature_evidence.pop(("barrier", feature_id), None)
 
     def retract_walkable(self, feature_id: Any, reason: str = "") -> None:
         """Retract a walkable feature and clear evaluation caches."""
