@@ -43,9 +43,11 @@ class ObjectStateGraphPlanner:
         self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()
 
     def on_boundary(self, boundary) -> None:
-        """Episode lifecycle boundary handler (WP0.5). Delegates to the
-        deprecated reset_episode for backward-compatible semantics."""
-        self.reset_episode()
+        """Episode lifecycle boundary handler (WP0.5)."""
+        from hbllm.hcir.world.percept import resolve_boundary_flags
+
+        _, retain_dyn, is_same_ctx = resolve_boundary_flags(boundary)
+        self.reset_episode(is_new_context=not (retain_dyn and is_same_ctx))
 
     @property
     def boundary_retention(self):

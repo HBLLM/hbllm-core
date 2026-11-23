@@ -356,12 +356,20 @@ class MyAgent(Agent):
         if hasattr(self.internal_agent, "on_boundary"):
             from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
 
+            if not retain_dynamics:
+                b_kind = EpisodeBoundaryKind.CONTEXT_RESET
+                same_ctx = False
+            elif is_new_level:
+                b_kind = EpisodeBoundaryKind.LEVEL_COMPLETE
+                same_ctx = False
+            else:
+                b_kind = EpisodeBoundaryKind.DEATH
+                same_ctx = level is None or level == self.current_levels_completed
             self.internal_agent.on_boundary(
                 EpisodeBoundary(
-                    kind=EpisodeBoundaryKind.LEVEL_COMPLETE
-                    if is_new_level
-                    else EpisodeBoundaryKind.DEATH,
+                    kind=b_kind,
                     retain_dynamics=retain_dynamics,
+                    same_context=same_ctx,
                 )
             )
         elif hasattr(self.internal_agent, "reset_episode"):

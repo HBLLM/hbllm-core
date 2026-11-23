@@ -149,19 +149,35 @@ class EpisodeBoundary:
         EpisodeBoundaryKind.CONTEXT_RESET
     )
     retain_dynamics: bool = True
-    same_level: bool = False
+    same_level: bool | None = None
     same_context: bool | None = None
 
     def __post_init__(self) -> None:
         if self.same_context is not None:
-            object.__setattr__(self, "same_level", bool(self.same_context))
+            resolved = bool(self.same_context)
+        elif self.same_level is not None:
+            resolved = bool(self.same_level)
         else:
-            object.__setattr__(self, "same_context", bool(self.same_level))
+            resolved = bool(
+                self.retain_dynamics and self.kind in (EpisodeBoundaryKind.DEATH, "death", "retry")
+            )
+        object.__setattr__(self, "same_level", resolved)
+        object.__setattr__(self, "same_context", resolved)
 
     @property
     def is_same_context(self) -> bool:
         """True when episode resets within the exact same spatial/situational context."""
         return bool(self.same_context if self.same_context is not None else self.same_level)
+
+
+def resolve_boundary_flags(boundary: Any) -> tuple[Any, bool, bool]:
+    """Return ``(kind, retain_dynamics, is_same_context)`` for a boundary marker or kind."""
+    if isinstance(boundary, EpisodeBoundary):
+        retain_dyn = bool(boundary.retain_dynamics)
+        return boundary.kind, retain_dyn, bool(boundary.is_same_context and retain_dyn)
+    kind = boundary
+    is_same_ctx = kind in (EpisodeBoundaryKind.DEATH, "death", "retry")
+    return kind, True, is_same_ctx
 
 
 @dataclass

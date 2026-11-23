@@ -2484,12 +2484,9 @@ class AutonomousEpistemicEngine:
         state (goals, inhibitions, object ids, mental plans) is cleared;
         long-term skills are lifelong.
         """
-        from hbllm.hcir.world.percept import EpisodeBoundaryKind
+        from hbllm.hcir.world.percept import EpisodeBoundaryKind, resolve_boundary_flags
 
-        kind = getattr(boundary, "kind", boundary)
-        is_same_context = getattr(
-            boundary, "is_same_context", getattr(boundary, "same_level", False)
-        )
+        kind, retain_dyn, is_same_context = resolve_boundary_flags(boundary)
         if kind in (
             EpisodeBoundaryKind.GOAL_REACHED,
             EpisodeBoundaryKind.LEVEL_COMPLETE,
@@ -2511,7 +2508,7 @@ class AutonomousEpistemicEngine:
                     self.consolidate_episodic_memory(terminal_reward=1.0)
                 except Exception as exc:  # consolidation must never break the lifecycle
                     logger.debug("Episodic consolidation failed at boundary: %s", exc)
-            self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
+            self.reset_episode(retain_dynamics=retain_dyn, is_new_context=not is_same_context)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
             if (
                 not self._feedback_assimilated
@@ -2519,9 +2516,9 @@ class AutonomousEpistemicEngine:
                 and self.last_action is not None
             ):
                 self.assimilate_feedback(self.prev_grid, [], is_failure=True)
-            self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
+            self.reset_episode(retain_dynamics=retain_dyn, is_new_context=not is_same_context)
         else:
-            self.reset_episode(retain_dynamics=True, is_new_context=not is_same_context)
+            self.reset_episode(retain_dynamics=retain_dyn, is_new_context=not is_same_context)
         if not is_same_context and self.symbolic_theory.labels_non_stationary:
             from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
 
@@ -2538,7 +2535,7 @@ class AutonomousEpistemicEngine:
         # Fan out to every faculty exposing a boundary handler (WP0.5).
         for attr in vars(self).values():
             handler = getattr(attr, "on_boundary", None)
-            if callable(handler) and attr is not self:
+            if callable(handler) and attr is not self and attr is not self.object_planner:
                 try:
                     handler(boundary)
                 except Exception as exc:

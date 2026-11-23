@@ -2860,9 +2860,10 @@ class EpistemicFeedbackAssimilator:
 
             # Record the terminal winning transition before reset clears current_episode
             # so Hippocampal SWR consolidation and DreamCoder LibraryLearner capture the full trace.
+            decision_pos = prev_avatar_pos if prev_avatar_pos is not None else view.avatar_pos
             view.episodic_cortex.record_transition(
                 step=view.step_counter,
-                avatar_pos=view.avatar_pos,
+                avatar_pos=decision_pos,
                 action=action,
                 action_data=action_data,
                 observation_diff=diff,
@@ -2890,8 +2891,25 @@ class EpistemicFeedbackAssimilator:
         is_fatal = (terminal == TerminalSignal.FAILURE) or (
             is_failure and terminal != TerminalSignal.TIMEOUT
         )
+        transition_recorded = False
 
         if is_fatal:
+            if action is not None:
+                decision_pos = prev_avatar_pos if prev_avatar_pos is not None else view.avatar_pos
+                view.episodic_cortex.record_transition(
+                    step=view.step_counter,
+                    avatar_pos=decision_pos,
+                    action=action,
+                    action_data=action_data,
+                    observation_diff=diff,
+                    reward=-1.0,
+                    is_terminal=True,
+                    terminal=terminal,
+                    is_failure=True,
+                    is_success=False,
+                    grid_snapshot=curr_grid,
+                )
+            transition_recorded = True
             # Faculty: Lateral Habenula & aMCC Fatal Prefix Backpropagation & Negative Valence
             view.working_memory.habenular_ior.record_catastrophe(
                 final_step=view.step_counter,
@@ -3182,19 +3200,21 @@ class EpistemicFeedbackAssimilator:
                         view.working_memory.register_tool_unlock(h_item.feature_id, orig_val)
 
         # Faculty: Hippocampal CA1/CA3 Experiential Trace Buffer
-        view.episodic_cortex.record_transition(
-            step=view.step_counter,
-            avatar_pos=view.avatar_pos,
-            action=action,
-            action_data=action_data,
-            observation_diff=diff,
-            reward=1.0 if is_success else (-1.0 if is_failure else 0.0),
-            is_terminal=is_success or is_failure,
-            terminal=terminal,
-            is_failure=is_failure,
-            is_success=is_success,
-            grid_snapshot=curr_grid,
-        )
+        if not transition_recorded:
+            decision_pos = prev_avatar_pos if prev_avatar_pos is not None else view.avatar_pos
+            view.episodic_cortex.record_transition(
+                step=view.step_counter,
+                avatar_pos=decision_pos,
+                action=action,
+                action_data=action_data,
+                observation_diff=diff,
+                reward=1.0 if is_success else (-1.0 if is_failure else 0.0),
+                is_terminal=is_success or is_failure,
+                terminal=terminal,
+                is_failure=is_failure,
+                is_success=is_success,
+                grid_snapshot=curr_grid,
+            )
 
         # Faculty: Prefrontal Inductive Hypothesis Testing & Relational Rule Discovery
         if view.prev_grid is not None:
