@@ -392,72 +392,13 @@ class EpistemicFeedbackAssimilator:
         )
 
     @staticmethod
-    def assimilate(
+    def _assimilate_epistemic_goals(
         view: Any,
-        curr_grid: Any,
-        available_actions: Sequence[Any],
-        terminal: TerminalSignal | None = None,
-        is_success: bool = False,
-        is_failure: bool = False,
-        action: Any | None = None,
-        action_data: dict[str, Any] | None = None,
-        **kwargs: Any,
+        curr_grid: np.ndarray,
+        H: int,
+        W: int,
     ) -> None:
-        """Assimilate sensory feedback from previous action into empirical world models."""
-        is_success = is_success or terminal == TerminalSignal.SUCCESS
-        is_failure = is_failure or terminal in (
-            TerminalSignal.FAILURE,
-            TerminalSignal.TIMEOUT,
-        )
-        if action is not None:
-            view.state.last_action = action
-            view.recent_actions.append(action)
-        if action_data is not None:
-            view.state.last_action_data = action_data
-
-        if view.prev_grid is None or view.last_action is None:
-            return
-
-        view.state._feedback_assimilated = True
-        prev_avatar_pos = view.avatar_pos
-
-        curr_grid = view.normalize_sensory_input(curr_grid)
-        if view.prev_grid is not None and view.prev_grid.shape != curr_grid.shape:
-            # Lattice extent changed (new context/episode): prior-lattice
-            # diffs are incomparable — start the episode's diff chain fresh.
-            view.apply_wm_delta(WorkingMemoryDelta("prev_grid", None))
-            return
-        H, W = curr_grid.shape
-
-        if not is_success:
-            walkable_feats = view.symbolic_theory.walkable_features
-            cargo_feats = view.symbolic_theory.cargo_features | view.learned_cargo_features
-            av_feats_frame = set(view.avatar_features or ())
-            if view.avatar_feature is not None:
-                av_feats_frame.add(view.avatar_feature)
-            view.hazard_tracker.record_frame(
-                view.step_counter,
-                curr_grid,
-                background_feature=view.bg_feature,
-                avatar_features=av_feats_frame,
-                walkable_features=walkable_feats,
-                cargo_features=cargo_feats,
-            )
-            for mob_f in view.hazard_tracker.mobile_entities:
-                if mob_f != view.bg_feature and mob_f not in cargo_feats:
-                    view.symbolic_theory.retract_walkable(mob_f, reason="autonomous_mobile")
-                    view.symbolic_theory.retract_candidate_goal(mob_f, reason="autonomous_mobile")
-                    if mob_f != view.avatar_feature:
-                        view.avatar_features.discard(mob_f)
-
-        diff = view.compute_frame_diff(view.prev_grid, curr_grid)
-        action = view.last_action
-        action_data = view.last_action_data
-
-        # Track visited cells in PrefrontalWorkingMemory (P2-9)
-        if view.avatar_pos is not None:
-            view.working_memory.visited_cells.add(view.avatar_pos)
-
+        """Assimilate epistemic curiosity goal completions and retire satisfied goals."""
         # Epistemic Goal Lifecycle Evaluation (P2-8):
         # A curiosity goal is satisfied when:
         # 1. Target feature is absent at target coordinate (consumed / collected / changed)
@@ -523,30 +464,20 @@ class EpistemicFeedbackAssimilator:
                 if getattr(last_step, "predicted_avatar_pos", None) == gp:
                     view.mental_plan.clear()
 
-        # Classify the observed effect kind for the motor posterior.
-        if action is not None and hasattr(view, "record_action_effect"):
-            _is_eff = bool(
-                (
-                    action_data
-                    and isinstance(action_data, dict)
-                    and any(k in action_data for k in ("x", "y", "col", "row"))
-                )
-                or (hasattr(view, "is_spatial_effector") and view.is_spatial_effector(action))
-            )
-            if _is_eff:
-                _kind = "point_effect"
-            elif diff.changed_pixel_count == 0:
-                _kind = "no_op"
-            else:
-                _av_prev = getattr(view, "prev_avatar_pos", None)
-                _av_cur = getattr(view, "avatar_pos", None)
-                _kind = (
-                    "translate"
-                    if (_av_prev is not None and _av_cur is not None and _av_prev != _av_cur)
-                    else "state_change"
-                )
-            view.record_action_effect(action, _kind)
-
+    @staticmethod
+    def _assimilate_effector_and_actuation(
+        view: Any,
+        curr_grid: np.ndarray,
+        diff: Any,
+        action: Any,
+        action_data: dict[str, Any] | None,
+        prev_avatar_pos: tuple[int, int] | None,
+        is_success: bool,
+        is_failure: bool,
+        H: int,
+        W: int,
+    ) -> tuple[bool, bool, bool]:
+        """Assimilate spatial effector target binding, undo discovery, and quiescence."""
         aff = view.action_affordances.get(action)
 
         if aff is not None:
@@ -782,7 +713,7 @@ class EpistemicFeedbackAssimilator:
                 view.working_memory.habenular_ior.active_inhibitions[(view.avatar_pos, tok)] = 20
 
             if is_effector_action and not is_success and not is_failure:
-                return
+                return (is_effector_action, is_known_displacement, True)
         else:
             view.state.consecutive_quiescent_actions = 0
             if target_coord is not None:
@@ -1065,6 +996,30 @@ class EpistemicFeedbackAssimilator:
                                     + 5
                                 )
 
+        return (is_effector_action, is_known_displacement, False)
+
+    @staticmethod
+    def _assimilate_motor_calibration(
+        view: Any,
+        curr_grid: np.ndarray,
+        prev_entities: Sequence[SpatialEntity],
+        curr_entities: Sequence[SpatialEntity],
+        diff: Any,
+        action: Any,
+        action_data: dict[str, Any] | None,
+        is_effector_action: bool,
+        is_success: bool,
+        is_failure: bool,
+        prev_avatar_pos: tuple[int, int] | None,
+        bg: int,
+        H: int,
+        W: int,
+    ) -> tuple[
+        list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]], list[tuple[int, int]], bool
+    ]:
+        """Calibrate motor dynamics models and ego-avatar displacement tracking."""
+        satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
+        manip_moved = False
         # ── A. Motor Calibration & Proprioception ────────────────────────────
         H, W = curr_grid.shape
         bg = view.estimate_background(curr_grid)
@@ -1747,6 +1702,29 @@ class EpistemicFeedbackAssimilator:
                                 ce.feature_id,
                                 ce.area,
                             )
+        return (av_moved, landing_cells_now, manip_moved)
+
+    @staticmethod
+    def _assimilate_proprioception_and_barriers(
+        view: Any,
+        curr_grid: np.ndarray,
+        diff: Any,
+        action: Any,
+        action_data: dict[str, Any] | None,
+        is_effector_action: bool,
+        is_known_displacement: bool,
+        av_moved: list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]],
+        manip_moved: bool,
+        available_actions: Sequence[Any],
+        is_success: bool,
+        is_failure: bool,
+        prev_avatar_pos: tuple[int, int] | None,
+        bg: int,
+        H: int,
+        W: int,
+    ) -> None:
+        """Verify proprioceptive efference copy and ground obstacles and collisions in TransitionKB."""
+        act_dyn = view.action_dynamics.get(action) if not is_effector_action else None
         # ── Proprioceptive Efference Copy Verification & Obstacle Grounding ──
         continuous_moved = bool(getattr(view.working_memory, "last_continuous_moved", False))
         if continuous_moved and action is not None and not is_effector_action:
@@ -2308,6 +2286,26 @@ class EpistemicFeedbackAssimilator:
                 if avatar_moved or diff.changed_pixel_count > 0:
                     view.apply_wm_delta(WorkingMemoryDelta("consecutive_plan_failures", 0))
 
+    @staticmethod
+    def _assimilate_state_mutations_and_cargo(
+        view: Any,
+        curr_grid: np.ndarray,
+        diff: Any,
+        action: Any,
+        action_data: dict[str, Any] | None,
+        is_effector_action: bool,
+        is_known_displacement: bool,
+        available_actions: Sequence[Any],
+        is_success: bool,
+        is_failure: bool,
+        landing_cells_now: list[tuple[int, int]],
+        prev_avatar_pos: tuple[int, int] | None,
+        bg: int,
+        H: int,
+        W: int,
+    ) -> None:
+        """Induce Pearl causal do(a) environmental state mutations and track cargo manipulation."""
+        satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
         # ── B. Environmental Mutation Induction ──────────────────────────────
         # Per-call invariants resolved once: the owned-subsystem reads below are
         # re-evaluated per mutated pixel otherwise (journaled-view overhead).
@@ -2666,6 +2664,31 @@ class EpistemicFeedbackAssimilator:
                     if gate_pts:
                         view.mental_plan.clear()
 
+    @staticmethod
+    def _assimilate_terminal_feedback(
+        view: Any,
+        curr_grid: np.ndarray,
+        prev_entities: Sequence[SpatialEntity],
+        diff: Any,
+        action: Any,
+        action_data: dict[str, Any] | None,
+        terminal: TerminalSignal | None,
+        is_success: bool,
+        is_failure: bool,
+        prev_avatar_pos: tuple[int, int] | None,
+        bg: int,
+        H: int,
+        W: int,
+    ) -> None:
+        """Assimilate terminal win/loss feedback, update goals and hazards, and record ledger outcomes."""
+        _sym_theory = view.symbolic_theory
+        _bg_feature = view.bg_feature
+        _prev_grid = view.prev_grid
+        _hazard_tracker = view.hazard_tracker
+        _wm_exog = view.working_memory
+        av_feats = set(view.avatar_features or ()) | (
+            {view.avatar_feature} if view.avatar_feature is not None else set()
+        )
         # ── C. Win / Loss Feedback Assimilation ──────────────────────────────
 
         if is_success:
@@ -3243,6 +3266,198 @@ class EpistemicFeedbackAssimilator:
                 is_won=is_success,
                 background_feature=view.bg_feature,
             )
+
+    @staticmethod
+    def assimilate(
+        view: Any,
+        curr_grid: Any,
+        available_actions: Sequence[Any],
+        terminal: TerminalSignal | None = None,
+        is_success: bool = False,
+        is_failure: bool = False,
+        action: Any | None = None,
+        action_data: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Assimilate sensory feedback from previous action into empirical world models."""
+        is_success = is_success or terminal == TerminalSignal.SUCCESS
+        is_failure = is_failure or terminal in (
+            TerminalSignal.FAILURE,
+            TerminalSignal.TIMEOUT,
+        )
+        if action is not None:
+            view.state.last_action = action
+            view.recent_actions.append(action)
+        if action_data is not None:
+            view.state.last_action_data = action_data
+
+        if view.prev_grid is None or view.last_action is None:
+            return
+
+        view.state._feedback_assimilated = True
+        prev_avatar_pos = view.avatar_pos
+
+        curr_grid = view.normalize_sensory_input(curr_grid)
+        if view.prev_grid is not None and view.prev_grid.shape != curr_grid.shape:
+            # Lattice extent changed (new context/episode): prior-lattice
+            # diffs are incomparable — start the episode's diff chain fresh.
+            view.apply_wm_delta(WorkingMemoryDelta("prev_grid", None))
+            return
+        H, W = curr_grid.shape
+
+        if not is_success:
+            walkable_feats = view.symbolic_theory.walkable_features
+            cargo_feats = view.symbolic_theory.cargo_features | view.learned_cargo_features
+            av_feats_frame = set(view.avatar_features or ())
+            if view.avatar_feature is not None:
+                av_feats_frame.add(view.avatar_feature)
+            view.hazard_tracker.record_frame(
+                view.step_counter,
+                curr_grid,
+                background_feature=view.bg_feature,
+                avatar_features=av_feats_frame,
+                walkable_features=walkable_feats,
+                cargo_features=cargo_feats,
+            )
+            for mob_f in view.hazard_tracker.mobile_entities:
+                if mob_f != view.bg_feature and mob_f not in cargo_feats:
+                    view.symbolic_theory.retract_walkable(mob_f, reason="autonomous_mobile")
+                    view.symbolic_theory.retract_candidate_goal(mob_f, reason="autonomous_mobile")
+                    if mob_f != view.avatar_feature:
+                        view.avatar_features.discard(mob_f)
+
+        diff = view.compute_frame_diff(view.prev_grid, curr_grid)
+        action = view.last_action
+        action_data = view.last_action_data
+
+        # Track visited cells in PrefrontalWorkingMemory (P2-9)
+        if view.avatar_pos is not None:
+            view.working_memory.visited_cells.add(view.avatar_pos)
+
+        # 1. Epistemic Goal Lifecycle Evaluation (P2-8)
+        EpistemicFeedbackAssimilator._assimilate_epistemic_goals(view, curr_grid, H, W)
+
+        # Classify the observed effect kind for the motor posterior.
+        if action is not None and hasattr(view, "record_action_effect"):
+            _is_eff = bool(
+                (
+                    action_data
+                    and isinstance(action_data, dict)
+                    and any(k in action_data for k in ("x", "y", "col", "row"))
+                )
+                or (hasattr(view, "is_spatial_effector") and view.is_spatial_effector(action))
+            )
+            if _is_eff:
+                _kind = "point_effect"
+            elif diff.changed_pixel_count == 0:
+                _kind = "no_op"
+            else:
+                _av_prev = getattr(view, "prev_avatar_pos", None)
+                _av_cur = getattr(view, "avatar_pos", None)
+                _kind = (
+                    "translate"
+                    if (_av_prev is not None and _av_cur is not None and _av_prev != _av_cur)
+                    else "state_change"
+                )
+            view.record_action_effect(action, _kind)
+
+        # 2. Spatial Effector & Actuation
+        is_effector_action, is_known_displacement, should_return = (
+            EpistemicFeedbackAssimilator._assimilate_effector_and_actuation(
+                view,
+                curr_grid,
+                diff,
+                action,
+                action_data,
+                prev_avatar_pos,
+                is_success,
+                is_failure,
+                H,
+                W,
+            )
+        )
+        if should_return:
+            return
+
+        bg = view.estimate_background(curr_grid)
+        prev_entities = view.extract_entities(view.prev_grid, bg)
+        curr_entities = view.extract_entities(curr_grid, bg)
+
+        # 3. Motor Calibration & Proprioception
+        av_moved, landing_cells_now, manip_moved = (
+            EpistemicFeedbackAssimilator._assimilate_motor_calibration(
+                view,
+                curr_grid,
+                prev_entities,
+                curr_entities,
+                diff,
+                action,
+                action_data,
+                is_effector_action,
+                is_success,
+                is_failure,
+                prev_avatar_pos,
+                bg,
+                H,
+                W,
+            )
+        )
+
+        # 4. Proprioception & Barrier Grounding
+        EpistemicFeedbackAssimilator._assimilate_proprioception_and_barriers(
+            view,
+            curr_grid,
+            diff,
+            action,
+            action_data,
+            is_effector_action,
+            is_known_displacement,
+            av_moved,
+            manip_moved,
+            available_actions,
+            is_success,
+            is_failure,
+            prev_avatar_pos,
+            bg,
+            H,
+            W,
+        )
+
+        # 5. Environmental Mutation Induction & Cargo
+        EpistemicFeedbackAssimilator._assimilate_state_mutations_and_cargo(
+            view,
+            curr_grid,
+            diff,
+            action,
+            action_data,
+            is_effector_action,
+            is_known_displacement,
+            available_actions,
+            is_success,
+            is_failure,
+            landing_cells_now,
+            prev_avatar_pos,
+            bg,
+            H,
+            W,
+        )
+
+        # 6. Win / Loss Terminal Feedback Assimilation
+        EpistemicFeedbackAssimilator._assimilate_terminal_feedback(
+            view,
+            curr_grid,
+            prev_entities,
+            diff,
+            action,
+            action_data,
+            terminal,
+            is_success,
+            is_failure,
+            prev_avatar_pos,
+            bg,
+            H,
+            W,
+        )
 
         # Enforce avatar/threat non-intersection invariant
         if view.avatar_features:
