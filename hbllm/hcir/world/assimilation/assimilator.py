@@ -2156,9 +2156,7 @@ class EpistemicFeedbackAssimilator:
                         and not possible_orthogonal_wall_slip
                     ):
                         prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                        view.inhibited_actions[view.last_action] = max(prev_inh + 3, 5)
-                        if view.consecutive_stuck_steps >= 2:
-                            view.inhibited_actions[view.last_action] = max(prev_inh + 6, 8)
+                        view.inhibited_actions[view.last_action] = min(prev_inh + 2, 3)
                         if prev_avatar_pos is not None:
                             view.failed_transitions.add((prev_avatar_pos, view.last_action))
                             view.working_memory.habenular_ior.failed_transitions.add(
@@ -2176,7 +2174,7 @@ class EpistemicFeedbackAssimilator:
                             and not possible_orthogonal_wall_slip
                         ):
                             prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                            view.inhibited_actions[view.last_action] = max(prev_inh + 2, 4)
+                            view.inhibited_actions[view.last_action] = min(prev_inh + 2, 3)
                             view.failed_transitions.add((prev_avatar_pos, view.last_action))
                             view.working_memory.habenular_ior.failed_transitions.add(
                                 (prev_avatar_pos, view.last_action)

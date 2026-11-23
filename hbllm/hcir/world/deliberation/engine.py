@@ -902,7 +902,9 @@ class PrefrontalDeliberationEngine:
                 )
             if not has_progress:
                 for osc_act in osc_acts:
-                    view.inhibited_actions[osc_act] = max(view.inhibited_actions.get(osc_act, 0), 6)
+                    view.inhibited_actions[osc_act] = min(
+                        view.inhibited_actions.get(osc_act, 0) + 2, 3
+                    )
 
         # Faculty: Anterior Cingulate Cortex (ACC) Limit Cycle & Conflict Suppression
         forced_acc_perturbation: Any | None = None
@@ -931,9 +933,11 @@ class PrefrontalDeliberationEngine:
                     if hasattr(view, "working_memory") and hasattr(
                         view.working_memory, "inhibit_action"
                     ):
-                        view.working_memory.inhibit_action(cyc_a, duration=8)
+                        view.working_memory.inhibit_action(cyc_a, duration=2)
                     else:
-                        view.inhibited_actions[cyc_a] = max(view.inhibited_actions.get(cyc_a, 0), 8)
+                        view.inhibited_actions[cyc_a] = min(
+                            view.inhibited_actions.get(cyc_a, 0) + 2, 3
+                        )
                 view.mental_plan.clear()
                 from hbllm.hcir.world.cortex_motor import ACCConflictMonitor
 
