@@ -654,6 +654,14 @@ class HCIRSymbolicWorldTheory:
         )
 
     @property
+    def lethal_features(self) -> frozenset[Any]:
+        """Empirically verified lethal hazard features derived from TransitionKB (read-only)."""
+        return (
+            self.transition_kb.features_with_outcome(TransitionOutcome.TERMINAL_FAIL)
+            - self._avatar_features
+        )
+
+    @property
     def avatar_features(self) -> frozenset[Any]:
         """Empirically verified self-avatar features (read-only)."""
         return frozenset(self._avatar_features)
@@ -1109,8 +1117,15 @@ class HCIRSymbolicWorldTheory:
         elif aff_str in (AffordanceType.ACTUATABLE.value, "actuator", "switch", "button"):
             return self.is_actuator(feature_id)
         elif aff_str in (AffordanceType.HAZARD.value, "hazard", "lethal"):
-            return self.get_role(feature_id) == "hazard"
+            return self.is_lethal(feature_id)
         return False
+
+    def is_lethal(self, feature_id: Any) -> bool:
+        """True if feature_id is an empirically verified lethal hazard in TransitionKB."""
+        return feature_id not in self._avatar_features and (
+            self.transition_kb.has_feature_outcome(feature_id, TransitionOutcome.TERMINAL_FAIL)
+            or self.get_role(feature_id) == "hazard"
+        )
 
     def induce_goal(self, feature_id: Any, evidence: Any = None) -> bool:
         """Induce universal goal predicate with minimum description length and evidence gating."""
@@ -1278,10 +1293,9 @@ class HCIRSymbolicWorldTheory:
         if mark_verified:
             self.mark_verified_in_context("barrier", feature_id)
         already_barrier = self._is_kb_barrier(feature_id)
+        is_lethal_outcome = "lethal" in ev_low or "hazard" in ev_low or "death" in ev_low
         kb_outcome = (
-            TransitionOutcome.TERMINAL_FAIL
-            if ("lethal" in ev_low or "hazard" in ev_low or "death" in ev_low)
-            else TransitionOutcome.BLOCKED
+            TransitionOutcome.TERMINAL_FAIL if is_lethal_outcome else TransitionOutcome.BLOCKED
         )
         self.transition_kb.retract_outcome(feature_id, TransitionOutcome.TRAVERSED)
         self.transition_kb.record_outcome(
@@ -1293,12 +1307,16 @@ class HCIRSymbolicWorldTheory:
         existing_rank, _ = self._feature_evidence.get(("barrier", feature_id), (0, ""))
         if not already_barrier:
             self._feature_evidence[("barrier", feature_id)] = (rank, ev_str)
-            self.bind_feature_to_role(feature_id, "barrier")
+            self.bind_feature_to_role(feature_id, "hazard" if is_lethal_outcome else "barrier")
             pred = CausalPredicate(
                 variable="feature_id",
                 operator="==",
                 value=feature_id,
-                metadata={"evidence": ev_str, "rank": rank, "role": "barrier"},
+                metadata={
+                    "evidence": ev_str,
+                    "rank": rank,
+                    "role": "hazard" if is_lethal_outcome else "barrier",
+                },
             )
             self.barrier_predicates.append(pred)
             logger.info(

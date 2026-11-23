@@ -11,6 +11,7 @@ notch detection, ARC palette symmetries, corridor manifold continuity) live here
 in the plugin layer, keeping the cognitive core 100% domain-agnostic.
 """
 
+import copy
 import logging
 from collections.abc import Sequence
 from typing import Any
@@ -120,7 +121,8 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
     """Domain Sensory Adapter lifting ARC-AGI 2D grids into standardized PerceptionFrames."""
 
     def __init__(self) -> None:
-        pass
+        self._cached_key: Any = None
+        self._cached_frame: PerceptionFrame | None = None
 
     def lift_percept(
         self,
@@ -204,6 +206,40 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
         candidate_goals.difference_update(recent_pos)
         if av_pos is not None:
             candidate_goals.discard(av_pos)
+
+        cache_key = (
+            hash(grid.tobytes()),
+            av_pos,
+            av_feature,
+            len(barrier_features),
+            len(goal_features),
+            len(walkable_features),
+            len(learned_barriers),
+            len(learned_goals),
+            len(known_lethals),
+        )
+        if cache_key == self._cached_key and self._cached_frame is not None:
+            diff = None
+            prev_grid = getattr(context, "prev_grid", None) or kwargs.get("prev_grid")
+            if (
+                prev_grid is not None
+                and isinstance(prev_grid, np.ndarray)
+                and prev_grid.shape == grid.shape
+            ):
+                diff = PerceptionEngine.compute_frame_diff(prev_grid, grid)
+            f = self._cached_frame
+            return PerceptionFrame(
+                entities=f.entities,
+                passable_topology=f.passable_topology,
+                avatar_pos=av_pos,
+                avatar_features=f.avatar_features,
+                candidate_goals=f.candidate_goals,
+                static_barriers=f.static_barriers,
+                lethal_cells=f.lethal_cells,
+                shape=f.shape,
+                diff=diff,
+                metadata=f.metadata,
+            )
 
         structural_goals = PerceptionEngine.detect_structural_goals(
             grid=grid,
@@ -299,7 +335,7 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
         ):
             diff = PerceptionEngine.compute_frame_diff(prev_grid, grid)
 
-        return PerceptionFrame(
+        frame = PerceptionFrame(
             entities=entities,
             passable_topology=passable_topology,
             avatar_pos=av_pos,
@@ -311,6 +347,9 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             diff=diff,
             metadata={"bg": bg, "grid": grid},
         )
+        self._cached_key = cache_key
+        self._cached_frame = frame
+        return frame
 
 
 def _attach_object_macro_tasks(
@@ -415,6 +454,11 @@ def _attach_object_macro_tasks(
     return tasks
 
 
+_DEFAULT_ARC_ADAPTER = ARCPerceptionAdapter()
+_ARC_OBJECTS_CACHE: dict[Any, list[ObjectSpec]] = {}
+_ARC_OBJECTS_CACHE_MAX: int = 32
+
+
 def extract_arc_objects(
     grid: Any,
     engine: Any = None,
@@ -480,8 +524,21 @@ def extract_arc_objects(
     if engine is not None:
         goal_feats.update(getattr(engine, "learned_goal_features", set()))
 
+    obj_cache_key = (
+        hash(g.tobytes()),
+        av_pos,
+        len(goal_feats),
+        len(candidate_goal_feats),
+        len(cargo_feats),
+        len(rec_feats),
+        len(barrier_feats),
+        len(actuator_feats),
+    )
+    if obj_cache_key in _ARC_OBJECTS_CACHE:
+        return [copy.copy(obj) for obj in _ARC_OBJECTS_CACHE[obj_cache_key]]
+
     # Lift standardized PerceptionFrame with pre-grounded avatar context
-    adapter = adapter or ARCPerceptionAdapter()
+    adapter = adapter or _DEFAULT_ARC_ADAPTER
     try:
         frame = adapter.lift_percept(g, context=engine)
     except Exception as exc:
@@ -673,5 +730,9 @@ def extract_arc_objects(
                         ),
                     )
                 )
+
+    if len(_ARC_OBJECTS_CACHE) >= _ARC_OBJECTS_CACHE_MAX:
+        _ARC_OBJECTS_CACHE.pop(next(iter(_ARC_OBJECTS_CACHE)), None)
+    _ARC_OBJECTS_CACHE[obj_cache_key] = [copy.copy(obj) for obj in objects]
 
     return objects

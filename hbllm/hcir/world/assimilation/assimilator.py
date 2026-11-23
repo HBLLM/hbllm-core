@@ -3088,11 +3088,23 @@ class EpistemicFeedbackAssimilator:
                             _sym_theory.mark_verified_in_context("lethal", cand_feat_int)
                             _sym_theory.retract_cargo(cand_feat_int, reason="lethal_hazard")
                             _sym_theory.retract_goal(cand_feat_int, reason="lethal_hazard")
+                            _sym_theory.retract_candidate_goal(
+                                cand_feat_int, reason="lethal_hazard"
+                            )
                             _sym_theory.retract_walkable(cand_feat_int, reason="lethal_hazard")
                             _sym_theory.retract_conditional_affordance(
                                 cand_feat_int, reason="lethal_hazard"
                             )
                             _sym_theory.induce_barrier(cand_feat_int, evidence="lethal_hazard")
+                            _lg_loop = get_engine_state_attr(view, "learned_goal_positions", None)
+                            if isinstance(_lg_loop, set) and _prev_grid is not None:
+                                for gp in list(_lg_loop):
+                                    if (
+                                        0 <= gp[0] < H
+                                        and 0 <= gp[1] < W
+                                        and int(_prev_grid[gp[0], gp[1]]) == cand_feat_int
+                                    ):
+                                        _lg_loop.discard(gp)
                             if was_prior_safe:
                                 from hbllm.hcir.world.cortex_causal import (
                                     invalidate_stale_context_ontology,
@@ -3114,6 +3126,9 @@ class EpistemicFeedbackAssimilator:
                                 target_pos,
                             )
                     view.exhausted_candidate_goals.add(target_pos)
+                    lg = get_engine_state_attr(view, "learned_goal_positions", None)
+                    if isinstance(lg, set):
+                        lg.discard(target_pos)
 
                     # Trajectory-scale aversive conditioning:
                     # The destination cell target_pos resulted in catastrophic loss/death.
