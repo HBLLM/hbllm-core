@@ -1282,22 +1282,42 @@ class PrefrontalDeliberationEngine:
         ):
             # Active Inference & Efference Copy Divergence:
             # If the organism is physically stuck or the previous step produced zero movement,
-            # the counterfactual mental rollout is falsified. Clear stale plan immediately.
+            # the counterfactual mental rollout is falsified. Clear stale plan immediately and replan
+            # via forward mental simulation over updated causal dynamics and Habenular IOR.
             if view.consecutive_stuck_steps > 0:
                 view.mental_plan.clear()
                 view.working_memory.active_plan_step = None
                 view.state.phase = EpistemicPhase.REPLANNING
-                macro_plan = view.object_planner.plan_macro_option(
-                    view, curr_grid, available_actions
-                )
-                if macro_plan:
+                simulated_plan = view.simulate_in_mind(curr_grid, available_actions)
+                if simulated_plan:
+                    view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
+                    view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
                     view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
-                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(simulated_plan)))
                     next_step = view.mental_plan.popleft()
                     view.working_memory.active_plan_step = next_step
-                    chosen_action = next_step.action
-                    chosen_data = next_step.action_data
-                    predicted_pos = next_step.predicted_avatar_pos
+                    plan_safe, should_wait, wait_steps = self.validate_plan_safety(
+                        view, curr_grid, available_actions, next_step
+                    )
+                    if should_wait:
+                        chosen_action, chosen_data, predicted_pos = self._execute_temporal_pacing(
+                            view, curr_grid, available_actions, next_step, wait_steps
+                        )
+                        branch = "temporal_pacing"
+                    elif plan_safe and not view.working_memory.habenular_ior.is_action_inhibited(
+                        view.avatar_pos, next_step.action, next_step.action_data
+                    ):
+                        chosen_action = next_step.action
+                        chosen_data = next_step.action_data
+                        predicted_pos = next_step.predicted_avatar_pos
+                        branch = "mental_simulation"
+                    else:
+                        view.mental_plan.clear()
+                        view.working_memory.active_plan_step = None
+                        chosen_action, chosen_data = view.plan_epistemic_probe(
+                            curr_grid, available_actions
+                        )
+                        branch = "epistemic_probe"
                     chosen_action, chosen_data = self.ensure_effector_grounded(
                         view, curr_grid, available_actions, chosen_action, chosen_data
                     )
@@ -1305,7 +1325,7 @@ class PrefrontalDeliberationEngine:
                         view,
                         chosen_action,
                         chosen_data,
-                        branch="macro_plan",
+                        branch=branch,
                         predicted_pos=predicted_pos,
                         grid=curr_grid,
                     )
@@ -1353,49 +1373,33 @@ class PrefrontalDeliberationEngine:
             elif not plan_safe:
                 view.state.consecutive_pacing_steps = 0
                 view.mental_plan.clear()
-
+                view.working_memory.active_plan_step = None
                 view.state.phase = EpistemicPhase.REPLANNING
-                # Primary replanning: Object-Centric Macro Option
-                macro_plan = view.object_planner.plan_macro_option(
-                    view, curr_grid, available_actions
+
+                danger_cells = (
+                    {next_step.predicted_avatar_pos}
+                    if next_step.predicted_avatar_pos is not None and not has_temporal
+                    else set()
                 )
-                if macro_plan:
+                simulated_plan = view.simulate_in_mind(
+                    curr_grid, available_actions, blocked_cells=danger_cells
+                )
+                if simulated_plan:
+                    view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
+                    view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
                     view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
-                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
+                    view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(simulated_plan)))
                     next_step = view.mental_plan.popleft()
+                    view.working_memory.active_plan_step = next_step
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
-                    branch = "macro_plan"
+                    branch = "mental_simulation"
                 else:
-                    danger_cells = (
-                        {next_step.predicted_avatar_pos}
-                        if next_step.predicted_avatar_pos is not None and not has_temporal
-                        else set()
+                    chosen_action, chosen_data = view.plan_epistemic_probe(
+                        curr_grid, available_actions
                     )
-                    simulated_plan = view.simulate_in_mind(
-                        curr_grid, available_actions, blocked_cells=danger_cells
-                    )
-                    if simulated_plan:
-                        view.apply_wm_delta(
-                            WorkingMemoryDelta("consecutive_simulation_failures", 0)
-                        )
-                        view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
-                        view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
-                        view.apply_wm_delta(
-                            WorkingMemoryDelta("mental_plan", deque(simulated_plan))
-                        )
-                    if view.mental_plan:
-                        next_step = view.mental_plan.popleft()
-                        chosen_action = next_step.action
-                        chosen_data = next_step.action_data
-                        predicted_pos = next_step.predicted_avatar_pos
-                        branch = "mental_simulation"
-                    else:
-                        chosen_action, chosen_data = view.plan_epistemic_probe(
-                            curr_grid, available_actions
-                        )
-                        branch = "epistemic_probe"
+                    branch = "epistemic_probe"
             else:
                 is_action_trigger = getattr(next_step, "expected_mutation", "") in (
                     "ACTION_TRIGGER",
@@ -1430,18 +1434,22 @@ class PrefrontalDeliberationEngine:
                     view.mental_plan.clear()
                     view.working_memory.active_plan_step = None
                     view.state.phase = EpistemicPhase.REPLANNING
-                    macro_plan = view.object_planner.plan_macro_option(
-                        view, curr_grid, available_actions
-                    )
-                    if macro_plan:
+                    simulated_plan = view.simulate_in_mind(curr_grid, available_actions)
+                    if simulated_plan:
+                        view.apply_wm_delta(
+                            WorkingMemoryDelta("consecutive_simulation_failures", 0)
+                        )
+                        view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
                         view.apply_wm_delta(WorkingMemoryDelta("phase", self._target_phase(view)))
-                        view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(macro_plan)))
+                        view.apply_wm_delta(
+                            WorkingMemoryDelta("mental_plan", deque(simulated_plan))
+                        )
                         next_step = view.mental_plan.popleft()
                         view.working_memory.active_plan_step = next_step
                         chosen_action = next_step.action
                         chosen_data = next_step.action_data
                         predicted_pos = next_step.predicted_avatar_pos
-                        branch = "macro_plan"
+                        branch = "mental_simulation"
                     else:
                         chosen_action, chosen_data = view.plan_epistemic_probe(
                             curr_grid, available_actions
@@ -1530,7 +1538,7 @@ class PrefrontalDeliberationEngine:
                     view.apply_wm_delta(
                         WorkingMemoryDelta(
                             "simulation_cooldown",
-                            min(12, 2 ** min(view.consecutive_simulation_failures, 4)),
+                            min(2, view.consecutive_simulation_failures),
                         )
                     )
                     view.working_memory.update_salience_baseline(view)

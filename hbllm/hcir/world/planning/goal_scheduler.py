@@ -1490,151 +1490,44 @@ class EpistemicGoalScheduler:
                 goals = [g for g in goals if priorities[g][0] == min_tier]
             goals.sort(key=lambda g: priorities[g])
 
-        # (d) Structural inference: geometric patterns suggesting goals
-        if not goals and engine.learned_goal_positions:
+        if avatar_pos is not None:
             goals = [
                 g
-                for g in engine.learned_goal_positions
-                if 0 <= g[0] < H
-                and 0 <= g[1] < W
-                and g not in interactive_cluster_loci
-                and (
-                    avatar_pos is None
-                    or (
-                        g != avatar_pos
-                        and (abs(g[0] - avatar_pos[0]) > 1 or abs(g[1] - avatar_pos[1]) > 1)
-                    )
-                )
-            ]
-        if not goals:
-            wm_priors_d: dict[int, dict[str, float]] = engine.working_memory.concept_role_priors
-            has_cargo_d = bool(
-                engine.symbolic_theory.cargo_features or engine.learned_cargo_features
-            )
-            structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
-            primary_sgs = [
-                sg
-                for sg in structural_goals
-                if sg.get("type")
-                in (
-                    "target_zone",
-                    "exit_marker",
-                    "reflection_target",
-                    "relational_alignment",
-                    "optical_mirror_target",
-                    "constellation_target",
-                )
-            ]
-            cand_sgs = primary_sgs if primary_sgs else structural_goals
-
-            def _is_prior_blocked_feat(feat_val: int) -> bool:
-                if feat_val in engine.symbolic_theory.goal_features:
-                    return False
-                p_s, b_s, h_s = cls._role_scores_from_priors(wm_priors_d, feat_val, has_cargo_d)
-                return (h_s >= 0.65 and p_s < 0.45) or (b_s >= 0.72 and p_s < 0.40)
-
-            for sg in cand_sgs:
-                feat = sg.get("feature")
-                if sg.get("is_midpoint") or sg.get("type") == "relational_alignment":
-                    feat = None
-                if feat is not None and (
-                    (feat in av_feats and not sg.get("is_midpoint"))
-                    or feat in lethal_feats
-                    or (
-                        engine.symbolic_theory.is_barrier(feat)
-                        and feat not in engine.symbolic_theory.goal_features
-                        and feat not in engine.symbolic_theory.candidate_goal_features
-                    )
-                    or _is_prior_blocked_feat(int(feat))
-                ):
-                    continue
+                for g in goals
                 if (
-                    feat is not None
-                    and feat != bg
-                    and feat not in av_feats
-                    and (engine.symbolic_theory.is_walkable(feat) or not has_discrete_interact)
-                ):
-                    new_candidate_feats.add(feat)
-                is_high_conf = sg.get("confidence", 0.0) >= 0.7 and (
-                    avatar_pos is not None or bool(av_feats)
+                    (g != avatar_pos or (g in satisfied_when and "entity_pos" in satisfied_when[g]))
+                    and (g in confirmed_goals or g not in interactive_cluster_loci)
                 )
-                cells = sg.get("cells")
-                if cells:
-                    for cp in cells:
-                        if (
-                            0 <= cp[0] < H
-                            and 0 <= cp[1] < W
-                            and cp != avatar_pos
-                            and cp not in interactive_cluster_loci
-                            and int(curr_grid[cp[0], cp[1]]) != bg
-                        ):
-                            if (
-                                feat is None or feat not in engine.symbolic_theory.goal_features
-                            ) and (
-                                engine.symbolic_theory.is_locus_explored(cp)
-                                or cp in engine.exhausted_candidate_goals
-                            ):
-                                continue
-                            cp_feat = int(curr_grid[cp[0], cp[1]])
-                            if cp_feat in lethal_feats or _is_prior_blocked_feat(cp_feat):
-                                continue
-                            if cp not in goals:
-                                goals.append(cp)
-                            if is_high_conf and (
-                                feat is not None and feat in engine.symbolic_theory.goal_features
-                            ):
-                                new_learned_positions.add(cp)
-                else:
-                    pos = sg.get("position")
-                    if (
-                        pos
-                        and 0 <= pos[0] < H
-                        and 0 <= pos[1] < W
-                        and pos != avatar_pos
-                        and pos not in interactive_cluster_loci
-                        and int(curr_grid[pos[0], pos[1]]) != bg
-                    ):
-                        if (feat is None or feat not in engine.symbolic_theory.goal_features) and (
-                            engine.symbolic_theory.is_locus_explored(pos)
-                            or pos in engine.exhausted_candidate_goals
-                        ):
-                            continue
-                        pos_feat = int(curr_grid[pos[0], pos[1]])
-                        if pos_feat in lethal_feats or _is_prior_blocked_feat(pos_feat):
-                            continue
-                        if pos not in goals:
-                            goals.append(pos)
-                        if is_high_conf and (
-                            feat is not None and feat in engine.symbolic_theory.goal_features
-                        ):
-                            new_learned_positions.add(pos)
+            ]
 
-            if len(goals) > 1 and avatar_pos is not None:
+        all_cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
+            engine.learned_cargo_features
+        )
+        unexhausted_goals = [
+            g
+            for g in goals
+            if (
+                (
+                    g not in engine.exhausted_candidate_goals
+                    or (has_cargo_context and int(curr_grid[g[0], g[1]]) not in all_cargo_feats)
+                )
+                and (
+                    not engine.symbolic_theory.is_locus_explored(g)
+                    or has_cargo_context
+                    or g in confirmed_goals
+                )
+            )
+            or (
+                g in satisfied_when
+                and "entity_pos" in satisfied_when[g]
+                and not engine.symbolic_theory.is_locus_explored(satisfied_when[g]["entity_pos"])
+                and (not engine.symbolic_theory.is_locus_explored(g) or g == avatar_pos)
+            )
+        ]
+        goals = unexhausted_goals
 
-                def _structural_priority(g: tuple[int, int]) -> tuple[int, float, int]:
-                    gf = int(curr_grid[g[0], g[1]])
-                    pref_g, bar_g, haz_g = (
-                        cls._role_scores_from_priors(wm_priors_d, gf, has_cargo_d)
-                        if gf != bg
-                        else (0.0, 0.0, 0.0)
-                    )
-                    dist_g = abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
-                    if gf in engine.symbolic_theory.goal_features:
-                        return (0, -round(pref_g, 3), dist_g)
-                    if haz_g >= 0.65 and pref_g < 0.45:
-                        return (8, haz_g, dist_g)
-                    if bar_g >= 0.72 and pref_g < 0.40:
-                        return (7, bar_g, dist_g)
-                    if pref_g >= 0.55:
-                        return (1, -round(pref_g, 3), dist_g)
-                    if pref_g >= 0.35:
-                        return (2, -round(pref_g, 3), dist_g)
-                    cnt_g = feat_counts.get(gf, 0) if gf != bg else 0
-                    return (3 if cnt_g == 1 else 4, -round(pref_g, 3), dist_g)
-
-                goals.sort(key=_structural_priority)
-
-        # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
+        # Tier 3. Frontier Exploration: Nearest reachable boundary between visited and unvisited
+        # (Activated when confirmed goals and novel entities are either exhausted or absent)
         if not goals:
             frontier_candidates = cls.compute_frontier_candidates(
                 engine=engine,
@@ -1688,43 +1581,8 @@ class EpistemicGoalScheduler:
                         goals.append(e_blk.grid_pos)
                         satisfied_when[e_blk.grid_pos] = {"max_visits": 2}
 
-        if avatar_pos is not None:
-            goals = [
-                g
-                for g in goals
-                if (
-                    (g != avatar_pos or (g in satisfied_when and "entity_pos" in satisfied_when[g]))
-                    and (g in confirmed_goals or g not in interactive_cluster_loci)
-                )
-            ]
-
-        all_cargo_feats = set(engine.symbolic_theory.cargo_features) | set(
-            engine.learned_cargo_features
-        )
-        unexhausted_goals = [
-            g
-            for g in goals
-            if (
-                (
-                    g not in engine.exhausted_candidate_goals
-                    or (has_cargo_context and int(curr_grid[g[0], g[1]]) not in all_cargo_feats)
-                )
-                and (
-                    not engine.symbolic_theory.is_locus_explored(g)
-                    or has_cargo_context
-                    or g in confirmed_goals
-                )
-            )
-            or (
-                g in satisfied_when
-                and "entity_pos" in satisfied_when[g]
-                and not engine.symbolic_theory.is_locus_explored(satisfied_when[g]["entity_pos"])
-                and (not engine.symbolic_theory.is_locus_explored(g) or g == avatar_pos)
-            )
-        ]
-        if unexhausted_goals:
-            goals = unexhausted_goals
-        elif goals:
+        # If both entities AND frontiers are completely exhausted:
+        if not goals and engine.exhausted_candidate_goals:
             clear_exhausted = True
 
         # Exclude all known static lethal and exogenous coordinates from candidate attractors
