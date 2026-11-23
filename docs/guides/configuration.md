@@ -1,145 +1,101 @@
 ---
-title: "Configuration — Environment & Settings"
-description: "How to configure HBLLM Core using environment variables, .env files, and pyproject.toml settings."
+title: "Configuration — Runtime, Environment & Settings"
+description: "How to configure HBLLM Core via CognitiveSystemConfig, environment variables, .env files, and YAML settings."
 ---
 
 # Configuration
 
-HBLLM can be configured via environment variables, `.env` files, or programmatically.
+HBLLM Core can be configured programmatically through `CognitiveSystemConfig` (recommended), via environment variables / `.env` files, or via YAML (`hbllm.yaml.example`).
 
-## Environment Variables
+---
 
-### Core
+## 1. `CognitiveSystemConfig` (Pure-HCIR Composition Root)
 
-| Variable | Default | Description |
-|---|---|---|
-| `HBLLM_PROVIDER` | `local` | LLM backend: `local`, `openai`, `anthropic`, `ollama` |
-| `HBLLM_MODEL` | `hbllm/base-500m` | Model identifier |
-| `HBLLM_PORT` | `8000` | API server port |
-| `HBLLM_ENV` | `development` | Environment mode: `development` or `production` |
-| `HBLLM_LOG_LEVEL` | `INFO` | Logging verbosity |
-| `HBLLM_MEMORY_DIR` | `~/.hbllm/memory` | Memory database location |
-| `HBLLM_ADAPTER_DIR` | `~/.hbllm/adapters` | LoRA adapter cache |
-| `HBLLM_BUS_TYPE` | `inprocess` | Message bus: `inprocess` or `redis` |
-| `HBLLM_REDIS_URL` | — | Redis connection URL for distributed bus |
-| `HBLLM_REDIS_HMAC_KEY` | — | HMAC signing key for Redis messages |
-| `HBLLM_ROS2_ENABLED` | `0` | Enable ROS2 integration |
-| `HBLLM_QUANTIZE` | — | Quantization mode: `int4`, `int8`, or empty |
-| `OPENAI_API_KEY` | — | OpenAI API key |
-| `ANTHROPIC_API_KEY` | — | Anthropic API key |
-
-### Security & Production
-
-| Variable | Default | Description |
-|---|---|---|
-| `HBLLM_JWT_SECRET` | *(auto-gen in dev)* | JWT signing secret. **Required** in production mode |
-| `HBLLM_TENANT_GUARD_MODE` | `WARN` | Tenant isolation: `WARN` or `STRICT` (blocks cross-tenant) |
-| `HBLLM_CORS_ORIGINS` | `*` | Allowed CORS origins. Wildcard blocked in production |
-
-### Rate Limiting & Quotas
-
-| Variable | Default | Description |
-|---|---|---|
-| `HBLLM_RATE_LIMIT_RPM` | `60` | Max requests per minute per tenant |
-| `HBLLM_DB_MAX_PER_TENANT` | `50000` | Max episodic memory turns per tenant |
-
-### Infrastructure
-
-| Variable | Default | Description |
-|---|---|---|
-| `HBLLM_SHUTDOWN_DRAIN_SEC` | `15` | Seconds to drain in-flight requests on shutdown |
-| `HBLLM_OTEL_ENDPOINT` | — | OpenTelemetry collector endpoint for distributed tracing |
-| `HBLLM_CONFIG_PATH` | `hbllm.yaml` | Path to YAML configuration file |
-
-## .env File
-
-Create a `.env` file in the project root:
-
-```env
-HBLLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-HBLLM_LOG_LEVEL=DEBUG
-HBLLM_BUS_TYPE=redis
-HBLLM_REDIS_URL=redis://localhost:6379
-
-# Production settings
-HBLLM_ENV=production
-HBLLM_JWT_SECRET=your-secret-here
-HBLLM_RATE_LIMIT_RPM=120
-HBLLM_DB_MAX_PER_TENANT=100000
-```
-
-## BrainConfig (Pydantic)
-
-The `BrainConfig` class uses Pydantic `BaseModel` with validators for type-safe configuration:
+**Module:** `hbllm.runtime.bootstrap.CognitiveSystemConfig`
 
 ```python
-from hbllm.brain.config import BrainConfig
+from pathlib import Path
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-config = BrainConfig(
-    provider="openai",
-    model_name="gpt-4o",
-    env="production",
-    jwt_secret="my-production-secret",
-    rate_limit_rpm=120,
-    db_max_per_tenant=100_000,
-    shutdown_drain_sec=30,
+config = CognitiveSystemConfig(
+    world_id="prod_world",
+    seed=42,
+    exploration_budget=150,
+    enable_logging=True,
+    memory_dir=Path("./data/worlds/prod_world"),
+    enable_grounding=True,
+    perception_mode="handcrafted",  # "handcrafted" | "snn" | "learned"
+    enable_brain_llm=False,         # Keep False for Pure-HCIR
+    enable_autonomous_curiosity=False,
+    max_events_per_store=2000,
 )
+system = build_cognitive_system(config)
 ```
 
-### Validators
+| Field | Default | Description |
+|---|---|---|
+| `world_id` | `"default"` | Context/world partition identifier |
+| `seed` | `None` | Deterministic random seed |
+| `exploration_budget` | `150` | Epistemic probing step budget |
+| `memory_dir` | `~/.hbllm/worlds/<world_id>` | Persistent `SQLiteEventStore` directory (`None` for in-memory) |
+| `enable_grounding` | `True` | Attach `CorticalGroundingBridge` (SGE) |
+| `perception_mode` | `"handcrafted"` | `FeatureExtractor` backend (`handcrafted`, `snn`, `learned`) |
+| `enable_brain_llm` | `False` | Allow optional external LLM scaffold outside `hcir/` |
+| `enable_autonomous_curiosity` | `False` | Enable `EpistemicCuriosityController` web fallback on unknown queries |
+| `max_events_per_store` | `2000` | Bounded compaction ceiling for `SQLiteEventStore` |
 
-| Field | Validator | Behavior |
-|-------|-----------|----------|
-| `env` | — | `development` or `production` |
-| `jwt_secret` | `model_validator` | **Must be set** when `env=production` |
-| `rate_limit_rpm` | `field_validator` | Must be `> 0` |
-| `db_max_per_tenant` | `field_validator` | Must be `> 0` |
-| `shutdown_drain_sec` | `field_validator` | Must be `>= 0` |
+---
 
-## YAML Configuration
+## 2. Environment Variables
 
-HBLLM loads its system configuration from `hbllm.yaml` (or the path in `HBLLM_CONFIG_PATH`):
+### Runtime & Storage
 
-```yaml
-env: production
+| Variable | Default | Description |
+|---|---|---|
+| `HBLLM_ENV` | `development` | `development` or `production` |
+| `HBLLM_LOG_LEVEL` | `INFO` | Logging verbosity |
+| `HBLLM_DATA_DIR` | `./data` | Data directory for persistent stores and audit trails |
+| `HBLLM_BUS_BACKEND` | `inprocess` | Message bus: `inprocess` or `redis` |
+| `HBLLM_REDIS_URL` | — | Redis connection URL for distributed deployments |
+| `HBLLM_REDIS_HMAC_KEY` | — | HMAC signing key for Redis messages |
+| `HBLLM_DATABASE_URL` | — | PostgreSQL URL when running multi-replica server storage |
+| `HBLLM_CONFIG_PATH` | `hbllm.yaml.example` | Path to YAML configuration file |
 
-cluster:
-  node_id: "brain-01"
-  
-adapters:
-  enabled: true
-  cache_dir: "./checkpoints/adapters"
-  auto_download: true
-  require_sha256: true
-  sources:
-    - domain: coding
-      repo_id: hbllm/coding-lora-v2
-      revision: v2.1.0
+### Security & Serving (`hbllm.serving`)
 
-checkpoints_dir: ./checkpoints
-data_dir: ./data
+| Variable | Default | Description |
+|---|---|---|
+| `HBLLM_JWT_SECRET` | *(ephemeral in dev)* | **Required** in `HBLLM_ENV=production`; must be shared across replicas |
+| `HBLLM_UNSAFE_DEV_AUTH` | `0` | Explicit opt-in (`1`) for unauthenticated loopback dev mode (`JWTAuthMiddleware` fails closed by default) |
+| `HBLLM_TENANT_GUARD_MODE` | `WARN` | Tenant isolation: `OFF`, `WARN`, or `STRICT` |
+| `HBLLM_CORS_ORIGINS` | `*` | Allowed CORS origins (wildcard blocked in production) |
+| `HBLLM_RATE_LIMIT_RPM` | `60` | Max requests per minute per tenant |
+| `HBLLM_SHUTDOWN_DRAIN_SEC` | `15` | Graceful drain timeout on shutdown |
+| `HBLLM_OTEL_ENDPOINT` | — | OpenTelemetry collector endpoint |
+
+---
+
+## 3. `.env` Example (Production)
+
+```env
+HBLLM_ENV=production
+HBLLM_JWT_SECRET=replace-with-strong-32byte-secret
+HBLLM_TENANT_GUARD_MODE=STRICT
+HBLLM_CORS_ORIGINS=https://app.example.com
+HBLLM_RATE_LIMIT_RPM=120
+HBLLM_BUS_BACKEND=redis
+HBLLM_REDIS_URL=redis://redis:6379/0
+HBLLM_LOG_LEVEL=INFO
 ```
+
+---
+
+## 4. YAML & `HBLLMCoreConfig` (`hbllm.config`)
+
+Copy `hbllm.yaml.example` as a starting point and load via `hbllm.config`:
 
 ```python
 from hbllm.config import HBLLMCoreConfig
 
-# Load from hbllm.yaml (auto-discovered) or explicit path
-config = HBLLMCoreConfig.load("hbllm.yaml")
+cfg = HBLLMCoreConfig.load("hbllm.yaml.example")
 ```
-
-## Multi-Tenant Configuration
-
-Each tenant is isolated at the `brain.process()` level. Memory is automatically partitioned per tenant:
-
-```python
-brain = await BrainFactory.create("openai/gpt-4o")
-
-# Tenant isolation happens at query time
-result = await brain.process(
-    "Summarize our Q3 earnings",
-    tenant_id="tenant-001",
-    session_id="session-abc",
-)
-```
-

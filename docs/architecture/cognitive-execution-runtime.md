@@ -1,13 +1,13 @@
 ---
 title: "Cognitive Execution Runtime — Composable Reasoning Substrate"
-description: "Architecture deep-dive into HBLLM's Cognitive Execution Runtime: 13 composable reasoning operators, immutable HCIR views, deterministic replay, resource budgets, and zero LLM dependency."
+description: "Architecture deep-dive into HBLLM's Cognitive Execution Runtime: 14 default composable reasoning operators, immutable HCIR views, deterministic replay, resource budgets, and zero LLM dependency."
 ---
 
 # Cognitive Execution Runtime — Composable Reasoning Substrate
 
 > **Core Architectural Rule:** *Operators calculate. HCIR decides what becomes reality.*
 
-The **Cognitive Execution Runtime** (`hbllm.brain.reasoning`) is the CPU-like execution layer for HBLLM cognition. It provides the formal execution semantics and pipeline orchestrator for composable reasoning operators to execute over immutable snapshots of canonical cognitive state without owning or directly mutating that state.
+The **Cognitive Execution Runtime** (`hbllm.hcir.reasoning`, with compatibility re-exports at `hbllm.brain.reasoning`) is the CPU-like execution layer for HBLLM cognition. It provides the formal execution semantics and pipeline orchestrator for composable reasoning operators to execute over immutable snapshots of canonical cognitive state without owning or directly mutating that state.
 
 ```text
                  HCIR (Canonical Cognitive State)
@@ -86,9 +86,9 @@ The runtime establishes complete LLM independence over structured problem classe
 
 ---
 
-## The 13 Composable Reasoning Operators
+## The 14 Default Composable Reasoning Operators
 
-The runtime hosts 13 specialized operators split between new formal inference engines and wrapped legacy brain systems adapted to the immutable runtime contract:
+`create_default_operator_registry()` (`hbllm.hcir.reasoning.operators.registry`) registers **14 specialized operators** executing over immutable `FrozenGraphView` snapshots, alongside auxiliary structural engines (`RelationalSchemaInducer`, `SkillMacroChunker`, `TemporalVelocityModel`, `SourceVerifier`):
 
 ```mermaid
 graph TB
@@ -97,52 +97,56 @@ graph TB
         REG["OperatorRegistry.select()"]
     end
 
-    subgraph "Phase 7: New Formal Operators"
+    subgraph "Formal Operators"
         DED["⚡ Deduction<br/>(Forward Chaining / Modus Ponens)"]
-        IND["📊 Induction<br/>(Statistical Co-occurrence & Rules)"]
+        IND["📊 Induction<br/>(Statistical Co-occurrence &amp; Rules)"]
         ABD["🔍 Abduction<br/>(Best-Explanation Hypothesis Ranking)"]
         TEMP["⏰ Temporal<br/>(Allen's Interval Algebra)"]
         SPAT["📍 Spatial<br/>(RCC-8 Qualitative Containment)"]
         ANA["🔗 Analogy<br/>(Gentner Structure-Mapping)"]
     end
 
-    subgraph "Phase 8: Wrapped Cognitive Engines"
+    subgraph "Cognitive &amp; Embodied Operators"
         PRED["📈 Prediction<br/>(Order-N Markov Predictor)"]
-        CONT["⚔️ Contradiction<br/>(Structural & Negation Analysis)"]
+        CONT["⚔️ Contradiction<br/>(Structural &amp; Negation Analysis)"]
         CF["🔄 Counterfactual<br/>('What-If' Graph Traversal)"]
         CAUS["🌿 Causal<br/>(BFS Multi-Hop Chain Discovery)"]
         ACT["🎯 Active Inference<br/>(Utility Action Optimization)"]
-        SIM["🛡️ Simulation<br/>(Multi-Layer Risk & Safety Filter)"]
+        SIM["🛡️ Simulation<br/>(Multi-Layer Risk &amp; Safety Filter)"]
+        EMB["🤖 Embodied Causal<br/>(Backward-Chaining Action Planning)"]
         SNN_OP["⚡ SNN Reasoning<br/>(Spiking Feature Evaluation)"]
     end
 
     RT --> REG
     REG -.-> DED & IND & ABD & TEMP & SPAT & ANA
-    REG -.-> PRED & CONT & CF & CAUS & ACT & SIM & SNN_OP
+    REG -.-> PRED & CONT & CF & CAUS & ACT & SIM & EMB & SNN_OP
 ```
 
-### Phase 7: New Operators
+### Formal Operators
 
 | Operator | Module | Mechanism | Target Problems |
 |---|---|---|---|
-| **Deduction** | `deduction.py` | Modus ponens forward chaining over rule edges and proposition premises | `ProblemType.EXPLANATION`, `ProblemType.CONSTRAINT` |
-| **Induction** | `induction.py` | Property co-occurrence clustering and generalization across entity populations | `ProblemType.GENERALIZATION`, `ProblemType.CLASSIFICATION` |
-| **Abduction** | `abduction.py` | Backward explanation search ranking candidate causes for unexplained observations | `ProblemType.EXPLANATION`, `ProblemType.DIAGNOSIS` |
-| **Temporal** | `temporal.py` | Allen's 13 interval relations, event ordering, and temporal transitivity | `ProblemType.TEMPORAL`, `ProblemType.CAUSAL` |
-| **Spatial** | `spatial.py` | Region Connection Calculus (RCC-8) topological containment and adjacency | `ProblemType.SPATIAL`, `ProblemType.PLANNING` |
-| **Analogy** | `analogy.py` | Structure-mapping theory (Gentner) cross-domain relational isomorphism transfer | `ProblemType.ANALOGY`, `ProblemType.GENERALIZATION` |
+| **Deduction** | `operators/deduction.py` | Modus ponens forward chaining over rule edges and proposition premises | `ProblemType.EXPLANATION`, `ProblemType.CONSTRAINT` |
+| **Induction** | `operators/induction.py` | Property co-occurrence clustering and generalization across entity populations | `ProblemType.GENERALIZATION`, `ProblemType.CLASSIFICATION` |
+| **Abduction** | `operators/abduction.py` | Backward explanation search ranking candidate causes for unexplained observations | `ProblemType.EXPLANATION`, `ProblemType.DIAGNOSIS` |
+| **Temporal** | `operators/temporal.py` | Allen's 13 interval relations, event ordering, and temporal transitivity | `ProblemType.TEMPORAL`, `ProblemType.CAUSAL` |
+| **Spatial** | `operators/spatial.py` | Region Connection Calculus (RCC-8) topological containment and adjacency | `ProblemType.SPATIAL`, `ProblemType.PLANNING` |
+| **Analogy** | `operators/analogy.py` | Structure-mapping theory (Gentner) cross-domain relational isomorphism transfer | `ProblemType.ANALOGY`, `ProblemType.GENERALIZATION` |
 
-### Phase 8: Wrapped Cognitive Engines
+### Cognitive & Embodied Engines
 
-| Operator | Module | Wrapped Subsystem | Architectural Adaptation |
+| Operator | Module | Underlying Subsystem | Architectural Adaptation |
 |---|---|---|---|
-| **Prediction** | `prediction.py` | `MarkovPredictor` | Reads event sequences from frozen HCIR, trains transient Markov model, proposes `PredictionNode` |
-| **Contradiction** | `contradiction.py` | `ContradictionDetector` | **Replaced LLM** with pure graph analysis: structural `CONTRADICTS` edges, claim negation patterns, and prediction failure magnitudes |
-| **Counterfactual** | `counterfactual.py` | `CounterfactualReasoner` | Synchronous graph traversal calculating belief confidence deltas under hypothetical evidence removal |
-| **Causal** | `causal.py` | `CausalGraph` / `CausalReasoner` | BFS traversal over `CAUSES` edges with probability decay, cycle guards, and transitive edge proposal |
-| **Active Inference** | `active_inference.py` | `ActiveInferenceEngine` | Multi-attribute utility ranking ($Utility = w_1 R + w_2 I + w_3 V - w_4 \text{Risk} - w_5 \text{Cost}$) over candidate `ActionNode` items |
-| **Simulation** | `simulation.py` | `LayeredSimulationEngine` | Multi-layer risk evaluation (safety regex filters, resource exhaustion limits, belief contradictions) |
-| **SNN Reasoning** | `snn_reasoning.py` | `ReasoningNetwork` | Structural feature extraction evaluated through LIF spiking networks (or calibrated sigmoid fallback) |
+| **Prediction** | `operators/prediction.py` | `MarkovPredictor` | Reads event sequences from frozen HCIR, trains transient Markov model, proposes `PredictionNode` |
+| **Contradiction** | `operators/contradiction.py` | `ContradictionDetector` | Pure graph analysis: structural `CONTRADICTS` edges, claim negation patterns, prediction errors |
+| **Counterfactual** | `operators/counterfactual.py` | `CounterfactualReasoner` | Synchronous graph traversal calculating belief confidence deltas under hypothetical evidence removal |
+| **Causal** | `operators/causal.py` | `CausalOperator` | BFS traversal over `CAUSES` edges with probability decay, cycle guards, and transitive edge proposal |
+| **Active Inference** | `operators/active_inference.py` | `ActiveInferenceOperator` | Multi-attribute utility ranking ($Utility = w_1 R + w_2 I + w_3 V - w_4 \text{Risk} - w_5 \text{Cost}$) over candidate `ActionNode` items |
+| **Simulation** | `operators/simulation.py` | `SimulationOperator` | Multi-layer risk evaluation (safety filters, resource limits, belief contradictions) |
+| **Embodied Causal** | `operators/embodied_causal.py` | `EmbodiedCausalOperator` | Backward-chaining action dependency resolution (`requires` / `produces`) for physical and simulated environments |
+| **SNN Reasoning** | `operators/snn_reasoning.py` | `SNNReasoningOperator` | Structural feature extraction evaluated through LIF spiking networks |
+
+> Auxiliary engines in `hbllm.hcir.reasoning.operators`: `RelationalSchemaInducer` (`relational_schema.py`), `SkillMacroChunker` (`skill_chunker.py`), `TemporalVelocityModel` (`temporal_dynamics.py`), and `SourceVerifier` (`source_verifier.py`).
 
 ---
 
@@ -247,15 +251,15 @@ Meta-Test — Zero LLM Calls:
 ## Python Usage Example
 
 ```python
-from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode, HCIREdge, HCIREdgeType
-from hbllm.brain.reasoning.operators import (
+from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIREdgeType, PhysicalEntityNode
+from hbllm.hcir.reasoning.operators import (
     OperatorRegistry,
-    SpatialOperator,
-    ReasoningProblem,
     ProblemType,
     ReasoningBudget,
+    ReasoningProblem,
+    SpatialOperator,
 )
-from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
+from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
 
 # 1. Initialize Graph & Entities
 graph = CognitiveGraph()

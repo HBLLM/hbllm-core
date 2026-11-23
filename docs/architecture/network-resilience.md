@@ -114,7 +114,7 @@ if node:
 
 **Module:** `hbllm.network.cluster_config.ClusterConfig`
 
-Pydantic model for multi-node cluster topology, configurable via `hbllm.yaml`:
+Pydantic model for multi-node cluster topology, configurable via environment variables or YAML (`hbllm.yaml.example`):
 
 ```yaml
 cluster:

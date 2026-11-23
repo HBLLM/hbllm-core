@@ -1,200 +1,103 @@
-<!-- SEO Keywords: Sovereign Personal AI, Open Source AGI, Cognitive Architecture, Large Language Models, Multi-Agent Systems, Edge AI, Hybrid Quantization, LoRA Tuning, Privacy-First AI, On-Premise AI, Python 3.11 AI Framework, Autonomous Agents, Multi-Tenant AI, Human Modeling, Spiking Neural Networks -->
+<!-- SEO Keywords: Sovereign Cognitive OS, Neuro-Symbolic AI, Event-Sourced Graph Substrate, Active Inference, Symbol Grounding Engine, Pure-HCIR, Python 3.11 AI Framework, Rust Acceleration, Multi-Tenant AI, Spiking Neural Networks -->
 
 <div align="center">
   <h1>🧠 HBLLM Core</h1>
-  <h3>An AI That Thinks Like a Person</h3>
-  <p><b>A continuously thinking, goal-driven, memory-forming cognitive brain that models <em>you</em> — runs entirely on your own hardware, no cloud required.</b></p>
-  <p><em>Local by default. Distributed when you want it. It learns who you are, what you're building, and who matters to you — your data never leaves your device unless you choose.</em></p>
+  <h3>Pure-HCIR Event-Sourced Cognitive OS &amp; Neuro-Symbolic AI</h3>
+  <p><b>A deterministic, LLM-free cognitive kernel and active-inference world model built over an event-sourced graph substrate (HCIR) — runs entirely on your own hardware.</b></p>
+  <p><em>Nodes emit intent. Operators calculate. HCIR owns state. Zero cloud dependencies required in the core reasoning loop.</em></p>
 
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
-  [![PyTorch](https://img.shields.io/badge/PyTorch-2.2%2B-ee4c2c.svg)](https://pytorch.org/)
-  [![Rust](https://img.shields.io/badge/Rust-Accelerated-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-6150%2B%20passing-brightgreen.svg)](#)
-  [![Files](https://img.shields.io/badge/Source-840%2B%20modules-purple.svg)](#)
+  [![Rust](https://img.shields.io/badge/Rust-13%20Crates-orange.svg)](https://www.rust-lang.org/)
+  [![Tests](https://img.shields.io/badge/Tests-599%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
+  [![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-92.5%25%20Zero--Shot%20(0%20LLM%20Tokens)-cyan.svg)](#verified-benchmarks)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
 <br/>
 
-> [!NOTE]  
+> [!NOTE]
 > **Quick Links:**
-> - 📐 **[Architecture Overview](docs/architecture/overview.md)** — Full layered design with 50+ cognitive nodes
-> - 👤 **[Cognitive Subsystems](docs/architecture/cognitive-subsystems.md)** — UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph
-> - 🛡️ **[Security Architecture](SECURITY.md)** — Identity Triplet, Tenant Guard, Audit Log, Encryption at Rest
-> - ⚡ **[Benchmarks](docs/api/benchmarks.md)** — Memory Profiling, Fast-Path Latency
+> - 📐 **[Architecture Overview](docs/architecture/overview.md)** — Pure-HCIR Cognitive OS, 8 invariants, and single composition root (`build_cognitive_system`)
+> - 🌍 **[Cortical World Model](docs/architecture/cortical-world-model.md)** — 5-stage `CorticalPipeline`, 17 world subpackages, and `TransitionKnowledgeBase`
+> - 🗣️ **[Language & Reading](docs/architecture/language-and-reading.md)** — 100% LLM-free multilingual parser/realizer (`en`, `si`, `ta`) and Track T4 reading comprehension
+> - 🛡️ **[Security & Sandboxing](docs/security.md)** — `ConstitutionalVerifier`, two-tier capability sandboxing, JWT auth, and multi-tenant isolation
+> - ⚡ **[Benchmarks & Held-Out v2](docs/api/benchmarks.md)** — Frozen suites (`dev`, `novelty`, `widened_dev`, `heldout`), `eval-*` gate, and native simulators
 
 ---
 
-## What Makes HBLLM Different?
+## Why HBLLM Core?
 
-Most AI systems answer questions when you ask them. HBLLM Core does something fundamentally different — **it thinks all the time, entirely on your own machine, and it models you**.
+Instead of relying on an autoregressive transformer as the primary brain, **HBLLM Core models cognition as formal operations over an event-sourced graph substrate (`hbllm.hcir`)**:
 
-### It Remembers
-
-Nine memory subsystems — working, episodic, semantic, procedural, knowledge graph, value, spatial, temporal, and importance-scored — give it genuine recall. It knows what happened yesterday, what it learned last month, and what you care about most.
-
-### It Models You
-
-The **Human Modeling Layer** continuously learns who you are from every interaction:
-
-- **UserModel** — Your expertise domains, communication preferences, beliefs, trust levels, and temporal work patterns
-- **ProjectGraph** — What you're building: goals, blockers, open questions, decisions, milestones — auto-detected from conversation
-- **ExecutiveCortex** — Cognitive focus management: what to prioritize, when to interrupt, how to allocate compute
-- **RelationshipMemory** — Your social graph: who matters, their roles, sentiment trends, interaction history
-- **RealityGraph** — Unified world state: merges sensor data, knowledge graph, and cognitive models into one view
-
-### It Pursues Goals
-
-The executive control system breaks high-level objectives into persistent DAG tasks, retries failures, verifies real-world outcomes, and picks up exactly where it left off after a reboot.
-
-### It Scales Across Your Devices
-
-Phone, laptop, and home server share knowledge via `SynapseGateway` with Ed25519 cryptographic trust — zero cloud required.
-
-### It Knows When to Stop
-
-A policy engine blocks harmful actions, every decision is audited, and the system slows itself down when overloaded.
+- **Event-Sourced State Ownership:** No cognitive subsystem mutates state directly. Proposals are submitted as `TransactionOperation`s, checked by `ConstitutionalVerifier`, and committed atomically by `TransactionManager` across a 4-tier workspace (`Working`, `Brain`, `Persistent`, `Meta`).
+- **100% LLM-Free Cognitive Core:** World modeling, active inference, Pearl's *do(a)* causal induction (`TransitionKnowledgeBase`), symbol grounding (`hbllm.hcir.grounding`), 14 composable reasoning operators (`hbllm.hcir.reasoning`), neuromorphic SNN dynamics (`hbllm.hcir.snn`), and multilingual dialogue (`hbllm.hcir.language`) run deterministically with **0 LLM tokens**.
+- **Domain-Agnostic General Intelligence:** All core mechanisms operate on universal spatial, causal, topological, and relational primitives — never task-specific heuristics. Environment adapters live cleanly outside `hbllm/` in `plugins/`.
+- **Governed Real-World Capabilities:** File inspection, AST analysis, memory recall, graph explanation (`ConceptExplainer`), autonomous curiosity (`EpistemicCuriosityController`), and web fetch execute through `CommandDispatcher` and `CapabilitySandboxManager`.
+- **Native Rust Acceleration:** 13 optional Rust/PyO3 crates (with automatic pure-Python fallbacks) accelerate structural-sharing graph snapshots, BLAKE3 canonical hashing, parallel rollout simulation, subgraph isomorphism, SIMD math, and vector search.
 
 ```text
-                 ┌───────────────────────────────────────────────────┐
- Input ────────► │                 HBLLM Core Brain                  │
- (text, vision,  │                                                   │
-  audio, IoT)    │   Perception ──► Router ──► Planner ──► Critic    │
-                 │       │            │            │          │       │
-                 │  WorldState     Memory      Workspace  Decision   │
-                 │  Tracker      (9 types)    (blackboard)   │       │
-                 │       │                        │          │       │
-                 │  SNN Stream                 Identity    Policy    │
-                 │  (Comprehension              Ethics    Engine    │
-                 │   + Expression)                │          │       │
-                 │       │                        │          │       │
-                 │  Human Modeling Layer ──────────────── Actions    │
-                 │  (UserModel, ProjectGraph,              │       │
-                 │   ExecutiveCortex, Social,    OS Adapter ─┘       │
-                 │   RealityGraph)                                   │
-                 └──────────────────────────────────┬────────────────┘
-                                                    │
- Action / Output ◄──────────────────────────────────┘
+  Observation / Dialogue ──► build_cognitive_system() [Single Composition Root]
+                                    │
+        ┌───────────────────────────┼───────────────────────────┐
+        ▼                           ▼                           ▼
+  Language & Reading       Cortical World Model          Composable Reasoning
+  (hbllm.hcir.language)    (hbllm.hcir.world)           (hbllm.hcir.reasoning)
+  en/si/ta, SymSpell,      5-Stage CorticalPipeline,    14 Formal Operators,
+  Discourse & Track T4     TransitionKB, Grounding,     RelationalSchema &
+  SVO Ingestion            PrefrontalWorkingMemory      SkillMacroChunker
+        │                           │                           │
+        └───────────────────────────┼───────────────────────────┘
+                                    ▼
+                 TransactionManager + ConstitutionalVerifier
+                                    │
+                                    ▼
+         TieredWorkspace (Working | Brain | Persistent | Meta) + SQLiteEventStore
+                                    │
+                                    ▼
+           CommandDispatcher + CapabilitySandboxManager ──► Action / Response
 ```
 
-> 📖 **[Architecture →](docs/architecture/overview.md)** · **[Cognitive Nodes →](docs/architecture/cognitive-nodes.md)** · **[Memory Systems →](docs/architecture/memory-systems.md)** · **[Cognitive Subsystems →](docs/architecture/cognitive-subsystems.md)**
+> 📖 **[Architecture →](docs/architecture/overview.md)** · **[HCIR Kernel OS →](docs/architecture/hcir-kernel-os.md)** · **[Entry Points →](docs/architecture/entry-points.md)** · **[Symbol Grounding →](docs/architecture/grounding.md)**
 
 ---
 
 ## Key Capabilities
 
-| Category | What it does | Docs |
-|---|---|---|
-| **👤 Human Modeling** | Learns expertise, preferences, trust, and habits from every interaction — the system models *you* | [Social Cognition](docs/architecture/social-cognition.md) |
-| **📋 Project Awareness** | Tracks goals, blockers, decisions, and milestones per project — auto-detects what you're working on | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
-| **🧠 HCIR Cognitive OS** | Event-sourced Cognitive OS kernel, tiered workspace, transactional governance, and rollback engine | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
-| **👁️ Evidence Perception** | Decoupled providers, structured evidence normalization, `CorrelationEngine`, and HCIR hyperedge binding | [Voice & Audio Pipeline](docs/architecture/voice-pipeline.md) |
-| **🔬 Epistemic Runtime** | Domain-neutral autonomous discovery: hypothesis generation, Bayesian belief revision, self-calibration | [Epistemic Runtime](docs/architecture/epistemics.md) |
-| **🧩 Cognitive Execution Runtime** | 13 composable reasoning operators (deduction, causal, spatial, temporal, etc.) executing over immutable HCIR state with zero LLM dependency | [Reasoning Runtime](docs/architecture/cognitive-execution-runtime.md) |
-| **🎯 Embodied Mental Simulation** | Copy-on-write simulation branches over HCIR, multi-step counterfactual planning, and support stability verification before action | [Embodiment](docs/architecture/embodiment.md) |
-| **🔍 Active Epistemic Discovery** | Information-theoretic probe selection (Value of Information, entropy reduction) resolving ambiguity through minimal-cost probing | [Epistemic Runtime](docs/architecture/epistemics.md) |
-| **🔄 Relational Transfer Engine** | Analogical structure mapping across domains, extracting evidence-backed relational schemas and resisting surface attribute distractors | [Reasoning Runtime](docs/architecture/cognitive-execution-runtime.md) |
-| **🧭 Metacognitive Self-Model** | Empirical competence profiling, quadratic Brier and ECE calibration, simulation throttling penalty, and strategy switching state machine | [Self-Model](docs/architecture/self-model.md) |
-| **💤 Lifelong Continual Learning** | Three-layer memory (Fast Episodic, Slow Consolidated, Immutable Provenance), tri-modal sleep replay, and stability gating for zero catastrophic forgetting | [Sleep Cycle](docs/architecture/sleep-cycle.md) |
-| **⚡ SNN Cognitive Stream** | Spiking Neural Networks for concept extraction, content planning, and reward evaluation with Broca compression | [SNN Cognitive Engine](docs/architecture/snn-cognitive-engine.md) |
-| **🧠 Always-On Cognition** | Stays awake between queries — notices events, forms thoughts, and acts proactively | [Executive Brain](docs/architecture/executive-brain-layer.md) |
-| **💾 9 Memory Subsystems** | Working, Episodic, Semantic, Procedural, Value, Knowledge Graph, Spatial, Temporal, Importance | [Memory Systems](docs/architecture/memory-systems.md) |
-| **🎯 Goal Pursuit** | Decomposes objectives into persistent DAG tasks, retries failures, verifies outcomes | [Executive Brain](docs/architecture/executive-brain-layer.md) |
-| **🤝 Social Intelligence** | Relationship memory with sentiment tracking, interaction history, and notification priority | [Social Cognition](docs/architecture/social-cognition.md) |
-| **🌍 Unified World State** | RealityGraph merges KnowledgeGraph, BrainWorldState, and sensor data into one view | [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
-| **🦀 13 Rust Acceleration Crates** | Native AVX-512/NEON inference, BPE tokenization, MinHash LSH, vector search, persistent HCIR graph, simulation engine, and structure matcher | [Rust Kernels](docs/api/rust-kernels.md) |
-| **⚙️ Fully Local** | Runs on CPU-only machines — 125M model needs ~500MB RAM, 1.5B fits in 4GB with INT4 | [Benchmarks](docs/api/benchmarks.md) |
-| **🧪 Self-Personalizing** | SpawnerNode auto-creates 2MB LoRA adapters — the brain grows new specialist regions at runtime | [Zoning](docs/zoning/how-it-works.md) |
-| **🌐 Distributed** | Spans your devices via Ed25519 cryptographic trust — zero cloud required | [Adaptive Network](docs/architecture/adaptive-network.md) |
-| **🛑 Safety & Control** | Policy engine, restraint engine, PII redaction, voice auth, rollback, audit trail | [Human Control](docs/architecture/human-control.md) |
-| **📦 Packages & Skills** | Standalone `.hbpkg` archives, `manifest.json` standard, and autonomous skill induction | [Packages & Skills](docs/guides/hbpkg-and-skills.md) |
-| **💻 CLI Tools** | Full developer manual for `serve`, `train`, `data`, `agent`, `code`, `diagnostics`, `export_dpo` | [CLI Manual](docs/guides/cli.md) |
-| **🔌 Plugin SDK** | Declarative `@subscribe` plugins with auto-binding — extend any cognitive loop | [Plugin Guide](docs/guides/plugins.md) |
+| Subsystem | Role | Package | Docs |
+|---|---|---|---|
+| **HCIR Cognitive OS Kernel** | 8-opcode ISA, `TieredWorkspace`, `TransactionManager`, `ConstitutionalVerifier`, `ExecutiveRuntime` | `hbllm.hcir` / `hbllm.hcir.kernel` | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
+| **Cortical World Model** | 5-stage active inference (`Perception → Assimilation → Simulation → Deliberation → Motor`), `TransitionKnowledgeBase` | `hbllm.hcir.world` | [Cortical World Model](docs/architecture/cortical-world-model.md) |
+| **Symbol Grounding Engine** | Perceptual feature extraction (`handcrafted`, `snn`, `learned`), bipartite tracking, concept induction | `hbllm.hcir.grounding` | [Grounding](docs/architecture/grounding.md) |
+| **Language & Reading** | Non-LLM multilingual parser/realizer (`en`, `si`, `ta`), `HCIRGateway`, `ReadingCurriculumIngestor` | `hbllm.hcir.language` | [Language & Reading](docs/architecture/language-and-reading.md) |
+| **Composable Reasoning** | 14 immutable-snapshot operators (`Deduction`, `Abduction`, `Causal`, `Spatial`, `Analogy`, `EmbodiedCausal`, …) | `hbllm.hcir.reasoning` | [Execution Runtime](docs/architecture/cognitive-execution-runtime.md) |
+| **Neuromorphic SNN** | LIF neurons, STDP, STP, WTA, cortical oscillations, `NeuromodulationEngine`, SNN perception | `hbllm.hcir.snn` | [SNN Engine](docs/architecture/snn-cognitive-engine.md) |
+| **Capabilities & Curiosity** | `CommandDispatcher`, `ConceptExplainer`, `EpistemicCuriosityController`, `BeliefConflictResolver`, sandboxed tools | `hbllm.hcir.capabilities` | [Capabilities](docs/architecture/capabilities-and-curiosity.md) |
+| **Declarative Skills** | Composable `SymbolicPredicate` signatures & `SubgoalSequence` bytecode compilation | `hbllm.hcir.skills` | [World Model API](docs/api/world-model.md) |
+| **Security & Serving** | FastAPI REST + MCP server, fail-closed `JWTAuthMiddleware`, `TenantGuard`, `AuditTrail`, `PIIRedactor` | `hbllm.serving` / `hbllm.security` | [Security](docs/security.md) |
+| **Native Rust Substrate** | 13 Rust crates (`hbllm_hcir_graph`, `hbllm_simulation_engine`, `hbllm_structure_matcher`, `hbllm_compute`, …) | `rust/` / `hbllm.native` | [Rust Kernels](docs/api/rust-kernels.md) |
 
 ---
 
-## Architecture at a Glance
+## Verified Benchmarks
 
-```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                     HBLLM Core (848 modules, 1320 source files)     │
-│                                                                     │
-│  ┌──────────┐  ┌─────────────────┐  ┌───────────────────────────┐  │
-│  │Perception│  │   Message Bus   │  │     Security & Governance │  │
-│  │ (38 files│  │   (48 files)    │  │       (24 files)          │  │
-│  │ STT,TTS, │  │ InProcess/Redis │  │ PII, VoiceAuth, Policy,  │  │
-│  │ Vision,  │  │ Trust,Registry  │  │ Audit, Tenant Guard      │  │
-│  │ Gesture) │  │                 │  │                           │  │
-│  └────┬─────┘  └───────┬─────┬──┘  └───────────────────────────┘  │
-│       │                │     │                                      │
-│       ▼                ▼     │                                      │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │                    Brain Layer (220+ files)                 │   │
-│  │                                                             │   │
-│  │  Cognitive Loop    SNN Stream       Autonomy & Executive    │   │
-│  │  ├─ Router         ├─ Comprehension ├─ AutonomyCore         │   │
-│  │  ├─ Planner        ├─ Expression    ├─ StateMachine         │   │
-│  │  ├─ Workspace      ├─ TrainedPRM    ├─ TaskGraph            │   │
-│  │  ├─ Critic         └─ ContentPlan   ├─ GoalDecomposition    │   │
-│  │  └─ Decision                        ├─ ReflexLibrary        │   │
-│  │                                     └─ RestraintEngine      │   │
-│  │  Human Modeling          Meta-Cognitive                     │   │
-│  │  ├─ UserModel            ├─ Learner (DPO)                  │   │
-│  │  ├─ ProjectGraph         ├─ Curiosity                      │   │
-│  │  ├─ ExecutiveCortex      ├─ Spawner (neurogenesis)         │   │
-│  │  ├─ RelationshipMemory   ├─ Sleep Cycle                    │   │
-│  │  └─ RealityGraph         └─ Identity & Ethics              │   │
-│  │                                                             │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│       │                                                             │
-│       ▼                                                             │
-│  ┌────────────┐  ┌──────────┐  ┌─────────┐  ┌──────────────────┐  │
-│  │  Memory    │  │ Actions  │  │ Serving │  │  Model/Training  │  │
-│  │ (45 files) │  │(32 files)│  │(58 files│  │   (42 files)     │  │
-│  │ 9 types   │  │ Sandbox, │  │ HTTP,WS,│  │ Transformer,     │  │
-│  │ + search  │  │ IoT,MCP, │  │ Studio, │  │ Quant, DPO,      │  │
-│  │ + compact │  │ Browser  │  │ SSE     │  │ Tokenizer        │  │
-│  └───────────┘  └──────────┘  └─────────┘  └──────────────────┘  │
-└─────────────────────────────────────────────────────────────────────┘
-```
+### Sealed Held-Out v2 (`eval-phase2-r10`, 2026-11-21)
 
----
+Executed under the anti-tamper `eval-*` git tag gate on `benchmarks/suites/heldout.yaml` (`n = 120` unseen trials across 5 regimes, commit `a26f09bd`, ledger in `reports/heldout/LEDGER.md`):
 
-## Platform-Agnostic Design
+| Metric | Measured Result | Wilson 95% CI | Notes |
+|---|---|---|---|
+| **Zero-Shot Solve Rate** | **0.9250** (`111 / 120`) | `[0.8636, 0.9600]` | Generality `0.8236`, 4 exploration deaths (`3.33%`), **0 LLM tokens** |
+| **Cross-Seed Transfer** | **0.9035** (`114` episodes) | `[0.8354, 0.9453]` | `skills_consolidated = 161` across distinct procedural seeds |
+| **Same-Layout Replay** | **1.0000** | — | Generality `0.9021`, `mean_steps_to_stable_policy = 0.0` |
 
-HBLLM Core is a **fully platform-independent cognitive library** with zero dependencies on any frontend, desktop, or server framework.
+**Per-Family Breakdown (`eval-phase2-r10`):**
+- `continuous`: **100.0%** zero-shot (`100.0%` cross-seed transfer)
+- `symbolic`: **100.0%** zero-shot (`100.0%` cross-seed transfer)
+- `grid`: **95.0%** zero-shot (`97.37%` cross-seed transfer)
+- `stochastic_dynamic`: **85.0%** zero-shot (`78.95%` cross-seed transfer)
+- `partial_observability`: **80.0%** zero-shot (`68.42%` cross-seed transfer)
 
-| Layer | Responsibility | Location |
-|-------|---------------|----------|
-| **Core** | Cognitive nodes, memory, bus, agent executor, plugins | `hbllm/` (848 modules) |
-| **Platform Bridge** | UI, config, persistence, platform-specific tools | External (e.g. [Sentra](../sentra/)) |
-| **Plugins** | Modular cognitive extensions | `hbllm/plugins/` |
-
-```python
-# Extend the core with platform-specific tools
-from hbllm.actions.agent_executor import AgentExecutor
-
-
-class MyPlatformExecutor(AgentExecutor):
-    def _register_platform_tools(self):
-        self.tools.register("my_tool", ..., my_tool_fn, {})
-```
-
-> 📖 **[Plugin Development →](docs/guides/plugins.md)** · **[Custom Nodes →](docs/guides/custom-nodes.md)**
-
----
-
-## Hardware Requirements
-
-| Target | Model | RAM | GPU? |
-|--------|-------|-----|------|
-| **Raspberry Pi 5** (8GB) | 125M | ~1GB | ❌ |
-| **Laptop** (no GPU) | 125M–500M | ~2–4GB | ❌ |
-| **Desktop** (16GB) | 1.5B INT4 | ~4GB | Optional |
-| **Desktop + GPU** (6GB VRAM) | 1.5B FP16 | ~6GB | ✅ Faster |
-| **Cloud / API Mode** | Any (OpenAI/Anthropic/Ollama) | ~200MB | ❌ |
-
-> Rust SIMD kernels (AVX2 on x86, NEON on ARM) accelerate INT4/INT8 quantized inference on CPU. **No CUDA required.**
+> For native simulator benchmarks (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack`, `ai2thor`, `safety_gymnasium`, `alfworld`, `arc_agi`), see **[Benchmarks & Profiling](docs/api/benchmarks.md)**.
 
 ---
 
@@ -203,113 +106,91 @@ class MyPlatformExecutor(AgentExecutor):
 ```bash
 git clone https://github.com/hbllm/hbllm-core.git
 cd HBLLM/core
+
+# Core Pure-HCIR installation (no GPU / no PyTorch required)
 pip install -e .
 
-# Optional integrations
-pip install paho-mqtt        # IoT / MQTT Home Automation
-export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics (requires rclpy)
+# Optional: install FastAPI/JWT server extras or build native Rust wheels
+pip install -e ".[server]"
+for crate in rust/*/; do [ -f "$crate/Cargo.toml" ] && maturin develop --manifest-path "$crate/Cargo.toml" --release; done
 ```
 
+### Python SDK (Single Composition Root)
+
 ```python
-import asyncio
-from hbllm.brain.core.factory import BrainFactory, BrainConfig
+from hbllm.hcir.world.percept import EmbodiedObservation
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-
-async def main():
-    # Cloud-backed (easy start)
-    brain = await BrainFactory.create("openai/gpt-4o")
-
-    # Or fully local — no API keys needed
-    # brain = await BrainFactory.create_local("./checkpoints/sft/my_domain")
-
-    # Customize what's enabled
-    # config = BrainConfig(
-    #     inject_user_model=True,          # Learn who the user is
-    #     inject_project_graph=True,       # Track project state
-    #     inject_executive_cortex=True,    # Focus management
-    #     inject_relationship_memory=True, # Social graph
-    #     inject_reality_graph=True,       # Unified world state
-    #     inject_perception=False,         # Skip heavy ML models
-    # )
-    # brain = await BrainFactory.create("openai/gpt-4o", config=config)
-
-    result = await brain.process(
-        "Analyze our server logs and design a firewall rule.",
-        tenant_id="tenant-001",
+# 1. Boot the single canonical Cognitive OS runtime
+system = build_cognitive_system(
+    CognitiveSystemConfig(
+        world_id="quickstart",
+        memory_dir=None,  # In-memory SQLite / workspace (or path for persistence)
+        enable_grounding=True,
+        perception_mode="handcrafted",  # "handcrafted" | "snn" | "learned"
     )
-    print(f"Response: {result.text}")
-    print(f"Confidence: {result.confidence:.2f}")
-    print(f"Stages: {result.stages_completed}")
-    print(f"Latency: {result.latency_ms:.0f}ms")
+)
 
-    await brain.shutdown()
+# 2. LLM-free multilingual dialogue & knowledge graph ingestion
+system.process_dialogue("A capacitor stores energy in an electric field.")
+reply = system.process_dialogue("What does a capacitor store?")
+print(reply.response_text)
 
-
-asyncio.run(main())
+# 3. Deterministic 5-stage cortical step on spatial observation
+obs = EmbodiedObservation(
+    lattice=[[0, 0, 0], [0, 1, 0], [0, 0, 2]],
+    available_actions=[1, 2, 3, 4],
+    context_id="quickstart",
+    episode_id="0",
+)
+action, meta = system.engine.step(obs)
+print(f"Action: {action}, Phase: {meta.get('phase')}")
 ```
 
 ### CLI
 
 ```bash
-hbllm diagnostics                  # System & Cognitive OS runtime diagnostics
-hbllm info                         # View Cognitive OS architecture & invariants
-hbllm kernel status                # Inspect HCIR kernel, verifiers, and memory tiers
-hbllm mind step --obs file.json    # Deterministic active inference step
-hbllm bench dev                    # Run frozen dev benchmark suite
-hbllm bench local-suite            # Run ARC local suite benchmark
-hbllm serve --port 8000            # Start the FastAPI + MCP Server
-hbllm plugin list                  # List installed plugins
+hbllm diagnostics                   # Hardware, Rust SIMD, and Cognitive OS health
+hbllm info                          # Cognitive OS invariants and 5-stage cortical loop
+hbllm kernel status                 # Inspect verified TransactionManager, stages & native graph
+hbllm mind step --obs obs.json      # Single deterministic active-inference step
+hbllm bench dev                     # Run frozen dev benchmark suite
+hbllm bench profile                 # Profile substrate & 32x32 5-stage E2E latency
+hbllm serve --port 8000             # Start FastAPI REST + MCP Server (requires .[server])
+hbllm plugin list                   # List installed plugins in plugins/
 ```
 
-> 📖 **[Quickstart Guide →](docs/guides/quickstart.md)** · **[Configuration →](docs/guides/configuration.md)** · **[Deployment →](docs/guides/deployment.md)**
+> 📖 **[Quickstart Guide →](docs/guides/quickstart.md)** · **[CLI Manual →](docs/guides/cli.md)** · **[Configuration →](docs/guides/configuration.md)** · **[Deployment →](docs/guides/deployment.md)**
 
 ---
 
 ## Project Stats
 
 | Metric | Value |
-|--------|-------|
-| Source modules | **421** Python files across 16+ packages |
-| Brain layer | **166** files — 16 cognitive subsystems |
-| Test suite | **6,100+** tests (unit, integration, e2e) |
-| Cognitive nodes | **50+** async nodes on the message bus |
-| Memory types | **9** (Working, Episodic, Semantic, Procedural, KG, Value, Spatial, Temporal, Importance) |
-| Human modeling | **5** subsystems (UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph) |
-| SNN networks | **5** (Comprehension, Association, Reasoning, Expression, TrainedPRM) |
-| Rust crates | **13** (compute, concept_extract, confidence, data_tools, hcir_graph, knowledge_graph, network_utils, perception, policy_eval, semantic_search, simulation_engine, structure_matcher, tokenizer) |
-| LoRA adapter size | **~2MB** each |
+|---|---|
+| Core source modules (`hbllm/`) | **988** Python files |
+| HCIR Cognitive OS (`hbllm/hcir/`) | **413** Python files across **11** subpackages (budget `<= 150,000` LOC) |
+| Cortical World Model (`hbllm/hcir/world/`) | **149** Python files across **17** domain subpackages |
+| Reasoning operators (`hbllm/hcir/reasoning/`) | **14** default composable operators (0 LLM dependencies) |
+| Workspace tiers | **4** (`Working`, `Brain`, `Persistent`, `Meta`) |
+| Test suites | **599** core test files (`tests/`) + **70** plugin test files (`plugins/`) |
+| Rust crates (`rust/`) | **13** PyO3 native acceleration crates |
 
 ---
 
 ## Documentation
 
 | Section | Contents |
-|---------|----------|
-| **[Architecture](docs/architecture/)** | [Overview](docs/architecture/overview.md), [Cognitive Nodes](docs/architecture/cognitive-nodes.md), [Memory](docs/architecture/memory-systems.md), [Message Bus](docs/architecture/message-bus.md), [Sleep Cycle](docs/architecture/sleep-cycle.md), [Executive Brain](docs/architecture/executive-brain-layer.md), [Cognitive Subsystems](docs/architecture/cognitive-subsystems.md) |
-| **[Zoning](docs/zoning/)** | [LoRA Routing](docs/zoning/lora-routing.md), [Weighted Domains](docs/zoning/weighted-domains.md), [Hybrid Quantization](docs/zoning/hybrid-quantization.md) |
-| **[Guides](docs/guides/)** | [Quickstart](docs/guides/quickstart.md), [Custom Nodes](docs/guides/custom-nodes.md), [Plugins](docs/guides/plugins.md), [Training](docs/guides/training.md), [Deployment](docs/guides/deployment.md), [IoT/Robotics](docs/guides/robotics-iot.md) |
-| **[API Reference](docs/api/)** | [Brain Factory](docs/api/brain-factory.md), [Brain Subsystems](docs/api/brain-subsystems.md), [Network](docs/api/network.md), [Model](docs/api/model.md), [Rust Kernels](docs/api/rust-kernels.md) |
+|---|---|
+| **[Architecture](docs/architecture/overview.md)** | [Overview](docs/architecture/overview.md), [Entry Points](docs/architecture/entry-points.md), [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md), [Cortical World Model](docs/architecture/cortical-world-model.md), [Symbol Grounding](docs/architecture/grounding.md), [Language & Reading](docs/architecture/language-and-reading.md), [Reasoning Runtime](docs/architecture/cognitive-execution-runtime.md), [SNN Engine](docs/architecture/snn-cognitive-engine.md), [Capabilities & Curiosity](docs/architecture/capabilities-and-curiosity.md), [Memory Systems](docs/architecture/memory-systems.md), [Graph Substrate](docs/architecture/graph_substrate.md), [Sandboxing](docs/architecture/sandboxing.md), [Innate Priors](docs/architecture/priors.md) |
+| **[ADRs](docs/adr/README.md)** | [ADR 001](docs/adr/0001-hbllm-core-architecture.md), [ADR 002](docs/adr/0002-operational-architecture-and-governance.md), [ADR 003](docs/adr/0003-epistemic-runtime.md), [ADR 004 (Pure-HCIR)](docs/adr/0004-pure-hcir-cognitive-os.md) |
+| **[Guides](docs/guides/quickstart.md)** | [Quickstart](docs/guides/quickstart.md), [CLI Reference](docs/guides/cli.md), [Configuration](docs/guides/configuration.md), [Deployment](docs/guides/deployment.md), [Plugin SDK](docs/guides/plugins.md), [Custom Nodes](docs/guides/custom-nodes.md), [Packages & Skills](docs/guides/hbpkg-and-skills.md), [Persistence & Backup](docs/guides/persistence-backup.md), [Robotics & IoT](docs/guides/robotics-iot.md) |
+| **[API Reference](docs/api/hcir.md)** | [HCIR Kernel](docs/api/hcir.md), [World Model](docs/api/world-model.md), [Language](docs/api/language.md), [Capabilities](docs/api/capabilities.md), [Reasoning](docs/api/reasoning.md), [SNN](docs/api/snn.md), [Memory](docs/api/memory.md), [Governance](docs/api/governance.md), [Security](docs/api/security.md), [Serving](docs/api/serving.md), [Benchmarks](docs/api/benchmarks.md), [Rust Kernels](docs/api/rust-kernels.md) |
 
 ---
 
-## Contributing
+## Contributing & License
 
-We welcome contributions! Key areas:
+See **[Contributing Guide](docs/contributing.md)** and **[AGENTS.md](AGENTS.md)** for engineering invariants, architectural ratchets, and verification commands.
 
-- 👤 **Human Modeling** — Improve UserModel learning, add new trust dimensions, project graph features
-- 🧠 **Cognitive Plugins** — Extend emotion, temporal, swarm or build new ones
-- 📱 **Edge Devices** — Optimization for Raspberry Pi 5 & Jetson Orin Nano
-- 🌐 **Starter Zones** — Pre-trained LoRAs for Medicine, Law, Creative Writing
-
-> 📖 **[Contributing Guide →](docs/contributing.md)**
-
----
-
-## License
-
-HBLLM Core is released under **GNU General Public License v3.0 (GPLv3)**.
-
-<div align="center">
-  <p><b>HBLLM Core</b> — An AI that thinks like a person, models who you are, runs on your hardware, and scales on your terms.</p>
-  <p>⭐ Star this repository to support open-source, privacy-first cognitive architectures!</p>
-</div>
+HBLLM Core is released under **GNU General Public License v3.0 (GPLv3)** — see [LICENSE.md](LICENSE.md).

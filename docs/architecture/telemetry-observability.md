@@ -111,8 +111,9 @@ The developmental learning plugin exposes `DevelopmentalTelemetryEmitter` (`plug
 
 ## Cross-References
 
+- [HCIR Kernel OS](./hcir-kernel-os.md) — `KernelTelemetry` health probes, `AutonomyTracker`, and `ExecutiveRuntime` instrumentation
+- [Cortical World Model](./cortical-world-model.md) — per-stage `CorticalPipeline` timing (`stage_timings_ms`) and `hbllm bench profile`
 - [Developmental Learning](./developmental-learning.md) — active causal discovery and curriculum telemetry
-- [Executive Brain Layer](./executive-brain-layer.md) — the primary producer of telemetry events
 - [Self-Model](./self-model.md) — persistent identity (complementary to DigitalTwin)
 - [Packaging & Boundaries](./packaging-and-boundaries.md) — core-runtime vs optional extras segregation
 - [ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md) — design decisions

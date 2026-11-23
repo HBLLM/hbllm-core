@@ -1,12 +1,65 @@
 # Memory API Reference
 
-HBLLM implements a **multi-tiered memory system** inspired by human cognitive
-architecture. Each tier serves a different purpose, and together they give the
-system both short-term recall and long-term learning capabilities.
+HBLLM's canonical memory substrate is **HCIR-native** (`TieredWorkspace`, `HCIRMemoryBackend`, `SQLiteEventStore`, `LexicalOntologyStore`), storing episodic, semantic, procedural, value, and belief memories as typed, tenant-isolated graph nodes backed by `TransactionManager`.
+
+*(Legacy SQLite/vector stores under `hbllm.memory` remain documented in the final section for backward compatibility.)*
 
 ---
 
-## Architecture Overview
+## Pure-HCIR Memory Substrate (Canonical)
+
+```mermaid
+graph TB
+    subgraph "HCIR Memory API"
+        HMB["HCIRMemoryBackend<br/>(hbllm.hcir.adapters.hcir_memory_backend)"]
+        ONT["LexicalOntologyStore<br/>(hbllm.hcir.stores.ontology_store)"]
+        ES["SQLiteEventStore<br/>(hbllm.hcir.stores.sqlite_event_store)"]
+    end
+
+    subgraph "4-Tier Workspace (hbllm.hcir.workspace_tiers)"
+        W["Working Tier (TaskFrame)"]
+        B["Brain Tier (Session)"]
+        P["Persistent Tier (Lifelong)"]
+        M["Meta Tier (Telemetry / Competence)"]
+    end
+
+    HMB --> W --> B --> P --> M
+    P <--> ES
+```
+
+### `HCIRMemoryBackend`
+
+**Module:** `hbllm.hcir.adapters.hcir_memory_backend.HCIRMemoryBackend`
+
+```python
+from hbllm.hcir.adapters.hcir_memory_backend import HCIRMemoryBackend
+from hbllm.hcir.workspace_tiers import TieredWorkspace
+
+tiered = TieredWorkspace()
+backend = HCIRMemoryBackend(tiered_workspace=tiered)
+
+ep_id = await backend.store_episode(
+    summary="Verified backup checksum",
+    outcome="All shards valid",
+    reward=0.95,
+    tenant_id="tenant-alpha",
+)
+matches = await backend.search_across_memory_types(
+    query="backup", tenant_id="tenant-alpha", limit=10
+)
+```
+
+### `SQLiteEventStore` & `LexicalOntologyStore`
+
+- **`SQLiteEventStore`** (`hbllm.hcir.stores.sqlite_event_store`): Hash-chained event log with `append()`, `get_events()`, `compact()`, `verify_chain_integrity()`, and `max_events` bounded compaction.
+- **`LexicalOntologyStore`** (`hbllm.hcir.stores.ontology_store`): SQLite lexical/taxonomic store supporting `lookup()`, `has_word()`, `is_a()`, `get_hypernyms()`, `fuzzy_lookup()`, and `stats()`.
+
+---
+
+## Legacy Bus Memory Subsystem (`hbllm.memory`)
+
+> [!NOTE]
+> The interfaces below belong to the legacy MessageBus `MemoryNode` (`hbllm.memory`). New Pure-HCIR subsystems should use `TieredWorkspace` and `HCIRMemoryBackend` above.
 
 ```mermaid
 graph TB

@@ -40,9 +40,9 @@ The Logical Policy Sandbox operates inside the HCIR kernel (`hbllm.hcir.kernel.c
 3. **Dynamic Parameter & AST Inference**:
    - Inferred via `infer_capability_permissions()`, matching parameter tokens (e.g. `filepath`, `url`, `cmd`, `sql`) against capability requests to prevent permission bypass via generic wrappers.
 
-### Tier 2: Physical Process Isolation Sandbox (OS / Process Level)
+### Tier 2: Physical Process Isolation Sandbox (`SandboxedExecutor`)
 
-The Physical Isolation Sandbox (`hbllm.actions.sandbox.run_sandboxed_python`) operates at the operating system process boundary. Any capability running with `IsolationMode.SUBPROCESS` or executing untrusted Python code is dispatched through this layer:
+The Physical Isolation Sandbox (`hbllm.hcir.kernel.capability_sandboxing.SandboxedExecutor`) operates at the operating system process boundary. Any capability running with `IsolationMode.SUBPROCESS` (such as `execution.sandbox_run`) or executing untrusted Python code is dispatched through this layer with immediate parent write-end pipe closure so EOF signals cleanly without hangs:
 
 1. **AST Pre-Validation**:
    - Parses the abstract syntax tree before execution.
@@ -66,13 +66,13 @@ The Physical Isolation Sandbox (`hbllm.actions.sandbox.run_sandboxed_python`) op
 |---|---|---|---|
 | **Core Read-Only Logic** (Knowledge query, calculator) | `TrustLevel.SYSTEM` | `IsolationMode.IN_PROCESS` | **Tier 1** (Permission check + wall-clock timeout) |
 | **Local System I/O** (File readers, SQLite queries) | `TrustLevel.VERIFIED` | `IsolationMode.IN_PROCESS` | **Tier 1** (Explicit permission grant required) |
-| **Dynamic Python Execution** (`ExecutionNode`, `tool_python_exec`) | `TrustLevel.UNTRUSTED` | `IsolationMode.SUBPROCESS` | **Tier 1 + Tier 2** (AST validation, POSIX quotas, network unshare) |
+| **Dynamic Python Execution** (`execution.sandbox_run`, untrusted scripts) | `TrustLevel.UNTRUSTED` | `IsolationMode.SUBPROCESS` | **Tier 1 + Tier 2** (AST validation, POSIX quotas, network unshare) |
 | **External Plugins / Untrusted Code** | `TrustLevel.UNTRUSTED` | `IsolationMode.SUBPROCESS` | **Tier 1 + Tier 2** (Strict hardware & process isolation) |
 
 ---
 
 ## Architectural Guarantees
 
-1. **No False Confidence**: Capabilities requiring process isolation cannot bypass Tier 2. `CapabilityResolver` routes all `IsolationMode.SUBPROCESS` tasks into `run_sandboxed_python`.
+1. **No False Confidence**: Capabilities requiring process isolation cannot bypass Tier 2. `CapabilityResolver` and `CapabilitySandboxManager` route all `IsolationMode.SUBPROCESS` tasks into `SandboxedExecutor` with hard memory/CPU quotas and immediate pipe EOF cleanup.
 2. **Zero In-Process Code Execution**: Untrusted model-generated Python code is never evaluated inside the core process space.
 3. **Audit Trail Accountability**: Every sandbox policy evaluation, permission check, denial, and execution result is cryptographically recorded in `AuditTrail`.

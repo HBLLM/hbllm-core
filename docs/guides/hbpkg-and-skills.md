@@ -5,13 +5,13 @@ description: "How to package, sign, distribute, and install modular HBLLM capabi
 
 # Packages (`.hbpkg`) & Skills SDK
 
-HBLLM provides a standardized archive format (`.hbpkg`) and a declarative Skill definition standard for packaging, sharing, and hot-loading cognitive modules, domain LoRAs, and procedural skills.
+HBLLM provides a standardized archive format (`.hbpkg`), declarative neuro-symbolic skills (`hbllm.hcir.skills.declarative`), and `SKILL.md` definitions (`hbllm.skills`) for packaging, sharing, and hot-loading cognitive modules and procedural skills.
 
 ---
 
 ## The `.hbpkg` Package Standard
 
-An `.hbpkg` file is an authenticated, compressed container containing cognitive code, declarative metadata, and optional model adapter weights.
+An `.hbpkg` file is an authenticated, compressed container containing cognitive code, declarative metadata, and optional skill/capability declarations.
 
 ### Package Structure
 
@@ -20,9 +20,7 @@ my-package.hbpkg (compressed archive)
 ├── manifest.json         # Package metadata, permissions, entry points
 ├── skills/               # Declarative SKILL.md definition files
 │   └── weather_check.md
-├── adapters/             # Domain LoRA safetensors (optional)
-│   └── adapter_model.safetensors
-└── nodes/                # Custom Python or native cognitive nodes
+└── nodes/                # Custom Python or declarative skill modules
     └── custom_node.py
 ```
 
@@ -59,24 +57,16 @@ Use the Python SDK `hbllm.hbpkg.packager` to bundle and validate packages:
 
 ```python
 from pathlib import Path
-from hbllm.hbpkg.manifest import PackageManifest
-from hbllm.hbpkg.packager import PackageBuilder
+from hbllm.hbpkg.manifest import HBPkgManifest
+from hbllm.hbpkg.packager import Packager
 
-# 1. Define manifest
-manifest = PackageManifest(
+manifest = HBPkgManifest(
     name="devops-incident-responder",
     version="1.2.0",
     description="Autonomous incident response package",
-    capabilities_required=["network:egress"],
 )
-
-# 2. Build the .hbpkg archive
-builder = PackageBuilder(source_dir=Path("./my_package_source"))
-package_path = builder.build(
-    output_path=Path("./dist/devops-incident-responder.hbpkg"),
-    manifest=manifest,
-)
-print(f"Built package at: {package_path}")
+packager = Packager()
+print(manifest.name, manifest.version)
 ```
 
 ---
@@ -145,4 +135,7 @@ asyncio.run(main())
 
 ## Autonomous Skill Induction
 
-HBLLM does not only execute pre-written skills; the **SkillCompilerNode** (`hbllm.brain.skills.skill_compiler_node`) and **SkillInductionNode** (`hbllm.brain.skills.skill_induction_node`) automatically synthesize new procedural skills when successful multi-step tool executions recur in `EpisodicMemory`.
+Beyond pre-written `SKILL.md` bundles, HBLLM automatically synthesizes declarative skills inside the Pure-HCIR core:
+- **`DeclarativeNeuroSymbolicSkill`** (`hbllm.hcir.skills.declarative`): Expresses skills as composable `SymbolicPredicate` signatures paired with `SubgoalSequence` instructions compiled into `InstructionStream`s.
+- **`SkillInductionEngine`** (`hbllm.hcir.skills.induction`) & **`SkillMacroChunker`** (`hbllm.hcir.reasoning.operators.skill_chunker`): Induce reusable macro skills from recurring trajectories and store them in `PrefrontalWorkingMemory.procedural_library` and `TieredWorkspace`.
+- Legacy bus nodes (`hbllm.brain.skills.skill_compiler_node`, `hbllm.brain.skills.skill_induction_node`) remain for legacy MessageBus deployments.

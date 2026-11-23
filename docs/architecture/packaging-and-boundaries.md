@@ -63,7 +63,7 @@ def __getattr__(name: str) -> Any:
 ```
 
 ### Result
-- Directly importing `plugins.developmental_adapter` or `hbllm.brain.continual.store` now loads **0** heavy server or vector database modules.
+- Directly importing `plugins.developmental_adapter` or `hbllm.hcir` now loads **0** heavy server or vector database modules.
 - The edge footprint memory overhead drops by $> 90\%$.
 - Accessing `from hbllm.brain import BrainFactory` continues to resolve on demand with 100% backward compatibility.
 
@@ -71,10 +71,16 @@ def __getattr__(name: str) -> Any:
 
 ## 4. Automated Architectural Boundary Enforcement
 
-To ensure boundaries are never violated by accidental imports in PRs, automated isolation tests run in fresh subprocesses (`tests/unit/core/test_dependency_boundaries.py`):
+To ensure boundaries are never violated by accidental imports in PRs, automated isolation and governance suites run under `tests/unit/architecture/` and `tests/unit/core/test_dependency_boundaries.py`:
 
-1. **`test_developmental_adapter_import_cleanliness`**: Asserts that `import plugins.developmental_adapter` loads 0 blacklisted modules (`fastapi`, `uvicorn`, `redis`, `qdrant_client`, `asyncpg`, `pgvector`, `cryptography`).
-2. **`test_continual_store_import_cleanliness`**: Asserts that `import hbllm.brain.continual.store` loads 0 blacklisted modules.
-3. **`test_brain_lazy_loading_and_resolution`**: Verifies `__dir__` completeness and dynamic on-demand resolution.
-4. **`test_memory_lazy_loading_and_resolution`**: Verifies dynamic resolution of memory nodes.
-5. **`test_pyproject_dependency_discipline`**: Asserts that core base `dependencies` in `pyproject.toml` contain zero server/storage dependencies.
+1. **Layering & Boundary Isolation (`test_layering.py`, `test_dependency_boundaries.py`):**
+   - `hbllm.hcir` never imports from `hbllm.brain`.
+   - Core `hbllm` never imports from `plugins/`.
+   - Importing `plugins.developmental_adapter` loads **0** blacklisted optional extras (`fastapi`, `uvicorn`, `redis`, `qdrant_client`, `asyncpg`, `pgvector`, `cryptography`).
+   - Core `dependencies` in `pyproject.toml` remain lean without server or vector-DB extras.
+2. **LOC Budgets & Zero-LLM Core Gate (`test_loc_budget.py`):**
+   - Enforces `<= 150,000` LOC across `hbllm/hcir/**/*.py` and `<= 300,000` LOC across `hbllm/**/*.py`.
+   - Enforces a strict ratchet reducing legacy `__path__.append` shims toward zero.
+   - Verifies via AST inspection that `hbllm/hcir/**` imports **zero** LLM client libraries or external LLM scaffolds (`openai`, `anthropic`, `litellm`, `transformers`, `plugins.llm_scaffold`, `hbllm.serving.provider`).
+3. **Single Composition Root & Persistence Hygiene (`test_single_composition_root.py`, `test_no_direct_sqlite.py`):**
+   - Confirms runtime entry points compose through `build_cognitive_system()` and raw SQLite connections remain confined to `hbllm.persistence`, `hbllm.hcir.stores`, `hbllm.security`, and `hbllm.network.durable_bus`.

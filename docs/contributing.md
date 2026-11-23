@@ -1,49 +1,58 @@
 ---
 title: "Contributing to HBLLM Core"
-description: "Guidelines for contributing to the HBLLM open-source cognitive architecture project."
+description: "Guidelines, invariants, testing, and tooling workflow for contributing to the Pure-HCIR HBLLM Core repository."
 ---
 
 # Contributing
 
-We welcome contributions to push AGI forward! HBLLM Core is an open-source project and we value every contribution.
+We welcome contributions to **HBLLM Core**! Please read `AGENTS.md` in the repository root alongside this guide so every contribution preserves our Pure-HCIR invariants, architectural boundaries, and test gates.
+
+---
 
 ## Getting Started
 
-1. Fork the repository on GitHub
-2. Clone your fork and create a feature branch
-3. Install development dependencies:
+1. Fork the repository on GitHub and clone your fork.
+2. Install development dependencies inside `HBLLM/core`:
 
 ```bash
 cd HBLLM/core
 pip install -e ".[dev]"
 ```
 
+*(Optional)* Build native Rust extensions:
+
+```bash
+pip install maturin
+for crate in rust/*/; do
+  [ -f "$crate/Cargo.toml" ] && maturin develop --manifest-path "$crate/Cargo.toml" --release
+done
+```
+
+---
+
 ## Development Workflow
 
 ### Running Tests
 
 ```bash
-# Full test suite
-python -m pytest tests/ -v
+# Architecture & Pure-HCIR invariant checks (required)
+pytest tests/unit/architecture/ -q
 
-# Specific test file
-python -m pytest tests/test_network.py -v
+# Fast HCIR & world-model test suites
+pytest tests/unit/hcir/ tests/unit/world/ -q
 
-# With coverage
-python -m pytest tests/ --cov=hbllm
+# Plugin test suites
+pytest plugins/*/tests/ -q --timeout=30
+
+# Docs strict build check
+mkdocs build --strict -d /tmp/hbllm_docs && rm -rf /tmp/hbllm_docs
 ```
 
-### Linting
+### Linting & Formatting
 
 ```bash
-# Check for errors
 ruff check .
-
-# Auto-fix safe issues
-ruff check --fix .
-
-# Format code
-ruff format .
+ruff format --check .
 ```
 
 ### Type Checking
@@ -52,42 +61,44 @@ ruff format .
 mypy hbllm/
 ```
 
+### Knowledge Graph Sync (`graphify`)
+
+After substantial Python code changes or adding files, refresh the local knowledge graph:
+
+```bash
+graphify update .
+```
+
 ### Rust Components
 
 ```bash
-# Format
-cargo fmt --manifest-path rust/compute_kernel/Cargo.toml
-
-# Lint
-cargo clippy --manifest-path rust/compute_kernel/Cargo.toml --workspace -- -D warnings
-
-# Build
-cargo check --manifest-path rust/compute_kernel/Cargo.toml
+cargo fmt --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace
 ```
+
+---
 
 ## Key Areas for Contribution
 
 | Area | Description | Difficulty |
 |---|---|---|
-| 🧠 **New Cognitive Nodes** | Emotion modeling, temporal reasoning | Advanced |
-| 📱 **Edge Optimization** | Raspberry Pi 5, Jetson Orin Nano patches | Intermediate |
-| 🌐 **Starter Zones** | Pre-trained LoRAs for Medicine, Law, Creative Writing | Intermediate |
-| 📖 **Documentation** | Tutorials, examples, API docs | Beginner |
-| 🧪 **Testing** | Expand test coverage, fuzz testing | Beginner |
-| 🔧 **Rust Kernels** | New SIMD optimizations, quantization formats | Advanced |
+| 🧠 **Cortical World Model (`hbllm.hcir.world`)** | Probabilistic transition beliefs, stochastic MDP/EFE planning, active inference | Advanced |
+| 👁️ **Symbol Grounding (`hbllm.hcir.grounding`)** | SNN & learned morphology-invariant `FeatureExtractor`s, tracking speedups | Intermediate |
+| 🗣️ **Language & Reading (`hbllm.hcir.language`)** | New `LanguageProfile`s, parser/realizer coverage, Track T4 knowledge ingestion | Intermediate |
+| 🔧 **Rust Kernels (`rust/*`)** | Wiring `hbllm_simulation_engine` & `hbllm_structure_matcher`, Rust unit tests | Advanced |
+| 📖 **Documentation & Tests** | Tutorials, API examples, Hypothesis property tests | Beginner |
+
+---
 
 ## Pull Request Guidelines
 
-1. **One concern per PR** — Keep changes focused and reviewable.
-2. **Tests required** — All new features must include tests.
-3. **Lint clean** — PRs must pass `ruff check`, `ruff format --check`, and `mypy`.
-4. **Descriptive commits** — Use conventional commit format (`feat:`, `fix:`, `docs:`).
+1. **Respect Core Invariants:** Zero external LLM imports in `hbllm/hcir/**`, mutate state only via `TransactionManager`, keep `hbllm/` strictly domain-agnostic (put task adapters in `plugins/`).
+2. **One concern per PR:** Keep changes focused and reviewable.
+3. **Tests & Docs required:** Include unit tests and update relevant `docs/` pages if public architecture or APIs change.
+4. **Lint & CI clean:** Pass `ruff check`, `ruff format --check`, `mypy`, `pytest tests/unit/architecture/`, and `mkdocs build --strict`.
 
-## Code Style
-
-- Python: Enforced by `ruff` (configured in `pyproject.toml`)
-- Rust: Enforced by `cargo fmt` and `cargo clippy`
-- Markdown: Standard GitHub-Flavored Markdown
+---
 
 ## License
 

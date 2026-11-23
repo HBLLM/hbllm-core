@@ -1,8 +1,8 @@
 # Governance & Security
 
-HBLLM enforces governance at multiple layers — from constitutional principles
-that define the system's values, to runtime policy evaluation on every response,
-to proactive monitoring that watches world state and takes corrective action.
+HBLLM enforces governance at two complementary layers:
+1. **Pure-HCIR Kernel Governance (`hbllm.hcir.kernel.governance`):** `ConstitutionalVerifier`, `CommitAuthorityRegistry`, `EpistemicSafetyGate`, `GovernanceEngine`, `OwnerRuleStore`, and `PolicyEngine` govern every `TransactionManager` commit and capability invocation.
+2. **Legacy Bus Governance (`hbllm.brain.governance`):** `PolicyEngine`, `SentinelNode`, and `ConstitutionalPrinciples` govern message-bus node traffic when the serving bus is active.
 
 ---
 
@@ -10,27 +10,44 @@ to proactive monitoring that watches world state and takes corrective action.
 
 ```mermaid
 graph TB
-    subgraph "Governance Stack"
-        CP["ConstitutionalPrinciples<br/>(Core values)"]
-        OR["OwnerRules<br/>(User-defined rules)"]
-        PE["PolicyEngine<br/>(Runtime evaluation)"]
-        SN["SentinelNode<br/>(Proactive monitor)"]
-        DN["DecisionNode<br/>(Safety gatekeeper)"]
+    subgraph "HCIR Kernel Governance (hbllm.hcir.kernel.governance)"
+        TX["TransactionOperation / CapabilityCall"] --> CV["ConstitutionalVerifier + 6 Verification Stages"]
+        CV --> GE["GovernanceEngine + EpistemicSafetyGate"]
+        GE -->|"Approved"| TM["TransactionManager / CognitiveKernel"]
+        GE -->|"Denied"| ROLL["Compensating Rollback + Audit"]
     end
-    subgraph "Data Flow"
-        LLM["LLM Response"] --> DN
-        DN -->|safety check| PE
-        PE -->|pass/fail| DN
-        DN --> User
-        Sensors -->|context.update| SN
-        SN -->|evaluate| PE
-        SN -->|sentinel.action| IoT
+
+    subgraph "Policy &amp; Rules"
+        OR["OwnerRuleStore"]
+        PE["PolicyEngine"]
+        OR --> PE --> CV &amp; GE
     end
 ```
 
 ---
 
-## PolicyEngine
+## `ConstitutionalVerifier` & `EpistemicSafetyGate`
+
+**Modules:** `hbllm.hcir.kernel.governance.constitutional_verifier`, `hbllm.hcir.kernel.governance.epistemic_gate`, `hbllm.hcir.kernel.governance.governance_engine`
+
+```python
+from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
+from hbllm.hcir.kernel.commit_authority import CommitAuthorityRegistry
+from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.kernel.verification import create_default_pipeline
+from hbllm.hcir.workspace import HCIRWorkspaceState
+
+registry = CommitAuthorityRegistry()
+verifier = ConstitutionalVerifier(authority_registry=registry)
+tx_mgr = TransactionManager(
+    workspace=HCIRWorkspaceState(),
+    verification_stages=create_default_pipeline(constitutional_verifier=verifier),
+)
+```
+
+---
+
+## `PolicyEngine`
 
 ::: hbllm.brain.governance.policy_engine.PolicyEngine
 

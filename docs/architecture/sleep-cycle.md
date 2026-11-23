@@ -161,12 +161,8 @@ Consolidation cycles can be triggered via three mechanisms:
        Message(type=MessageType.QUERY, source_node_id="cli", topic="system.sleep.force", payload={}),
    )
    ```
-3. **REST API Trigger:**
-   ```bash
-   curl -X POST "https://api.hbllm.ai/v1/system/sleep" \
-        -H "Authorization: Bearer <TOKEN>" \
-        -d '{"tenant_id": "tenant-001", "mode": "deep"}'
-   ```
+3. **ExecutiveRuntime Idle Consolidation:**
+   `ExecutiveRuntime.run_offline_consolidation()` (`hbllm.hcir.kernel.executive_runtime`) triggers prioritized episodic replay (`HippocampalPrioritizedReplayBuffer` in `hbllm.hcir.world.episodic.replay`), `TieredWorkspace` promotion/hygiene (`enforce_node_budgets()`, `compact_event_stores()`, `run_memory_hygiene_cycle()`), and background skill consolidation automatically during idle windows (`start_autonomous_loop()`).
 
 ---
 

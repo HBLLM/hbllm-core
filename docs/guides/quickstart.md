@@ -1,126 +1,109 @@
 ---
 title: "Quick Start Guide — HBLLM Core"
-description: "Get HBLLM Core running in under 5 minutes on any hardware — no GPU required. Installation, CLI usage, API server, and Python SDK."
+description: "Install and run HBLLM Core (Pure-HCIR Cognitive OS) in under 5 minutes on any hardware — no GPU required."
 ---
 
 # Quick Start
 
-Get HBLLM Core running in under 5 minutes.
+Get HBLLM Core running in under 5 minutes with zero cloud or GPU requirements.
 
 ## Prerequisites
 
-- Python 3.11+
-- pip or uv package manager
-- **No GPU required** — HBLLM runs on CPU-only machines (laptops, Raspberry Pi 5, servers)
-- (Optional) CUDA-capable GPU for faster local model inference
-- (Optional) Rust toolchain for building SIMD compute kernels
-
-!!! tip "Minimal Hardware"
-    The 125M model runs in under 500MB RAM on any modern CPU. You can start building cognitive agents today on any laptop — no cloud GPU rentals needed.
+- **Python 3.11+**
+- `pip` or `uv`
+- **No GPU required** — the Pure-HCIR Cognitive OS runs deterministically on CPU.
+- *(Optional)* Rust toolchain + `maturin` for native acceleration crates (`rust/*`).
+- *(Optional)* `.[server]` extra for the FastAPI REST + MCP server.
 
 ## Installation
 
 ```bash
 # Clone the repository
 git clone https://github.com/hbllm/hbllm-core.git
-cd hbllm-core
+cd HBLLM/core
 
-# Install in development mode
-pip install -e ".[dev]"
+# Install core Pure-HCIR runtime in editable mode
+pip install -e .
 
-# Optional integrations
-pip install paho-mqtt         # IoT / MQTT
-export HBLLM_ROS2_ENABLED=1  # ROS2 Robotics (requires rclpy)
+# Optional extras:
+# pip install -e ".[server]"   # FastAPI, Uvicorn, PyJWT, WebSockets
+# pip install -e ".[dev]"      # Server + storage + pytest/ruff/mypy
+```
+
+*(Optional)* Build native Rust acceleration wheels:
+
+```bash
+pip install maturin
+for crate in rust/*/; do
+  [ -f "$crate/Cargo.toml" ] && maturin develop --manifest-path "$crate/Cargo.toml" --release
+done
 ```
 
 ## Verify Installation
 
 ```bash
-# Run the test suite
-python -m pytest tests/ -v
+# Inspect runtime, Rust crates, and Cognitive OS status
+hbllm diagnostics
 
-# Check brain architecture
+# View architectural invariants & 5-stage cortical loop
 hbllm info
+
+# Check verified HCIR kernel, transaction stages, and 4 memory tiers
+hbllm kernel status
+
+# Run fast HCIR & architecture invariant tests
+pytest tests/unit/hcir/ tests/unit/architecture/ -q
 ```
 
-Expected output:
-```
-🧠 HBLLM Core v0.1.0
-Nodes:   28 specialized brain nodes
-Memory:  6 systems (Episodic, Semantic, Procedural, Value, Working, KG)
-Model:   Zoning — shared base + LoRA domain adapters
-Sizes:   125M / 500M / 1.5B parameters
-```
+## Python SDK (Single Composition Root)
 
-## Start the API Server
-
-=== "Local Model"
-
-    ```bash
-    # Requires downloaded safetensors
-    python -m hbllm.serving.api
-    ```
-
-=== "OpenAI Backend"
-
-    ```bash
-    HBLLM_PROVIDER=openai \
-    OPENAI_API_KEY=sk-... \
-    python -m hbllm.serving.api
-    ```
-
-=== "Anthropic Backend"
-
-    ```bash
-    HBLLM_PROVIDER=anthropic \
-    ANTHROPIC_API_KEY=sk-ant-... \
-    python -m hbllm.serving.api
-    ```
-
-The server starts on `http://localhost:8000` with auto-generated OpenAPI docs at `/docs`.
-
-## Python SDK
+All runtime entry points boot through `build_cognitive_system()` (`hbllm.runtime.bootstrap`):
 
 ```python
-import asyncio
-from hbllm.brain.core.factory import BrainFactory
+from hbllm.hcir.world.percept import EmbodiedObservation
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-
-async def main():
-    # Create a brain with OpenAI backend
-    brain = await BrainFactory.create("openai/gpt-4o")
-
-    # Process a complex query
-    result = await brain.process(
-        "Analyze our server logs and design a firewall rule.",
-        tenant_id="tenant-001",
+# 1. Boot verified Pure-HCIR Cognitive OS
+system = build_cognitive_system(
+    CognitiveSystemConfig(
+        world_id="quickstart",
+        memory_dir=None,  # In-memory workspace (omit for ~/.hbllm/worlds/<world_id>)
+        enable_grounding=True,
+        perception_mode="handcrafted",  # "handcrafted" | "snn" | "learned"
     )
+)
 
-    print(f"Decision: {result.text}")
-    print(f"Confidence: {result.confidence:.2f}")
-    print(f"Latency: {result.latency_ms:.0f}ms")
+# 2. LLM-free dialogue, prose ingestion, and calibrated query answering
+system.process_dialogue("Photosynthesis converts sunlight into chemical energy.")
+turn = system.process_dialogue("What does photosynthesis convert?")
+print(turn.response_text)
 
-    await brain.shutdown()
-
-
-asyncio.run(main())
+# 3. Deterministic 5-stage cortical active-inference step
+obs = EmbodiedObservation(
+    lattice=[[0, 0, 0], [0, 1, 0], [0, 0, 2]],
+    available_actions=[1, 2, 3, 4],
+    context_id="quickstart",
+    episode_id="ep_0",
+)
+action, meta = system.engine.step(obs)
+print(f"Chosen action: {action}, Phase: {meta.get('phase')}")
 ```
 
-## CLI Commands
+## CLI Workflows
 
 ```bash
-hbllm info                # View active brain architecture
-hbllm nodes               # List all loaded cognitive nodes
-hbllm serve --port 8000   # Start FastAPI + MCP Server
-hbllm train --model-size 125m  # Start local pre-training loop
-hbllm data --dataset fineweb   # Run data preparation pipeline
-hbllm plugin list         # List all installed dynamic plugins
-hbllm plugin new <name>   # Scaffold a new custom plugin
+hbllm kernel boot --world-id my_world       # Boot verified HCIR kernel
+hbllm mind step --obs tests/fixtures/obs_minimal.json --explain
+hbllm bench dev                             # Run frozen dev benchmark suite
+hbllm bench profile                         # Profile Rust/Python step latency
+hbllm plugin list                           # List installed plugins in plugins/
+hbllm serve --host 127.0.0.1 --port 8000    # Start FastAPI + MCP Server (requires .[server])
 ```
 
 ## Next Steps
 
-- [Architecture Overview](../architecture/overview.md) — Understand the system design.
-- [Configuration Guide](configuration.md) — Customize HBLLM for your environment.
-- [Custom Nodes](custom-nodes.md) — Extend the brain with your own nodes.
-- [Deployment Guide](deployment.md) — Deploy to production.
+- [Architecture Overview](../architecture/overview.md) — Pure-HCIR invariants and layered topology.
+- [Cortical World Model](../architecture/cortical-world-model.md) — 5-stage epistemic loop & `TransitionKnowledgeBase`.
+- [Language & Reading](../architecture/language-and-reading.md) — Multilingual parser/realizer & Track T4 comprehension.
+- [CLI Reference Manual](cli.md) — Complete CLI flags and subcommands.
+- [Deployment Guide](deployment.md) — Docker, production auth, and Kubernetes setup.

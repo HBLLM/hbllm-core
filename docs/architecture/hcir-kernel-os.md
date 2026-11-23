@@ -85,7 +85,7 @@ graph LR
 - **CognitiveEventLog**: Structured event stream with causality tracking
 - **Semantic Events**: Normalized via `SemanticNormalizer` before journaling
 
-**Code:** `hbllm.hcir.journal.CognitiveJournal`, `hbllm.hcir.events.CognitiveEventLog`
+**Code:** `hbllm.hcir.cognitive_journal.CognitiveJournal`, `hbllm.hcir.cognitive_event_log.CognitiveEventLog`, `hbllm.hcir.stores.sqlite_event_store.SQLiteEventStore`
 
 ### 3. Constitutional Governance
 
@@ -100,31 +100,32 @@ graph LR
     TM --> |"rollback"| COMP["Compensating Txn"]
 ```
 
-- **ConstitutionalVerifier**: Validates transactions against governance rules
-- **TransactionManager**: Atomic commits with compensating rollbacks
+- **ConstitutionalVerifier**: Validates transactions against governance rules and `CommitAuthorityRegistry` grants
+- **TransactionManager**: Atomic commits with compensating rollbacks and verification stages (`ScopeVerifier`, `SchemaVerifier`, `ResourceVerifier`, `PolicyVerifier`, `BranchModeVerifier`)
 - **Governance Constraints**: Budget limits, capability checks, tenant isolation
 
-**Code:** `hbllm.hcir.governance.ConstitutionalVerifier`, `hbllm.hcir.governance.TransactionManager`
+**Code:** `hbllm.hcir.kernel.governance.constitutional_verifier.ConstitutionalVerifier`, `hbllm.hcir.kernel.transaction_manager.TransactionManager`, `hbllm.hcir.kernel.commit_authority.CommitAuthorityRegistry`
 
-### 4. Declarative Capabilities
+### 4. Declarative Capabilities & Command Dispatch
 
-Nodes declare their capabilities and resource budgets via a typed system:
+Capabilities declare permissions and resource budgets via a typed system (`CapabilityManifest`, `CapabilityPermissions`, `SandboxedCapabilityPolicy`):
 
 | Component | Role |
-|-----------|------|
+|---|---|
 | `CognitiveBudget` | Resource limits (compute, memory, time) |
-| `NodeAdapter` | Adapts arbitrary nodes to the HCIR ABI |
-| `CapabilityResolver` | Resolves and sandboxes capability requests |
-| `GoalDecomposer` | Breaks goals into capability-aligned sub-tasks |
+| `NodeAdapter` | Adapts nodes to the HCIR ABI |
+| `CapabilityResolver` | Resolves and sandboxes capability requests (`CapabilitySandboxManager`) |
+| `CommandDispatcher` | Routes parsed `COMMAND` `SemanticFrame`s to governed capabilities |
+| `AutonomyTracker` | Tracks native HCIR parse/plan/realize autonomy rates |
 
-**Code:** `hbllm.hcir.capabilities`
+**Code:** `hbllm.hcir.capabilities`, `hbllm.hcir.kernel.command_dispatcher`, `hbllm.hcir.kernel.autonomy_tracker`
 
-### 5. HCIR Memory Backend
+### 5. HCIR Memory Backend & Bounded Event Storage
 
-The `HCIRMemoryBackend` is the **sole memory storage backend** (Phase 5: LEGACY_REMOVED). All memory types are stored as typed graph nodes:
+The `HCIRMemoryBackend` stores episodic, semantic, procedural, value, and belief memories as typed graph nodes inside `TieredWorkspace`, backed by `SQLiteEventStore` with bounded event-store compaction (`max_events`, hysteresis, and per-tier/world node budgets via `enforce_node_budgets()`):
 
 | Memory Type | Node Type | Store Method | Recall Method |
-|-------------|-----------|-------------|---------------|
+|---|---|---|---|
 | Episodic | `EpisodeNode` | `store_episode()` | `recall_episodes()` |
 | Semantic | `ConceptNode` | `store_concept()` | `recall_concepts()` |
 | Procedural | `SkillNode` | `store_skill()` | `recall_skills()` |
@@ -140,7 +141,7 @@ The `HCIRMemoryBackend` is the **sole memory storage backend** (Phase 5: LEGACY_
 The `MemoryMigrationProxy` managed the 5-phase transition from legacy SQLite stores to HCIR:
 
 | Phase | Mode | Behavior |
-|-------|------|----------|
+|---|---|---|
 | 1 | READ_THROUGH | Legacy authoritative, HCIR warmed |
 | 2 | DUAL_WRITE | Both written, legacy reads |
 | 3 | SHADOW_READ | Both read, divergence tracked |
@@ -149,24 +150,21 @@ The `MemoryMigrationProxy` managed the 5-phase transition from legacy SQLite sto
 
 **Code:** `hbllm.hcir.adapters.memory_migration_proxy.MemoryMigrationProxy`
 
-### 7. Bus Bridge (HCIRBusBridge)
+### 7. Bus Bridge (`HCIRBusBridge`)
 
-Bridges the HCIR workspace with the MessageBus, converting bus events into workspace mutations:
+Bridges the HCIR workspace with the `MessageBus`, converting bus events into workspace mutations:
 
 - **Inbound**: Bus messages → `SemanticNormalizer` → workspace nodes
 - **Outbound**: Workspace mutations → bus notifications
 
-**Code:** `hbllm.hcir.bridge.HCIRBusBridge`
+**Code:** `hbllm.hcir.adapters.hcir_bus_bridge.HCIRBusBridge`
 
-### 8. Federation Sync Protocol
+### 8. Consensus & Delta Transport
 
-Synchronizes workspace state across distributed brain instances:
+Coordinates multi-branch and distributed workspace state synchronization:
 
-- **TransactionSyncProtocol**: Coordinates commits across peers
-- **Vector Clocks**: Causal ordering of distributed events
-- **Conflict Resolution**: Last-writer-wins with compensating transactions
-
-**Code:** `hbllm.hcir.federation.TransactionSyncProtocol`
+- **`CognitiveConsensusEngine`** (`hbllm.hcir.kernel.consensus_engine`): Arbitrates competing `CandidateBelief` proposals cleanly into verified transactions.
+- **`DeltaTransportProtocol`** (`hbllm.hcir.delta_transport`): Compact delta exchange and synchronization across workspace peers.
 
 ---
 
@@ -256,19 +254,16 @@ graph TD
 
 ---
 
-## Brain Lifecycle Integration
+## Composition Root Integration
 
-The HCIR Cognitive OS is wired into the Brain lifecycle via `BrainFactory`:
+The HCIR Cognitive OS is wired exclusively through `build_cognitive_system()` (`hbllm.runtime.bootstrap`):
 
 ```python
-# Brain.process() — runs HCIR cognitive cycle after pipeline
-result = await brain.process(user_input)
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-# Brain.shutdown() — archives workspace to persistent tier
-await brain.shutdown()
-
-# Brain.cognitive_stats() — exports HCIR metrics
-stats = brain.cognitive_stats()
+system = build_cognitive_system(CognitiveSystemConfig(world_id="example", memory_dir=None))
+receipt = system.runtime.kernel.execute("world.query_state", {})
+print(receipt.status, system.tiered_workspace.populate_meta_stats())
 ```
 
 ---
@@ -278,5 +273,6 @@ stats = brain.cognitive_stats()
 Inspect system runtime health, event loop engine (`uvloop`), SQLite version, and native Rust acceleration crates:
 
 ```bash
-python -m hbllm.cli.diagnostics
+hbllm diagnostics
+hbllm kernel status
 ```

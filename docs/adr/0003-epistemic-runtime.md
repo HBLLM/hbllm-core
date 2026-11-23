@@ -1,9 +1,9 @@
 # ADR 003: Domain-Neutral Epistemic Runtime for Autonomous Discovery
 
-- **Status**: Implemented
+- **Status**: Superseded by [ADR 004: Pure-HCIR Cognitive OS](0004-pure-hcir-cognitive-os.md) (epistemic discovery is now unified in `hbllm.hcir.world` & `hbllm.hcir.capabilities`)
 - **Deciders**: HBLLM Core Architecture Team
 - **Date**: 2026-08-08
-- **Technical Area**: Epistemic Cognition (`core/hbllm/brain/epistemics`)
+- **Technical Area**: Epistemic Cognition (originally `core/hbllm/brain/epistemics`, now unified in `core/hbllm/hcir/world`)
 
 ---
 
@@ -205,12 +205,13 @@ graph TB
 - **E2E Integration**: 3 tests covering the full discovery cycle (curiosity → ideas → hypotheses → evidence → revision → memory → calibration → falsification).
 - **Cross-Component Integration**: 5 tests covering AutonomyCore wiring, tick simulation, idempotency, memory persistence across rewiring, and engine accessibility.
 - **Lint**: Ruff clean (0 errors).
-- **Architecture Documentation**: `docs/architecture/epistemics.md` (304 lines).
+- **Architecture Documentation**: Replaced by [Cortical World Model](../architecture/cortical-world-model.md) & [Capabilities & Curiosity](../architecture/capabilities-and-curiosity.md).
 
 ---
 
 ## References
 
+- [ADR 004: Pure-HCIR Cognitive OS](0004-pure-hcir-cognitive-os.md) — Current unified architecture.
 - [ADR 001: HBLLM Core Master Architecture](0001-hbllm-core-architecture.md) — Parent architecture decision.
-- [Architecture: Epistemic Runtime](../architecture/epistemics.md) — Full technical deep-dive.
-- [Architecture: Overview](../architecture/overview.md) — Layer 4c listing.
+- [Architecture: Cortical World Model](../architecture/cortical-world-model.md) — Current active-inference & epistemic world model.
+- [Architecture: Overview](../architecture/overview.md) — Pure-HCIR system overview.

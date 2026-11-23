@@ -1,132 +1,79 @@
-# Embodiment & Real-World Actuation
-
-HBLLM Core interacts with the physical or operating system environment safely through the **Execution Reality Layer**. This system ensures that when the agent takes an action, it is not merely relying on the theoretical success of a tool, but actually verifying that the physical or digital state was altered as expected.
-
-## Core Components
-
-### 1. Device Reality Integration (`hbllm/brain/embodiment/os_adapter.py`)
-The `os_adapter` acts as a secure boundary between the cognitive loop and the host OS. 
-- It maps semantic intentions (e.g., "turn off the wifi") into safe actuator/sensor interfaces.
-- Provides isolated contexts for the agent to probe the OS state without risking unconstrained shell execution.
-
-### 2. Execution Verification Engine (`hbllm/brain/embodiment/verifier.py`)
-Large Language Models are prone to hallucinating the success of their actions based on API responses. 
-- The `ExecutionVerifier` class implements **asynchronous non-blocking polling**. 
-- After an action is executed, the verifier probes the actual physical or digital state (e.g., checking if the light is actually off, or if the file actually exists) to confirm the state change.
-- Re-triggers the agent if reality diverges from the expected simulation.
-
-### 3. Idempotency Tracking (`hbllm/brain/embodiment/idempotency.py`)
-During complex, multi-step execution, retries or crashes are inevitable. 
-- To prevent duplicate mutating actions, the system generates deterministic action hashes based on the parameters and context.
-- Maintains a lock-table of executed actions. 
-- If a crash occurs and the system reboots, the agent will not repeat a destructive or state-mutating action it had successfully executed immediately prior to the crash.
-
-### 4. Platform-Specific Adapters
-
-The OS Adapter delegates to platform-specific backends for deep OS integration:
-
-| Platform | Module | Capabilities |
-|----------|--------|-------------|
-| **macOS** | `platform_mac.py` | AppleScript automation, Spotlight search, system preferences, Notification Center, Finder integration |
-| **Linux** | `platform_linux.py` | D-Bus integration, systemd service control, NetworkManager, udev device events, X11/Wayland window management |
-
-Each adapter implements a common `PlatformAdapter` interface so the cognitive pipeline remains platform-agnostic while leveraging native capabilities.
-
-### 5. Confirmation Gate (`hbllm/actions/confirmation.py`)
-
-Human-in-the-loop approval for high-risk actions before execution:
-
-- **Risk classification** — Actions are classified into trust tiers (SAFE, MODERATE, SENSITIVE, CRITICAL).
-- **Escalation** — SENSITIVE and CRITICAL actions require explicit user confirmation.
-- **Timeout** — Pending confirmations expire after a configurable timeout (default: 5 minutes).
-- **Audit integration** — All confirmation decisions are logged to the audit trail.
-
-### 6. Rollback Engine (`hbllm/actions/rollback.py`)
-
-Undo support for reversible actions with snapshot-based state recovery:
-
-- **Pre-action snapshots** — Captures relevant state before executing mutating actions.
-- **Rollback execution** — Applies inverse operations to restore previous state.
-- **Cascade rollback** — Multi-step action chains can be rolled back as a unit.
-- **Retention** — Snapshots are retained for a configurable period (default: 24 hours).
-
-## Safety Architecture
-
-```
-User Request → Risk Classifier → Confirmation Gate (if needed) → Idempotency Check
-    → Pre-Action Snapshot → OS Adapter (Platform-Specific) → Execution
-    → Verification Polling → Success/Failure → Rollback (if failed)
-```
-
-All embodiment actions follow this pipeline to ensure safety, reversibility, and verification at every step.
-
+---
+title: "Embodiment & Decoupled Device Drivers"
+description: "Strict separation between environment device drivers (plugins/*_adapter/) and the domain-agnostic Pure-HCIR cognitive engine (hbllm.hcir.world & hbllm.hcir.reasoning)."
 ---
 
-## Decoupled Embodiment Architecture: Device Drivers vs Cognitive Engine
+# Embodiment & Decoupled Device Drivers
 
-HBLLM enforces a strict architectural boundary between **how an agent interacts with an environment (Device Driver)** and **how it decides what to do (Cognitive Reasoning Core)**.
+HBLLM enforces a strict architectural boundary between **how an agent interacts with a simulator, OS, or hardware device (Device Driver)** and **how it perceives, models, and plans (Pure-HCIR Cognitive Core)**.
 
 ```mermaid
 graph TD
-    subgraph Environment ["Physical Simulation / Hardware"]
-        Sim["Simulator Engine (Unity / Gym / OS)"]
+    subgraph Environment["Physical Simulation / OS / Hardware"]
+        Sim["Simulator Engine (Unity / Gym / ROS2 / Shell)"]
     end
 
-    subgraph Driver ["Plugin Adapter (Pure Device Driver)"]
-        Sensors["Perception Adapter: Ingests Raw Obs"]
-        AffordanceGen["Affordance Bridge: Declares Candidate ActionNodes"]
-        ActuatorBridge["Actuator Bridge: Low-level Motor Dispatch"]
+    subgraph Driver["External Adapter (plugins/*_adapter/)"]
+        Sensors["Perception Adapter: Ingests Raw Observations"]
+        AffordanceGen["Action Space Declaration"]
+        ActuatorBridge["Actuator Bridge: Low-Level Motor Dispatch"]
     end
 
-    subgraph Brain ["HBLLM Cognitive Core"]
-        Graph["HCIR CognitiveGraph (Entities, Relations, Goals)"]
-        URR["UnifiedReasoningRuntime"]
-        Operator["EmbodiedCausalOperator"]
+    subgraph Brain["Pure-HCIR Cognitive Core (hbllm.hcir)"]
+        Graph["TieredWorkspace &amp; TransitionKnowledgeBase"]
+        AEE["AutonomousEpistemicEngine<br/>(5-Stage CorticalPipeline)"]
+        URR["UnifiedReasoningRuntime<br/>(EmbodiedCausalOperator)"]
+        Sandbox["CapabilitySandboxManager<br/>(Permission &amp; Process Isolation)"]
     end
 
-    Sim -->|Raw State & Metadata| Sensors
-    Sensors -->|Nodes & Edges| Graph
-    Graph -->|Entities & State| AffordanceGen
-    AffordanceGen -->|Candidate ActionNodes| Graph
+    Sim -->|Raw State &amp; Metadata| Sensors
+    Sensors -->|EmbodiedObservation / Nodes| AEE
+    AEE <-->|Verified Transactions| Graph
     Graph -->|FrozenGraphView| URR
-    URR -->|Reasoning Problem| Operator
-    Operator -->|Selected ActionNode + Provenance| URR
-    URR -->|Winning ActionNode| ActuatorBridge
+    URR -->|Action Proposal + Provenance| AEE
+    AEE -->|Chosen Action| Sandbox --> ActuatorBridge
     ActuatorBridge -->|Primitive Action Payload| Sim
 ```
 
-### 1. Device Driver Layer (`plugins/*_adapter/`)
-The plugin adapter functions strictly as a hardware or simulator device driver:
-- **Perception (`perception.py`)**: Senses raw simulator telemetry, object coordinates, visibility, and containment hierarchies into typed `PhysicalEntityNode`s and `HCIREdge`s (`PART_OF`, `DEPENDS_ON`). Also translates scenario criteria into active `GoalNode`s.
-- **Affordance Enumeration (`action.py`)**: Evaluates the physical state and declares what primitive actions are possible as declarative `ActionNode`s, defining explicit `requirements` (preconditions) and `produces` (outcomes).
-- **Actuator Dispatch (`action.py`)**: Translates high-level declarative actions chosen by the brain into low-level motor primitives (e.g., yaw rotation toward coordinates, camera pitch alignment, sidestepping around collision geometry, and Unity RPC action dictionaries).
-- **Zero Procedural Planning**: The driver contains no hand-crafted decision trees, if-else task state machines, or domain-specific sub-goaling.
+---
 
-### 2. Cognitive Reasoning Core (`hbllm/brain/reasoning/`)
-All decision-making and planning are handled universally by the general cognitive architecture:
-- **`UnifiedReasoningRuntime`**: Evaluates active goals against an immutable snapshot of the environment (`FrozenGraphView`).
-- **`EmbodiedCausalOperator`**: A domain-agnostic classical reasoning operator that executes **backward-chaining causal dependency resolution**:
-  1. Inspects the target criteria declared on the active `GoalNode`.
-  2. Finds candidate `ActionNode`s whose `produces` list satisfies unsatisfied conditions.
-  3. Evaluates action `requirements` against the current graph view. If prerequisites are missing (e.g., container is closed, target is beyond physical reach), it spawns recursive causal sub-goals to find the immediately executable prerequisite action.
-  4. Dispatches the winning `ActionNode` with a complete `ProvenanceChain` detailing the causal derivation.
-- **Deterministic & Zero-Token**: Achieves 100% success on multi-tier manipulation tasks with strictly **0 LLM tokens** and low-millisecond latency (sub-millisecond native Rust spatial/graph kernels `< 0.2ms`; full 5-stage Python cognitive step `p50 ~ 10-15ms / p95 <= 45ms` at `32x32`).
+## 1. Device Driver Layer (`plugins/*_adapter/`)
+
+Environment adapters act strictly as hardware or simulator device drivers:
+
+- **Perception (`perception.py`):** Converts raw simulator observations, coordinates, or scene graphs into `EmbodiedObservation` frames or typed `PhysicalEntityNode`s and `HCIREdge`s.
+- **Affordance & Action Mapping (`action.py`):** Translates abstract chosen actions from `AutonomousEpistemicEngine` / `EmbodiedCausalOperator` into environment motor primitives (velocity commands, Unity RPC actions, Gym discrete indices).
+- **Zero Procedural Planning:** Drivers never hardcode task-specific decision trees or solution shortcuts for benchmarks (enforced by Invariant 7).
 
 ---
 
-## 7. Empirical Validation Across Authentic Native Environments
+## 2. Pure-HCIR Cognitive Core (`hbllm.hcir`)
 
-The Execution Reality Layer and HCIR Causal Planners are evaluated strictly against **authentic, installed upstream simulator packages** (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack` / `nle`, `ai2thor`). Rather than relying on autoregressive token generation for spatial pathfinding or vital monitoring, HBLLM uses typed state ingress and zero-token topological causal planning.
+All physical reasoning, causal discovery, and subgoal planning reside universally in the LLM-free core:
+
+1. **Active Inference & World Model (`hbllm.hcir.world`):**
+   - `AutonomousEpistemicEngine` runs the 5-stage `CorticalPipeline` (`PerceptionStage` → `AssimilationStage` → `SimulationStage` → `DeliberationStage` → `MotorStage`).
+   - `TransitionKnowledgeBase` records empirical traversability, collision hazards, distal actuations, and conditional rules (`CausalEffectRule`).
+   - `PrefrontalWorkingMemory` tracks held cargo, action inhibitions, and synthesized `DeclarativeNeuroSymbolicSkill`s.
+2. **Backward-Chaining Causal Reasoning (`hbllm.hcir.reasoning.operators.embodied_causal`):**
+   - `EmbodiedCausalOperator` inspects unsatisfied `GoalNode` conditions on an immutable `FrozenGraphView`, matches candidate `ActionNode` `produces`/`requirements` edges, resolves prerequisite subgoals recursively, and returns a `CognitiveResult` with full `ProvenanceChain`.
+3. **Governed Kernel Sandboxing (`hbllm.hcir.kernel.capability_sandboxing`):**
+   - Real-world tool and subprocess actions (`fs.*`, `code.python_ast`, `git.status`, `shell.exec`, `execution.sandbox_run`) are checked by `CapabilitySandboxManager` against `CapabilityPermissions` and executed in isolated subprocesses when untrusted (see [Sandboxing](sandboxing.md)).
+
+---
+
+## 3. Empirical Validation Across Authentic Native Environments
+
+The Pure-HCIR cognitive engine and `EmbodiedCausalOperator` are validated against **authentic upstream simulator packages** (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack`/`nle`, `ai2thor`, `arc_agi`, `safety_gymnasium`, `alfworld`) with **0 LLM tokens** and low-millisecond step latency (native Rust kernels `< 0.2ms`; 5-stage `32×32` Python cognitive step `p50 ~ 10–16ms / p95 <= 45ms` ungrounded).
 
 | Domain | Environment Package | Literature / RL Baseline | Pure HCIR Performance | Key Architectural Mechanism |
-| :--- | :--- | :---: | :---: | :--- |
-| **Interactive Reasoning** | `arc_agi` / Official API | < 5% (RL exploration limits)<br>Human: 22–71 actions | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | Hierarchical Subgoal Trees (`DEPENDS_ON`) + Multi-Step Lookahead ($K \ge 2$) |
-| **Open-World Survival** | `crafter` (v1.8.3) | 10.0% (DreamerV2, 1M steps)<br>4.2% (PPO, 1M steps) | **41.28%** Hafner Score<br>**93.9%** Multi-Tier (31/33) | Causal Recipe DAG + Vital Priority Interrupts |
-| **Grounded Language** | `minigrid` (v3.1.0) | ~50% (IL, 1M+ demos)<br>< 10% (PPO on BossLevel) | **100.0%** Overall (45/45)<br>**100.0%** BossLevel (39.0 steps) | Spatial-epistemic search & type-safe key-door deduction |
-| **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B steps) | **100.0%** Native Success (15/15)<br>**0 deadlocks** across all tiers | Reachability macro-push search, line deadlock pruning (`PhysicsPredictor.is_line_deadlock()`), & 2x2 invariant checks |
-| **Multi-Agent Kitchen** | `overcooked_ai_py` (v1.1.0) | ~60–70% (BC / PPO Self-Play) | **100.0%** (10/10 episodes) | Causal recipe pipelining & counter contention resolution |
-| **Rogue-Like Dungeons** | `minihack` (v1.0.2) / `nle` | < 20% (IMPALA / TorchBeast) | **80.0%** (4/5 tiers at 100%) | Frontier glyph exploration & melee combat interrupts |
-| **3D Object Manipulation** | `ai2thor` (v5.0.0) | ~30–45% (Embodied CLIP / PPO) | **50.0%** (Tiers 1–2 at 100%)<br>Pickup in 3 steps | Ground-truth 3D scene graph, camera yaw/pitch alignment & affordance reach |
+|---|---|---|---|---|
+| **Interactive Reasoning** | `arc_agi` / Official API | < 5% (RL limits)<br>Human: 22–71 actions | **100.0%** (2/2 Level Wins)<br>**116.2%** Human Efficiency | Hierarchical subgoal trees (`DEPENDS_ON`) & multi-step lookahead |
+| **Open-World Survival** | `crafter` (v1.8.3) | 10.0% (DreamerV2, 1M)<br>4.2% (PPO, 1M) | **53.9%** Hafner Score<br>**100.0%** Multi-Tier (11/11) | Causal recipe DAG & vital priority interrupts |
+| **Grounded Language** | `minigrid` (v3.1.0) | ~50% (IL)<br>< 10% (PPO BossLevel) | **100.0%** Overall (45/45)<br>**100.0%** BossLevel (39.0 steps) | Spatial-epistemic search & key-door deduction |
+| **Topological Pushing** | `gym_sokoban` (v0.0.6) | 82–85% (DRC(3,3), 1B) | **100.0%** Native (15/15)<br>**0 deadlocks** across all tiers | Reachability macro-push, `PhysicsPredictor.is_line_deadlock()` & $2\times 2$ checks |
+| **Multi-Agent Kitchen** | `overcooked_ai_py` (v1.1.0) | ~60–70% (BC / PPO) | **100.0%** (10/10 episodes) | Causal recipe pipelining & counter contention resolution |
+| **Rogue-Like Dungeons** | `minihack` (v1.0.2) / `nle` | < 20% (IMPALA) | **100.0%** (5/5 tiers solved) | Frontier glyph exploration & melee interrupts |
+| **3D Object Manipulation** | `ai2thor` (v5.0.0) | ~30–45% (CLIP / PPO) | **100.0%** (4/4 tiers solved) | 3D scene graph, camera yaw/pitch alignment & reachability |
 
-*For complete metric tables, 95% Wilson confidence intervals, per-tier breakdowns, and CLI reproducibility commands, refer to the [Embodied Cognitive & Frontier Benchmarks](../api/benchmarks.md#embodied-cognitive-frontier-benchmarks) API reference.*
-
+*For complete metric tables, 95% Wilson confidence intervals, per-tier breakdowns, and CLI reproducibility commands, see **[Benchmarks & Profiling](../api/benchmarks.md)**.*
