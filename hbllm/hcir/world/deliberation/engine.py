@@ -1542,7 +1542,7 @@ class PrefrontalDeliberationEngine:
                     view.apply_wm_delta(
                         WorkingMemoryDelta(
                             "simulation_cooldown",
-                            min(2, view.consecutive_simulation_failures),
+                            min(2, 2**view.consecutive_simulation_failures),
                         )
                     )
                     view.working_memory.update_salience_baseline(view)
