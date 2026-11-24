@@ -3644,6 +3644,17 @@ class AutonomousEpistemicEngine:
             self.learned_goal_positions.add(goal_pos)
             if hasattr(self.state, "learned_goal_positions"):
                 self.state.learned_goal_positions.add(goal_pos)
+            if self.symbolic_theory is not None:
+                kb = self.symbolic_theory.transition_kb
+                if kb.get_belief(goal_pos, scope="locus") is None:
+                    from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                    kb.record_outcome(
+                        goal_pos,
+                        TransitionOutcome.TERMINAL_WIN,
+                        scope="locus",
+                        evidence="learned_goal",
+                    )
             gid = f"learned_goal_{goal_pos[0]}_{goal_pos[1]}"
 
             gnode = GoalNode(

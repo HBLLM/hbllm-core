@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 
@@ -29,6 +29,72 @@ from hbllm.hcir.world.percept import PlaceLocus, TerminalSignal
 logger = logging.getLogger(__name__)
 
 
+class GovernedPredicateList(list):
+    """List subclass maintaining bidirectional synchronization with TransitionKnowledgeBase.
+
+    When predicates targeting 'feature_id' are appended, extended, or removed,
+    the corresponding outcome in the owner's TransitionKnowledgeBase is updated atomically,
+    enforcing TransitionKnowledgeBase as the single canonical source of truth.
+    """
+
+    def __init__(
+        self,
+        owner: HCIRSymbolicWorldTheory | None,
+        role: str,
+        initial: Sequence[CausalPredicate] = (),
+    ) -> None:
+        super().__init__()
+        self._owner = owner
+        self._role = role
+        if initial:
+            for item in initial:
+                super().append(item)
+
+    def append(self, item: CausalPredicate) -> None:
+        super().append(item)
+        if self._owner is not None and not self._owner._syncing_predicates:
+            self._owner._on_predicate_added(self._role, item)
+
+    def extend(self, items: Sequence[CausalPredicate]) -> None:
+        for item in items:
+            self.append(item)
+
+    def remove(self, item: CausalPredicate) -> None:
+        super().remove(item)
+        if self._owner is not None and not self._owner._syncing_predicates:
+            self._owner._on_predicate_removed(self._role, item)
+
+    def pop(self, index: int = -1) -> CausalPredicate:
+        item = super().pop(index)
+        if self._owner is not None and not self._owner._syncing_predicates:
+            self._owner._on_predicate_removed(self._role, item)
+        return item
+
+    def clear(self) -> None:
+        super().clear()
+        if self._owner is not None and not self._owner._syncing_predicates:
+            self._owner._on_predicates_cleared(self._role)
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        old = self[index]
+        super().__setitem__(index, value)
+        if self._owner is not None and not self._owner._syncing_predicates:
+            if isinstance(old, CausalPredicate):
+                self._owner._on_predicate_removed(self._role, old)
+            if isinstance(value, CausalPredicate):
+                self._owner._on_predicate_added(self._role, value)
+
+    def __delitem__(self, index: Any) -> None:
+        old = self[index]
+        super().__delitem__(index)
+        if (
+            self._owner is not None
+            and not self._owner._syncing_predicates
+            and isinstance(old, CausalPredicate)
+        ):
+            self._owner._on_predicate_removed(self._role, old)
+
+
 @dataclass
 class HCIRSymbolicWorldTheory:
     """Neuro-symbolic domain-agnostic world theory grounded in HCIR CausalPredicates.
@@ -47,6 +113,7 @@ class HCIRSymbolicWorldTheory:
 
     goal_predicates: list[CausalPredicate] = field(default_factory=list)
     barrier_predicates: list[CausalPredicate] = field(default_factory=list)
+    _syncing_predicates: bool = field(default=False, init=False, repr=False)
     _context_epoch: int = 0
     _has_prior_context_transition: bool = False
     _awaiting_context_revalidation: bool = False
@@ -110,6 +177,134 @@ class HCIRSymbolicWorldTheory:
     _role_priors: dict[str, int] = field(default_factory=dict)
     # Conditional affordance templates (role-level, survive relabeling)
     _role_conditional_templates: list[dict[str, Any]] = field(default_factory=list)
+
+    _GOVERNED_ROLE_FIELDS: ClassVar[dict[str, str]] = {
+        "goal_predicates": "goal",
+        "barrier_predicates": "barrier",
+        "walkable_predicates": "walkable",
+        "cargo_predicates": "cargo",
+        "receptacle_predicates": "receptacle",
+        "actuator_predicates": "actuator",
+    }
+
+    def __post_init__(self) -> None:
+        self._syncing_predicates = True
+        self.goal_predicates = GovernedPredicateList(self, "goal", self.goal_predicates)
+        self.barrier_predicates = GovernedPredicateList(self, "barrier", self.barrier_predicates)
+        self.walkable_predicates = GovernedPredicateList(self, "walkable", self.walkable_predicates)
+        self.cargo_predicates = GovernedPredicateList(self, "cargo", self.cargo_predicates)
+        self.receptacle_predicates = GovernedPredicateList(
+            self, "receptacle", self.receptacle_predicates
+        )
+        self.actuator_predicates = GovernedPredicateList(self, "actuator", self.actuator_predicates)
+        self._syncing_predicates = False
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if (
+            name in self._GOVERNED_ROLE_FIELDS
+            and not isinstance(value, GovernedPredicateList)
+            and not self.__dict__.get("_syncing_predicates", False)
+        ):
+            role = self._GOVERNED_ROLE_FIELDS[name]
+            old = self.__dict__.get(name)
+            if old is not None and isinstance(old, GovernedPredicateList):
+                self._on_predicates_cleared(role)
+            value = GovernedPredicateList(self, role, value or ())
+        super().__setattr__(name, value)
+
+    def _on_predicate_added(self, role: str, item: CausalPredicate) -> None:
+        if (
+            not isinstance(item, CausalPredicate)
+            or item.variable != "feature_id"
+            or item.value is None
+        ):
+            return
+        feat = item.value
+        ev = str((item.metadata or {}).get("evidence", f"predicate_governor:{role}"))
+        if role == "goal":
+            if not self.transition_kb.has_feature_outcome(feat, TransitionOutcome.TERMINAL_WIN):
+                self.transition_kb.record_outcome(
+                    feat, TransitionOutcome.TERMINAL_WIN, evidence=ev, mark_verified=True
+                )
+            self.mark_verified_in_context("goal", feat)
+            self._candidate_goal_features.add(feat)
+        elif role == "barrier":
+            is_lethal = "lethal" in ev.lower() or "hazard" in ev.lower() or "death" in ev.lower()
+            out = TransitionOutcome.TERMINAL_FAIL if is_lethal else TransitionOutcome.BLOCKED
+            if not self.transition_kb.has_feature_outcome(feat, out):
+                self.transition_kb.record_outcome(feat, out, evidence=ev, mark_verified=True)
+            self.mark_verified_in_context("barrier", feat)
+            self._barrier_eval_cache.clear()
+        elif role == "walkable":
+            if not self.transition_kb.has_feature_outcome(feat, TransitionOutcome.TRAVERSED):
+                self.transition_kb.record_outcome(
+                    feat, TransitionOutcome.TRAVERSED, evidence=ev, mark_verified=True
+                )
+            self.mark_verified_in_context("walkable", feat)
+            self._walkable_eval_cache.clear()
+        elif role == "cargo":
+            if not self.transition_kb.has_feature_outcome(feat, TransitionOutcome.DISPLACED_OTHER):
+                self.transition_kb.record_outcome(
+                    feat, TransitionOutcome.DISPLACED_OTHER, evidence=ev, mark_verified=True
+                )
+            self.mark_verified_in_context("cargo", feat)
+        elif role == "receptacle":
+            if not self.transition_kb.has_feature_outcome(feat, TransitionOutcome.RECEIVED_ENTITY):
+                self.transition_kb.record_outcome(
+                    feat, TransitionOutcome.RECEIVED_ENTITY, evidence=ev, mark_verified=True
+                )
+            self.mark_verified_in_context("receptacle", feat)
+        elif role == "actuator":
+            if not self.transition_kb.has_feature_outcome(feat, TransitionOutcome.MUTATED_STATE):
+                self.transition_kb.record_outcome(
+                    feat, TransitionOutcome.MUTATED_STATE, evidence=ev, mark_verified=True
+                )
+            self.mark_verified_in_context("actuator", feat)
+
+    def _on_predicate_removed(self, role: str, item: CausalPredicate) -> None:
+        if (
+            not isinstance(item, CausalPredicate)
+            or item.variable != "feature_id"
+            or item.value is None
+        ):
+            return
+        feat = item.value
+        preds = getattr(self, f"{role}_predicates", ())
+        if any(p.variable == "feature_id" and p.value == feat for p in preds):
+            return
+        if role == "goal":
+            self.transition_kb.retract_outcome(feat, TransitionOutcome.TERMINAL_WIN)
+            self._candidate_goal_features.discard(feat)
+        elif role == "barrier":
+            self.transition_kb.retract_outcome(feat, TransitionOutcome.BLOCKED)
+            self.transition_kb.retract_outcome(feat, TransitionOutcome.TERMINAL_FAIL)
+            self._barrier_eval_cache.clear()
+        elif role == "walkable":
+            self.transition_kb.retract_outcome(feat, TransitionOutcome.TRAVERSED)
+            self._walkable_eval_cache.clear()
+        elif role == "cargo":
+            self.transition_kb.retract_outcome(feat, TransitionOutcome.DISPLACED_OTHER)
+        elif role == "receptacle":
+            self.transition_kb.retract_outcome(feat, TransitionOutcome.RECEIVED_ENTITY)
+        elif role == "actuator":
+            self.transition_kb.retract_outcome(feat, TransitionOutcome.MUTATED_STATE)
+
+    def _on_predicates_cleared(self, role: str) -> None:
+        if role == "goal":
+            self.transition_kb.retract_outcome_all(TransitionOutcome.TERMINAL_WIN, scope="all")
+            self._candidate_goal_features.clear()
+        elif role == "barrier":
+            self.transition_kb.retract_outcome_all(TransitionOutcome.BLOCKED, scope="all")
+            self._barrier_eval_cache.clear()
+        elif role == "walkable":
+            self.transition_kb.retract_outcome_all(TransitionOutcome.TRAVERSED, scope="all")
+            self._walkable_eval_cache.clear()
+        elif role == "cargo":
+            self.transition_kb.retract_outcome_all(TransitionOutcome.DISPLACED_OTHER, scope="all")
+        elif role == "receptacle":
+            self.transition_kb.retract_outcome_all(TransitionOutcome.RECEIVED_ENTITY, scope="all")
+        elif role == "actuator":
+            self.transition_kb.retract_outcome_all(TransitionOutcome.MUTATED_STATE, scope="all")
 
     @property
     def goal_features(self) -> frozenset[Any]:
@@ -521,12 +716,14 @@ class HCIRSymbolicWorldTheory:
             return [p for p in preds if p.variable == "feature_id" and p.value in keep_feats]
 
         self._candidate_goal_features = set()
+        self._syncing_predicates = True
         self.goal_predicates = _keep_preds(self.goal_predicates, keep_goal)
         self.barrier_predicates = _keep_preds(self.barrier_predicates, keep_bar)
         self.walkable_predicates = _keep_preds(self.walkable_predicates, keep_walk)
         self.cargo_predicates = _keep_preds(self.cargo_predicates, keep_cargo)
         self.receptacle_predicates = _keep_preds(self.receptacle_predicates, keep_rec)
         self.actuator_predicates = _keep_preds(self.actuator_predicates, keep_act)
+        self._syncing_predicates = False
 
         self._conditional_affordances = {
             k: v for k, v in self._conditional_affordances.items() if k in keep_cond
@@ -1522,11 +1719,13 @@ class HCIRSymbolicWorldTheory:
         """Retract a goal feature and its associated predicates."""
         self._candidate_goal_features.discard(feature_id)
         self.transition_kb.retract_outcome(feature_id, TransitionOutcome.TERMINAL_WIN)
+        self._syncing_predicates = True
         self.goal_predicates = [
             p
             for p in self.goal_predicates
             if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
         ]
+        self._syncing_predicates = False
         self._feature_evidence.pop(("goal", feature_id), None)
         self._feature_evidence.pop(("candidate_goal", feature_id), None)
 
@@ -1546,11 +1745,13 @@ class HCIRSymbolicWorldTheory:
             feature_id, TransitionOutcome.TERMINAL_FAIL
         )
         if not still_lethal:
+            self._syncing_predicates = True
             self.barrier_predicates = [
                 p
                 for p in self.barrier_predicates
                 if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
             ]
+            self._syncing_predicates = False
             self._feature_evidence.pop(("barrier", feature_id), None)
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
@@ -1558,11 +1759,13 @@ class HCIRSymbolicWorldTheory:
     def retract_walkable(self, feature_id: Any, reason: str = "") -> None:
         """Retract a walkable feature and clear evaluation caches."""
         self.transition_kb.retract_outcome(feature_id, TransitionOutcome.TRAVERSED)
+        self._syncing_predicates = True
         self.walkable_predicates = [
             p
             for p in self.walkable_predicates
             if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
         ]
+        self._syncing_predicates = False
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
         self._feature_evidence.pop(("walkable", feature_id), None)
@@ -1570,41 +1773,49 @@ class HCIRSymbolicWorldTheory:
     def retract_cargo(self, feature_id: Any, reason: str = "") -> None:
         """Retract a cargo feature."""
         self.transition_kb.retract_outcome(feature_id, TransitionOutcome.DISPLACED_OTHER)
+        self._syncing_predicates = True
         self.cargo_predicates = [
             p
             for p in self.cargo_predicates
             if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
         ]
+        self._syncing_predicates = False
         self._feature_evidence.pop(("cargo", feature_id), None)
 
     def retract_receptacle(self, feature_id: Any, reason: str = "") -> None:
         """Retract a receptacle feature."""
         self.transition_kb.retract_outcome(feature_id, TransitionOutcome.RECEIVED_ENTITY)
+        self._syncing_predicates = True
         self.receptacle_predicates = [
             p
             for p in self.receptacle_predicates
             if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
         ]
+        self._syncing_predicates = False
         self._feature_evidence.pop(("receptacle", feature_id), None)
 
     def retract_actuator(self, feature_id: Any, reason: str = "") -> None:
         """Retract an actuator feature."""
         self.transition_kb.retract_outcome(feature_id, TransitionOutcome.MUTATED_STATE)
+        self._syncing_predicates = True
         self.actuator_predicates = [
             p
             for p in self.actuator_predicates
             if not (p.variable == "feature_id" and p.operator == "==" and p.value == feature_id)
         ]
+        self._syncing_predicates = False
         self._feature_evidence.pop(("actuator", feature_id), None)
 
     def clear_goals(self) -> None:
         """Clear all goal rules and cached features."""
-        self.transition_kb.retract_outcome_all(TransitionOutcome.TERMINAL_WIN, scope="feature")
+        self._syncing_predicates = True
+        self.transition_kb.retract_outcome_all(TransitionOutcome.TERMINAL_WIN, scope="all")
         self._candidate_goal_features.clear()
         self.goal_predicates.clear()
         to_pop = [k for k in self._feature_evidence if k[0] in ("goal", "candidate_goal")]
         for k in to_pop:
             self._feature_evidence.pop(k, None)
+        self._syncing_predicates = False
 
     def clear_candidate_goals(self) -> None:
         """Clear all candidate goal hypotheses."""
@@ -1628,13 +1839,15 @@ class HCIRSymbolicWorldTheory:
         """Clear all barrier rules and cached features (optionally preserving lethal beliefs)."""
         self._barrier_eval_cache.clear()
         self._walkable_eval_cache.clear()
-        self.transition_kb.retract_outcome_all(TransitionOutcome.BLOCKED, scope="feature")
+        self._syncing_predicates = True
+        self.transition_kb.retract_outcome_all(TransitionOutcome.BLOCKED, scope="all")
         if not preserve_lethal:
-            self.transition_kb.retract_outcome_all(TransitionOutcome.TERMINAL_FAIL, scope="feature")
+            self.transition_kb.retract_outcome_all(TransitionOutcome.TERMINAL_FAIL, scope="all")
             self.barrier_predicates.clear()
             to_pop = [k for k in self._feature_evidence if k[0] == "barrier"]
             for k in to_pop:
                 self._feature_evidence.pop(k, None)
+            self._syncing_predicates = False
             return
         kept_feats = self.barrier_features
         self.barrier_predicates = [
@@ -1645,6 +1858,7 @@ class HCIRSymbolicWorldTheory:
         to_pop = [k for k in self._feature_evidence if k[0] == "barrier" and k[1] not in kept_feats]
         for k in to_pop:
             self._feature_evidence.pop(k, None)
+        self._syncing_predicates = False
 
     def induce_depletion_goal(self, feature_id: Any, evidence: Any = None) -> None:
         """Induce a global board depletion goal (clear board of this feature)."""
@@ -2179,6 +2393,7 @@ class HCIRSymbolicWorldTheory:
 
     def clear(self) -> None:
         """Clear all intensional predicates when resetting across distinct games."""
+        self._syncing_predicates = True
         self.goal_predicates.clear()
         self.barrier_predicates.clear()
         self.walkable_predicates.clear()
@@ -2210,6 +2425,7 @@ class HCIRSymbolicWorldTheory:
         self._current_entity_distribution_stats.clear()
         self._prior_entity_distribution_stats.clear()
         self.transition_kb.clear()
+        self._syncing_predicates = False
 
 
 def invalidate_stale_context_ontology(

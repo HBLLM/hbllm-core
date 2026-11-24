@@ -362,9 +362,13 @@ class TransitionKnowledgeBase:
 
     def retract_outcome_all(self, outcome: TransitionOutcome, *, scope: str = "feature") -> None:
         """Retract an outcome across all recorded beliefs within ``scope``."""
-        store = self._locus_beliefs if scope == "locus" else self._feature_beliefs
-        for belief in store.values():
-            belief.decay_or_clear_outcome(outcome)
+        if scope in ("all", "both"):
+            stores = [self._feature_beliefs, self._locus_beliefs]
+        else:
+            stores = [self._locus_beliefs if scope == "locus" else self._feature_beliefs]
+        for store in stores:
+            for belief in store.values():
+                belief.decay_or_clear_outcome(outcome)
         self._invalidate_caches()
 
     def record_causal_rule(
@@ -548,6 +552,40 @@ class TransitionKnowledgeBase:
         )
         self._traversable_cache = res
         return res
+
+    def loci_with_outcome(
+        self, outcome: TransitionOutcome, *, min_count: float = 0.0
+    ) -> frozenset[tuple[int, int]]:
+        """Return locus coordinates having observed ``outcome`` above ``min_count``."""
+        key = outcome.value
+        return frozenset(
+            (int(k[0]), int(k[1]))
+            for k, b in self._locus_beliefs.items()
+            if b.counts.get(key, 0.0) > min_count
+        )
+
+    def impassable_loci(self) -> frozenset[tuple[int, int]]:
+        """Return coordinate loci empirically evaluated as non-traversable."""
+        return frozenset(
+            (int(k[0]), int(k[1]))
+            for k, b in self._locus_beliefs.items()
+            if (
+                b.counts.get(_OUT_BLOCKED, 0.0) > 0.0 or b.counts.get(_OUT_TERMINAL_FAIL, 0.0) > 0.0
+            )
+            and not b.traversability_posterior() >= 0.5
+        )
+
+    def traversable_loci(self) -> frozenset[tuple[int, int]]:
+        """Return coordinate loci empirically evaluated as safely traversable."""
+        return frozenset(
+            (int(k[0]), int(k[1]))
+            for k, b in self._locus_beliefs.items()
+            if (
+                b.counts.get(_OUT_TRAVERSED, 0.0) > 0.0
+                or b.counts.get(_OUT_TERMINAL_WIN, 0.0) > 0.0
+            )
+            and b.traversability_posterior() >= 0.5
+        )
 
     def begin_context_epoch(self, epoch: int | None = None) -> None:
         """Advance context epoch and drop episode-local coordinate beliefs."""
