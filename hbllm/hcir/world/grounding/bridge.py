@@ -151,6 +151,8 @@ class CorticalGroundingBridge:
         self.state.dialogue_role_priors.clear()
         self.state.last_scene_sig = None
         self.state.episode_feature_memory.clear()
+        self.state.cached_entity_features.clear()
+        self.state.cached_entity_concepts.clear()
         self.state.adapted_role_pairs.clear()
         self.tracker.reset()
         self._committed_beliefs.clear()
@@ -401,6 +403,7 @@ class CorticalGroundingBridge:
 
         # 4. Epistemic Evaluation & Commit of Accepted Relations (bounded growth check)
         committed_claims: list[str] = []
+        to_commit: list[tuple[Any, Any, Any]] = []
         for claim in claims:
             # Match supporting evidence
             claim_ev = [e for e in ev_records if e.evidence_id in claim.evidence_ids]
@@ -414,35 +417,53 @@ class CorticalGroundingBridge:
                     and abs(decision.posterior_belief - prev[1]) < 0.05
                 ):
                     continue  # Bounded state growth: skip redundant transaction
-                try:
-                    self.committer.commit_decision(decision, claim, belief)
-                    self._committed_beliefs[b_key] = (
-                        claim.polarity.value,
-                        decision.posterior_belief,
-                    )
-                    committed_claims.append(claim.claim_id)
-                except Exception as exc:
-                    logger.debug("Failed to commit claim %s: %s", claim.claim_id, exc)
+                to_commit.append((decision, claim, belief))
+                self._committed_beliefs[b_key] = (
+                    claim.polarity.value,
+                    decision.posterior_belief,
+                )
+                committed_claims.append(claim.claim_id)
+
+        if to_commit:
+            try:
+                self.committer.commit_decisions(to_commit)
+            except Exception as exc:
+                logger.debug("Failed to commit batch claims: %s", exc)
 
         active_cands = self.tracker.get_active_candidates()
 
-        # 5. Feature Extraction via FeatureExtractorRegistry
+        # 5. Feature Extraction via FeatureExtractorRegistry with Unmoved Entity Caching
         if ctx is not None:
             curr_grid = getattr(ctx, "curr_grid", None)
             if curr_grid is not None:
                 envelope.metadata["grid"] = curr_grid
                 envelope.metadata["bg_feature"] = getattr(ctx, "bg_feature", 0)
-        if entity_states:
-            envelope.metadata["entities"] = [
-                {"id": cand_id, **state} for cand_id, state in entity_states.items()
-            ]
+
+        needs_extract_entities: list[dict[str, Any]] = []
+        for cand_id, state in entity_states.items():
+            if (
+                state.get("moved", False)
+                or cand_id not in self.state.cached_entity_features
+                or cand_id not in self.state.cached_entity_concepts
+            ):
+                needs_extract_entities.append({"id": cand_id, **state})
 
         feature_vectors: list[PerceptualFeatureVector] = []
-        try:
-            extracted = self.feature_registry.extract_all(envelope)
-            feature_vectors.extend(extracted)
-        except Exception as exc:
-            logger.debug("FeatureExtractorRegistry.extract_all failed: %s", exc)
+        if needs_extract_entities:
+            envelope.metadata["entities"] = needs_extract_entities
+            try:
+                extracted = self.feature_registry.extract_all(envelope)
+                for fv in extracted:
+                    ent_id = fv.feature_metadata.get("entity_id")
+                    if ent_id:
+                        self.state.cached_entity_features[ent_id] = fv
+            except Exception as exc:
+                logger.debug("FeatureExtractorRegistry.extract_all failed: %s", exc)
+
+        for cand_id in entity_states:
+            cached_fv = self.state.cached_entity_features.get(cand_id)
+            if cached_fv is not None:
+                feature_vectors.append(cached_fv)
 
         # 6. Concept Learning & Role Prior Inference via ConceptLearner (active across all modes)
         concept_assignments: list[ConceptAssignment] = []
@@ -460,6 +481,20 @@ class CorticalGroundingBridge:
                 entity_id: str | None = fv.feature_metadata.get("entity_id")
                 if not entity_id and active_cands:
                     entity_id = active_cands[0].candidate_ref.id
+
+                # If entity did not move and concept was already assigned, reuse cached assignment
+                if (
+                    entity_id
+                    and not entity_states.get(entity_id, {}).get("moved", False)
+                    and entity_id in self.state.cached_entity_concepts
+                ):
+                    assignment = self.state.cached_entity_concepts[entity_id]
+                    concept_assignments.append(assignment)
+                    if "raw_color" in fv.feature_metadata:
+                        rc_feat = int(fv.feature_metadata["raw_color"])
+                        feature_concept_ids[rc_feat] = assignment.concept_ref.id
+                    continue
+
                 if infer_priors and "raw_color" in fv.feature_metadata:
                     priors = self.concept_learner.infer_role_priors(
                         fv, max_distance=0.35, distance_scale=0.30
@@ -472,6 +507,8 @@ class CorticalGroundingBridge:
                                 existing_rp[r_name] = r_conf
                 assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
                 concept_assignments.append(assignment)
+                if entity_id:
+                    self.state.cached_entity_concepts[entity_id] = assignment
                 if "raw_color" in fv.feature_metadata:
                     rc_feat = int(fv.feature_metadata["raw_color"])
                     feature_concept_ids[rc_feat] = assignment.concept_ref.id

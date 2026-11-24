@@ -363,13 +363,19 @@ class EpistemicGoalScheduler:
         hard_blocked: set[tuple[int, int]] = set(engine.learned_barriers) | set(static_lethal)
         unverified_blocked: set[tuple[int, int]] = set(hard_blocked)
         non_bg_rs, non_bg_cs = np.nonzero(curr_grid != bg)
+        unique_vals = set(np.unique(curr_grid[curr_grid != bg]))
+        feat_ev: dict[int, Any] = {}
+        for uv in unique_vals:
+            uv_int = int(uv)
+            if uv_int not in av_feats:
+                feat_ev[uv_int] = th.evaluate_transition(uv_int)
         for r_np, c_np in zip(non_bg_rs.tolist(), non_bg_cs.tolist(), strict=False):
             if (r_np, c_np) == avatar_pos:
                 continue
             val = int(curr_grid[r_np, c_np])
             if val in av_feats:
                 continue
-            ev_cell = th.evaluate_transition(val, locus=(r_np, c_np))
+            ev_cell = feat_ev[val]
             if not ev_cell.traversable or ev_cell.risk_cost >= 40.0 or val in lethal_feats:
                 hard_blocked.add((r_np, c_np))
                 unverified_blocked.add((r_np, c_np))

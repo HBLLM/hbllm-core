@@ -103,20 +103,58 @@ class RelationLearner:
         now = timestamp if timestamp > 0.0 else time.time()
         dyads: list[SpatialDyad] = []
         entity_ids = list(spatial_states.keys())
+        n_ents = len(entity_ids)
+        if n_ents <= 1:
+            return dyads
+
+        # Precompute extents for bounding-box interaction reach
+        extents: dict[str, float] = {}
+        for ent_id, st in spatial_states.items():
+            bbox = st.get("bbox")
+            if bbox and len(bbox) >= 4:
+                extents[ent_id] = 0.5 * math.hypot(float(bbox[2]), float(bbox[3]))
+            else:
+                extents[ent_id] = 0.0
+
+        # Build spatial hash grid when number of entities is non-trivial (> 16)
+        use_spatial_bins = n_ents > 16
+        if use_spatial_bins:
+            max_ext = max(extents.values()) if extents else 0.0
+            bin_size = max(self._proximity_threshold, 2.0 * max_ext + 1.0)
+            bins: dict[tuple[int, int], list[str]] = {}
+            for ent_id, st in spatial_states.items():
+                p = st.get("position", (0.0, 0.0))
+                bx = int(p[0] // bin_size)
+                by = int(p[1] // bin_size)
+                bins.setdefault((bx, by), []).append(ent_id)
 
         for i, sub_id in enumerate(entity_ids):
             sub_st = spatial_states[sub_id]
             sub_pos = sub_st.get("position", (0.0, 0.0))
             sub_vel = sub_st.get("velocity", (0.0, 0.0))
             sub_bbox = sub_st.get("bbox")
+            sub_ext = extents[sub_id]
 
-            for j, obj_id in enumerate(entity_ids):
-                if i == j:
+            if use_spatial_bins:
+                bx = int(sub_pos[0] // bin_size)
+                by = int(sub_pos[1] // bin_size)
+                candidate_objs: list[str] = []
+                for dbx in (-1, 0, 1):
+                    for dby in (-1, 0, 1):
+                        b_ents = bins.get((bx + dbx, by + dby))
+                        if b_ents:
+                            candidate_objs.extend(b_ents)
+            else:
+                candidate_objs = entity_ids
+
+            for obj_id in candidate_objs:
+                if sub_id == obj_id:
                     continue
                 obj_st = spatial_states[obj_id]
                 obj_pos = obj_st.get("position", (0.0, 0.0))
                 obj_vel = obj_st.get("velocity", (0.0, 0.0))
                 obj_bbox = obj_st.get("bbox")
+                obj_ext = extents[obj_id]
 
                 # Relative displacements
                 dx = obj_pos[0] - sub_pos[0]
@@ -124,7 +162,8 @@ class RelationLearner:
                 dz = (obj_pos[2] - sub_pos[2]) if len(sub_pos) > 2 and len(obj_pos) > 2 else 0.0
                 dist = math.sqrt(dx * dx + dy * dy + dz * dz)
 
-                if dist > self._proximity_threshold and not (sub_bbox and obj_bbox):
+                max_reach = max(self._proximity_threshold, sub_ext + obj_ext + 1.0)
+                if dist > max_reach:
                     continue
 
                 # Relative and centroid speeds
