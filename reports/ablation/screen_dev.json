@@ -1,47 +1,49 @@
 {
   "n_trials": 80,
   "baseline": {
-    "generality_score": 0.7547,
-    "solve_rate": 0.8,
-    "n_solved": 64,
+    "generality_score": 0.8318,
+    "solve_rate": 0.9625,
+    "n_solved": 77,
     "n_trials": 80,
     "wilson_95_ci": [
-      0.6995,
-      0.873
+      0.8955,
+      0.9872
     ],
-    "deaths": 10,
-    "mean_steps": 24.16,
-    "mean_p50_ms": 65.43,
-    "mean_p95_ms": 173.13,
+    "deaths": 2,
+    "mean_steps": 23.04,
+    "mean_p50_ms": 95.52,
+    "mean_p95_ms": 226.26,
     "family_scores": {
-      "grid": 0.7601,
-      "continuous": 0.6228,
-      "symbolic": 0.8812
+      "grid": 0.8674,
+      "continuous": 0.7479,
+      "symbolic": 0.88
     },
     "family_solve_rates": {
-      "grid": 0.725,
-      "continuous": 0.75,
+      "grid": 0.925,
+      "continuous": 1.0,
       "symbolic": 1.0
     },
     "crash": null
   },
   "calls": {
-    "subgoal_stack": 14523,
-    "body_schema": 3347,
-    "habenular_ior": 150459,
-    "remote_causal": 3760,
-    "hazard_tracker": 198352,
-    "acc_conflict_monitor": 49244,
-    "object_planner": 2337,
-    "prediction_budget": 756,
-    "option_discovery": 75878,
-    "budget_governor": 67050,
-    "world_kernel": 0
+    "subgoal_stack": 11599,
+    "body_schema": 2540,
+    "habenular_ior": 100515,
+    "remote_causal": 3337,
+    "hazard_tracker": 175094,
+    "acc_conflict_monitor": 38069,
+    "object_planner": 13101,
+    "prediction_budget": 609,
+    "option_discovery": 27973,
+    "budget_governor": 45392,
+    "world_kernel": 0,
+    "grounding_bridge": 17547
   },
   "used": [
     "acc_conflict_monitor",
     "body_schema",
     "budget_governor",
+    "grounding_bridge",
     "habenular_ior",
     "hazard_tracker",
     "object_planner",

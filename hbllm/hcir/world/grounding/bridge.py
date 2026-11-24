@@ -153,7 +153,9 @@ class CorticalGroundingBridge:
         self.state.episode_feature_memory.clear()
         self.state.cached_entity_features.clear()
         self.state.cached_entity_concepts.clear()
+        self.state.cached_entity_priors.clear()
         self.state.adapted_role_pairs.clear()
+        self.relation_learner.reset()
         self.tracker.reset()
         self._committed_beliefs.clear()
         if (
@@ -204,8 +206,16 @@ class CorticalGroundingBridge:
         entity_states: dict[str, dict[str, Any]] = {}
         entities = extracted_entities or []
 
-        # Find existing active candidates to enable permutation-invariant tracking
+        # Find existing active candidates indexed by color for permutation-invariant O(1) lookup
         active_cands = self.tracker.get_active_candidates()
+        cands_by_color: dict[int, list[Any]] = {}
+        uncolored_cands: list[Any] = []
+        for c in active_cands:
+            c_col = c.properties.get("color")
+            if c_col is None:
+                uncolored_cands.append(c)
+            else:
+                cands_by_color.setdefault(int(c_col), []).append(c)
         matched_cand_ids: set[str] = set()
 
         for idx, ent in enumerate(entities):
@@ -300,7 +310,10 @@ class CorticalGroundingBridge:
                 best_trk_id: str | None = None
                 best_cand_id: str | None = None
                 best_dist = float("inf")
-                for c in active_cands:
+                cand_pool = list(cands_by_color.get(int(color), ()))
+                if uncolored_cands:
+                    cand_pool.extend(uncolored_cands)
+                for c in cand_pool:
                     cid = c.candidate_ref.id
                     if cid in matched_cand_ids:
                         continue
@@ -393,20 +406,22 @@ class CorticalGroundingBridge:
             }
         self.state.last_scene_sig = scene_sig
 
-        # 3. Dynamic Relation Induction
+        # 3. Dynamic Relation Induction (evaluate only dyads whose participants moved/changed)
         self.relation_learner.observe_entity_states(entity_states, timestamp=now)
         claims, ev_records = self.relation_learner.propose_claims(
             source_channel_id="cortical_perception",
             observation_id=obs_id,
             dependency_group=f"dep_cortex_s{step}",
+            candidate_pairs=self.relation_learner.last_changed_pairs,
         )
 
         # 4. Epistemic Evaluation & Commit of Accepted Relations (bounded growth check)
         committed_claims: list[str] = []
         to_commit: list[tuple[Any, Any, Any]] = []
+        ev_by_id = {e.evidence_id: e for e in ev_records}
         for claim in claims:
             # Match supporting evidence
-            claim_ev = [e for e in ev_records if e.evidence_id in claim.evidence_ids]
+            claim_ev = [ev_by_id[eid] for eid in claim.evidence_ids if eid in ev_by_id]
             decision, belief = self.evaluator.evaluate_claim(claim, claim_ev)
             if decision.outcome == DecisionOutcome.ACCEPT:
                 b_key = f"{claim.subject_ref.id}:{claim.predicate_ref}:{claim.object_ref}"
@@ -482,33 +497,39 @@ class CorticalGroundingBridge:
                 if not entity_id and active_cands:
                     entity_id = active_cands[0].candidate_ref.id
 
-                # If entity did not move and concept was already assigned, reuse cached assignment
-                if (
+                is_unmoved_cached = bool(
                     entity_id
                     and not entity_states.get(entity_id, {}).get("moved", False)
                     and entity_id in self.state.cached_entity_concepts
-                ):
-                    assignment = self.state.cached_entity_concepts[entity_id]
-                    concept_assignments.append(assignment)
-                    if "raw_color" in fv.feature_metadata:
-                        rc_feat = int(fv.feature_metadata["raw_color"])
-                        feature_concept_ids[rc_feat] = assignment.concept_ref.id
-                    continue
-
+                )
                 if infer_priors and "raw_color" in fv.feature_metadata:
-                    priors = self.concept_learner.infer_role_priors(
-                        fv, max_distance=0.35, distance_scale=0.30
-                    )
+                    if (
+                        is_unmoved_cached
+                        and entity_id is not None
+                        and entity_id in self.state.cached_entity_priors
+                    ):
+                        priors = self.state.cached_entity_priors[entity_id]
+                    else:
+                        priors = self.concept_learner.infer_role_priors(
+                            fv, max_distance=0.35, distance_scale=0.30
+                        )
+                        if entity_id:
+                            self.state.cached_entity_priors[entity_id] = dict(priors)
                     if priors:
                         rc = int(fv.feature_metadata["raw_color"])
                         existing_rp = role_priors.setdefault(rc, {})
                         for r_name, r_conf in priors.items():
                             if r_conf > existing_rp.get(r_name, 0.0):
                                 existing_rp[r_name] = r_conf
-                assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
+
+                if is_unmoved_cached and entity_id is not None:
+                    assignment = self.state.cached_entity_concepts[entity_id]
+                else:
+                    assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
+                    if entity_id:
+                        self.state.cached_entity_concepts[entity_id] = assignment
+
                 concept_assignments.append(assignment)
-                if entity_id:
-                    self.state.cached_entity_concepts[entity_id] = assignment
                 if "raw_color" in fv.feature_metadata:
                     rc_feat = int(fv.feature_metadata["raw_color"])
                     feature_concept_ids[rc_feat] = assignment.concept_ref.id
@@ -524,6 +545,9 @@ class CorticalGroundingBridge:
                 splits, merges = self.concept_learner.maintain()
                 split_count = len(splits)
                 merge_count = len(merges)
+                if split_count > 0 or merge_count > 0:
+                    self.state.cached_entity_concepts.clear()
+                    self.state.cached_entity_priors.clear()
             except Exception as exc:
                 logger.debug("ConceptLearner.maintain failed: %s", exc)
 
@@ -632,6 +656,8 @@ class CorticalGroundingBridge:
             return 0
 
         bound = 0
+        newly_bound = False
+        adapted_any = False
         seen_pairs: set[tuple[int, str]] = set()
         role_to_concept_id: dict[str, str] = {}
         actuator_feats: set[int] = set()
@@ -673,6 +699,10 @@ class CorticalGroundingBridge:
                 if (feat, r_name) in seen_pairs:
                     continue
                 seen_pairs.add((feat, r_name))
+                existing_c = self.concept_store.get_concept(cid) if cid else None
+                already_had_role = (
+                    existing_c is not None and f"role:{r_name}" in existing_c.affordances
+                )
                 refreshed_fv = fv
                 pair_key = (feat, r_name)
                 if (
@@ -685,6 +715,7 @@ class CorticalGroundingBridge:
                         if callable(adapt_fn):
                             adapted = adapt_fn(fv.feature_id, r_name)
                             if isinstance(adapted, tuple) and adapted:
+                                adapted_any = True
                                 refreshed_fv = PerceptualFeatureVector(
                                     feature_id=fv.feature_id,
                                     observation_id=fv.observation_id,
@@ -706,6 +737,8 @@ class CorticalGroundingBridge:
                     confidence=1.0,
                 )
                 if pure_concept is not None:
+                    if not already_had_role or pure_concept.concept_ref.id != cid:
+                        newly_bound = True
                     self.state.last_feature_concept_ids[feat] = pure_concept.concept_ref.id
                     cid = pure_concept.concept_ref.id
                     role_to_concept_id[r_name] = cid
@@ -715,6 +748,8 @@ class CorticalGroundingBridge:
                         str(entity_id), r_name
                     )
                     if bound_concept is not None:
+                        if not already_had_role:
+                            newly_bound = True
                         role_to_concept_id[r_name] = bound_concept.concept_ref.id
                         bound += 1
         if "cargo" in role_to_concept_id and "receptacle" in role_to_concept_id:
@@ -735,6 +770,11 @@ class CorticalGroundingBridge:
                 relation_name="unlocks_barrier",
                 composite_role="lock_mechanism_system",
             )
+        if newly_bound:
+            self.state.cached_entity_priors.clear()
+            self.state.cached_entity_concepts.clear()
+        if adapted_any:
+            self.state.cached_entity_features.clear()
         return bound
 
     # ─────────────────────────────────────────────────────────────────────────

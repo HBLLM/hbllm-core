@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from scipy.ndimage import label as _scipy_label
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
@@ -165,6 +166,75 @@ class FrontopolarSubgoalMCTSPlanner:
                 else:
                     normalized_held.add(int(item))
 
+        H_b, W_b = grid_bounds
+        base_passable = np.ones((H_b, W_b), dtype=bool)
+        for br, bc in barriers:
+            if 0 <= br < H_b and 0 <= bc < W_b:
+                base_passable[br, bc] = False
+
+        comp_cache: dict[
+            tuple[frozenset[tuple[int, int]], frozenset[int]],
+            tuple[np.ndarray, np.ndarray],
+        ] = {}
+
+        def _get_passable_components(
+            cleared_barriers: frozenset[tuple[int, int]],
+            perm_feats: frozenset[int],
+        ) -> tuple[np.ndarray, np.ndarray]:
+            c_key = (cleared_barriers, perm_feats)
+            cached_comp = comp_cache.get(c_key)
+            if cached_comp is not None:
+                return cached_comp
+            passable = base_passable.copy()
+            for cr, cc in cleared_barriers:
+                if 0 <= cr < H_b and 0 <= cc < W_b:
+                    passable[cr, cc] = True
+            if perm_feats and curr_grid is not None:
+                for br, bc in barriers:
+                    if 0 <= br < H_b and 0 <= bc < W_b and int(curr_grid[br, bc]) in perm_feats:
+                        passable[br, bc] = True
+            labeled, _ = _scipy_label(passable)
+            comp_cache[c_key] = (passable, labeled)
+            return passable, labeled
+
+        def _fast_is_reachable(
+            start: tuple[int, int],
+            goal: tuple[int, int],
+            passable: np.ndarray,
+            labeled: np.ndarray,
+        ) -> bool:
+            if start == goal:
+                return True
+            sr, sc = start
+            gr, gc = goal
+            if not (0 <= gr < H_b and 0 <= gc < W_b):
+                return False
+            if abs(sr - gr) + abs(sc - gc) == 1 and 0 <= sr < H_b and 0 <= sc < W_b:
+                return True
+            if 0 <= sr < H_b and 0 <= sc < W_b and bool(passable[sr, sc]):
+                start_lbl = int(labeled[sr, sc])
+                if bool(passable[gr, gc]):
+                    return int(labeled[gr, gc]) == start_lbl
+                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    nr, nc = gr + dr, gc + dc
+                    if 0 <= nr < H_b and 0 <= nc < W_b and int(labeled[nr, nc]) == start_lbl:
+                        return True
+                return False
+            start_comps: set[int] = set()
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = sr + dr, sc + dc
+                if 0 <= nr < H_b and 0 <= nc < W_b and bool(passable[nr, nc]):
+                    start_comps.add(int(labeled[nr, nc]))
+            if not start_comps:
+                return False
+            if bool(passable[gr, gc]):
+                return int(labeled[gr, gc]) in start_comps
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = gr + dr, gc + dc
+                if 0 <= nr < H_b and 0 <= nc < W_b and int(labeled[nr, nc]) in start_comps:
+                    return True
+            return False
+
         root = FrontopolarSubgoalMCTSNode(
             subgoal=None,
             state_avatar_pos=avatar_pos,
@@ -194,28 +264,16 @@ class FrontopolarSubgoalMCTSPlanner:
                     continue
 
                 # Spelke Continuity / Barrier Reachability Pruning with Extended Body Schema Permeability
-                effective_barriers = set(barriers) - set(node.state_cleared_barriers)
+                perm_feats: set[int] = set()
                 if curr_grid is not None and (tool_barrier_affinities or body_schema):
-                    permeable_feats: set[int] = set()
                     for h_feat in node.state_held_items:
                         if tool_barrier_affinities and h_feat in tool_barrier_affinities:
-                            permeable_feats.update(tool_barrier_affinities[h_feat])
+                            perm_feats.update(tool_barrier_affinities[h_feat])
                         if body_schema and hasattr(body_schema, "tool_barrier_affinities"):
-                            permeable_feats.add(h_feat)
-                            permeable_feats.update(
+                            perm_feats.add(h_feat)
+                            perm_feats.update(
                                 body_schema.tool_barrier_affinities.get(h_feat, set())
                             )
-                    if permeable_feats:
-                        H_b, W_b = grid_bounds
-                        effective_barriers = {
-                            b
-                            for b in effective_barriers
-                            if not (
-                                0 <= b[0] < H_b
-                                and 0 <= b[1] < W_b
-                                and int(curr_grid[b[0], b[1]]) in permeable_feats
-                            )
-                        }
 
                 # Prerequisite checking: clearing obstacles or unlocking mechanisms requires held key/tool
                 if cand_sg.subgoal_type in [
@@ -228,11 +286,15 @@ class FrontopolarSubgoalMCTSPlanner:
                         continue
 
                 if cand_target is not None:
-                    if not cls._is_reachable(
+                    passable_m, labeled_m = _get_passable_components(
+                        node.state_cleared_barriers,
+                        frozenset(perm_feats),
+                    )
+                    if not _fast_is_reachable(
                         node.state_avatar_pos,
                         cand_target,
-                        effective_barriers,
-                        grid_bounds,
+                        passable_m,
+                        labeled_m,
                     ):
                         pruned_count += 1
                         continue

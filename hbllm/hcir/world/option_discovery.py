@@ -117,9 +117,11 @@ class OptionDiscoveryEngine:
         self,
         min_reuse_for_consolidation: int = 2,
         betweenness_threshold: float = 0.15,
+        live_pipeline_enabled: bool = False,
     ) -> None:
         self.min_reuse_for_consolidation = min_reuse_for_consolidation
         self.betweenness_threshold = betweenness_threshold
+        self.live_pipeline_enabled: bool = live_pipeline_enabled
         self.discovered_options: dict[str, DiscoveredOption] = {}
         self.total_episode_steps: int = 0
         self.option_executed_steps: int = 0

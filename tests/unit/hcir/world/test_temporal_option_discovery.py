@@ -92,3 +92,16 @@ def test_epistemic_engine_option_discovery_integration() -> None:
     opt_id = options[0].option_id
     epistemic_engine.record_option_usage(opt_id, steps=8, success=True)
     assert epistemic_engine.get_option_reuse_rate() > 0.0
+
+
+def test_option_discovery_gated_off_in_standard_step_loop() -> None:
+    """OptionDiscoveryEngine stays gated off on standard step() unless explicitly enabled."""
+    from hbllm.hcir.world.percept import EmbodiedObservation
+
+    epistemic_engine = AutonomousEpistemicEngine(enable_logging=False)
+    assert epistemic_engine.option_discovery.live_pipeline_enabled is False
+
+    epistemic_engine.step(
+        EmbodiedObservation(lattice=_create_two_room_grid(), available_actions=(1, 2, 3, 4))
+    )
+    assert epistemic_engine.option_discovery.discovered_options == {}

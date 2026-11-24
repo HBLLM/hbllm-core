@@ -2027,6 +2027,114 @@ class MentalSimulationPlanner:
         open_barriers: set[tuple[int, int]] = set()
         accumulated_plan: list[MentalSimulationStep] = []
         max_stages = 8
+        _u_vals, _u_cnts = np.unique(curr_grid, return_counts=True)
+        feat_counts = {
+            int(k): int(v) for k, v in zip(_u_vals.tolist(), _u_cnts.tolist(), strict=False)
+        }
+
+        def build_bfs_tree(
+            s_pos: tuple[int, int],
+            active_barriers: set[tuple[int, int]],
+        ) -> tuple[
+            dict[tuple[int, int], tuple[tuple[int, int] | None, int | None]],
+            dict[tuple[int, int], int],
+            dict[tuple[int, int], tuple[int, tuple[int, int], int]],
+        ]:
+            parent_map: dict[tuple[int, int], tuple[tuple[int, int] | None, int | None]] = {
+                s_pos: (None, None)
+            }
+            dist_map: dict[tuple[int, int], int] = {s_pos: 0}
+            terminal_void_parent: dict[tuple[int, int], tuple[int, tuple[int, int], int]] = {}
+            q: deque[tuple[int, int]] = deque([s_pos])
+            while q:
+                p = q.popleft()
+                d_cur = dist_map[p]
+                for act, dr, dc in movable_actions:
+                    if (p, act) in engine.failed_transitions:
+                        continue
+                    nr, nc = p[0] + dr, p[1] + dc
+                    if not (0 <= nr < H and 0 <= nc < W):
+                        continue
+                    nxt = (nr, nc)
+                    if nxt in parent_map:
+                        continue
+
+                    step_r = int(np.sign(dr))
+                    step_c = int(np.sign(dc))
+                    dist = max(abs(dr), abs(dc))
+                    ray_blocked = False
+                    void_at_terminal = False
+                    for k in range(1, dist + 1):
+                        kr = p[0] + step_r * k
+                        kc = p[1] + step_c * k
+                        if (kr, kc) in active_barriers or (
+                            kr,
+                            kc,
+                        ) in engine.current_context_hazards:
+                            ray_blocked = True
+                            break
+                        if 0 <= kr < H and 0 <= kc < W:
+                            cell_val = int(curr_grid[kr, kc])
+                            if cell_val in engine.hazard_tracker.known_lethal_features:
+                                ray_blocked = True
+                                break
+                            if bg_is_impassable_void and cell_val == bg and (kr, kc) not in goals:
+                                if k == dist:
+                                    void_at_terminal = True
+                                else:
+                                    ray_blocked = True
+                                    break
+                    if ray_blocked:
+                        continue
+                    if void_at_terminal:
+                        if nxt not in terminal_void_parent:
+                            terminal_void_parent[nxt] = (d_cur + 1, p, act)
+                        continue
+
+                    parent_map[nxt] = (p, act)
+                    dist_map[nxt] = d_cur + 1
+                    q.append(nxt)
+            return parent_map, dist_map, terminal_void_parent
+
+        def path_from_tree(
+            target_positions: set[tuple[int, int]],
+            parent_map: dict[tuple[int, int], tuple[tuple[int, int] | None, int | None]],
+            dist_map: dict[tuple[int, int], int],
+            terminal_void_parent: dict[tuple[int, int], tuple[int, tuple[int, int], int]],
+        ) -> list[MentalSimulationStep] | None:
+            if not target_positions:
+                return None
+            best_t: tuple[int, int] | None = None
+            best_d = 1 << 30
+            best_is_void = False
+            for t in target_positions:
+                d = dist_map.get(t)
+                if d is not None and d < best_d:
+                    best_d = d
+                    best_t = t
+                    best_is_void = False
+                elif bg_is_impassable_void:
+                    vp = terminal_void_parent.get(t)
+                    if vp is not None and vp[0] < best_d:
+                        best_d = vp[0]
+                        best_t = t
+                        best_is_void = True
+            if best_t is None:
+                return None
+            rev: list[MentalSimulationStep] = []
+            cur = best_t
+            if best_is_void:
+                _, p, act = terminal_void_parent[cur]
+                rev.append(MentalSimulationStep(action=act, predicted_avatar_pos=cur))
+                cur = p
+            while True:
+                p_prev, act_prev = parent_map[cur]
+                if p_prev is None or act_prev is None:
+                    break
+                rev.append(MentalSimulationStep(action=act_prev, predicted_avatar_pos=cur))
+                cur = p_prev
+            rev.reverse()
+            return rev
 
         def find_shortest_path(
             s_pos: tuple[int, int],
@@ -2088,7 +2196,8 @@ class MentalSimulationPlanner:
         visited_triggers: set[tuple[int, int]] = set()
         for _ in range(max_stages):
             effective_barriers = static_barriers - open_barriers
-            goal_path = find_shortest_path(cur_pos, goals, effective_barriers)
+            p_map, d_map, tv_map = build_bfs_tree(cur_pos, effective_barriers)
+            goal_path = path_from_tree(goals, p_map, d_map, tv_map)
             if goal_path is not None:
                 accumulated_plan.extend(goal_path)
                 logger.info(
@@ -2138,7 +2247,7 @@ class MentalSimulationPlanner:
                 if trig_pos is not None:
                     if trig_pos in visited_triggers:
                         continue
-                    tr_path = find_shortest_path(cur_pos, {trig_pos}, effective_barriers)
+                    tr_path = path_from_tree({trig_pos}, p_map, d_map, tv_map)
                     if tr_path is not None:
                         candidate_triggers.append((trig_pos, tr_path, 100, {b_pos}))
                 elif req_tool is not None:
@@ -2148,9 +2257,7 @@ class MentalSimulationPlanner:
                         tool_found = False
                         for e in entities:
                             if e.feature_id == req_tool and e.grid_pos in reachable_cells:
-                                t_path = find_shortest_path(
-                                    cur_pos, {e.grid_pos}, effective_barriers
-                                )
+                                t_path = path_from_tree({e.grid_pos}, p_map, d_map, tv_map)
                                 if t_path is not None:
                                     candidate_triggers.append((e.grid_pos, t_path, 80, {b_pos}))
                                     tool_found = True
@@ -2183,8 +2290,8 @@ class MentalSimulationPlanner:
                                             )
                                         )
                                         if ib_trig and ib_trig in reachable_cells:
-                                            tr_path = find_shortest_path(
-                                                cur_pos, {ib_trig}, effective_barriers
+                                            tr_path = path_from_tree(
+                                                {ib_trig}, p_map, d_map, tv_map
                                             )
                                             if tr_path is not None:
                                                 candidate_triggers.append(
@@ -2201,8 +2308,8 @@ class MentalSimulationPlanner:
                                                     e2.feature_id == ib_tool
                                                     and e2.grid_pos in reachable_cells
                                                 ):
-                                                    t_path2 = find_shortest_path(
-                                                        cur_pos, {e2.grid_pos}, effective_barriers
+                                                    t_path2 = path_from_tree(
+                                                        {e2.grid_pos}, p_map, d_map, tv_map
                                                     )
                                                     if t_path2 is not None:
                                                         candidate_triggers.append(
@@ -2233,7 +2340,7 @@ class MentalSimulationPlanner:
                     and tr_pos not in effective_barriers
                 )
                 if is_standable:
-                    tr_path = find_shortest_path(cur_pos, {tr_pos}, effective_barriers)
+                    tr_path = path_from_tree({tr_pos}, p_map, d_map, tv_map)
                 else:
                     adj_cells = {
                         (tr_pos[0] + dr, tr_pos[1] + dc)
@@ -2245,7 +2352,7 @@ class MentalSimulationPlanner:
                     if cur_pos in adj_cells:
                         tr_path = []
                     elif adj_cells:
-                        tr_path = find_shortest_path(cur_pos, adj_cells, effective_barriers)
+                        tr_path = path_from_tree(adj_cells, p_map, d_map, tv_map)
                     else:
                         tr_path = None
 
@@ -2262,9 +2369,7 @@ class MentalSimulationPlanner:
                             if (ar, ac) in reachable_cells:
                                 adjacent_barrier_cells.add((ar, ac))
                     if adjacent_barrier_cells:
-                        approach_path = find_shortest_path(
-                            cur_pos, adjacent_barrier_cells, effective_barriers
-                        )
+                        approach_path = path_from_tree(adjacent_barrier_cells, p_map, d_map, tv_map)
                         if approach_path:
                             accumulated_plan.extend(approach_path)
                             for sg in buffered_subgoals:
@@ -2304,7 +2409,7 @@ class MentalSimulationPlanner:
                         and t_pos not in effective_barriers
                     )
                     if t_standable:
-                        t_path = find_shortest_path(cur_pos, {t_pos}, effective_barriers)
+                        t_path = path_from_tree({t_pos}, p_map, d_map, tv_map)
                     else:
                         adj_cells = {
                             (t_pos[0] + dr, t_pos[1] + dc)
@@ -2316,7 +2421,7 @@ class MentalSimulationPlanner:
                         if cur_pos in adj_cells:
                             t_path = []
                         elif adj_cells:
-                            t_path = find_shortest_path(cur_pos, adj_cells, effective_barriers)
+                            t_path = path_from_tree(adj_cells, p_map, d_map, tv_map)
                         else:
                             t_path = None
 
@@ -2324,7 +2429,7 @@ class MentalSimulationPlanner:
                         score = 1
                         if t_feat is not None:
                             # Relational salience: boost if matching a singleton cue
-                            if int(np.sum(curr_grid == t_feat)) == 2:
+                            if feat_counts.get(t_feat, 0) == 2:
                                 score = 5
                         candidate_triggers.append((t_pos, t_path, score, set()))
 

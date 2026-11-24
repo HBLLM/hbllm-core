@@ -220,7 +220,9 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
         )
         if cache_key == self._cached_key and self._cached_frame is not None:
             diff = None
-            prev_grid = getattr(context, "prev_grid", None) or kwargs.get("prev_grid")
+            prev_grid = getattr(context, "prev_grid", None)
+            if prev_grid is None:
+                prev_grid = kwargs.get("prev_grid")
             if (
                 prev_grid is not None
                 and isinstance(prev_grid, np.ndarray)

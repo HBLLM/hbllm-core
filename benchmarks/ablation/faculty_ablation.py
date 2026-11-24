@@ -302,7 +302,7 @@ def faculty_inventory(engine: Any) -> dict[str, str]:
         if v is None:
             continue
         mod = type(v).__module__
-        if mod.startswith("hbllm.hcir.world"):
+        if mod == "hbllm.hcir.world" or mod.startswith("hbllm.hcir.world."):
             inv[name] = type(v).__name__
     return inv
 

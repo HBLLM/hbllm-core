@@ -641,7 +641,11 @@ class GeodesicManifoldRouter:
         frontier_candidates = list(zip(fr_r.tolist(), fr_c.tolist()))
 
         opt_eng = engine.option_discovery
-        if opt_eng is not None and opt_eng.discovered_options:
+        if (
+            opt_eng is not None
+            and bool(opt_eng.live_pipeline_enabled)
+            and opt_eng.discovered_options
+        ):
             bottleneck_frontiers = [
                 opt.bottleneck_state
                 for opt in opt_eng.discovered_options.values()

@@ -15,16 +15,12 @@ from __future__ import annotations
 
 import copy
 import logging
+import uuid
 from collections import deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from hbllm.hcir.world_kernel import WorldKernel
-
-import uuid
+from typing import Any
 
 import numpy as np
 
@@ -460,9 +456,6 @@ class AutonomousEpistemicEngine:
         )
         self.transaction_manager: TransactionManager | None = (
             getattr(services, "transaction_manager", None) if services is not None else None
-        )
-        self.world_kernel: WorldKernel | None = (
-            getattr(services, "world_kernel", None) if services is not None else None
         )
         self.active_task_frame: TaskFrame | None = None
         if self.tiered_workspace is not None:
@@ -1093,7 +1086,6 @@ class AutonomousEpistemicEngine:
         self.services = services
         self.event_bus = getattr(services, "event_bus", None)
         self.capability_resolver = getattr(services, "capability_resolver", None)
-        self.world_kernel = getattr(services, "world_kernel", None)
         if getattr(services, "transaction_manager", None) is not None:
             self.transaction_manager = services.transaction_manager
         if services.tiered_workspace is not None:
@@ -3093,90 +3085,6 @@ class AutonomousEpistemicEngine:
             target_role=target_role,
             blocked_cells=blocked_cells,
         )
-
-    def evaluate_candidate_action_ensemble(
-        self,
-        action: Any,
-        curr_grid: np.ndarray | None = None,
-        horizon_ms: int = 60000,
-    ) -> tuple[Any, bool]:
-        """Evaluate candidate action through WorldKernel PredictiveRealityModel ensemble.
-
-        Returns:
-            tuple[EnsemblePrediction | None, bool]: The ensemble prediction (or None if
-            predictive reality is unavailable) and a boolean indicating whether high
-            inter-predictor disagreement was detected.
-
-        If high disagreement is detected among physics, SNN, statistical, and neural
-        predictors, the anterior cingulate / deliberation cortex is notified via KernelEvent.
-        """
-        if self.world_kernel is None or not hasattr(self.world_kernel, "predictive_reality"):
-            return None, False
-
-        from hbllm.hcir.world.world_context import WorldModelScope
-        from hbllm.hcir.world.world_state_snapshot import WorldStateSnapshot
-
-        variables: dict[str, Any] = {}
-        if curr_grid is not None:
-            variables["grid"] = curr_grid
-        elif hasattr(self, "last_observed_grid") and self.last_observed_grid is not None:
-            variables["grid"] = self.last_observed_grid
-
-        if hasattr(self.world_kernel, "digital_twin") and hasattr(
-            self.world_kernel.digital_twin, "get_variables"
-        ):
-            variables.update(self.world_kernel.digital_twin.get_variables())
-
-        snapshot = WorldStateSnapshot(
-            world_id=self.world_id,
-            timestamp=float(self.step_counter),
-            variables=variables,
-            entity_states={},
-        )
-
-        action_intent = str(action.name if hasattr(action, "name") else action)
-        scope = WorldModelScope(world_id=self.world_id)
-
-        pred = self.world_kernel.predictive_reality.predict(
-            snapshot=snapshot,
-            action_intent=action_intent,
-            horizon_ms=horizon_ms,
-            scope=scope,
-        )
-
-        disagreement = (
-            self.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement(
-                pred.component_predictions
-            )
-        )
-
-        if disagreement.high_disagreement:
-            actor_pos = (
-                (float(self.avatar_pos[0]), float(self.avatar_pos[1]))
-                if self.avatar_pos is not None
-                else None
-            )
-            self.acc_conflict.register_predictive_conflict(
-                disagreement_score=disagreement.disagreement_index,
-                conflicting_predictors=disagreement.conflicting_predictors,
-                actor_pos=actor_pos,
-                step=self.step_counter,
-            )
-            if self.event_bus is not None:
-                self.event_bus.publish(
-                    KernelEvent(
-                        event_type="epistemic.ensemble_disagreement",
-                        source="AutonomousEpistemicEngine",
-                        data={
-                            "action_intent": action_intent,
-                            "disagreement_index": disagreement.disagreement_index,
-                            "conflicting_predictors": disagreement.conflicting_predictors,
-                            "world_id": self.world_id,
-                        },
-                    )
-                )
-
-        return pred, disagreement.high_disagreement
 
     def schedule_causal_subgoal_chain(
         self,

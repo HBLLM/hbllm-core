@@ -53,7 +53,15 @@ class RelationLearner:
         self._proximity_threshold = proximity_threshold
         self._relations: dict[str, LearnedRelation] = {}
         self._dyad_histories: dict[tuple[str, str], KinematicDyadHistory] = {}
+        self._last_entity_geom: dict[str, tuple[tuple[float, ...], Any]] = {}
+        self.last_changed_pairs: set[tuple[str, str]] = set()
         self._seed_canonical_relations()
+
+    def reset(self) -> None:
+        """Clear episode-local dyad histories and cached entity geometry."""
+        self._dyad_histories.clear()
+        self._last_entity_geom.clear()
+        self.last_changed_pairs.clear()
 
     def _seed_canonical_relations(self) -> None:
         """Pre-seeds canonical spatial invariants while allowing emergent ones."""
@@ -101,13 +109,38 @@ class RelationLearner:
     ) -> list[SpatialDyad]:
         """Extracts dyadic spatial metrics for all interacting entity pairs."""
         now = timestamp if timestamp > 0.0 else time.time()
+        self.last_changed_pairs = set()
         dyads: list[SpatialDyad] = []
         entity_ids = list(spatial_states.keys())
         n_ents = len(entity_ids)
         if n_ents <= 1:
+            stale_eids = [eid for eid in self._last_entity_geom if eid not in spatial_states]
+            for eid in stale_eids:
+                self._last_entity_geom.pop(eid, None)
+            if stale_eids:
+                stale_pairs = [
+                    pk
+                    for pk in self._dyad_histories
+                    if pk[0] not in spatial_states or pk[1] not in spatial_states
+                ]
+                for pk in stale_pairs:
+                    self._dyad_histories.pop(pk, None)
             return dyads
 
-        # Precompute extents for bounding-box interaction reach
+        changed_entities: set[str] = set()
+        stale_eids = [eid for eid in self._last_entity_geom if eid not in spatial_states]
+        for eid in stale_eids:
+            self._last_entity_geom.pop(eid, None)
+        if stale_eids or len(self._dyad_histories) > n_ents * 8:
+            stale_pairs = [
+                pk
+                for pk in self._dyad_histories
+                if pk[0] not in spatial_states or pk[1] not in spatial_states
+            ]
+            for pk in stale_pairs:
+                self._dyad_histories.pop(pk, None)
+
+        # Precompute extents and identify entities whose geometry/kinematics changed
         extents: dict[str, float] = {}
         for ent_id, st in spatial_states.items():
             bbox = st.get("bbox")
@@ -115,14 +148,28 @@ class RelationLearner:
                 extents[ent_id] = 0.5 * math.hypot(float(bbox[2]), float(bbox[3]))
             else:
                 extents[ent_id] = 0.0
+            pos_raw = st.get("position", (0.0, 0.0))
+            geom = (tuple(float(x) for x in pos_raw), tuple(bbox) if bbox else None)
+            vel_raw = st.get("velocity", ())
+            if (
+                bool(st.get("moved", False))
+                or any(float(v) != 0.0 for v in vel_raw)
+                or self._last_entity_geom.get(ent_id) != geom
+            ):
+                changed_entities.add(ent_id)
+                self._last_entity_geom[ent_id] = geom
 
-        # Build spatial hash grid when number of entities is non-trivial (> 16)
+        # Build spatial hash grid when number of entities is non-trivial (> 16),
+        # keeping large perimeter/frame entities separate so one large wall does not inflate bins.
         use_spatial_bins = n_ents > 16
         if use_spatial_bins:
-            max_ext = max(extents.values()) if extents else 0.0
-            bin_size = max(self._proximity_threshold, 2.0 * max_ext + 1.0)
+            large_entities = [eid for eid in entity_ids if extents[eid] > self._proximity_threshold]
+            large_set = set(large_entities)
+            bin_size = max(2.0 * self._proximity_threshold + 1.0, 1.0)
             bins: dict[tuple[int, int], list[str]] = {}
             for ent_id, st in spatial_states.items():
+                if ent_id in large_set:
+                    continue
                 p = st.get("position", (0.0, 0.0))
                 bx = int(p[0] // bin_size)
                 by = int(p[1] // bin_size)
@@ -134,21 +181,37 @@ class RelationLearner:
             sub_vel = sub_st.get("velocity", (0.0, 0.0))
             sub_bbox = sub_st.get("bbox")
             sub_ext = extents[sub_id]
+            sub_changed = sub_id in changed_entities
 
             if use_spatial_bins:
-                bx = int(sub_pos[0] // bin_size)
-                by = int(sub_pos[1] // bin_size)
-                candidate_objs: list[str] = []
-                for dbx in (-1, 0, 1):
-                    for dby in (-1, 0, 1):
-                        b_ents = bins.get((bx + dbx, by + dby))
-                        if b_ents:
-                            candidate_objs.extend(b_ents)
+                if sub_id in large_set:
+                    candidate_objs = entity_ids
+                else:
+                    bx = int(sub_pos[0] // bin_size)
+                    by = int(sub_pos[1] // bin_size)
+                    candidate_objs = []
+                    for dbx in (-1, 0, 1):
+                        for dby in (-1, 0, 1):
+                            b_ents = bins.get((bx + dbx, by + dby))
+                            if b_ents:
+                                candidate_objs.extend(b_ents)
+                    if large_entities:
+                        candidate_objs.extend(large_entities)
             else:
                 candidate_objs = entity_ids
 
             for obj_id in candidate_objs:
                 if sub_id == obj_id:
+                    continue
+                pair_key = (sub_id, obj_id)
+                if (
+                    not sub_changed
+                    and obj_id not in changed_entities
+                    and pair_key in self._dyad_histories
+                ):
+                    prev_latest = self._dyad_histories[pair_key].latest()
+                    if prev_latest is not None:
+                        dyads.append(prev_latest)
                     continue
                 obj_st = spatial_states[obj_id]
                 obj_pos = obj_st.get("position", (0.0, 0.0))
@@ -223,6 +286,7 @@ class RelationLearner:
                 if pair_key not in self._dyad_histories:
                     self._dyad_histories[pair_key] = KinematicDyadHistory(sub_id, obj_id)
                 self._dyad_histories[pair_key].add_sample(dyad)
+                self.last_changed_pairs.add(pair_key)
 
         return dyads
 
@@ -262,13 +326,19 @@ class RelationLearner:
         source_channel_id: str = "spatial_stream",
         observation_id: str = "obs_dyad",
         dependency_group: str = "spatial_tracker",
+        candidate_pairs: set[tuple[str, str]] | None = None,
     ) -> tuple[list[GroundingClaim], list[EvidenceRecord]]:
         """Synthesizes uncommitted GroundingClaim proposals and calibrated EvidenceRecords."""
         claims: list[GroundingClaim] = []
         evidence_records: list[EvidenceRecord] = []
         now = time.time()
 
-        for (sub_id, obj_id), history in self._dyad_histories.items():
+        items = (
+            [(pk, self._dyad_histories[pk]) for pk in candidate_pairs if pk in self._dyad_histories]
+            if candidate_pairs is not None
+            else list(self._dyad_histories.items())
+        )
+        for (sub_id, obj_id), history in items:
             latest = history.latest()
             if not latest:
                 continue

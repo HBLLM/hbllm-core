@@ -418,9 +418,15 @@ class CorticalPipeline:
         grid_arr = np.asarray(raw_grid) if raw_grid is not None else None
         has_2d_grid = grid_arr is not None and grid_arr.ndim == 2
 
-        # G11: Topological Bottleneck & Option Discovery
+        # G11: Topological Bottleneck & Option Discovery (gated off by default on live steps)
         opt_eng = engine.option_discovery
-        if opt_eng and has_2d_grid and grid_arr is not None and 4 <= grid_arr.size <= 256:
+        if (
+            opt_eng is not None
+            and bool(opt_eng.live_pipeline_enabled)
+            and has_2d_grid
+            and grid_arr is not None
+            and 4 <= grid_arr.size <= 256
+        ):
             bg_val = int(engine.estimate_background(grid_arr))
             av_feats = set(engine.avatar_features or ())
             if engine.avatar_feature is not None:
