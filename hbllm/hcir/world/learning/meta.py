@@ -8,9 +8,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 from hbllm.hcir.world.causal.predicates import CausalPredicate
 
@@ -31,42 +29,6 @@ class GameFeatureSignature:
     has_special_actions: bool = False
     has_movement_actions: bool = False
     grid_density: float = 0.0
-
-    @classmethod
-    def from_observation(
-        cls,
-        grid: np.ndarray,
-        available_actions: list[int] | set[int],
-        bg_feature: int = 0,
-        is_spatial_effector_fn: Any = None,
-        is_displacement_fn: Any = None,
-    ) -> GameFeatureSignature:
-        """Extract feature signature from first observation in a domain-agnostic manner."""
-        action_set = set(available_actions)
-        distinct = len(set(int(x) for x in grid.flatten()))
-        total = grid.size
-        non_bg = int(np.count_nonzero(grid != bg_feature)) if total > 0 else 0
-        g_shape = (int(grid.shape[0]), int(grid.shape[1])) if grid.ndim >= 2 else (0, 0)
-
-        # Domain-agnostic detection of effector and movement capabilities
-        has_effector = False
-        has_movement = False
-        if is_spatial_effector_fn is not None:
-            has_effector = any(is_spatial_effector_fn(a) for a in action_set)
-        if is_displacement_fn is not None:
-            has_movement = any(is_displacement_fn(a) for a in action_set)
-        else:
-            has_movement = len(action_set) >= 4
-
-        return cls(
-            action_space=frozenset(action_set),
-            grid_shape=g_shape,
-            num_distinct_colors=distinct,
-            has_spatial_effector_actions=has_effector,
-            has_special_actions=len(action_set) > 4,
-            has_movement_actions=has_movement,
-            grid_density=non_bg / total if total > 0 else 0.0,
-        )
 
     def similarity(self, other: GameFeatureSignature) -> float:
         """Compute similarity to another game's feature signature."""
@@ -226,43 +188,6 @@ class MetaLearningGovernor:
 
         predictions.sort(key=lambda x: x[1], reverse=True)
         return predictions
-
-    def allocate_time_budget(
-        self,
-        features: GameFeatureSignature,
-        total_budget_seconds: float = 600.0,
-        available_strategies: list[str] | None = None,
-    ) -> dict[str, float]:
-        """Allocate time budget across strategies proportional to predicted success."""
-        ranking = self.predict_strategy_ranking(features, available_strategies)
-        if not ranking:
-            if available_strategies:
-                equal = total_budget_seconds / len(available_strategies)
-                return {s: equal for s in available_strategies}
-            return {}
-
-        total_score = sum(max(0.01, score) for _, score in ranking)
-        return {
-            name: total_budget_seconds * max(0.01, score) / total_score for name, score in ranking
-        }
-
-    def get_global_stats(self) -> dict[str, Any]:
-        """Return aggregate statistics across all recorded outcomes."""
-        if not self.outcome_history:
-            return {"total_games": 0}
-        total_levels_won = sum(o.levels_won for o in self.outcome_history)
-        total_levels = sum(o.total_levels for o in self.outcome_history)
-        return {
-            "total_games": len(self.outcome_history),
-            "total_levels_won": total_levels_won,
-            "total_levels": total_levels,
-            "overall_success_rate": total_levels_won / total_levels if total_levels > 0 else 0.0,
-            "strategies_known": sorted(set(o.strategy_name for o in self.outcome_history)),
-            "per_strategy_avg": {
-                name: sum(rates) / len(rates) if rates else 0.0
-                for name, rates in self.strategy_success_rates.items()
-            },
-        }
 
     def to_causal_predicates(self) -> list[CausalPredicate]:
         """Export meta-learning state as formal causal predicates."""

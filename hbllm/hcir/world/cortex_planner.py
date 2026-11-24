@@ -24,7 +24,6 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
 from hbllm.hcir.world.planning import (
-    ContinuousKinematicPlanner,
     DynamicReplanner,
     EpistemicGoalProposal,
     EpistemicGoalScheduler,
@@ -102,7 +101,6 @@ class SimulationStage:
 
 
 __all__ = [
-    "ContinuousKinematicPlanner",
     "DynamicReplanner",
     "EpistemicGoalProposal",
     "EpistemicGoalScheduler",

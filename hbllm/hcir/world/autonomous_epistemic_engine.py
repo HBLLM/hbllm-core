@@ -155,7 +155,6 @@ from hbllm.hcir.world.cortex_causal import (
     HCIRSymbolicWorldTheory,
 )
 from hbllm.hcir.world.cortex_deliberation import (
-    AdaptiveNeuromodulationGovernor,
     BasalGangliaDecision,
     BasalGangliaGatingCircuit,
     NeuromodulatoryState,
@@ -218,31 +217,6 @@ class AutonomousEpistemicEngine:
     # memory cost for capabilities a given episode never exercises.
     relational_matcher: RelationalGraphMatcher = _LazyFaculty(RelationalGraphMatcher)
     visual_symmetry: VisualSymmetryAnalyzer = _LazyFaculty(VisualSymmetryAnalyzer)
-
-    @classmethod
-    def for_tests(
-        cls,
-        exploration_budget: int = 150,
-        enable_logging: bool = True,
-        instructions: Sequence[str] | str | None = None,
-        world_id: str = "default",
-        seed: int | None = None,
-        tiered_workspace: TieredWorkspace | None = None,
-    ) -> AutonomousEpistemicEngine:
-        """Construct an engine with default verified kernel services for tests."""
-        from hbllm.hcir.kernel.services import KernelServices
-        from hbllm.hcir.workspace import HCIRWorkspaceState
-
-        services = KernelServices.create_default(HCIRWorkspaceState())
-        return cls(
-            exploration_budget=exploration_budget,
-            enable_logging=enable_logging,
-            instructions=instructions,
-            services=services,
-            world_id=world_id,
-            seed=seed,
-            tiered_workspace=tiered_workspace,
-        )
 
     def __init__(
         self,
@@ -1066,16 +1040,6 @@ class AutonomousEpistemicEngine:
             self.target_scorers.remove(scorer)
         MotorCortexEffector.unregister_target_scorer(scorer)
 
-    def register_deliberation_policy(self, policy: Any) -> None:
-        """Register an external deliberation arbitration policy."""
-        if policy not in self.deliberation_policies:
-            self.deliberation_policies.append(policy)
-
-    def unregister_deliberation_policy(self, policy: Any) -> None:
-        """Unregister an external deliberation arbitration policy."""
-        if policy in self.deliberation_policies:
-            self.deliberation_policies.remove(policy)
-
     def attach_kernel_services(
         self,
         services: KernelServices,
@@ -1520,14 +1484,6 @@ class AutonomousEpistemicEngine:
         self.evidence_provenance_log.append(record)
         return record
 
-    def recall_episodic_attractor_plan(
-        self, sensory_cue: np.ndarray, match_threshold: float = 0.35
-    ) -> tuple[list[Any] | None, float]:
-        """Recall winning procedural macro plan using Hippocampal DG separation and CA3 auto-association."""
-        return self.episodic_cortex.recall_attractor_plan(
-            sensory_cue, match_threshold=match_threshold
-        )
-
     @property
     def episodic_memory(self) -> HippocampalEpisodicCortex:
         """Hippocampal episodic cortex managing experiences and attractor networks (alias)."""
@@ -1555,11 +1511,6 @@ class AutonomousEpistemicEngine:
             surprise_entropy=surprise_entropy,
             risk_penalties=risk_penalties,
         )
-
-    @property
-    def neuromodulation_governor(self) -> AdaptiveNeuromodulationGovernor:
-        """Dual Neuromodulatory Governor (VTA Dopamine & LC Noradrenaline)."""
-        return self.deliberation_engine.neuromodulation
 
     def step_neuromodulatory_dynamics(
         self,
@@ -1604,204 +1555,6 @@ class AutonomousEpistemicEngine:
         else:
             target_graph = CognitiveGraph(False)
         return algorithms.minimum_spanning_tree_subgraph(target_graph)
-
-    def compute_all_pairs_geodesics(
-        self,
-        graph: CognitiveGraph | None = None,
-        weight_attribute: str = "weight",
-    ) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], list[str]]]:
-        """Compute all-pairs shortest paths and distance matrix across cognitive graph."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.all_pairs_shortest_paths(target_graph, weight_attr=weight_attribute)
-
-    def find_graph_bottlenecks_and_bridges(
-        self, graph: CognitiveGraph | None = None
-    ) -> tuple[set[str], list[tuple[str, str]]]:
-        """Identify critical articulation points and single-point-of-failure bridge edges."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.articulation_points_and_bridges(target_graph)
-
-    def is_graph_fault_tolerant_biconnected(self, graph: CognitiveGraph | None = None) -> bool:
-        """Check if cognitive graph has redundant alternate paths between all vertices."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.is_biconnected(target_graph)
-
-    def compute_network_max_flow_min_cut(
-        self,
-        source: str,
-        sink: str,
-        graph: CognitiveGraph | None = None,
-        capacity_attribute: str = "capacity",
-    ) -> tuple[float, list[tuple[str, str]], set[str], set[str]]:
-        """Compute directed maximum flow and minimum cutset bottleneck between source and sink."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.max_flow_min_cut(
-            target_graph, source, sink, capacity_attr=capacity_attribute
-        )
-
-    def extract_minimal_feedback_arc_set(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> tuple[list[tuple[str, str]], list[str]]:
-        """Extract minimal Feedback Arc Set (FAS) to sever causal graph cycles into a DAG."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.feedback_arc_set(target_graph)
-
-    def condense_graph_scc_metagraph(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> tuple[dict[int, set[str]], list[tuple[int, int]]]:
-        """Condense directed graph strongly connected components (SCCs) into a DAG metagraph."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.condense_scc_metagraph(target_graph)
-
-    def compute_graph_eulerian_inspection_tour(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> tuple[bool, list[tuple[str, str]]]:
-        """Find an Eulerian path or circuit covering all directed graph transitions (Hierholzer)."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.find_eulerian_path_or_circuit(target_graph)
-
-    def compute_graph_chinese_postman_tour(
-        self,
-        graph: CognitiveGraph | None = None,
-        weight_attribute: str = "weight",
-    ) -> tuple[float, list[tuple[str, str]]]:
-        """Compute optimal minimal-cost Chinese Postman Tour covering all edges at least once."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.chinese_postman_tour(target_graph, weight_attr=weight_attribute)
-
-    def compute_graph_dominating_set(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> set[str]:
-        """Compute an approximate Minimum Dominating Set (MDS) of observer / waypoint nodes."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.minimum_dominating_set(target_graph)
-
-    def compute_graph_independent_set(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> set[str]:
-        """Compute an approximate Maximum Independent Set (MIS) of non-conflicting concurrent nodes."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.maximum_independent_set(target_graph)
-
-    def compute_graph_vertex_cover(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> set[str]:
-        """Compute an approximate Minimum Vertex Cover (MVC) of structural bottleneck nodes."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.minimum_vertex_cover(target_graph)
-
-    def compute_graph_edge_coloring(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> dict[tuple[str, str], int]:
-        """Compute a proper greedy edge coloring (Vizing's theorem) of non-conflicting transitions."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.greedy_edge_coloring(target_graph)
-
-    def compute_graph_feedback_vertex_set(
-        self,
-        graph: CognitiveGraph | None = None,
-    ) -> set[str]:
-        """Compute an approximate minimal Feedback Vertex Set (FVS) to break all directed cycles."""
-        if graph is not None:
-            target_graph = graph
-        elif self.tiered_workspace is not None:
-            target_graph = getattr(self.tiered_workspace.brain, "graph", None) or CognitiveGraph(
-                False
-            )
-        else:
-            target_graph = CognitiveGraph(False)
-        return algorithms.feedback_vertex_set(target_graph)
 
     @property
     def phase(self) -> EpistemicPhase:
@@ -1927,10 +1680,6 @@ class AutonomousEpistemicEngine:
                 except Exception as e:
                     logger.debug("Phase transition transaction notice: %s", e)
 
-    def shift_phase(self, new_phase: EpistemicPhase, reason: str = "") -> None:
-        """Alias for transition_to_phase."""
-        self.transition_to_phase(new_phase, reason=reason)
-
     def assess_evidence_sufficiency(
         self,
         observations: list[Any],
@@ -1945,14 +1694,6 @@ class AutonomousEpistemicEngine:
         avg_conf = sum(confs) / n
         is_sufficient = (n >= min_observations) and (avg_conf >= min_confidence)
         return is_sufficient, avg_conf
-
-    def is_action_sufficiently_probed(self, action_id: Any) -> bool:
-        """Check if an action has been tested enough times to have a reliable dynamics model."""
-        dyn = self.action_dynamics.get(action_id)
-        if dyn is None:
-            return False
-        probes = getattr(dyn, "probes_tested", 0)
-        return probes >= self.MIN_PROBES_PER_ACTION
 
     def register_action_space(self, action_specs: Sequence[Any]) -> None:
         """Register external action definitions dynamically from peripheral driver or device descriptor.
@@ -2127,21 +1868,6 @@ class AutonomousEpistemicEngine:
         aff = self.action_affordances.get(action)
         return bool(aff is not None and getattr(aff, "is_focus_switch", False))
 
-    def mark_focus_switch_action(self, action: Any) -> None:
-        """Empirically register an action as an entity focus switcher."""
-        self.focus_switch_actions.add(action)
-        if action in self.action_affordances:
-            self.action_affordances[action].is_focus_switch = True
-        else:
-            self.action_affordances[action] = ActionAffordance(
-                action_id=action,
-                is_focus_switch=True,
-            )
-        logger.info(
-            "AutonomousEpistemicEngine: Grounded empirical FOCUS_SWITCH affordance for action %s",
-            action,
-        )
-
     @staticmethod
     def normalize_sensory_input(raw: Any) -> np.ndarray:
         """Normalize arbitrary sensory observations (camera, depth, lidar, 2D grid) into a spatial 2D array."""
@@ -2303,15 +2029,6 @@ class AutonomousEpistemicEngine:
         self.avatar_pos = val
 
     @property
-    def current_target_pos(self) -> tuple[int, int] | None:
-        """Canonical alias for active target or goal position."""
-        if self.active_probe_target is not None:
-            return self.active_probe_target
-        if self.learned_goal_positions:
-            return next(iter(self.learned_goal_positions))
-        return None
-
-    @property
     def current_context_hazards(self) -> set[tuple[int, int]]:
         """Hazard loci grounded for the current context epoch."""
         return (
@@ -2462,9 +2179,6 @@ class AutonomousEpistemicEngine:
                 epoch, set()
             )
 
-    def set_current_level(self, level: int) -> None:
-        self.set_context_epoch(level)
-
     # ── Episodic State Management ─────────────────────────────────────────────
 
     def on_boundary(self, boundary: Any) -> None:
@@ -2564,7 +2278,7 @@ class AutonomousEpistemicEngine:
             context_epoch=target_epoch,
         )
         self.apply_delta(delta, author="episodic_cortex")
-        if hasattr(self, "_entity_cache") and isinstance(self._entity_cache, dict):
+        if isinstance(self._entity_cache, dict):
             self._entity_cache.clear()
         self._structural_goals_cache = None
         if new_context or not retain_dynamics:
@@ -2778,23 +2492,6 @@ class AutonomousEpistemicEngine:
             return True
         return False
 
-    def compute_exploration_budget(self, n_actions: int) -> int:
-        """Adaptive budget: more probing when more unknowns exist."""
-        if not self.is_motor_grounded():
-            calibrated = sum(1 for d in self.action_dynamics.values() if d.confidence >= 0.7)
-            uncalibrated = max(0, n_actions - calibrated)
-            return max(
-                self.exploration_budget,
-                uncalibrated * self.MIN_PROBES_PER_ACTION * 3,
-            )
-        confirmed_count = (
-            len(self.symbolic_theory.goal_features)
-            + len(self.symbolic_theory.barrier_features)
-            + len(self.state_mutations)
-        )
-        scaling = max(0.2, 1.0 - 0.15 * confirmed_count)
-        return max(15, int(self.exploration_budget * scaling))
-
     # ── Delegated Public Interfaces ───────────────────────────────────────────
 
     def perceive(self, raw_observation: Any) -> PerceptionFrame:
@@ -2838,7 +2535,6 @@ class AutonomousEpistemicEngine:
                     theory.retract_walkable(old_bg, reason="background_shift")
                 elif (
                     old_bg is None
-                    and hasattr(self, "default_bg_feature")
                     and self.default_bg_feature != bg
                     and not theory.has_verified_walkable(self.default_bg_feature)
                 ):
@@ -3550,8 +3246,7 @@ class AutonomousEpistemicEngine:
         )
         if goal_pos not in self.learned_goal_positions:
             self.learned_goal_positions.add(goal_pos)
-            if hasattr(self.state, "learned_goal_positions"):
-                self.state.learned_goal_positions.add(goal_pos)
+            self.state.learned_goal_positions.add(goal_pos)
             if self.symbolic_theory is not None:
                 kb = self.symbolic_theory.transition_kb
                 if kb.get_belief(goal_pos, scope="locus") is None:

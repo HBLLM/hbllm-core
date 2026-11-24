@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from hbllm.hcir.world.macro.custom import (
-    CustomMacroAction,
     ProceduralReplayAction,
     attribute_macro_action_outcome,
 )
@@ -23,7 +22,6 @@ from hbllm.hcir.world.macro.planner import (
 )
 from hbllm.hcir.world.macro.primitives import (
     DepositCargo,
-    ExploreFrontier,
     ExploreObject,
     InteractWith,
     NavigateTo,
@@ -35,9 +33,7 @@ from hbllm.hcir.world.macro.primitives import (
 )
 
 __all__ = [
-    "CustomMacroAction",
     "DepositCargo",
-    "ExploreFrontier",
     "ExploreObject",
     "InteractWith",
     "MacroAction",

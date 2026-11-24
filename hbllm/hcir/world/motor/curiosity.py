@@ -769,20 +769,6 @@ class EpistemicCuriosityExplorer:
 
         return None
 
-    @staticmethod
-    def _probe_frontier_escape(
-        engine: AutonomousEpistemicEngine,
-        curr_grid: np.ndarray,
-        disp_actions: list[tuple[int, tuple[int, int]]],
-        bg: int,
-        bg_is_impassable_void: bool,
-    ) -> int | None:
-        """Frontier Backtracking: BFS shortest path action to nearest walkable frontier cell."""
-        res = EpistemicCuriosityExplorer._probe_frontier_escape_with_target(
-            engine, curr_grid, disp_actions, bg, bg_is_impassable_void
-        )
-        return res[0] if res is not None else None
-
     @classmethod
     def compute_epistemic_probe(
         cls,

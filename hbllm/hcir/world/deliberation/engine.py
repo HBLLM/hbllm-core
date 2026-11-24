@@ -134,10 +134,9 @@ class PrefrontalDeliberationEngine:
         """Arbitrate interactive control clusters and target affordances via policies or fallbacks."""
         # 1. Query external registered deliberation policies first
         for policy in get_engine_state_attr(view, "deliberation_policies", []):
-            if hasattr(policy, "arbitrate_affordances"):
-                res = policy.arbitrate_affordances(
-                    view, curr_grid, available_actions, known_av_feats
-                )
+            arb_fn = get_sub_attr(policy, "arbitrate_affordances", None)
+            if callable(arb_fn):
+                res = arb_fn(view, curr_grid, available_actions, known_av_feats)
                 if res is not None:
                     return res
 
@@ -250,13 +249,11 @@ class PrefrontalDeliberationEngine:
                 # samples and never repeat a null-effect action >2x in a row
                 # (unless every action is null-dominated).
                 def _null_score(a: Any) -> tuple[int, float, int]:
-                    post = view.motor_posterior(a) if hasattr(view, "motor_posterior") else {}
+                    post_fn = get_sub_attr(view, "motor_posterior", None)
+                    post = post_fn(a) if callable(post_fn) else {}
                     null_p = post.get("no_op", 0.0) + post.get("blocked", 0.0)
-                    consec = (
-                        view.consecutive_null_count(a)
-                        if hasattr(view, "consecutive_null_count")
-                        else 0
-                    )
+                    consec_fn = get_sub_attr(view, "consecutive_null_count", None)
+                    consec = consec_fn(a) if callable(consec_fn) else 0
                     return (consec >= 2, null_p, a)
 
                 viable = [a for a in uninhibited_discrete if not _null_score(a)[0]]
@@ -593,7 +590,7 @@ class PrefrontalDeliberationEngine:
                 if dyn.is_displacement_action():
                     dr, dc = dyn.delta_r, dyn.delta_c
                     nr, nc = view.avatar_pos[0] + dr, view.avatar_pos[1] + dc
-                    if hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2:
+                    if isinstance(curr_grid, np.ndarray) and curr_grid.ndim >= 2:
                         H, W = curr_grid.shape[0], curr_grid.shape[1]
                         if not (0 <= nr < H and 0 <= nc < W):
                             return False
@@ -929,11 +926,11 @@ class PrefrontalDeliberationEngine:
             ) or getattr(getattr(view, "working_memory", None), "last_continuous_moved", False)
             is_deliberate_pacing = has_temporal and view.consecutive_pacing_steps > 0
             if not has_progress and not is_deliberate_pacing:
+                wm_ref = get_sub_attr(view, "working_memory", None)
+                inhibit_fn = get_sub_attr(wm_ref, "inhibit_action", None)
                 for cyc_a in cyclic_acts:
-                    if hasattr(view, "working_memory") and hasattr(
-                        view.working_memory, "inhibit_action"
-                    ):
-                        view.working_memory.inhibit_action(cyc_a, duration=2)
+                    if callable(inhibit_fn):
+                        inhibit_fn(cyc_a, duration=2)
                     else:
                         view.inhibited_actions[cyc_a] = min(
                             view.inhibited_actions.get(cyc_a, 0) + 2, 3
@@ -1618,7 +1615,8 @@ class PrefrontalDeliberationEngine:
         chosen_data: dict[str, Any] | None,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Effector Grounding Invariant: Ensure any spatial effector has valid spatial targets."""
-        if hasattr(view, "is_spatial_effector") and view.is_spatial_effector(chosen_action):
+        eff_fn = get_sub_attr(view, "is_spatial_effector", None)
+        if callable(eff_fn) and eff_fn(chosen_action):
             aff = view.action_affordances.get(chosen_action)
             req_keys = aff.target_param_keys if aff else ("x", "y")
             if (

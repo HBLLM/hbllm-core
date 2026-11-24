@@ -9,19 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import time
-import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-
-if TYPE_CHECKING:
-    from hbllm.hcir.world.cortex_causal import ActionAffordance
 
 
 @dataclass(frozen=True)
@@ -367,80 +362,6 @@ class StateTransitionRecord:
         ]
 
 
-class TransitionSequenceModel:
-    """W049: Sequence modeling of transitions, trajectories, and forward reachability."""
-
-    def __init__(self) -> None:
-        self._transitions: list[StateTransitionRecord] = []
-        self._graph: dict[str, dict[str, str]] = {}  # pre_hash -> action -> post_hash
-
-    def record_transition(
-        self,
-        pre_state: WorldStateSnapshot,
-        action: str | None,
-        post_state: WorldStateSnapshot,
-        is_reversible: bool = True,
-    ) -> StateTransitionRecord:
-        """Record and index a state transition in the sequential model."""
-        delta = StateDifferenceComputer.compute_difference(pre_state, post_state)
-        rec = StateTransitionRecord(
-            transition_id=f"trans_{uuid.uuid4().hex[:8]}",
-            pre_state=pre_state,
-            post_state=post_state,
-            action=action,
-            delta=delta,
-            is_reversible=is_reversible,
-        )
-        self._transitions.append(rec)
-        action_key = action or "NOOP"
-        if pre_state.state_hash not in self._graph:
-            self._graph[pre_state.state_hash] = {}
-        self._graph[pre_state.state_hash][action_key] = post_state.state_hash
-        return rec
-
-    def predict_next_state_hash(self, pre_state_hash: str, action: str) -> str | None:
-        """Predict post-state hash under given action from empirical transition model."""
-        return self._graph.get(pre_state_hash, {}).get(action)
-
-    def get_trajectory(self) -> list[StateTransitionRecord]:
-        """Return ordered list of recorded transitions."""
-        return list(self._transitions)
-
-
-@dataclass
-class ReversibilityAnalysis:
-    """W050: Rigorous reversibility analysis and information-loss quantification."""
-
-    is_invertible: bool
-    information_loss_bits: float
-    inverse_action: str | None
-    restoration_possible: bool
-    reason: str
-
-    def to_causal_predicate(self) -> CausalPredicate:
-        """Export reversibility property as a declarative causal predicate."""
-        return CausalPredicate(
-            variable="reversibility",
-            operator="==",
-            value=self.is_invertible,
-            relation=self.inverse_action or "NONE",
-            target_entity=self.reason,
-        )
-
-    def to_affordance(self) -> ActionAffordance | None:
-        """Synthesize compensatory inverse affordance if transition is invertible."""
-        if not self.inverse_action:
-            return None
-        from hbllm.hcir.world.cortex_causal import ActionAffordance
-
-        return ActionAffordance(
-            action_id=self.inverse_action,
-            name=f"inverse_{self.inverse_action}",
-            confidence=1.0 if self.is_invertible else 0.5,
-            metadata={"information_loss_bits": self.information_loss_bits, "reason": self.reason},
-        )
-
-
 class ReversibilityEngine:
     """W050: Computes transition reversibility, entropy loss, and executes restoration trajectories."""
 
@@ -455,64 +376,6 @@ class ReversibilityEngine:
         "FLIP_H": "FLIP_H",
         "FLIP_V": "FLIP_V",
     }
-
-    @classmethod
-    def analyze_transition(
-        cls,
-        transition: StateTransitionRecord,
-        custom_inverses: dict[str, str] | None = None,
-    ) -> ReversibilityAnalysis:
-        """W050: Analyzes whether an action/transition is mathematically and physically invertible."""
-        inverses = dict(cls.DEFAULT_INVERSES)
-        if custom_inverses:
-            inverses.update(custom_inverses)
-
-        action = transition.action or "NOOP"
-        inv_action = inverses.get(action)
-
-        # Check for destructive/irreversible structural changes
-        has_destructive_loss = False
-        info_loss_bits = 0.0
-
-        for struct_chg in transition.delta.structural_changes:
-            if struct_chg.startswith("ENTITY_REMOVED"):
-                has_destructive_loss = True
-                info_loss_bits += 8.0  # Lost entity identity & state entropy
-
-        if transition.delta.changed_cells:
-            # Overwriting cells: calculate Shannon entropy loss of overwriting
-            n_cells = len(transition.delta.changed_cells)
-            palette = getattr(transition.delta, "palette", None)
-            n_palette = float(len(palette)) if palette else 16.0
-            info_loss_bits += n_cells * math.log2(max(2.0, n_palette))
-
-        if has_destructive_loss:
-            return ReversibilityAnalysis(
-                is_invertible=False,
-                information_loss_bits=info_loss_bits,
-                inverse_action=None,
-                restoration_possible=False,
-                reason="DESTRUCTIVE_ENTITY_REMOVAL",
-            )
-
-        if inv_action is not None and not has_destructive_loss:
-            return ReversibilityAnalysis(
-                is_invertible=True,
-                information_loss_bits=0.0,
-                inverse_action=inv_action,
-                restoration_possible=True,
-                reason="EXACT_INVERSE_ACTION_AVAILABLE",
-            )
-
-        return ReversibilityAnalysis(
-            is_invertible=transition.is_reversible,
-            information_loss_bits=info_loss_bits,
-            inverse_action=None,
-            restoration_possible=transition.is_reversible,
-            reason="STATE_RESTORE_VIA_MEMORY_ROLLBACK"
-            if transition.is_reversible
-            else "IRREVERSIBLE",
-        )
 
     @classmethod
     def restore_state(

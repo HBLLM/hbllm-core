@@ -30,7 +30,6 @@ from hbllm.hcir.world.percept import EpistemicPhase, ExogenousSignalTracker, Pla
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
-from hbllm.hcir.world.working_memory.buffer import PBWMWorkingMemoryBuffer
 from hbllm.hcir.world.working_memory.models import (
     DomainCompetenceProfile,
     HeldItem,
@@ -75,7 +74,6 @@ class PrefrontalWorkingMemory:
 
         self.homeostatic_state: HomeostaticState = HomeostaticState()
         self.domain_competence_profiles: dict[str, DomainCompetenceProfile] = {}
-        self.pbwm_buffer: PBWMWorkingMemoryBuffer = PBWMWorkingMemoryBuffer()
         self.held_items: list[HeldItem] = []
         self.active_schema: SubgoalSchema | None = None
         self.procedural_library: dict[str, DeclarativeNeuroSymbolicSkill] = {}
@@ -610,10 +608,6 @@ class PrefrontalWorkingMemory:
         """Register a doorway transition as an active macro-subgoal in prefrontal memory."""
         self.topological_subgoals.append(door_coord)
         self.active_macro_goal = f"doorway_to_room_{target_room}"
-
-    def orient_attention(self, coord: tuple[int, int]) -> None:
-        """Orient prefrontal attentional focus to surprising or salient coordinates."""
-        self.focal_attention_point = coord
 
     def acquire_item(
         self,

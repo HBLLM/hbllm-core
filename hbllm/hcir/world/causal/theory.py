@@ -462,52 +462,6 @@ class HCIRSymbolicWorldTheory:
         # Unknown feature — cannot assign role from prior without evidence
         return None
 
-    def rebind_role_from_evidence(self, feature_id: Any, role: str, evidence: str = "") -> None:
-        """Re-bind a feature to a role when empirical evidence confirms the mapping.
-
-        This is the primary mechanism for cross-context transfer: when the engine discovers
-        that feature 7 behaves like a 'key' (e.g., it unlocks a barrier), it binds
-        feature 7 to role 'key'. Any conditional affordance templates involving role 'key'
-        are then instantiated with feature 7.
-        """
-        self.bind_feature_to_role(feature_id, role)
-        # Re-instantiate conditional affordance templates that reference this role
-        for tmpl in self._role_conditional_templates:
-            if tmpl["feature_role"] == role:
-                # This feature matches the template's target role — look for prerequisite
-                prereq_role = tmpl.get("prerequisite_role")
-                prereq_feats = (
-                    self._role_to_features.get(prereq_role, set()) if prereq_role else set()
-                )
-                for pf in prereq_feats:
-                    if feature_id not in self._conditional_affordances:
-                        self.induce_conditional_affordance(
-                            feature=feature_id,
-                            condition=CausalPredicate(
-                                variable="inventory",
-                                operator="contains",
-                                value=pf,
-                            ),
-                            evidence=tmpl.get("evidence", "role_template"),
-                            prerequisite_feature=pf,
-                        )
-            elif tmpl.get("prerequisite_role") == role:
-                # This feature matches the template's prerequisite role — look for target
-                target_role = tmpl["feature_role"]
-                target_feats = self._role_to_features.get(target_role, set())
-                for tf in target_feats:
-                    if tf not in self._conditional_affordances:
-                        self.induce_conditional_affordance(
-                            feature=tf,
-                            condition=CausalPredicate(
-                                variable="inventory",
-                                operator="contains",
-                                value=feature_id,
-                            ),
-                            evidence=tmpl.get("evidence", "role_template"),
-                            prerequisite_feature=feature_id,
-                        )
-
     def clear_feature_bindings(self) -> None:
         """Clear all feature→role bindings without clearing role priors or templates.
 

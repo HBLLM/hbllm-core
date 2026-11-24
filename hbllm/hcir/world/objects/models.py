@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from typing import Any
@@ -88,40 +87,6 @@ class SalientObject:
     salience_score: float = 0.0
     properties: dict[str, Any] = field(default_factory=dict)
 
-    @classmethod
-    def from_spatial_entity(
-        cls,
-        entity: SpatialEntity,
-        category: ObjectCategory = ObjectCategory.UNKNOWN,
-    ) -> SalientObject:
-        """Construct a SalientObject directly from an HCIR SpatialEntity component."""
-        cells = set(entity.properties.get("cells", [entity.grid_pos]))
-        centroid = (int(round(entity.centroid[0])), int(round(entity.centroid[1])))
-        anchor = (
-            min(cells, key=lambda p: (p[0] - centroid[0]) ** 2 + (p[1] - centroid[1]) ** 2)
-            if cells
-            else centroid
-        )
-        salience = float(
-            entity.properties.get(
-                "salience_score",
-                100.0 / math.log2(2 + max(1, entity.area)),
-            )
-        )
-        return cls(
-            object_id=entity.id,
-            category=category,
-            feature_id=entity.feature_id if entity.feature_id is not None else 0,
-            centroid=centroid,
-            cells=cells,
-            area=entity.area,
-            is_solid=(entity.role == EntityRole.OBSTACLE),
-            interaction_stances=[entity.grid_pos],
-            anchor_coord=anchor,
-            salience_score=salience,
-            properties={"role": str(entity.role), **dict(entity.properties)},
-        )
-
     def to_spatial_entity(self, role: EntityRole | None = None) -> SpatialEntity:
         """Convert salient object back into a formal HCIR SpatialEntity."""
         eff_role = role or (
@@ -169,15 +134,3 @@ class MacroOption:
     primitive_steps: list[Any]  # list[MentalSimulationStep]
     score: float = 0.0
     description: str = ""
-
-    def to_subgoal(self) -> dict[str, Any]:
-        """Convert macro-option into a structured declarative subgoal dictionary."""
-        return {
-            "option_id": self.option_id,
-            "directive": int(self.directive),
-            "target_object_id": self.target_object.object_id if self.target_object else None,
-            "target_stance": self.target_stance,
-            "step_count": len(self.primitive_steps),
-            "score": self.score,
-            "description": self.description,
-        }

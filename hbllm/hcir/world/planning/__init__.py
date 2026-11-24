@@ -19,16 +19,12 @@ from hbllm.hcir.world.planning.goal_scheduler import (
     EpistemicGoalProposal,
     EpistemicGoalScheduler,
 )
-from hbllm.hcir.world.planning.kinematics import (
-    ContinuousKinematicPlanner,
-)
 from hbllm.hcir.world.planning.mental_simulation import (
     MentalSimulationPlanner,
     MentalSimulationStep,
 )
 
 __all__ = [
-    "ContinuousKinematicPlanner",
     "DynamicReplanner",
     "EpistemicGoalProposal",
     "EpistemicGoalScheduler",

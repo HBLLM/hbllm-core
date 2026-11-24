@@ -105,57 +105,6 @@ class GridTopologyGraph:
         return all_paths[0] if all_paths else None
 
     @staticmethod
-    def shortest_path_on_mask(
-        passable_mask: np.ndarray,
-        start_coord: tuple[int, int],
-        goal_coord: tuple[int, int],
-        connectivity: str = "4_connected",
-    ) -> list[tuple[int, int]] | None:
-        """Find minimum-hop shortest path from start to goal through a boolean traversable mask."""
-        H, W = passable_mask.shape
-        sr, sc = start_coord
-        gr, gc = goal_coord
-        if (sr, sc) == (gr, gc):
-            return [(sr, sc)]
-        if not (0 <= sr < H and 0 <= sc < W and 0 <= gr < H and 0 <= gc < W):
-            return None
-
-        offsets = (
-            [(-1, 0), (1, 0), (0, -1), (0, 1)]
-            if connectivity == "4_connected"
-            else [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-        )
-
-        queue: collections.deque[tuple[int, int]] = collections.deque([(sr, sc)])
-        visited: set[tuple[int, int]] = {(sr, sc)}
-        parent: dict[tuple[int, int], tuple[int, int]] = {}
-
-        found = False
-        while queue:
-            curr_r, curr_c = queue.popleft()
-            if (curr_r, curr_c) == (gr, gc):
-                found = True
-                break
-            for dr, dc in offsets:
-                nr, nc = curr_r + dr, curr_c + dc
-                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited:
-                    if (nr, nc) == (gr, gc) or bool(passable_mask[nr, nc]):
-                        visited.add((nr, nc))
-                        parent[(nr, nc)] = (curr_r, curr_c)
-                        queue.append((nr, nc))
-
-        if not found:
-            return None
-
-        curr = (gr, gc)
-        path = [curr]
-        while curr != (sr, sc):
-            curr = parent[curr]
-            path.append(curr)
-        path.reverse()
-        return path
-
-    @staticmethod
     def shortest_path_from_kb(
         grid: np.ndarray,
         start_coord: tuple[int, int],

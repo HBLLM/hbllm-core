@@ -278,6 +278,24 @@ class ObjectStateGraphPlanner:
 
         return salient_objects
 
+    def _resolve_perception_frame(
+        self,
+        engine: Any,
+        curr_grid: np.ndarray | PerceptionFrame,
+    ) -> tuple[PerceptionFrame | None, np.ndarray | None]:
+        """Resolve a PerceptionFrame and backing grid array without duplicating lifting paths."""
+        if isinstance(curr_grid, PerceptionFrame):
+            return curr_grid, curr_grid.metadata.get("grid")
+        perceive_fn = get_engine_state_attr(engine, "perceive", None)
+        if callable(perceive_fn):
+            return perceive_fn(curr_grid), curr_grid
+        adapter = PerceptionRegistry.get_default()
+        if adapter is not None:
+            return adapter.lift_percept(curr_grid, context=engine), curr_grid
+        if isinstance(curr_grid, np.ndarray) and curr_grid.ndim >= 2:
+            return PerceptionFrame(shape=(curr_grid.shape[0], curr_grid.shape[1])), curr_grid
+        return None, None
+
     def extract_salient_objects(
         self,
         engine: Any,
@@ -285,19 +303,9 @@ class ObjectStateGraphPlanner:
         bg: int,
     ) -> list[SalientObject]:
         """Extract and categorize K salient objects via domain perception adapter."""
-        if isinstance(curr_grid, PerceptionFrame):
-            percept = curr_grid
-        elif hasattr(engine, "perceive") and callable(engine.perceive):
-            percept = engine.perceive(curr_grid)
-        else:
-            adapter = PerceptionRegistry.get_default()
-            if adapter is not None:
-                percept = adapter.lift_percept(curr_grid, context=engine)
-            else:
-                if not (hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2):
-                    raise ValueError("lattice extent unknown")
-                H, W = curr_grid.shape[0], curr_grid.shape[1]
-                percept = PerceptionFrame(shape=(H, W))
+        percept, _ = self._resolve_perception_frame(engine, curr_grid)
+        if percept is None:
+            raise ValueError("lattice extent unknown")
         return self.lift_salient_objects(percept, engine)
 
     def find_shortest_path(
@@ -446,30 +454,13 @@ class ObjectStateGraphPlanner:
         """Synthesize a complete macro-option plan adhering to the 5 executive cognitive directives.
         Supports continuous spatial displacement paths (BFS/A*) and allocentric spatial effector (point actuation) actions.
         """
-        if not available_actions:
+        if not available_actions or curr_grid is None:
             return None
-        if curr_grid is None:
-            return None  # lattice extent unknown — no plan on a guessed shape
 
         # 1. Resolve PerceptionFrame from domain sensory adapter
-        percept: PerceptionFrame
-        grid_arr: np.ndarray | None
-        if isinstance(curr_grid, PerceptionFrame):
-            percept = curr_grid
-            grid_arr = percept.metadata.get("grid")
-        elif hasattr(engine, "perceive") and callable(engine.perceive):
-            percept = engine.perceive(curr_grid)
-            grid_arr = curr_grid
-        else:
-            adapter = PerceptionRegistry.get_default()
-            if adapter is not None:
-                percept = adapter.lift_percept(curr_grid, context=engine)
-            else:
-                if not (hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2):
-                    return None  # lattice extent unknown — no plan on a guessed shape
-                H, W = curr_grid.shape[0], curr_grid.shape[1]
-                percept = PerceptionFrame(shape=(H, W))
-            grid_arr = curr_grid
+        percept, grid_arr = self._resolve_perception_frame(engine, curr_grid)
+        if percept is None:
+            return None  # lattice extent unknown — no plan on a guessed shape
 
         H, W = percept.shape
         av_pos = percept.avatar_pos or engine.avatar_pos
@@ -501,11 +492,6 @@ class ObjectStateGraphPlanner:
             if (
                 get_engine_state_attr(engine, "immobile_entity_actions", None)
                 and act in engine.immobile_entity_actions
-            ):
-                continue
-            if (
-                get_engine_state_attr(engine, "inhibited_actions", None)
-                and engine.inhibited_actions.get(act, 0) > 0
             ):
                 continue
             if act in action_deltas:
@@ -864,16 +850,12 @@ class ObjectStateGraphPlanner:
                             blocking_barrier_feats.add(o.feature_id)
 
                 # Step-budget and temporal horizon awareness
-                remaining_budget = (
-                    engine.get_remaining_step_budget()
-                    if hasattr(engine, "get_remaining_step_budget")
-                    else 1000
+                rem_budget_fn = get_engine_state_attr(engine, "get_remaining_step_budget", None)
+                remaining_budget = rem_budget_fn() if callable(rem_budget_fn) else 1000
+                strict_budget_fn = get_engine_state_attr(
+                    engine, "is_under_strict_step_budget", None
                 )
-                is_strict_budget = (
-                    engine.is_under_strict_step_budget()
-                    if hasattr(engine, "is_under_strict_step_budget")
-                    else False
-                )
+                is_strict_budget = strict_budget_fn() if callable(strict_budget_fn) else False
 
                 # ── DIRECTIVE 5: If not, play with it (interact) and see what is the outcome. ───
                 scored_candidates: list[tuple[SalientObject, list[Any], float]] = []
@@ -1027,10 +1009,9 @@ class ObjectStateGraphPlanner:
 
             # Check if this effector action defines discrete valid targets
             eff_aff = get_engine_state_attr(engine, "action_affordances", {}).get(eff_act)
+            eff_meta = get_engine_state_attr(eff_aff, "metadata", None)
             raw_valid_targets = (
-                eff_aff.metadata.get("valid_targets")
-                if (eff_aff and hasattr(eff_aff, "metadata") and isinstance(eff_aff.metadata, dict))
-                else None
+                eff_meta.get("valid_targets") if isinstance(eff_meta, dict) else None
             )
 
             valid_targets_list: list[tuple[int, int, dict[str, Any]]] = []
@@ -1057,16 +1038,15 @@ class ObjectStateGraphPlanner:
                 """Find the closest un-quiescent valid target to (target_r, target_c)."""
                 best_vt_tuple = None
                 best_d = float("inf")
+                wm_ref = get_engine_state_attr(engine, "working_memory", None)
+                hab_ior = get_engine_state_attr(wm_ref, "habenular_ior", None)
                 for vy, vx, vt in valid_targets_list:
                     if (vy, vx) in quiescent_coords:
                         continue
-                    if hasattr(engine, "working_memory") and hasattr(
-                        engine.working_memory, "habenular_ior"
+                    if hab_ior is not None and hab_ior.is_action_inhibited(
+                        engine.avatar_pos, eff_act, action_data={"x": vx, "y": vy}
                     ):
-                        if engine.working_memory.habenular_ior.is_action_inhibited(
-                            engine.avatar_pos, eff_act, action_data={"x": vx, "y": vy}
-                        ):
-                            continue
+                        continue
                     vis = get_engine_state_attr(engine, "entity_visit_counts", {}).get(
                         f"actuate_{vy}_{vx}", 0
                     )

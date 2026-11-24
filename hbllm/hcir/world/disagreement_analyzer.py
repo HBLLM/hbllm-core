@@ -120,37 +120,6 @@ class PredictorDisagreementAnalyzer:
                 contradictions.append(f"Conflict on variable '{k}': {va} vs {vb}")
         return contradictions
 
-    def to_contradiction_operations(
-        self,
-        contradictions: list[str],
-        world_id: str = "default_world",
-        source_a: str = "predictor_a",
-        source_b: str = "predictor_b",
-    ) -> list[TransactionOperation]:
-        """Propose atomic HCIR transactions for detected contradictions so EpistemicSafetyGate can gate execution."""
-        import uuid
-
-        ops: list[TransactionOperation] = []
-        for contradiction in contradictions:
-            cid = f"contradiction_{uuid.uuid4().hex[:8]}"
-            ops.append(
-                TransactionOperation(
-                    op=TransactionOp.ADD_NODE,
-                    node_id=cid,
-                    node_data={
-                        "id": cid,
-                        "node_type": "contradiction",
-                        "category": "reasoning",
-                        "claim_a_id": source_a,
-                        "claim_b_id": source_b,
-                        "description": contradiction,
-                        "world_id": world_id,
-                        "status": "open",
-                    },
-                )
-            )
-        return ops
-
     def export_causal_predicates(self, report: DisagreementReport) -> list[CausalPredicate]:
         """Export disagreement report as declarative causal predicates."""
         return [report.to_causal_predicate()]

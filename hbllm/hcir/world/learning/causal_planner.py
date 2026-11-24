@@ -240,24 +240,6 @@ class CausalTheoryPlanner:
         )
 
     @staticmethod
-    def compute_causal_heuristic(
-        pos: tuple[int, int],
-        context: CausalPlanningContext,
-    ) -> float:
-        """Manhattan distance heuristic to nearest goal, with barrier penalty.
-
-        Uses discovered causal knowledge rather than hard-coded features.
-        """
-        if not context.goal_positions:
-            return 0.0
-        min_dist = min(abs(pos[0] - g[0]) + abs(pos[1] - g[1]) for g in context.goal_positions)
-        # Penalty if position is adjacent to lethal/barrier cells
-        penalty = 0.0
-        if pos in context.barrier_positions and pos not in context.goal_positions:
-            penalty += 100.0
-        return float(min_dist) + penalty
-
-    @staticmethod
     def is_position_safe(
         pos: tuple[int, int],
         grid: np.ndarray,
@@ -296,54 +278,6 @@ class CausalTheoryPlanner:
             if feat in context.barrier_features:
                 return False
             if context.walkable_features and feat not in context.walkable_features:
-                return False
-        return True
-
-    @staticmethod
-    def is_stride_clear(
-        start_pos: tuple[int, int],
-        dr: int,
-        dc: int,
-        grid: np.ndarray,
-        context: CausalPlanningContext,
-    ) -> bool:
-        """Check intermediate cells on straight multi-cell strides against barriers/hazards."""
-        steps = max(abs(dr), abs(dc))
-        if steps <= 1 or not (dr == 0 or dc == 0 or abs(dr) == abs(dc)):
-            return True
-        step_r = (1 if dr > 0 else -1) if dr != 0 else 0
-        step_c = (1 if dc > 0 else -1) if dc != 0 else 0
-        H, W = context.grid_shape
-        for k in range(1, steps):
-            ir, ic = start_pos[0] + k * step_r, start_pos[1] + k * step_c
-            if ir < 0 or ic < 0 or ir >= H or ic >= W:
-                return False
-            inter_pos = (ir, ic)
-            if inter_pos in context.goal_positions:
-                continue
-            feat = int(grid[ir, ic])
-            if feat in context.lethal_features:
-                return False
-            if context.transition_kb is not None:
-                ev = context.transition_kb.evaluate_transition(
-                    feat,
-                    locus=inter_pos,
-                    active_state_tokens=context.active_state_tokens,
-                )
-                if ev.risk_cost >= 40.0 and ev.goal_value <= 0.0:
-                    return False
-                if ev.confidence > 0.0:
-                    if not ev.traversable:
-                        return False
-                    locus_belief = context.transition_kb.get_belief(inter_pos, scope="locus")
-                    if inter_pos in context.barrier_positions and not (
-                        locus_belief is not None and ev.traversable
-                    ):
-                        return False
-                    continue
-            if inter_pos in context.barrier_positions:
-                return False
-            if feat in context.barrier_features:
                 return False
         return True
 
