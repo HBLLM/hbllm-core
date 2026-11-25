@@ -2604,18 +2604,27 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
             None,
         )
         if last_user_msg:
+            from starlette.concurrency import run_in_threadpool
+
+            from hbllm.serving.cognitive_registry import get_cognitive_registry
+
+            registry = _state.get("cognitive_registry") or get_cognitive_registry()
+            _state.setdefault("cognitive_registry", registry)
             try:
-                from hbllm.runtime.bootstrap import CognitiveSystem
-
-                cognitive_system = _state.get("cognitive_system")
-                if cognitive_system is None:
-                    cognitive_system = CognitiveSystem()
-                    _state["cognitive_system"] = cognitive_system
-
-                hcir_result = cognitive_system.process_dialogue(last_user_msg)
-                if hcir_result.is_success:
+                override_system = _state.get("cognitive_system")
+                if override_system is not None:
+                    hcir_result = await run_in_threadpool(
+                        override_system.process_dialogue,
+                        last_user_msg,
+                    )
+                else:
+                    hcir_result = await registry.process_dialogue(tenant_id, last_user_msg)
+                hcir_ok = bool(getattr(hcir_result, "is_success", False))
+                hcir_text = str(getattr(hcir_result, "response_text", "") or "")
+                if hcir_ok and hcir_text:
                     logger.info(
-                        "HCIR autonomy: success for input: %s",
+                        "HCIR autonomy: success for tenant=%s input=%s",
+                        tenant_id,
                         last_user_msg[:80],
                     )
                     return JSONResponse(
@@ -2629,14 +2638,14 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
                                     "index": 0,
                                     "message": {
                                         "role": "assistant",
-                                        "content": hcir_result.response_text,
+                                        "content": hcir_text,
                                     },
                                     "finish_reason": "stop",
                                 }
                             ],
                             "usage": {
                                 "prompt_tokens": len(last_user_msg.split()),
-                                "completion_tokens": len(hcir_result.response_text.split()),
+                                "completion_tokens": len(hcir_text.split()),
                                 "total_tokens": 0,
                             },
                         },
@@ -2645,12 +2654,14 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
                 else:
                     logger.debug(
                         "HCIR fallback to brain pipeline: %s — %s",
-                        hcir_result.error_type,
+                        getattr(hcir_result, "error_type", type(hcir_result).__name__),
                         last_user_msg[:80],
                     )
             except Exception:
-                logger.debug(
-                    "HCIR unavailable, falling through to brain pipeline",
+                fallbacks = registry.record_fallback()
+                logger.warning(
+                    "Pure-HCIR fast path failed (fallbacks=%d); falling back to brain pipeline",
+                    fallbacks,
                     exc_info=True,
                 )
 

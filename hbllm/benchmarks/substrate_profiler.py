@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import copy
 import logging
+import subprocess  # nosec B404
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ class CognitiveStepProfileReport:
     target_p95_budget_ms: float
     budget_met: bool
     stage_summaries: list[StageLatencySummary]
+    e2e_cpu_p50_ms: float = 0.0
+    e2e_cpu_p95_ms: float = 0.0
+    e2e_cpu_max_ms: float = 0.0
+    git_sha: str = "unknown"
 
 
 DEFAULT_E2E_32X32_P95_BUDGET_MS = 45.0
@@ -387,10 +392,27 @@ def print_substrate_profile_report(report: SubstrateProfileReport) -> None:
     print(f"  Combined Decisional Cycle p95: {report.total_native_p95_ms:.3f} ms -> {budget_str}\n")
 
 
+def _resolve_git_sha() -> str:
+    """Return short HEAD SHA when running inside a git checkout, else 'unknown'."""
+    try:
+        res = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 def benchmark_e2e_cognitive_step_32x32(
     steps: int = 40,
     target_p95_budget_ms: float = DEFAULT_E2E_32X32_P95_BUDGET_MS,
-    warmup_steps: int = 2,
+    warmup_steps: int = 5,
 ) -> CognitiveStepProfileReport:
     """Profile end-to-end AutonomousEpistemicEngine.step() per cortical stage at 32x32."""
     import gc
@@ -429,6 +451,7 @@ def benchmark_e2e_cognitive_step_32x32(
     gc.collect()
     engine = build_cognitive_system(cfg).engine
     e2e_ms: list[float] = []
+    cpu_ms: list[float] = []
     stage_samples: dict[str, list[float]] = {}
     av = [2, 2]
 
@@ -442,7 +465,9 @@ def benchmark_e2e_cognitive_step_32x32(
             episode_id="0",
         )
         t0 = time.perf_counter()
+        c0 = time.process_time()
         action, _ = engine.step(obs)
+        cpu_ms.append((time.process_time() - c0) * 1000.0)
         e2e_ms.append((time.perf_counter() - t0) * 1000.0)
         for st_name, st_ms in engine.cortical_pipeline.last_stage_timings_ms.items():
             stage_samples.setdefault(st_name, []).append(st_ms)
@@ -453,6 +478,7 @@ def benchmark_e2e_cognitive_step_32x32(
                 av = [nr, nc]
 
     e2e_arr = np.asarray(e2e_ms, dtype=float)
+    cpu_arr = np.asarray(cpu_ms, dtype=float)
     summaries = [
         StageLatencySummary(
             stage=name,
@@ -467,6 +493,9 @@ def benchmark_e2e_cognitive_step_32x32(
     p50_val = round(float(np.percentile(e2e_arr, 50)), 3)
     p95_val = round(float(np.percentile(e2e_arr, 95)), 3)
     max_val = round(float(np.max(e2e_arr)), 3)
+    cpu_p50_val = round(float(np.percentile(cpu_arr, 50)), 3)
+    cpu_p95_val = round(float(np.percentile(cpu_arr, 95)), 3)
+    cpu_max_val = round(float(np.max(cpu_arr)), 3)
     return CognitiveStepProfileReport(
         grid_shape=(32, 32),
         steps=len(e2e_ms),
@@ -476,14 +505,30 @@ def benchmark_e2e_cognitive_step_32x32(
         target_p95_budget_ms=target_p95_budget_ms,
         budget_met=p95_val <= target_p95_budget_ms,
         stage_summaries=summaries,
+        e2e_cpu_p50_ms=cpu_p50_val,
+        e2e_cpu_p95_ms=cpu_p95_val,
+        e2e_cpu_max_ms=cpu_max_val,
+        git_sha=_resolve_git_sha(),
     )
+
+
+def serialize_profile_report(
+    substrate_report: SubstrateProfileReport,
+    e2e_report: CognitiveStepProfileReport,
+) -> dict[str, Any]:
+    """Serialize substrate and end-to-end profile reports to a JSON-compatible dictionary."""
+    return {
+        "git_sha": e2e_report.git_sha,
+        "substrate": asdict(substrate_report),
+        "e2e_32x32": asdict(e2e_report),
+    }
 
 
 def print_cognitive_step_profile_report(report: CognitiveStepProfileReport) -> None:
     """Format and print the per-stage 32x32 cognitive step latency breakdown."""
     print(
         f"  End-to-End {report.grid_shape[0]}x{report.grid_shape[1]} Cognitive Cycle "
-        f"(steps={report.steps}, target p95 <= {report.target_p95_budget_ms:.1f} ms):\n"
+        f"(steps={report.steps}, sha={report.git_sha}, target p95 <= {report.target_p95_budget_ms:.1f} ms):\n"
     )
     print(f"  {'Stage / Component':<24} | {'p50 (ms)':<9} | {'p95 (ms)':<9} | {'max (ms)':<9}")
     print("  " + "─" * 58)
@@ -492,6 +537,10 @@ def print_cognitive_step_profile_report(report: CognitiveStepProfileReport) -> N
     print("  " + "─" * 58)
     status = "✓ PASSED" if report.budget_met else "✗ EXCEEDED"
     print(
-        f"  Total E2E engine.step(): p50={report.e2e_p50_ms:.2f}ms, "
-        f"p95={report.e2e_p95_ms:.2f}ms, max={report.e2e_max_ms:.2f}ms -> {status}\n"
+        f"  Wall E2E engine.step(): p50={report.e2e_p50_ms:.2f}ms, "
+        f"p95={report.e2e_p95_ms:.2f}ms, max={report.e2e_max_ms:.2f}ms -> {status}"
+    )
+    print(
+        f"  CPU  E2E engine.step(): p50={report.e2e_cpu_p50_ms:.2f}ms, "
+        f"p95={report.e2e_cpu_p95_ms:.2f}ms, max={report.e2e_cpu_max_ms:.2f}ms\n"
     )

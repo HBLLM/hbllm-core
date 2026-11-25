@@ -562,11 +562,9 @@ class CommandDispatcher:
                     ],
                     author="command_dispatcher",
                 )
-            else:
-                graph = getattr(self._workspace, "graph", None)
-                if graph is not None:
-                    graph.add_node(evidence)
-            return evidence.id
+                return evidence.id
+            logger.warning("CommandDispatcher: workspace lacks commit_operations; receipt skipped")
+            return None
         except Exception as exc:
             logger.warning("CommandDispatcher: failed to commit receipt: %s", exc)
             return None

@@ -143,7 +143,21 @@ class HCIRGateway:
                     target_dict.update(subject_ref.properties)
                 if object_ref and object_ref.properties:
                     target_dict.update(object_ref.properties)
-                self._graph.upsert_node(ent)
+                if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
+                    from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+                    self._workspace.commit_operations(
+                        [
+                            TransactionOperation(
+                                op=TransactionOp.UPSERT_NODE,
+                                node_id=ent.id,
+                                node_data=ent.model_dump(),
+                            )
+                        ],
+                        author="hcir_language_gateway",
+                    )
+                else:
+                    self._graph.upsert_node(ent)
 
         # Create spatial edge if both subject and object are grounded entities
         location_entity_id = grounded.grounded_entities.get(

@@ -229,8 +229,43 @@ class ConstitutionalVerifier:
         ws_tenant = getattr(workspace, "tenant_id", None)
         tx_tenant = self._transaction_tenant(transaction)
         author = str(getattr(transaction, "author", "") or "")
-        is_internal_kernel_author = author == "system" or author.startswith(
-            ("kernel", "world_", "hcir", "node_budget", "memory_")
+        is_internal_kernel_author = (
+            author == "system"
+            or author.startswith(("kernel", "world_", "hcir", "node_budget", "memory_"))
+            or author
+            in (
+                "grounding_resolver",
+                "grounded_concept_registry",
+                "command_dispatcher",
+                "belief_revision",
+                "epistemic_curiosity",
+                "web_ingestion",
+                "t4_reading_curriculum",
+                "discourse_expository",
+                "event_compactor",
+                "executive_runtime",
+                "offline_consolidation",
+                "interpreter",
+                "tiered_workspace",
+                "cortical_pipeline",
+                "assimilator",
+                "assimilation_stage",
+                "deliberation",
+                "motor_stage",
+                "episodic_cortex",
+                "AutonomousEpistemicEngine",
+                "subgoal_exec",
+                "reasoning_runtime",
+                "macro_actions",
+                "macro_action_planner",
+                "cortex_motor",
+                "episode_boundary",
+                "record_learned_barrier",
+                "record_learned_goal",
+                "HippocampalReplayConsolidator",
+                "hierarchical_goal_decomposer",
+                "HCIRSpatialEntityPlanner",
+            )
         )
 
         # Enforce structural tenant boundary when workspace is bound to a tenant
