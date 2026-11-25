@@ -310,7 +310,9 @@ class ARCPerceptionAdapter(BasePerceptionAdapter):
             getattr(context, "verified_safe_features", set()) or set()
         )
         if len(walkable_and_safe) > 0 and bg not in walkable_and_safe:
-            _bg_cells = set(map(tuple, np.argwhere(grid == bg).tolist()))
+            _bg_cells: set[tuple[int, int]] = {
+                (int(r), int(c)) for r, c in np.argwhere(grid == bg).tolist()
+            }
             try:
                 static_barriers.update(_bg_cells - set(candidate_goals))
             except TypeError:
