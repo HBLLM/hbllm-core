@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 class JWTAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: Any, secret_key: str | None = None) -> None:
         super().__init__(app)
+        self._explicit_secret: str | None = secret_key
         self.secret_key = secret_key or os.environ.get("HBLLM_JWT_SECRET", "")
 
         if not self.secret_key:
@@ -46,13 +47,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        # Pass-through for health checks, P2P zero-trust federation mailbox, static files, and CORS preflight
+        # Pass-through for health probes, static files, and CORS preflight; /metrics and
+        # /v1/federation/mailbox require valid JWT authentication.
         _bypass_paths = [
             "/health",
             "/health/live",
             "/health/ready",
-            "/metrics",
-            "/v1/federation/mailbox",
         ]
         # Only expose /docs and /openapi.json in non-production environments
         if os.environ.get("HBLLM_ENV", "").lower() != "production":
@@ -103,10 +103,15 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             )
 
         token = auth_header.split(" ")[1]
+        active_secret = (
+            getattr(self, "_explicit_secret", None)
+            or os.environ.get("HBLLM_JWT_SECRET", "")
+            or self.secret_key
+        )
         try:
             payload = jwt.decode(
                 token,
-                self.secret_key,
+                active_secret,
                 algorithms=self.algorithms,
                 options={"require": ["tenant_id"]},
             )

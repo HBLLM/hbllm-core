@@ -195,8 +195,23 @@ async def test_command_separator_and_path_traversal_blocked(
 # ─── 4. FastAPI REST API Endpoint Integration ────────────────────────────────
 
 
+def _federation_auth_headers(app: object, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    import time
+
+    import jwt
+
+    secret = "federation_test_jwt_secret_32bytes_min"
+    monkeypatch.setenv("HBLLM_JWT_SECRET", secret)
+    token = jwt.encode(
+        {"tenant_id": "federation_peer", "exp": int(time.time()) + 3600},
+        secret,
+        algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_federation_mailbox_api_endpoint(
-    peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
+    peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from fastapi.testclient import TestClient
 
@@ -207,7 +222,9 @@ def test_federation_mailbox_api_endpoint(
     mailbox.register_peer("alice", peer_cipher.public_key_hex)
     _state["federated_mailbox"] = mailbox
 
-    # 2. Instantiate TestClient
+    # 2. Instantiate TestClient and verify unauthenticated requests fail closed (401)
+    monkeypatch.delenv("HBLLM_UNSAFE_DEV_AUTH", raising=False)
+    headers = _federation_auth_headers(app, monkeypatch)
     client = TestClient(app)
 
     # 3. Pack a valid P2P federation payload
@@ -221,9 +238,16 @@ def test_federation_mailbox_api_endpoint(
         intent_data=intent_data,
     )
 
-    # 4. Invoke the HTTP POST API endpoint
+    unauth_resp = client.post(
+        "/v1/federation/mailbox",
+        json={"envelope": envelope_package["envelope"], "signature": envelope_package["signature"]},
+    )
+    assert unauth_resp.status_code == 401
+
+    # 4. Invoke the HTTP POST API endpoint with authenticated federation JWT
     response = client.post(
         "/v1/federation/mailbox",
+        headers=headers,
         json={"envelope": envelope_package["envelope"], "signature": envelope_package["signature"]},
     )
 
@@ -235,7 +259,7 @@ def test_federation_mailbox_api_endpoint(
 
 
 def test_federation_mailbox_api_endpoint_blocked_on_attacks(
-    peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher
+    peer_cipher: EnvelopeCipher, local_cipher: EnvelopeCipher, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from fastapi.testclient import TestClient
 
@@ -245,6 +269,8 @@ def test_federation_mailbox_api_endpoint_blocked_on_attacks(
     mailbox = FederatedMailbox(cipher=local_cipher)
     mailbox.register_peer("alice", peer_cipher.public_key_hex)
     _state["federated_mailbox"] = mailbox
+    monkeypatch.delenv("HBLLM_UNSAFE_DEV_AUTH", raising=False)
+    headers = _federation_auth_headers(app, monkeypatch)
     client = TestClient(app)
 
     # 2. Attack payload containing prompt injection
@@ -260,6 +286,7 @@ def test_federation_mailbox_api_endpoint_blocked_on_attacks(
     # 3. Call endpoint
     response = client.post(
         "/v1/federation/mailbox",
+        headers=headers,
         json={"envelope": envelope_package["envelope"], "signature": envelope_package["signature"]},
     )
 

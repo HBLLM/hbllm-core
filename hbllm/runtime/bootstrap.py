@@ -36,6 +36,8 @@ class CognitiveSystemConfig:
     enable_logging: bool = True
     instructions: Sequence[str] | str | None = None
     memory_dir: Path | str | None = _DEFAULT_DIR_MARKER  # type: ignore[assignment]
+    seed_ontology_path: Path | str | None = None
+    tenant_id: str | None = None
     enable_grounding: bool = True
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
@@ -575,14 +577,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     # 1. State hierarchy & storage (Persistent Tier binding defaults to ~/.hbllm/worlds/<world_id>)
     resolved_mem_dir: Path | None = None
     if cfg.memory_dir is _DEFAULT_DIR_MARKER:
-        repo_root = Path(__file__).resolve().parents[2]
-        local_t4 = repo_root / "checkpoints" / "t4_reading"
-        if local_t4.exists() and (local_t4 / "persistent.db").exists():
-            resolved_mem_dir = local_t4
-        elif Path("checkpoints/t4_reading/persistent.db").exists():
-            resolved_mem_dir = Path("checkpoints/t4_reading")
-        else:
-            resolved_mem_dir = Path.home() / ".hbllm" / "worlds" / cfg.world_id
+        resolved_mem_dir = Path.home() / ".hbllm" / "worlds" / cfg.world_id
     elif cfg.memory_dir is not None:
         resolved_mem_dir = Path(cfg.memory_dir)
 
@@ -596,7 +591,10 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
             max_events=cfg.max_events_per_store,
         )
 
-    tiered_workspace = TieredWorkspace(persistent_store=persistent_store)
+    tiered_workspace = TieredWorkspace(
+        persistent_store=persistent_store,
+        tenant_id=cfg.tenant_id,
+    )
     # Unify workspace: services.workspace IS tiered_workspace.working_state
     workspace = tiered_workspace.working_state
 
@@ -694,7 +692,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         cfg.seed,
     )
 
-    return CognitiveSystem(
+    system = CognitiveSystem(
         services=services,
         engine=engine,
         bridge=bridge,
@@ -705,3 +703,11 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         reasoning_runtime=runtime.controller.reasoning_runtime,
         hydrated_count=hydrated_count,
     )
+    if cfg.seed_ontology_path is not None:
+        from hbllm.hcir.stores.ontology_store import LexicalOntologyStore
+
+        seed_path = Path(cfg.seed_ontology_path)
+        if not seed_path.exists():
+            raise FileNotFoundError(f"seed_ontology_path not found: {seed_path}")
+        system.attach_ontology_store(LexicalOntologyStore(seed_path))
+    return system

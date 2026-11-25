@@ -131,13 +131,16 @@ class TaskFrame:
         self,
         goal_id: str,
         frame_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         self.frame_id: str = frame_id or f"frame_{uuid.uuid4().hex[:8]}"
         self.goal_id: str = goal_id
+        self.tenant_id: str | None = tenant_id
         self.workspace: HCIRWorkspaceState = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name=f"frame_{self.frame_id}",
             tier=WorkspaceTier.WORKING,
+            tenant_id=tenant_id,
         )
         self.created_at: float = time.time()
         self.closed_at: float | None = None
@@ -201,9 +204,10 @@ class WorkingWorkspace:
     the goal completes, topics change, or eviction is needed.
     """
 
-    def __init__(self, max_frames: int = 10) -> None:
+    def __init__(self, max_frames: int = 10, tenant_id: str | None = None) -> None:
         self._frames: dict[str, TaskFrame] = {}
         self._max_frames = max_frames
+        self._tenant_id = tenant_id
         self._interruption_stack: list[InterruptionCheckpoint] = []
         # Set by TieredWorkspace.attach_authorities (WP6.4) — when present, new
         # frames get a dedicated TransactionManager sharing these stages/bus.
@@ -328,7 +332,7 @@ class WorkingWorkspace:
                 if not evicted:
                     break  # Can't evict anything
 
-        frame = TaskFrame(goal_id=goal_id)
+        frame = TaskFrame(goal_id=goal_id, tenant_id=self._tenant_id)
         self._frames[frame.frame_id] = frame
         # Attach a dedicated TM when kernel authorities have been provisioned
         # (WP6.4) so future frames are governed like the tier workspaces.
@@ -443,17 +447,20 @@ class TieredWorkspace:
         persistent_store: IEventStore | None = None,
         snapshot_interval: int = 1000,
         tier_policies: dict[WorkspaceTier, TierRetentionPolicy] | None = None,
+        tenant_id: str | None = None,
     ) -> None:
+        self.tenant_id: str | None = tenant_id
         self._tier_policies: dict[WorkspaceTier, TierRetentionPolicy] = {
             **DEFAULT_TIER_POLICIES,
             **(tier_policies or {}),
         }
-        self.working = WorkingWorkspace()
+        self.working = WorkingWorkspace(tenant_id=tenant_id)
         self.brain = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="brain",
             tier=WorkspaceTier.BRAIN,
             max_nodes=self._tier_policies[WorkspaceTier.BRAIN].max_nodes,
+            tenant_id=tenant_id,
         )
         self.persistent = HCIRWorkspaceState(
             event_store=persistent_store or InMemoryEventStore(),
@@ -461,12 +468,14 @@ class TieredWorkspace:
             branch_name="persistent",
             tier=WorkspaceTier.PERSISTENT,
             max_nodes=self._tier_policies[WorkspaceTier.PERSISTENT].max_nodes,
+            tenant_id=tenant_id,
         )
         self.meta = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="meta",
             tier=WorkspaceTier.META,
             max_nodes=self._tier_policies[WorkspaceTier.META].max_nodes,
+            tenant_id=tenant_id,
         )
 
         self._snapshot_interval = snapshot_interval

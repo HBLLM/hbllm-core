@@ -99,9 +99,11 @@ class HCIRWorkspaceState:
         graph: CognitiveGraph | None = None,
         tier: WorkspaceTier = WorkspaceTier.WORKING,
         max_nodes: int | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         self._tier = tier
         self._max_nodes = max_nodes
+        self._tenant_id = tenant_id
         self._event_store = event_store or InMemoryEventStore()
         self._snapshot_manager = SnapshotManager(self._event_store)
         if graph is not None:
@@ -137,6 +139,10 @@ class HCIRWorkspaceState:
     @max_nodes.setter
     def max_nodes(self, value: int | None) -> None:
         self._max_nodes = value
+
+    @property
+    def tenant_id(self) -> str | None:
+        return self._tenant_id
 
     @property
     def branch_name(self) -> str:
@@ -495,7 +501,12 @@ class HCIRWorkspaceState:
             raise ValueError(f"Branch '{branch_name}' already exists")
 
         # Structural sharing copy-on-write fork (WP4: < 1 ms @ 10k nodes)
-        forked = HCIRWorkspaceState(branch_mode=mode, branch_name=branch_name, tier=self._tier)
+        forked = HCIRWorkspaceState(
+            branch_mode=mode,
+            branch_name=branch_name,
+            tier=self._tier,
+            tenant_id=self._tenant_id,
+        )
         forked._graph = self._graph.fork()
         forked._graph._fork_base_version = self._snapshot_manager.current_version
         forked._global_attention = self._global_attention.model_copy(deep=True)
@@ -550,6 +561,7 @@ class HCIRWorkspaceState:
         resumed = HCIRWorkspaceState(
             branch_mode=self._branch_mode,
             branch_name=f"{self._branch_name}_resumed_{sequence_or_id}",
+            tenant_id=self._tenant_id,
         )
         for ev in all_events[: target_idx + 1]:
             apply_event_to_graph(resumed._graph, ev)

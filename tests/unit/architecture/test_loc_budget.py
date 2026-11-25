@@ -96,3 +96,59 @@ def test_zero_llm_imports_in_hcir() -> None:
                 ):
                     violations.append(f"{path.relative_to(ROOT_DIR)}:{node.lineno} imports {name}")
     assert not violations, "LLM imports inside hbllm/hcir:\n" + "\n".join(violations)
+
+
+def test_zero_shimmed_imports_in_hcir_and_runtime() -> None:
+    """``hbllm/hcir/**`` and ``hbllm/runtime/**`` must not import ``hbllm.actions`` or experiments shims."""
+    shimmed_packages: list[str] = []
+    for path in _iter_python_files(HBLLM_DIR):
+        if path.name != "__init__.py":
+            continue
+        src = path.read_text(encoding="utf-8", errors="ignore")
+        if "__path__.append" in src:
+            rel_parts = path.relative_to(ROOT_DIR).parent.parts
+            shimmed_packages.append(".".join(rel_parts))
+
+    # P2 perception provider consolidation still bridges legacy audio/speech/vision adapters
+    _p2_perception_allowlist = {
+        "hbllm/runtime/adapters/perception/audio_event_adapter.py",
+        "hbllm/runtime/adapters/perception/speech_adapter.py",
+        "hbllm/runtime/adapters/perception/vision_adapter.py",
+    }
+
+    violations: list[str] = []
+    for base_dir in (HCIR_DIR, HBLLM_DIR / "runtime"):
+        for path in _iter_python_files(base_dir):
+            rel_str = str(path.relative_to(ROOT_DIR))
+            if rel_str in _p2_perception_allowlist:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
+            for node in ast.walk(tree):
+                names: list[str] = []
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    names = [node.module]
+                for name in names:
+                    matched = next(
+                        (
+                            pkg
+                            for pkg in shimmed_packages
+                            if name == pkg or name.startswith(f"{pkg}.")
+                        ),
+                        None,
+                    )
+                    if matched is None:
+                        continue
+                    # Allow real non-experiment modules directly inside hbllm/<pkg>/
+                    mod_rel = Path(*name.split("."))
+                    real_mod_exists = (ROOT_DIR / mod_rel).with_suffix(".py").exists() or (
+                        ROOT_DIR / mod_rel / "__init__.py"
+                    ).exists()
+                    if matched != "hbllm.actions" and real_mod_exists:
+                        continue
+                    violations.append(f"{rel_str}:{node.lineno} imports shimmed {name}")
+
+    assert not violations, "Shimmed experiment imports inside hcir/runtime:\n" + "\n".join(
+        violations
+    )

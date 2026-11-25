@@ -148,7 +148,11 @@ class TestMcpServer:
                 "method": "tools/call",
                 "params": {
                     "name": "hbllm_memory_store",
-                    "arguments": {"content": "Test fact", "memory_type": "semantic"},
+                    "arguments": {
+                        "content": "Test fact",
+                        "memory_type": "semantic",
+                        "tenant_id": "t1",
+                    },
                 },
             }
         )
@@ -184,12 +188,35 @@ class TestMcpServer:
                 "method": "tools/call",
                 "params": {
                     "name": "hbllm_feedback",
-                    "arguments": {"message_id": "msg-123", "rating": 1, "comment": "Great!"},
+                    "arguments": {
+                        "message_id": "msg-123",
+                        "rating": 1,
+                        "comment": "Great!",
+                        "tenant_id": "t1",
+                    },
                 },
             }
         )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["recorded"] is True
+
+    @pytest.mark.asyncio
+    async def test_tools_call_missing_tenant_id_fails_closed(self, server):
+        mock_bus = AsyncMock()
+        server.bus = mock_bus
+        resp = await server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {
+                    "name": "hbllm_memory_store",
+                    "arguments": {"content": "Test fact"},
+                },
+            }
+        )
+        assert resp["result"]["isError"] is True
+        assert "tenant_id" in resp["result"]["content"][0]["text"]
 
     @pytest.mark.asyncio
     async def test_ensure_bus_creates_inprocess(self, server):

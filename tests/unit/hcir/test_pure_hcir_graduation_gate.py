@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from scripts.eval_pure_hcir_autonomy import run_pure_hcir_graduation_eval
 
 
-def test_pure_hcir_graduation_gate_autonomy_and_calibration() -> None:
-    """Verifies >= 98% Pure-HCIR parse/plan/realize autonomy and ECE < 0.05 with zero LLM."""
+def test_pure_hcir_graduation_gate_autonomy_and_calibration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies >= 98% Pure-HCIR parse/plan/realize autonomy and ECE < 0.05 hermetically."""
+    # Guarantee hermetic execution even when git-ignored checkpoints/t1_ontology is absent
+    missing_db = tmp_path / "nonexistent_lexical_ontology.db"
+    monkeypatch.setattr("hbllm.hcir.stores.ontology_store.DEFAULT_ONTOLOGY_DB", missing_db)
+    monkeypatch.setattr("hbllm.hcir.language.ontology_store.DEFAULT_ONTOLOGY_DB", missing_db)
+
     report = run_pure_hcir_graduation_eval()
 
     assert report["total_cases"] == 80

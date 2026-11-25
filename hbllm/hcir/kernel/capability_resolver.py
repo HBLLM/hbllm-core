@@ -388,7 +388,7 @@ class CapabilityResolver:
                 and getattr(policy, "isolation_mode", None) == "subprocess"
                 and "code" in params
             ):
-                from hbllm.actions.sandbox import run_sandboxed_python
+                from hbllm.hcir.kernel.subprocess_sandbox import run_sandboxed_python
 
                 sandbox_timeout = timeout or 5.0
                 max_mem = policy.resource_limits.max_memory_mb if policy else 256
