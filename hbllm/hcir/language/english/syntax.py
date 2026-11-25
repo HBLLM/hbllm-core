@@ -58,6 +58,7 @@ class VerbPhrase:
     indirect_object: NounPhrase | None = None
     prepositional_phrases: list[PrepositionalPhrase] = field(default_factory=list)
     adjective_complement: MorphToken | None = None
+    infinitive_verb: MorphToken | None = None
 
 
 @dataclass
@@ -91,7 +92,20 @@ class EnglishSyntaxParser:
         if (
             clean_tokens[0].pos in (EnglishPOS.AUX, EnglishPOS.VERB)
             and clean_tokens[0].lemma
-            in ("be", "do", "did", "does", "can", "is", "are", "was", "were")
+            in (
+                "be",
+                "do",
+                "did",
+                "does",
+                "can",
+                "could",
+                "will",
+                "would",
+                "is",
+                "are",
+                "was",
+                "were",
+            )
         ) or clean_tokens[0].surface.lower() in (
             "is",
             "are",
@@ -101,6 +115,9 @@ class EnglishSyntaxParser:
             "did",
             "does",
             "can",
+            "could",
+            "will",
+            "would",
         ):
             return self._parse_yes_no_question(clean_tokens)
 
@@ -113,7 +130,26 @@ class EnglishSyntaxParser:
             return self._parse_existential(clean_tokens)
 
         # 4. Check for Imperative ("Move the red ball to the table", "Push the box")
-        if clean_tokens[0].pos == EnglishPOS.VERB:
+        # Never treat inflected plural/3s/past nouns or NP subjects followed by a verb/aux as imperatives.
+        first_tok = clean_tokens[0]
+        first_inflected_non_imp = (
+            first_tok.features.get("number") == "plural"
+            or first_tok.features.get("person") == "3s"
+            or first_tok.features.get("tense") == "past"
+            or first_tok.features.get("aspect") == "progressive"
+        )
+        has_later_predicate = len(clean_tokens) >= 2 and (
+            clean_tokens[1].pos in (EnglishPOS.AUX, EnglishPOS.VERB)
+            or (
+                "noun" in first_tok.features.get("alt_pos", "")
+                and any(t.pos in (EnglishPOS.AUX, EnglishPOS.VERB) for t in clean_tokens[1:])
+            )
+        )
+        if (
+            first_tok.pos == EnglishPOS.VERB
+            and not first_inflected_non_imp
+            and not has_later_predicate
+        ):
             return self._parse_imperative(clean_tokens)
 
         # 5. Fallback to Declarative / Copular (NP + VP or NP + BE + Adj/PP)
@@ -152,13 +188,13 @@ class EnglishSyntaxParser:
             adjs.append(tokens[idx])
             idx += 1
 
-        # Check head noun (allow compound nouns up to 3 consecutive NOUN tokens)
+        # Check head noun (allow compound nouns up to 5 consecutive NOUN tokens)
         if idx < len(tokens) and tokens[idx].pos == EnglishPOS.NOUN:
             compound_parts = [tokens[idx]]
             idx += 1
             while (
                 idx < len(tokens)
-                and len(compound_parts) < 3
+                and len(compound_parts) < 5
                 and tokens[idx].pos == EnglishPOS.NOUN
                 and tokens[idx].features.get("is_path") != "true"
                 and not (idx + 1 < len(tokens) and tokens[idx + 1].pos == EnglishPOS.DET)
@@ -196,20 +232,74 @@ class EnglishSyntaxParser:
         if not np or idx >= len(tokens):
             return None
 
+        # Check negative determiner ("no dog", "no cars")
+        is_negated = np.determiner is not None and np.determiner.lemma == "no"
+
+        # Optional pre-verbal adverb ("never", "always", "often", "usually")
+        while idx < len(tokens) and tokens[idx].pos == EnglishPOS.ADV:
+            if tokens[idx].lemma == "never":
+                is_negated = True
+            idx += 1
+        if idx >= len(tokens):
+            return None
+
         # Check verb / copula
         verb_tok = tokens[idx]
         idx += 1
 
         if verb_tok.lemma == "be" or verb_tok.pos == EnglishPOS.AUX:
-            # Copular or spatial assertion: NP + BE + Adj OR NP + BE + PP
-            is_negated = False
-            if idx < len(tokens) and tokens[idx].lemma == "not":
-                is_negated = True
+            # Check negation marker "not" / "never" or benign adverbs
+            while idx < len(tokens) and tokens[idx].pos == EnglishPOS.ADV:
+                if tokens[idx].lemma in ("not", "never"):
+                    is_negated = True
                 idx += 1
 
+            # Check if followed by a main lexical verb (e.g. "Heat does not cause rust")
+            if idx < len(tokens) and tokens[idx].pos == EnglishPOS.VERB:
+                main_verb = tokens[idx]
+                idx += 1
+                obj_np, next_idx = self.parse_noun_phrase(tokens, idx)
+                idx = next_idx if obj_np else idx
+
+                pps: list[PrepositionalPhrase] = []
+                while idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
+                    prep = tokens[idx]
+                    p_np, p_next = self.parse_noun_phrase(tokens, idx + 1)
+                    if p_np:
+                        pps.append(PrepositionalPhrase(preposition=prep, noun_phrase=p_np))
+                        idx = p_next
+                    else:
+                        break
+
+                vp = VerbPhrase(
+                    head_verb=main_verb,
+                    direct_object=obj_np,
+                    prepositional_phrases=pps,
+                )
+                return SentenceNode(
+                    construction=ConstructionType.DECLARATIVE,
+                    subject=np,
+                    verb_phrase=vp,
+                    auxiliary=verb_tok,
+                    is_negated=is_negated,
+                )
+
             if idx < len(tokens) and tokens[idx].pos == EnglishPOS.ADJ:
-                # Copular property: "The ball is red"
-                vp = VerbPhrase(head_verb=verb_tok, adjective_complement=tokens[idx])
+                # Copular property: "The ball is red", "A drell is warm-blooded"
+                # Unless followed immediately by a noun (e.g. "Florbs are small aquatic creatures")
+                adj_tok = tokens[idx]
+                next_i = idx + 1
+                if next_i < len(tokens) and tokens[next_i].pos in (EnglishPOS.ADJ, EnglishPOS.NOUN):
+                    pred_np, next_idx = self.parse_noun_phrase(tokens, idx)
+                    if pred_np:
+                        vp = VerbPhrase(head_verb=verb_tok, direct_object=pred_np)
+                        return SentenceNode(
+                            construction=ConstructionType.COPULAR,
+                            subject=np,
+                            verb_phrase=vp,
+                            is_negated=is_negated,
+                        )
+                vp = VerbPhrase(head_verb=verb_tok, adjective_complement=adj_tok)
                 return SentenceNode(
                     construction=ConstructionType.COPULAR,
                     subject=np,
@@ -244,11 +334,52 @@ class EnglishSyntaxParser:
                     )
 
         if verb_tok.pos == EnglishPOS.VERB:
-            # Standard SVO: "The robot pushed the box to the table"
+            # Standard or ditransitive SVO:
+            # "Alice gave Bob the brass key", "The robot pushed the box to the table", "Florbs live in caves"
             obj_np, next_idx = self.parse_noun_phrase(tokens, idx)
             idx = next_idx if obj_np else idx
 
-            pps: list[PrepositionalPhrase] = []
+            indirect_np: NounPhrase | None = None
+            if (
+                obj_np is not None
+                and idx < len(tokens)
+                and tokens[idx].pos in (EnglishPOS.DET, EnglishPOS.ADJ, EnglishPOS.NOUN)
+            ):
+                second_np, next_idx2 = self.parse_noun_phrase(tokens, idx)
+                if second_np is not None:
+                    indirect_np = obj_np
+                    obj_np = second_np
+                    idx = next_idx2
+
+            # Coordinated direct object NPs ("converts sunlight and water into glucose")
+            if (
+                obj_np is not None
+                and idx + 1 < len(tokens)
+                and tokens[idx].pos == EnglishPOS.CONJ
+                and tokens[idx].lemma in ("and", "or")
+                and tokens[idx + 1].pos in (EnglishPOS.DET, EnglishPOS.ADJ, EnglishPOS.NOUN)
+                and not (
+                    idx + 2 < len(tokens)
+                    and tokens[idx + 2].pos in (EnglishPOS.VERB, EnglishPOS.AUX)
+                )
+            ):
+                coord_np, c_next = self.parse_noun_phrase(tokens, idx + 1)
+                if coord_np is not None:
+                    obj_np.raw_tokens = [*obj_np.raw_tokens, tokens[idx], *coord_np.raw_tokens]
+                    idx = c_next
+
+            # Causal / object-control infinitive: "Heavy rain caused the river to flood"
+            inf_verb: MorphToken | None = None
+            if (
+                obj_np is not None
+                and idx + 1 < len(tokens)
+                and tokens[idx].lemma == "to"
+                and tokens[idx + 1].pos == EnglishPOS.VERB
+            ):
+                inf_verb = tokens[idx + 1]
+                idx += 2
+
+            pps = []
             while idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
                 prep = tokens[idx]
                 p_np, p_next = self.parse_noun_phrase(tokens, idx + 1)
@@ -258,9 +389,18 @@ class EnglishSyntaxParser:
                 else:
                     break
 
-            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np, prepositional_phrases=pps)
+            vp = VerbPhrase(
+                head_verb=verb_tok,
+                direct_object=obj_np,
+                indirect_object=indirect_np,
+                prepositional_phrases=pps,
+                infinitive_verb=inf_verb,
+            )
             return SentenceNode(
-                construction=ConstructionType.DECLARATIVE, subject=np, verb_phrase=vp
+                construction=ConstructionType.DECLARATIVE,
+                subject=np,
+                verb_phrase=vp,
+                is_negated=is_negated,
             )
 
         return None
@@ -314,8 +454,22 @@ class EnglishSyntaxParser:
         """Parse Yes/No question: Aux + NP + PP/VP ("Is the ball on the table?")."""
         aux_tok = tokens[0]
         subject_np, idx = self.parse_noun_phrase(tokens, 1)
-        if not subject_np or idx >= len(tokens):
+        if not subject_np:
             return None
+
+        # Prevent greedy compound-NP from swallowing the predicate complement ("Is a drell warm-blooded?")
+        if idx >= len(tokens):
+            if aux_tok.lemma == "be" and len(tokens) >= 3:
+                is_two_cap_name = (
+                    tokens[-1].surface[:1].isupper() and tokens[-2].surface[:1].isupper()
+                )
+                if not is_two_cap_name:
+                    alt_subj, alt_idx = self.parse_noun_phrase(tokens[:-1], 1)
+                    if alt_subj is not None and alt_idx == len(tokens) - 1:
+                        subject_np = alt_subj
+                        idx = alt_idx
+            if idx >= len(tokens):
+                return None
 
         # Check PP complement ("on the table")
         if idx < len(tokens) and tokens[idx].pos == EnglishPOS.PREP:
@@ -331,9 +485,21 @@ class EnglishSyntaxParser:
                     auxiliary=aux_tok,
                 )
 
-        # Check Adj complement ("Is the ball red?")
+        # Check Adj complement ("Is the ball red?", "Is a drell warm-blooded?")
         if idx < len(tokens) and tokens[idx].pos == EnglishPOS.ADJ:
-            vp = VerbPhrase(head_verb=aux_tok, adjective_complement=tokens[idx])
+            adj_tok = tokens[idx]
+            next_i = idx + 1
+            if next_i < len(tokens) and tokens[next_i].pos in (EnglishPOS.ADJ, EnglishPOS.NOUN):
+                pred_np, _ = self.parse_noun_phrase(tokens, idx)
+                if pred_np:
+                    vp = VerbPhrase(head_verb=aux_tok, direct_object=pred_np)
+                    return SentenceNode(
+                        construction=ConstructionType.YES_NO_QUESTION,
+                        subject=subject_np,
+                        verb_phrase=vp,
+                        auxiliary=aux_tok,
+                    )
+            vp = VerbPhrase(head_verb=aux_tok, adjective_complement=adj_tok)
             return SentenceNode(
                 construction=ConstructionType.YES_NO_QUESTION,
                 subject=subject_np,
@@ -341,11 +507,21 @@ class EnglishSyntaxParser:
                 auxiliary=aux_tok,
             )
 
-        # Check Verb + (NP) complement ("Does overflow cause crash?", "Does encryption require a key?")
+        # Check Verb + (NP)? + (PP)* complement ("Do florbs live in caves?", "Do florbs fly?")
         if idx < len(tokens) and tokens[idx].pos == EnglishPOS.VERB:
             verb_tok = tokens[idx]
-            obj_np, _ = self.parse_noun_phrase(tokens, idx + 1)
-            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np)
+            obj_np, next_idx = self.parse_noun_phrase(tokens, idx + 1)
+            cur = next_idx if obj_np else idx + 1
+            pps: list[PrepositionalPhrase] = []
+            while cur < len(tokens) and tokens[cur].pos == EnglishPOS.PREP:
+                prep = tokens[cur]
+                p_np, p_next = self.parse_noun_phrase(tokens, cur + 1)
+                if p_np:
+                    pps.append(PrepositionalPhrase(preposition=prep, noun_phrase=p_np))
+                    cur = p_next
+                else:
+                    break
+            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np, prepositional_phrases=pps)
             return SentenceNode(
                 construction=ConstructionType.YES_NO_QUESTION,
                 subject=subject_np,
@@ -367,7 +543,7 @@ class EnglishSyntaxParser:
         return None
 
     def _parse_wh_question(self, tokens: list[MorphToken]) -> SentenceNode | None:
-        """Parse Wh-question: Where is the ball? / What causes crash? / Who is Darcy?"""
+        """Parse Wh-question: Where is the ball? / What do florbs eat? / Who was tired?"""
         wh_tok = tokens[0]
         idx = 1
         wh_prop: MorphToken | None = None
@@ -384,11 +560,21 @@ class EnglishSyntaxParser:
         if idx >= len(tokens):
             return None
 
-        # Check Wh + Main Verb ("What causes crash?")
+        # Check Wh + Main Verb ("What causes crash?", "Who walked home?", "Who closed the gate?")
         if tokens[idx].pos == EnglishPOS.VERB:
             verb_tok = tokens[idx]
-            obj_np, _ = self.parse_noun_phrase(tokens, idx + 1)
-            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np)
+            obj_np, next_idx = self.parse_noun_phrase(tokens, idx + 1)
+            cur = next_idx if obj_np else idx + 1
+            pps: list[PrepositionalPhrase] = []
+            while cur < len(tokens) and tokens[cur].pos == EnglishPOS.PREP:
+                prep = tokens[cur]
+                p_np, p_next = self.parse_noun_phrase(tokens, cur + 1)
+                if p_np:
+                    pps.append(PrepositionalPhrase(preposition=prep, noun_phrase=p_np))
+                    cur = p_next
+                else:
+                    break
+            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np, prepositional_phrases=pps)
             return SentenceNode(
                 construction=ConstructionType.WH_QUESTION,
                 subject=None,
@@ -401,16 +587,84 @@ class EnglishSyntaxParser:
 
         aux_tok = tokens[idx]
         idx += 1
+        if idx >= len(tokens):
+            return None
+
+        # Subject-seeking "Who was tired?", "Who is in the cave?", "Who is a wizard?"
+        if wh_tok.lemma == "who" and aux_tok.lemma == "be":
+            if tokens[idx].pos == EnglishPOS.ADJ:
+                adj_tok = tokens[idx]
+                if idx + 1 >= len(tokens):
+                    vp = VerbPhrase(head_verb=aux_tok, adjective_complement=adj_tok)
+                    return SentenceNode(
+                        construction=ConstructionType.WH_QUESTION,
+                        subject=None,
+                        verb_phrase=vp,
+                        auxiliary=aux_tok,
+                        wh_word=wh_tok,
+                    )
+            elif tokens[idx].pos == EnglishPOS.PREP:
+                prep = tokens[idx]
+                target_np, _ = self.parse_noun_phrase(tokens, idx + 1)
+                if target_np:
+                    pp = PrepositionalPhrase(preposition=prep, noun_phrase=target_np)
+                    vp = VerbPhrase(head_verb=aux_tok, prepositional_phrases=[pp])
+                    return SentenceNode(
+                        construction=ConstructionType.WH_QUESTION,
+                        subject=None,
+                        verb_phrase=vp,
+                        auxiliary=aux_tok,
+                        wh_word=wh_tok,
+                    )
+            elif tokens[idx].pos == EnglishPOS.DET and tokens[idx].lemma in ("a", "an"):
+                pred_np, _ = self.parse_noun_phrase(tokens, idx)
+                if pred_np:
+                    vp = VerbPhrase(head_verb=aux_tok, direct_object=pred_np)
+                    return SentenceNode(
+                        construction=ConstructionType.WH_QUESTION,
+                        subject=None,
+                        verb_phrase=vp,
+                        auxiliary=aux_tok,
+                        wh_word=wh_tok,
+                    )
 
         subject_np, next_idx = self.parse_noun_phrase(tokens, idx)
         if not subject_np:
             return None
 
-        # Check Wh + Aux + Subject + Main Verb ("What does encryption require?")
-        if next_idx < len(tokens) and tokens[next_idx].pos == EnglishPOS.VERB:
+        # Guard if compound-NP swallowed trailing verb after do/does/did ("What do florbs eat?")
+        if (
+            next_idx >= len(tokens)
+            and aux_tok.lemma in ("do", "does", "did", "can", "could", "will", "would")
+            and len(tokens) > idx + 1
+            and tokens[-1].pos in (EnglishPOS.VERB, EnglishPOS.NOUN)
+        ):
+            alt_subj, alt_idx = self.parse_noun_phrase(tokens[:-1], idx)
+            if alt_subj is not None and alt_idx == len(tokens) - 1:
+                subject_np = alt_subj
+                next_idx = alt_idx
+
+        # Check Wh + Aux + Subject + Main Verb ("What does encryption require?", "Where do florbs live?")
+        if next_idx < len(tokens) and (
+            tokens[next_idx].pos == EnglishPOS.VERB
+            or (
+                aux_tok.lemma in ("do", "does", "did", "can", "could", "will", "would")
+                and "verb" in tokens[next_idx].features.get("alt_pos", "")
+            )
+        ):
             verb_tok = tokens[next_idx]
-            obj_np, _ = self.parse_noun_phrase(tokens, next_idx + 1)
-            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np)
+            obj_np, obj_next = self.parse_noun_phrase(tokens, next_idx + 1)
+            cur = obj_next if obj_np else next_idx + 1
+            pps = []
+            while cur < len(tokens) and tokens[cur].pos == EnglishPOS.PREP:
+                prep = tokens[cur]
+                p_np, p_next = self.parse_noun_phrase(tokens, cur + 1)
+                if p_np:
+                    pps.append(PrepositionalPhrase(preposition=prep, noun_phrase=p_np))
+                    cur = p_next
+                else:
+                    break
+            vp = VerbPhrase(head_verb=verb_tok, direct_object=obj_np, prepositional_phrases=pps)
             return SentenceNode(
                 construction=ConstructionType.WH_QUESTION,
                 subject=subject_np,

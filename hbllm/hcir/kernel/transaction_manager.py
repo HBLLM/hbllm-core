@@ -177,10 +177,27 @@ class TransactionManager:
         validator: GraphValidator | None = None,
         event_bus: KernelEventBus | None = None,
         max_log_size: int = 10_000,
+        unsafe_allow_unverified: bool = False,
     ) -> None:
         self._workspace = workspace
-        self._verification_stages = verification_stages or []
+        self._verification_stages: list[IVerificationStage]
+        if verification_stages is None:
+            if unsafe_allow_unverified:
+                self._verification_stages = []
+            else:
+                from hbllm.hcir.kernel.governance.constitutional_verifier import (
+                    ConstitutionalVerifier,
+                )
+
+                self._verification_stages = [ConstitutionalVerifier()]
+        else:
+            self._verification_stages = list(verification_stages)
+
         if not self._verification_stages:
+            if not unsafe_allow_unverified:
+                raise ValueError(
+                    "TransactionManager requires non-empty verification_stages unless unsafe_allow_unverified=True"
+                )
             logger.warning("TransactionManager created without verification pipeline")
             self.unverified = True
         else:

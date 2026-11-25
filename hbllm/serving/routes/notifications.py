@@ -19,6 +19,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from hbllm.serving.deps import get_tenant_id
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["notifications"])
@@ -48,7 +50,7 @@ async def get_notifications(
     if not gateway:
         return {"notifications": [], "unread_count": 0}
 
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = get_tenant_id(request)
 
     from hbllm.serving.notifications import NotificationCategory
 
@@ -73,7 +75,7 @@ async def get_all_notifications(
     if not gateway:
         return {"notifications": [], "total": 0}
 
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = get_tenant_id(request)
     notifications = gateway.get_all(tenant_id, limit=limit, include_read=include_read)
 
     return {
@@ -95,7 +97,7 @@ async def mark_notifications_read(request: Request) -> Any:
     if not gateway:
         raise HTTPException(status_code=503, detail="Notification gateway not initialized")
 
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = get_tenant_id(request)
     body = await request.json()
 
     if body.get("all"):
@@ -129,7 +131,7 @@ async def notification_stream(request: Request) -> StreamingResponse:
     if not sse_channel:
         raise HTTPException(status_code=503, detail="SSE channel not initialized")
 
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = get_tenant_id(request)
 
     async def event_generator():
         """Yield SSE events from the proactive channel."""

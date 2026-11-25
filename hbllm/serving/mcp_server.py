@@ -60,7 +60,6 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
                 "tenant_id": {
                     "type": "string",
                     "description": "Tenant ID for multi-tenant isolation",
-                    "default": "default",
                 },
                 "session_id": {
                     "type": "string",
@@ -68,7 +67,7 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
                     "default": "default",
                 },
             },
-            "required": ["text"],
+            "required": ["text", "tenant_id"],
         },
     },
     {
@@ -83,10 +82,10 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
                     "enum": ["episodic", "semantic", "procedural", "all"],
                     "default": "all",
                 },
-                "tenant_id": {"type": "string", "default": "default"},
+                "tenant_id": {"type": "string", "description": "Required tenant identifier"},
                 "limit": {"type": "integer", "default": 10},
             },
-            "required": ["query"],
+            "required": ["query", "tenant_id"],
         },
     },
     {
@@ -101,10 +100,10 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
                     "enum": ["episodic", "semantic", "skill"],
                     "default": "semantic",
                 },
-                "tenant_id": {"type": "string", "default": "default"},
+                "tenant_id": {"type": "string", "description": "Required tenant identifier"},
                 "metadata": {"type": "object", "description": "Additional metadata", "default": {}},
             },
-            "required": ["content"],
+            "required": ["content", "tenant_id"],
         },
     },
     {
@@ -113,8 +112,9 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "tenant_id": {"type": "string", "default": "default"},
+                "tenant_id": {"type": "string", "description": "Required tenant identifier"},
             },
+            "required": ["tenant_id"],
         },
     },
     {
@@ -123,7 +123,7 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "tenant_id": {"type": "string", "default": "default"},
+                "tenant_id": {"type": "string", "description": "Required tenant identifier"},
                 "persona_name": {"type": "string", "description": "Name of the persona"},
                 "system_prompt": {"type": "string", "description": "System prompt for the persona"},
                 "goals": {
@@ -137,6 +137,7 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
                     "description": "Persona constraints",
                 },
             },
+            "required": ["tenant_id"],
         },
     },
     {
@@ -146,9 +147,9 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Complex query to decompose"},
-                "tenant_id": {"type": "string", "default": "default"},
+                "tenant_id": {"type": "string", "description": "Required tenant identifier"},
             },
-            "required": ["query"],
+            "required": ["query", "tenant_id"],
         },
     },
     {
@@ -163,14 +164,14 @@ HBLLM_TOOLS: list[dict[str, Any]] = [
                     "enum": [-1, 0, 1],
                     "description": "-1=bad, 0=neutral, 1=good",
                 },
-                "tenant_id": {"type": "string", "default": "default"},
+                "tenant_id": {"type": "string", "description": "Required tenant identifier"},
                 "comment": {
                     "type": "string",
                     "description": "Optional feedback comment",
                     "default": "",
                 },
             },
-            "required": ["message_id", "rating"],
+            "required": ["message_id", "rating", "tenant_id"],
         },
     },
     {
@@ -307,13 +308,22 @@ class HBLLMMcpServer:
 
     # ─── Tool Implementations ─────────────────────────────────────────────
 
+    @staticmethod
+    def _require_tenant_id(args: dict[str, Any]) -> str:
+        """Fail closed unless explicit non-empty tenant_id is supplied by caller."""
+        tenant_id = args.get("tenant_id")
+        if not tenant_id or not isinstance(tenant_id, str) or not tenant_id.strip():
+            raise ValueError("Missing required 'tenant_id' for multi-tenant isolation")
+        return tenant_id.strip()
+
     async def _tool_hbllm_chat(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
         """Full cognitive pipeline inference."""
+        tenant_id = self._require_tenant_id(args)
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="workspace.process",
-            tenant_id=str(args.get("tenant_id", "default")),
+            tenant_id=tenant_id,
             session_id=str(args.get("session_id", "default")),
             payload={"text": args["text"]},
         )
@@ -327,11 +337,12 @@ class HBLLMMcpServer:
         self, bus: MessageBus, args: dict[str, Any]
     ) -> dict[str, Any]:
         """Search memory systems."""
+        tenant_id = self._require_tenant_id(args)
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="memory.search",
-            tenant_id=str(args.get("tenant_id", "default")),
+            tenant_id=tenant_id,
             payload={
                 "query": args["query"],
                 "memory_type": args.get("memory_type", "all"),
@@ -348,6 +359,7 @@ class HBLLMMcpServer:
         self, bus: MessageBus, args: dict[str, Any]
     ) -> dict[str, Any]:
         """Store in memory."""
+        tenant_id = self._require_tenant_id(args)
         memory_type = str(args.get("memory_type", "semantic"))
         topic = f"memory.{memory_type}.store" if memory_type != "skill" else "memory.skill.store"
 
@@ -355,7 +367,7 @@ class HBLLMMcpServer:
             type=MessageType.EVENT,
             source_node_id="mcp_server",
             topic=topic,
-            tenant_id=str(args.get("tenant_id", "default")),
+            tenant_id=tenant_id,
             payload={
                 "content": args["content"],
                 "metadata": args.get("metadata", {}),
@@ -368,11 +380,12 @@ class HBLLMMcpServer:
         self, bus: MessageBus, args: dict[str, Any]
     ) -> dict[str, Any]:
         """Get identity profile."""
+        tenant_id = self._require_tenant_id(args)
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="identity.query",
-            tenant_id=str(args.get("tenant_id", "default")),
+            tenant_id=tenant_id,
             payload={},
         )
         try:
@@ -385,11 +398,12 @@ class HBLLMMcpServer:
         self, bus: MessageBus, args: dict[str, Any]
     ) -> dict[str, Any]:
         """Update identity profile."""
+        tenant_id = self._require_tenant_id(args)
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="mcp_server",
             topic="identity.update",
-            tenant_id=str(args.get("tenant_id", "default")),
+            tenant_id=tenant_id,
             payload={k: v for k, v in args.items() if k != "tenant_id"},
         )
         await bus.publish("identity.update", msg)
@@ -397,11 +411,12 @@ class HBLLMMcpServer:
 
     async def _tool_hbllm_plan(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
         """GoT planning."""
+        tenant_id = self._require_tenant_id(args)
         msg = Message(
             type=MessageType.QUERY,
             source_node_id="mcp_server",
             topic="planner.plan",
-            tenant_id=str(args.get("tenant_id", "default")),
+            tenant_id=tenant_id,
             payload={"query": args["query"]},
         )
         try:
@@ -412,11 +427,12 @@ class HBLLMMcpServer:
 
     async def _tool_hbllm_feedback(self, bus: MessageBus, args: dict[str, Any]) -> dict[str, Any]:
         """Submit RLHF feedback."""
+        tenant_id = self._require_tenant_id(args)
         msg = Message(
             type=MessageType.EVENT,
             source_node_id="mcp_server",
             topic="system.feedback",
-            tenant_id=str(args.get("tenant_id", "default")),
+            tenant_id=tenant_id,
             payload={
                 "message_id": args["message_id"],
                 "rating": args["rating"],

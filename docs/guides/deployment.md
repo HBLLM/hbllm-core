@@ -20,65 +20,52 @@ HBLLM is designed to run on **any hardware** — from a Raspberry Pi 5 to a Kube
 
 ## CPU-Only Deployment (No GPU)
 
-The simplest production deployment — runs on any machine with Python 3.11+:
+The Pure-HCIR Cognitive OS runs deterministically on any machine with Python 3.11+ and zero GPU requirements:
 
 ```bash
-# Install and serve (CPU-only, ~1GB RAM for 125M model)
-pip install -e .
-HBLLM_PROVIDER=local hbllm serve --port 8000
+pip install ".[server]"
+HBLLM_ENV=production HBLLM_JWT_SECRET="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+  hbllm serve --host 0.0.0.0 --port 8000
 ```
-
-!!! success "No CUDA, No Problem"
-    Rust SIMD kernels (AVX2 on x86, NEON on ARM) handle INT4/INT8 quantized inference on CPU. The 125M model serves responses in under 500MB RAM.
 
 ---
 
 ## Docker
 
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY . .
-RUN pip install -e .
-
-EXPOSE 8000
-CMD ["python", "-m", "hbllm.serving.api"]
-```
+The repository ships a 3-stage production `Dockerfile` (`rust-builder` → `python-builder` → non-root `runtime`) that compiles the Rust PyO3 wheels with `maturin build --release`, installs `.[server]`, exposes port `8000`, healthchecks `/health/live`, and launches `uvicorn hbllm.serving.api:app`:
 
 ```bash
+# Build production image from HBLLM/core/
 docker build -t hbllm-core .
 
-# CPU-only (no --gpus flag needed)
+# Run in production mode (fail-closed JWT auth requires HBLLM_JWT_SECRET)
 docker run -p 8000:8000 \
-  -e HBLLM_PROVIDER=local \
+  -e HBLLM_ENV=production \
+  -e HBLLM_JWT_SECRET="replace-with-strong-32byte-secret" \
   hbllm-core
+```
 
-# Or with cloud API backend (even lighter — ~200MB RAM)
-docker run -p 8000:8000 \
-  -e HBLLM_PROVIDER=openai \
-  -e OPENAI_API_KEY=sk-... \
-  hbllm-core
+For multi-replica deployments behind Nginx with Redis and PostgreSQL, use the production overlay (`docker-compose.prod.yml`):
+
+```bash
+export HBLLM_JWT_SECRET="replace-with-strong-32byte-secret"
+export POSTGRES_PASSWORD="replace-with-db-password"
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 ---
 
-## Raspberry Pi 5 Deployment
-
-HBLLM runs a full cognitive brain on a $80 single-board computer:
+## Raspberry Pi 5 / Edge Deployment
 
 ```bash
-# On Raspberry Pi 5 (8GB model recommended)
+# Core-only Pure-HCIR install on ARM64 (NEON SIMD via Rust crates, no GPU required)
 pip install -e .
-
-# Use the 125M model with INT4 quantization
-HBLLM_PROVIDER=local \
-HBLLM_QUANTIZE=int4 \
-hbllm serve --port 8000 --workers 1
+hbllm diagnostics
+hbllm kernel boot --world-id edge_node
 ```
 
 !!! tip "ARM Optimization"
-    The Rust compute kernels use NEON SIMD instructions natively on ARM64, giving significant speedups over pure Python inference.
+    Building the Rust crates (`maturin develop --release`) enables native ARM64 NEON acceleration for `hbllm_hcir_graph`, `hbllm_compute`, `hbllm_simulation_engine`, and `hbllm_structure_matcher`.
 
 ---
 
@@ -214,14 +201,13 @@ curl http://localhost:8000/health
 ## Security Checklist
 
 - [x] Set `HBLLM_JWT_SECRET` for production (`HBLLM_ENV=production` enforces this)
+- [x] Do **not** set `HBLLM_UNSAFE_DEV_AUTH=1` outside local loopback development
 - [x] Set `HBLLM_TENANT_GUARD_MODE=STRICT` for production deployments
 - [x] Set `HBLLM_REDIS_HMAC_KEY` for distributed deployments
-- [x] Use `weights_only=True` (enforced automatically)
 - [x] Enable per-tenant rate limiting (`HBLLM_RATE_LIMIT_RPM=60`)
 - [x] Enable per-tenant DB quotas (`HBLLM_DB_MAX_PER_TENANT=50000`)
 - [x] Enable audit logging (`security.audit_enabled: true`)
 - [x] Enable encryption at rest for sensitive fields (`security.encryption_enabled: true`)
-- [x] Pin adapter revisions to specific Git tags
 - [x] Run behind a reverse proxy (nginx/Caddy) with TLS
 - [x] Set `HBLLM_CORS_ORIGINS` to specific domains (wildcard blocked in production)
 

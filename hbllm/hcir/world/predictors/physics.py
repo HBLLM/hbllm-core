@@ -350,13 +350,34 @@ class PhysicsPredictor:
     # Topological Deadlock & Geodesic Calculation
     # ─────────────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _resolve_grid_shape(
+        grid_shape: tuple[int, int] | None,
+        *coords: tuple[int, int] | None,
+        cell_sets: tuple[set[tuple[int, int]] | frozenset[tuple[int, int]], ...] = (),
+    ) -> tuple[int, int]:
+        """Infer bounding shape dynamically from coordinates when explicit grid_shape is omitted."""
+        if grid_shape is not None:
+            return grid_shape
+        max_r = 0
+        max_c = 0
+        for pt in coords:
+            if pt is not None:
+                max_r = max(max_r, int(pt[0]))
+                max_c = max(max_c, int(pt[1]))
+        for cset in cell_sets:
+            for r, c in cset:
+                max_r = max(max_r, int(r))
+                max_c = max(max_c, int(c))
+        return (max(1, max_r + 2), max(1, max_c + 2))
+
     @classmethod
     def is_corner_deadlock(
         cls,
         entity_pos: tuple[int, int] | None = None,
         barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
         target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
-        grid_shape: tuple[int, int] = (64, 64),
+        grid_shape: tuple[int, int] | None = None,
         step_size: int = 1,
         box_pos: tuple[int, int] | None = None,
     ) -> bool:
@@ -365,7 +386,7 @@ class PhysicsPredictor:
         if pos is None:
             return False
         r, c = pos
-        H, W = grid_shape
+        H, W = cls._resolve_grid_shape(grid_shape, pos, cell_sets=(barrier_cells, target_positions))
 
         if pos in target_positions:
             return False
@@ -389,7 +410,7 @@ class PhysicsPredictor:
         entity_pos: tuple[int, int] | None = None,
         barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
         target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
-        grid_shape: tuple[int, int] = (64, 64),
+        grid_shape: tuple[int, int] | None = None,
         step_size: int = 1,
         box_pos: tuple[int, int] | None = None,
     ) -> bool:
@@ -405,7 +426,7 @@ class PhysicsPredictor:
         if pos in target_positions:
             return False
 
-        H, W = grid_shape
+        H, W = cls._resolve_grid_shape(grid_shape, pos, cell_sets=(barrier_cells, target_positions))
         br, bc = pos
 
         walls: list[tuple[tuple[int, int], list[tuple[int, int]]]] = [
@@ -471,7 +492,7 @@ class PhysicsPredictor:
         barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
         block_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
         target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
-        grid_shape: tuple[int, int] = (64, 64),
+        grid_shape: tuple[int, int] | None = None,
     ) -> bool:
         """Detect if pushable blocks form an irreversible 2x2 square with static barriers.
 
@@ -484,7 +505,9 @@ class PhysicsPredictor:
         if pos in target_positions:
             return False
 
-        H, W = grid_shape
+        H, W = cls._resolve_grid_shape(
+            grid_shape, pos, cell_sets=(barrier_cells, block_cells, target_positions)
+        )
         r, c = pos
         impassable = set(barrier_cells) | set(block_cells) | {pos}
 
@@ -529,7 +552,7 @@ class PhysicsPredictor:
         entity_pos: tuple[int, int] | None = None,
         barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
         target_positions: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
-        grid_shape: tuple[int, int] = (64, 64),
+        grid_shape: tuple[int, int] | None = None,
         step_size: int = 1,
     ) -> bool:
         """Detect if an object is pushed into a 1-wide dead-end tunnel (3 impassable sides)."""
@@ -537,7 +560,9 @@ class PhysicsPredictor:
             return False
 
         r, c = entity_pos
-        H, W = grid_shape
+        H, W = cls._resolve_grid_shape(
+            grid_shape, entity_pos, cell_sets=(barrier_cells, target_positions)
+        )
         blocked_up = (r - step_size < 0) or ((r - step_size, c) in barrier_cells)
         blocked_down = (r + step_size >= H) or ((r + step_size, c) in barrier_cells)
         blocked_left = (c - step_size < 0) or ((r, c - step_size) in barrier_cells)
@@ -598,13 +623,23 @@ class PhysicsPredictor:
         start: tuple[int, int],
         goal: tuple[int, int],
         barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
-        grid_shape: tuple[int, int] = (64, 64),
+        grid_shape: tuple[int, int] | None = None,
         step_size: int = 1,
         footprint_offsets: list[tuple[int, int]] | set[tuple[int, int]] | None = None,
         blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+        transition_kb: Any | None = None,
+        grid: np.ndarray | None = None,
     ) -> list[tuple[int, int]]:
         """Breadth-first search for shortest obstacle-clearing geodesic path, accounting for composite footprints."""
-        H, W = grid_shape
+        if grid_shape is None and grid is not None and grid.ndim >= 2:
+            H, W = (int(grid.shape[0]), int(grid.shape[1]))
+        else:
+            H, W = cls._resolve_grid_shape(
+                grid_shape,
+                start,
+                goal,
+                cell_sets=(barrier_cells, blocked_nodes or frozenset()),
+            )
         start_r, start_c = start
         goal_r, goal_c = goal
 
@@ -623,8 +658,10 @@ class PhysicsPredictor:
         for off_r, off_c in offsets:
             effective_barriers.discard((goal_r + off_r, goal_c + off_c))
 
+        use_kb = transition_kb is not None and grid is not None
         if (
-            offsets == [(0, 0)]
+            not use_kb
+            and offsets == [(0, 0)]
             and _rust_graph is not None
             and hasattr(_rust_graph, "fast_geodesic_astar")
         ):
@@ -654,6 +691,10 @@ class PhysicsPredictor:
                     return False
                 if (fr, fc) in effective_barriers:
                     return False
+                if transition_kb is not None and grid is not None:
+                    ev = transition_kb.evaluate_transition(int(grid[fr, fc]), locus=(fr, fc))
+                    if ev.risk_cost >= 40.0 or (not ev.traversable and (r, c) != (goal_r, goal_c)):
+                        return False
             return True
 
         step = max(1, step_size)
@@ -733,6 +774,8 @@ class PhysicsPredictor:
         period: int | None = None,
         allow_wait: bool = True,
         max_time: int = 120,
+        transition_kb: Any | None = None,
+        grid: np.ndarray | None = None,
     ) -> list[tuple[int, int, int]] | None:
         """Spatiotemporal 4D geodesic pathfinding (r, c, t) with temporal waiting affordance.
 
@@ -756,6 +799,10 @@ class PhysicsPredictor:
                 return True
             if (r, c) in effective_barriers:
                 return True
+            if transition_kb is not None and grid is not None:
+                ev = transition_kb.evaluate_transition(int(grid[r, c]), locus=(r, c))
+                if ev.risk_cost >= 40.0 or (not ev.traversable and (r, c) != (goal_r, goal_c)):
+                    return True
             t_key = (t % period) if period and period > 0 else t
             if t_key in hazards and (r, c) in hazards[t_key]:
                 return True

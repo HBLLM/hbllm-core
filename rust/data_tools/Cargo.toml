@@ -9,7 +9,7 @@ name = "hbllm_data_tools_rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.20.0" }
+pyo3 = { version = "0.25", features = ["abi3-py311"] }
 rayon = "1.8"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 unicode-segmentation = "1.10"

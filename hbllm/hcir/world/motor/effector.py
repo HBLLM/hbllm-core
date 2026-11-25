@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 class EffectorTargetScorer(ABC):
     """Abstract interface for external or domain-specific target candidate scoring.
 
-    Allows modular game-specific or benchmark-specific solvers (e.g. ARC-AGI-3 adapters)
-    to register candidate scoring strategies without coupling the core cognitive architecture.
+    Allows modular domain-specific or environment-adapter extensions to register
+    candidate scoring strategies without coupling the core cognitive architecture.
     """
 
     @abstractmethod
@@ -279,7 +279,7 @@ class MotorCortexEffector:
 
         actuation_candidates: list[tuple[int, int, float]] = []
 
-        # 1. Registered domain / adapter target scorers (e.g. ARC-AGI-3 plugin scorers)
+        # 1. Registered external or adapter target scorers
         for scorer in cls._registered_target_scorers:
             try:
                 actuation_candidates.extend(

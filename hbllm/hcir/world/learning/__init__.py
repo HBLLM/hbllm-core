@@ -7,7 +7,6 @@ from hbllm.hcir.world.learning.causal_planner import (
     CausalTheoryPlanner,
     RelationalSubgoalMacro,
     RelationalWaypoint,
-    get_sub_attr,
 )
 from hbllm.hcir.world.learning.meta import (
     GameFeatureSignature,
@@ -29,5 +28,4 @@ __all__ = [
     "RelationalWaypoint",
     "StrategyOutcome",
     "TransferableInvariant",
-    "get_sub_attr",
 ]

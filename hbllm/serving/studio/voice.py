@@ -130,7 +130,7 @@ async def studio_voice_update_config(request: Request) -> Any:
     from hbllm.perception.voice_config import TTSBackend, VoiceConfig, VoiceRegistry
 
     body = await request.json()
-    tenant_id = body.get("tenant_id") or get_tenant_id(request)
+    tenant_id = get_tenant_id(request)
 
     data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
     db_path = os.path.join(data_dir, "voice_preferences.db")

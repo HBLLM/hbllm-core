@@ -62,10 +62,18 @@ def get_data_dir() -> str:
 
 
 def get_tenant_id(request: Any) -> str:
-    """Extract tenant_id from request state."""
-    return getattr(request.state, "tenant_id", "default")
+    """Extract authenticated tenant_id from request state (fail closed with 401)."""
+    state = getattr(request, "state", None)
+    tenant_id = getattr(state, "tenant_id", None) if state is not None else None
+    if not tenant_id or not isinstance(tenant_id, str):
+        raise HTTPException(status_code=401, detail="Authenticated tenant_id required")
+    return tenant_id
 
 
 def get_user_id(request: Any) -> str:
-    """Extract user_id from request state."""
-    return getattr(request.state, "user_id", "default")
+    """Extract user_id from request state (falls back to authenticated tenant_id)."""
+    state = getattr(request, "state", None)
+    user_id = getattr(state, "user_id", None) if state is not None else None
+    if user_id and isinstance(user_id, str):
+        return user_id
+    return get_tenant_id(request)

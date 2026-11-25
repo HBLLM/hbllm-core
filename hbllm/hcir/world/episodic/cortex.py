@@ -468,9 +468,14 @@ class HippocampalEpisodicCortex:
             self.current_episode.clear()
 
     def on_boundary(self, boundary) -> None:
-        """Episode lifecycle boundary handler (WP0.5). Delegates to the
-        deprecated reset_episode for backward-compatible semantics."""
-        self.reset_episode()
+        """Episode lifecycle boundary handler (WP0.5)."""
+        from hbllm.hcir.world.percept import resolve_boundary_flags
+
+        _, retain_dyn, is_same_ctx = resolve_boundary_flags(boundary)
+        self.reset_episode(
+            retain_dynamics=retain_dyn,
+            retain_inhibitions=bool(retain_dyn and is_same_ctx),
+        )
 
     @property
     def boundary_retention(self):
@@ -639,19 +644,48 @@ class HippocampalEpisodicCortex:
                 extracted_waypoints: list[RelationalWaypoint] = []
                 seen_features: set[int] = set()
                 bg_val = get_engine_state_attr(view, "bg_feature", 0)
+                wm_ref = get_engine_state_attr(view, "working_memory", None)
+                sym_ref = get_engine_state_attr(view, "symbolic_theory", None)
+                av_feats_ref = set(get_engine_state_attr(view, "avatar_features", ()) or ())
+                av_single = get_engine_state_attr(view, "avatar_feature", None)
+                if av_single is not None:
+                    av_feats_ref.add(av_single)
+                walkable_ref = sym_ref.walkable_features if sym_ref is not None else set()
+                barrier_ref = sym_ref.barrier_features if sym_ref is not None else set()
                 for idx, step_t in enumerate(winning_trajectory):
+                    ref_grid = (
+                        winning_trajectory[idx - 1].grid_snapshot
+                        if idx > 0 and winning_trajectory[idx - 1].grid_snapshot is not None
+                        else step_t.grid_snapshot
+                    )
                     if (
-                        step_t.grid_snapshot is not None
+                        ref_grid is not None
                         and isinstance(step_t.avatar_pos, tuple)
                         and len(step_t.avatar_pos) >= 2
                         and isinstance(step_t.avatar_pos[0], (int, float))
                         and isinstance(step_t.avatar_pos[1], (int, float))
                     ):
                         ar, ac = int(step_t.avatar_pos[0]), int(step_t.avatar_pos[1])
-                        H_s, W_s = step_t.grid_snapshot.shape[:2]
+                        H_s, W_s = ref_grid.shape[:2]
                         if 0 <= ar < H_s and 0 <= ac < W_s:
-                            f_val = int(step_t.grid_snapshot[ar, ac])
-                            if f_val != bg_val and f_val not in seen_features:
+                            f_val = int(ref_grid[ar, ac])
+                            is_exog = (
+                                wm_ref.is_exogenous_locus(
+                                    (ar, ac), lattice=ref_grid, bg=bg_val, include_outer_edge=True
+                                )
+                                if wm_ref is not None
+                                else False
+                            )
+                            if (
+                                f_val != bg_val
+                                and f_val not in seen_features
+                                and f_val not in av_feats_ref
+                                and f_val not in walkable_ref
+                                and f_val not in barrier_ref
+                                and not is_exog
+                                and int(np.count_nonzero(ref_grid == f_val))
+                                <= max(4, int(H_s * W_s * 0.08))
+                            ):
                                 seen_features.add(f_val)
                                 extracted_waypoints.append(
                                     RelationalWaypoint(
@@ -713,7 +747,7 @@ class HippocampalEpisodicCortex:
         if target_epoch is not None:
             delta.set("_context_epoch", target_epoch)
         delta.set("prev_grid", None)
-        delta.set("_prev_oriented_threats", [])
+        delta.set("prev_oriented_threats", [])
         delta.set("avatar_pos", None)
         delta.set("last_action", None)
         delta.set("last_action_data", None)
@@ -763,14 +797,14 @@ class HippocampalEpisodicCortex:
         delta.set("simulation_cooldown", 0)
         view.working_memory.reset_salience_baseline()
         delta.set("current_simulated_goal", None)
-        delta.set("_feedback_assimilated", False)
+        delta.set("feedback_assimilated", False)
         view.symbolic_theory.clear_explored_loci(
             clear_features=(new_context or not retain_dynamics)
         )
         if new_context or not retain_dynamics:
             view.symbolic_theory.clear_candidate_goals()
             if new_context:
-                view.symbolic_theory.clear_barriers()
+                view.symbolic_theory.clear_barriers(preserve_lethal=True)
 
         _epoch = (
             ((view.context_epoch or 0) + 1 if new_context else (view.context_epoch or 0))
@@ -786,6 +820,7 @@ class HippocampalEpisodicCortex:
             delta.set("failed_transitions", _lft.setdefault(_epoch, set()))
             _llb = delta.mutate("context_barriers", view.context_barriers)
             delta.set("learned_barriers", _llb.setdefault(_epoch, set()))
+            view.symbolic_theory.transition_kb.clear_locus_beliefs()
             view.hazard_tracker.clear_lethal_positions()
             view.hazard_tracker.reset_episode()
             delta.mutate("exhausted_candidate_goals", view.exhausted_candidate_goals).clear()
@@ -819,7 +854,7 @@ class HippocampalEpisodicCortex:
             delta.set("current_room_id", None)
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
-            delta.set("_prev_oriented_threats", [])
+            delta.set("prev_oriented_threats", [])
             delta.set("prev_grid", None)
             delta.set("last_action", None)
             delta.set("last_predicted_pos", None)
@@ -833,13 +868,16 @@ class HippocampalEpisodicCortex:
             view.hazard_tracker.grid_history.clear()
             view.hazard_tracker.step_history.clear()
             delta.mutate("tested_action_positions", view.tested_action_positions).clear()
+            _lg = delta.mutate("learned_goal_positions", view.learned_goal_positions)
+            _lg.difference_update(view.hazard_tracker.static_lethal_positions)
+            _lg.difference_update(view.learned_barriers)
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
             delta.set("prev_grid", None)
             delta.set("last_action", None)
             delta.set("last_predicted_pos", None)
             delta.mutate("mental_plan", view.mental_plan).clear()
-            delta.set("_prev_oriented_threats", [])
+            delta.set("prev_oriented_threats", [])
             delta.mutate("recent_positions", view.recent_positions).clear()
             if hasattr(view, "acc_conflict_monitor"):
                 view.acc_conflict_monitor.reset()
@@ -872,9 +910,12 @@ class HippocampalEpisodicCortex:
                 delta.mutate("mobile_threat_features", view.mobile_threat_features).clear()
 
             # Carry forward hypotheses & semantics as priors
+            retained_av_feats = set(view.avatar_features or ())
             if view.avatar_feature is not None:
                 delta.set("prior_avatar_feature", view.avatar_feature)
-                delta.set("avatar_features", {view.avatar_feature})
+                retained_av_feats.add(view.avatar_feature)
+            if retained_av_feats:
+                delta.set("avatar_features", retained_av_feats)
             else:
                 view.avatar_features.clear()
             view._avatar_controllability_evidence.clear()
@@ -892,6 +933,7 @@ class HippocampalEpisodicCortex:
                 # Coordinate-keyed distal links are layout-specific; the feature-level
                 # law survives in symbolic_theory.conditional_affordances.
                 view.working_memory.remote_causal.reset_episode(retain_long_term=False)
+            view.working_memory.exogenous_tracker.reset_episode(retain_long_term=False)
             if hasattr(view, "feature_quiescent_counts"):
                 view.feature_quiescent_counts.clear()
             if hasattr(view, "_feature_quiescent_counts"):

@@ -4,26 +4,6 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-import numpy as np
-
-from hbllm.hcir.spatial_planner import SpatialActionIntent
-
-if TYPE_CHECKING:
-    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-
-logger = logging.getLogger(__name__)
-
-
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
-
-
-import logging
-from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -99,6 +79,18 @@ class ObjectSpec:
     role: str = "unknown"  # "goal", "cargo", "key", "receptacle", "switch", "barrier", "hazard", "manipulandum"
     properties: dict[str, Any] = field(default_factory=dict)
     macro_tasks: list[MacroAction] = field(default_factory=list)
+
+    @property
+    def grid_pos(self) -> tuple[int, int]:
+        return self.pos
+
+    @grid_pos.setter
+    def grid_pos(self, val: tuple[int, int]) -> None:
+        self.pos = val
+
+    @property
+    def area(self) -> int:
+        return int(self.properties.get("area", 1))
 
 
 @dataclass

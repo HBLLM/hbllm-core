@@ -151,7 +151,11 @@ class TestMcpServer:
                 "method": "tools/call",
                 "params": {
                     "name": "hbllm_memory_store",
-                    "arguments": {"content": "test fact", "memory_type": "semantic"},
+                    "arguments": {
+                        "content": "test fact",
+                        "memory_type": "semantic",
+                        "tenant_id": "test-tenant",
+                    },
                 },
             }
         )
@@ -171,6 +175,7 @@ class TestMcpServer:
                     "arguments": {
                         "persona_name": "Test Bot",
                         "system_prompt": "You are helpful",
+                        "tenant_id": "test-tenant",
                     },
                 },
             }
@@ -186,7 +191,11 @@ class TestMcpServer:
                 "method": "tools/call",
                 "params": {
                     "name": "hbllm_feedback",
-                    "arguments": {"message_id": "msg-123", "rating": 1},
+                    "arguments": {
+                        "message_id": "msg-123",
+                        "rating": 1,
+                        "tenant_id": "test-tenant",
+                    },
                 },
             }
         )
@@ -194,6 +203,21 @@ class TestMcpServer:
         assert result["isError"] is False
         content = json.loads(result["content"][0]["text"])
         assert content["recorded"] is True
+
+    async def test_tools_call_missing_tenant_id_fails_closed(self, server):
+        response = await server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {
+                    "name": "hbllm_memory_store",
+                    "arguments": {"content": "test fact", "memory_type": "semantic"},
+                },
+            }
+        )
+        result = response["result"]
+        assert result["isError"] is True
 
 
 # ─── Tool Definitions Tests ──────────────────────────────────────────────────

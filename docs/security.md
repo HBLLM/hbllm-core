@@ -2,13 +2,13 @@
 
 HBLLM is designed for enterprise environments where data isolation, secure code execution, and model integrity are mission-critical. This document outlines the security architecture implemented in the `core` package.
 
-## 1. Code Sandboxing (`ExecutionNode`)
+## 1. Code Sandboxing & Capability Isolation (`CapabilitySandboxManager`)
 
-Allowing an LLM to generate and execute code autonomously is a massive security risk. HBLLM mitigates this via a rigorous, multi-layered sandboxing pipeline found in `hbllm/actions/execution_node.py`:
+Autonomous tool and Python execution is protected by a formal two-tier sandboxing pipeline in `hbllm.hcir.kernel.capability_sandboxing` (see **[Sandboxing Architecture](architecture/sandboxing.md)**):
 
-- **Static AST Validation**: Before any Python code is executed, it is parsed by an internal Abstract Syntax Tree (AST) walker. This static analysis strictly rejects dangerous imports (e.g., `os`, `sys`, `subprocess`) and built-in functions (e.g., `exec()`, `eval()`, `open()`).
-- **Restricted Subprocess Execution**: Validated code is never run in the main process. It is executed in an isolated, restricted subprocess.
-- **Strict Timeouts**: Every execution is bound by a strict timeout (default: 5.0 seconds). If the code enters an infinite loop or attempts to halt the system, the subprocess is ruthlessly killed.
+- **Tier 1 (Logical Policy Sandbox):** `CapabilitySandboxManager` checks `TrustLevel` (`SYSTEM`, `VERIFIED`, `UNTRUSTED`), `CapabilityPermissions` (`allow_filesystem`, `allow_network`, `allow_subprocess`, `allow_db_write`), and `infer_capability_permissions()` before dispatch.
+- **Tier 2 (Physical Process Isolation):** `SandboxedExecutor` validates Python ASTs (blocking `exec`, `eval`, `__import__`, `__subclasses__`, `os`, `sys`, `subprocess`), executes inside `python -I` with POSIX `RLIMIT_AS` / `RLIMIT_CPU` quotas and Linux network unsharing (`unshare -Urn`), closes parent write-end pipes immediately for clean EOF, and enforces strict execution timeouts.
+- **SSRF-Protected Web Fetch:** `WebCapabilityExecutor` (`hbllm.hcir.capabilities.web_capabilities`) validates every URL with `is_safe_url()` before connecting.
 
 ## 2. Multi-Tenant Identity & Data Isolation
 
@@ -34,7 +34,7 @@ The `TenantGuard` module uses Python `contextvars` to propagate identity through
 | `WARN` | Log violations but allow access | Staging, migration monitoring |
 | `STRICT` | Raise `TenantIsolationError` on violations | Production, compliance |
 
-Configure via `hbllm.yaml`:
+Configure via YAML (`hbllm.yaml.example`) or environment variable:
 
 ```yaml
 security:
@@ -76,13 +76,13 @@ async def store(self, content: str, metadata: dict, *, tenant_id: str, **kwargs)
 
 *(Verified via automated tests: `test_integration.py::TestEndToEndPipeline::test_multi_tenant_isolation`, `test_e2e_tenant.py`, `test_identity_isolation.py`)*
 
-## 3. LoRA Adapter Integrity
+## 3. Constitutional Transaction Integrity (`ConstitutionalVerifier`)
 
-The HBLLM architecture allows for "In-Flight LoRA Hot-Swapping"—dynamically downloading and loading fine-tuned domain adapters from the Sentra Marketplace at runtime. 
+Every state mutation in the Pure-HCIR Cognitive OS flows through `TransactionManager` and `ConstitutionalVerifier` (`hbllm.hcir.kernel.governance.constitutional_verifier`):
 
-To prevent supply-chain attacks or malicious weight injection:
-- **SHA-256 Validation**: The `AdapterRegistry` enforces strict cryptographic checksums. Before a new `.safetensors` or `.bin` adapter is loaded into the base LLM, its SHA-256 hash is verified against a known, trusted ledger. 
-- **Read-Only Model Memory**: Adapter weights are loaded into read-only memory buffers to prevent runtime manipulation.
+- **Commit Authority Grants (`CommitAuthorityRegistry`):** Tracks authorized writers and scope boundaries per tier (`Working`, `Brain`, `Persistent`, `Meta`).
+- **6-Stage Verification Pipeline (`create_default_pipeline`):** Validates `ScopeVerifier`, `SchemaVerifier`, `ResourceVerifier`, `PolicyVerifier`, `BranchModeVerifier`, and `ConstitutionalVerifier`, triggering atomic in-flight rollback on rejection.
+- **Hash-Chained Event Store:** `SQLiteEventStore` (`hbllm.hcir.stores.sqlite_event_store`) verifies historical ledger integrity via `verify_chain_integrity()`.
 
 ## 4. Input Sanitization & Serving Security
 
@@ -113,8 +113,8 @@ Injection patterns detected include:
 
 ### Authentication
 
-- **JWT Authentication** (`hbllm.serving.auth`): `JWTAuthMiddleware` validates Bearer tokens and injects the identity triplet into `request.state`.
-- **API Key Manager** (`hbllm.serving.security`): SHA-256 hashed API keys with per-key scoping and tenant resolution.
+- **Fail-Closed JWT Authentication (`hbllm.serving.auth`):** `JWTAuthMiddleware` requires valid `Bearer` tokens containing `tenant_id` (and `exp` in production). Unauthenticated fallback is disabled by default and requires explicit `HBLLM_UNSAFE_DEV_AUTH=1` outside production. Production deployments (`HBLLM_ENV=production`) refuse to boot without `HBLLM_JWT_SECRET`.
+- **API Key Manager (`hbllm.serving.security`):** SHA-256 hashed API keys with per-key scoping and tenant resolution.
 
 ### CORS Hardening
 
@@ -279,7 +279,7 @@ original = vault.decrypt(encrypted)
 
 ## 10. Configuration Reference
 
-All security settings are in `hbllm.yaml` under the `security:` key:
+Configure security settings in your YAML config (see `hbllm.yaml.example`) under `security:` or via `HBLLM_*` environment variables:
 
 ```yaml
 security:

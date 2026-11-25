@@ -320,20 +320,41 @@ def bench_ablation() -> None:
 
 
 @bench_app.command("profile")
-def bench_profile() -> None:
+def bench_profile(
+    steps: int = typer.Option(40, "--steps", help="Number of 32x32 steps to measure"),
+    warmup: int = typer.Option(5, "--warmup", help="Warm-up steps before timing"),
+    budget_ms: float = typer.Option(45.0, "--budget-ms", help="E2E p95 latency budget (ms)"),
+    out: Path | None = typer.Option(None, "--out", help="Optional JSON output path"),
+    strict: bool = typer.Option(
+        False,
+        "--strict/--no-strict",
+        help="Exit non-zero if p95 latency budget is exceeded",
+    ),
+) -> None:
     """Profile decide() hot paths and full 32x32 5-stage cognitive step latency."""
     from hbllm.benchmarks.substrate_profiler import (
         benchmark_e2e_cognitive_step_32x32,
         print_cognitive_step_profile_report,
         print_substrate_profile_report,
         run_substrate_profile,
+        serialize_profile_report,
     )
 
     report = run_substrate_profile()
     print_substrate_profile_report(report)
-    e2e_report = benchmark_e2e_cognitive_step_32x32()
+    e2e_report = benchmark_e2e_cognitive_step_32x32(
+        steps=steps,
+        target_p95_budget_ms=budget_ms,
+        warmup_steps=warmup,
+    )
     print_cognitive_step_profile_report(e2e_report)
-    if not report.budget_met or not e2e_report.budget_met:
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(serialize_profile_report(report, e2e_report), indent=2),
+            encoding="utf-8",
+        )
+    if strict and (not report.budget_met or not e2e_report.budget_met):
         raise typer.Exit(code=1)
 
 

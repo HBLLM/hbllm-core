@@ -339,55 +339,6 @@ class HabenularEpisodicIOR:
             duration_steps,
         )
 
-    def preemptively_inhibit_from_counterfactuals(
-        self,
-        scm_invariants: list[CausalPredicate],
-        current_pos: tuple[int, int] | None = None,
-        duration_steps: int = 24,
-    ) -> int:
-        """Install pre-emptive motor inhibitions derived from Pearl's SCM counterfactual safety invariants.
-
-        Args:
-            scm_invariants: Causal predicates synthesized by SCM counterfactual analysis.
-            current_pos: Spatial position to anchor inhibition.
-            duration_steps: Lifetime of the negative inhibition.
-
-        Returns:
-            int: Count of newly inhibited actions.
-        """
-        inhibited_count = 0
-        for pred in scm_invariants:
-            is_safety_invariant = (
-                pred.variable.startswith("invariant:safe:")
-                or pred.relation == "counterfactual_safety_invariant"
-                or (pred.operator == "!=" and "invariant" in pred.variable)
-            )
-            if not is_safety_invariant:
-                continue
-
-            # Extract prohibited action token
-            raw_act = pred.value
-            try:
-                action_id: Any = int(raw_act)
-            except (ValueError, TypeError):
-                action_id = raw_act
-
-            self.preemptively_inhibit_action(
-                pos=current_pos,
-                action=action_id,
-                penalty=self.base_penalty,
-                duration_steps=duration_steps,
-            )
-            inhibited_count += 1
-
-        if inhibited_count > 0:
-            logger.info(
-                "HabenularEpisodicIOR: Pre-emptively inhibited %d actions from SCM counterfactuals at pos %s",
-                inhibited_count,
-                current_pos,
-            )
-        return inhibited_count
-
     def preemptively_inhibit_from_snn(
         self,
         hazard_density: np.ndarray,

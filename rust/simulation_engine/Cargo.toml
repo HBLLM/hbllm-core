@@ -9,7 +9,7 @@ name = "hbllm_simulation_engine"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.20.0", features = ["abi3-py311"] }
+pyo3 = { version = "0.25", features = ["abi3-py311"] }
 rayon = "1.8.0"
 blake3 = "1.5.0"
 serde = { version = "1.0", features = ["derive"] }

@@ -116,6 +116,18 @@ class KernelServices:
     migration_metrics: MigrationMetrics | None = None
     commit_authority_registry: CommitAuthorityRegistry | None = None
 
+    # ── Typed Cognitive / Language Runtime Subsystems (M-4) ──
+    language_runtime: Any | None = None
+    ontology_store: Any | None = None
+    command_dispatcher: Any | None = None
+    concept_explainer: Any | None = None
+    curiosity_controller: Any | None = None
+    epistemic_curiosity: Any | None = None
+    autonomy_metrics: Any | None = None
+    reasoning_runtime: Any | None = None
+    neuromodulation: Any | None = None
+    lexicon_acquisition: Any | None = None
+
     # Extension point for future services
     extensions: dict[str, Any] = field(default_factory=dict)
     require_verified: bool = False

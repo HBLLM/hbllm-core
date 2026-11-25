@@ -1,16 +1,21 @@
+---
+title: "Symbol Grounding Architecture (SGE)"
+description: "Authoritative specification of hbllm.hcir.grounding: handcrafted/snn/learned FeatureExtractors, ThreeTierEntityTracker, ConceptLearner, HCIRCommitter, and CorticalGroundingBridge."
+---
+
 # Symbol Grounding Architecture (SGE)
 
 > **Document Status:** Authoritative Architectural Specification  
-> **Subsystem:** `hbllm.hcir.grounding`  
-> **Invariants:** 1 (State Ownership), 3 (Zero LLM Dependency in Cognitive Core), 4 (Constitutional Governance), 7 (Domain-Agnostic Core)
+> **Subsystem:** `hbllm.hcir.grounding` & `hbllm.hcir.world.grounding`  
+> **Invariants:** 1 (State Ownership), 3 (Zero LLM Dependency in Core), 4 (Constitutional Governance), 7 (Domain-Agnostic Core)
 
 ---
 
 ## 1. Executive Summary
 
-The **Symbol Grounding Engine (SGE)** bridges raw multimodal sensory observations (2D lattices, continuous kinematics, acoustic streams, spatial point clouds) to formal symbolic representations within the **HCIR** (Human-Cognitive Intermediate Representation) substrate.
+The **Symbol Grounding Engine (SGE)** bridges raw multimodal sensory observations (2D lattices, continuous kinematics, acoustic streams, spatial frames) to formal symbolic representations within the **HCIR** substrate.
 
-Rather than relying on ungrounded token statistics or hallucination-prone external models, HBLLM grounds symbols empirically via physical invariants, active inference, spatiotemporal tracking, and transactional state commitment.
+Rather than relying on ungrounded token statistics or external LLM APIs, HBLLM grounds symbols empirically via physical invariants, bipartite spatiotemporal tracking, concept clustering, and transactional state commitment.
 
 ```
   ┌──────────────────────────────────────────────────────────────┐
@@ -21,29 +26,29 @@ Rather than relying on ungrounded token statistics or hallucination-prone extern
                                  ▼
   ┌──────────────────────────────────────────────────────────────┐
   │ 1. PERCEPTUAL FEATURE EXTRACTION (Protocol: FeatureExtractor) │
-  │    - Handcrafted Feature Extractor (Zero-param topology)     │
-  │    - SNN Perceptual Feature Extractor (Spiking LIF dynamics) │
-  │    - Learned Feature Extractor (Deterministic offline encoder)│
+  │    - SpatialGridFeatureExtractor ("handcrafted")             │
+  │    - SNNPerceptualFeatureExtractor ("snn", LIF spiking)      │
+  │    - LearnedPerceptualFeatureExtractor ("learned")           │
   └──────────────────────────────┬───────────────────────────────┘
                                  │
                                  ▼
   ┌──────────────────────────────────────────────────────────────┐
   │ 2. SPATIOTEMPORAL TRACKING & IDENTITY PERSISTENCE            │
-  │    - SpatiotemporalTracker (Bipartite matching, velocity)   │
-  │    - TemporalIdentityManager (Centroid distance, IoU gating) │
+  │    - ThreeTierEntityTracker (TrackletState & CandidateState) │
+  │    - CandidateGenerator & IdentityOperations                 │
   └──────────────────────────────┬───────────────────────────────┘
                                  │
                                  ▼
   ┌──────────────────────────────────────────────────────────────┐
   │ 3. CONCEPT INDUCTION & REGISTRATION                          │
-  │    - ConceptLearner (Affordance clustering, DBSCAN/K-Means)  │
-  │    - GroundedConceptNode (Symbolic token ↔ sensory anchor)   │
+  │    - ConceptLearner (WorkingConceptStore, split/merge/bind)  │
+  │    - GroundedConceptRegistry & ConceptLifecycleManager       │
   └──────────────────────────────┬───────────────────────────────┘
                                  │
                                  ▼
   ┌──────────────────────────────────────────────────────────────┐
   │ 4. CONSTITUTIONAL COMMITMENT & WORKSPACE ATTACHMENT          │
-  │    - GroundingCommitter (Constructs TransactionOperations)   │
+  │    - HCIRCommitter (Constructs TransactionOperations)        │
   │    - ConstitutionalVerifier (Validates invariant constraints)│
   │    - TransactionManager.commit() ──► TieredWorkspace         │
   └──────────────────────────────────────────────────────────────┘
@@ -53,14 +58,12 @@ Rather than relying on ungrounded token statistics or hallucination-prone extern
 
 ## 2. Core Invariants
 
-1. **Transactional Commitment (Invariant 1 & 4):**
-   The grounding subsystem never directly mutates `CognitiveGraph` or `TieredWorkspace`. Every newly recognized entity, object position update, or induced concept is proposed as a `TransactionOperation` (`ADD_NODE`, `UPSERT_NODE`, `ADD_EDGE`, `REMOVE_NODE`) and committed through `TransactionManager` under `ConstitutionalVerifier`.
-
+1. **Transactional Commitment (Invariants 1 & 4):**
+   The grounding subsystem never directly mutates `CognitiveGraph` or `TieredWorkspace`. Every newly recognized entity, position update, or induced concept is proposed as a `TransactionOperation` and committed through `TransactionManager` under `ConstitutionalVerifier`.
 2. **Zero LLM Dependency in Sensory-Motor Loop (Invariant 3):**
-   Perceptual feature extraction, coordinate lifting, tracking, and concept clustering execute 100% locally and deterministically without cloud APIs: native Rust spatial/graph kernels run sub-millisecond ($p95 < 1\text{ms}$), while the full 5-stage Python cognitive step at $32\times 32$ is budgeted at $p95 \le 45\text{ms}$ ($p50 \approx 10\text{–}15\text{ms}$). External cloud API calls are strictly forbidden. Permitted encoders are deterministic, offline-trained feed-forward or spiking neural networks conforming to `FeatureExtractor`.
-
+   Perceptual feature extraction, tracking, and concept induction run 100% locally and deterministically without cloud APIs. Permitted encoders are zero-parameter topological extractors or deterministic offline-trained feed-forward / spiking neural encoders conforming to `FeatureExtractor`.
 3. **Domain-Agnostic Symbol Formation (Invariant 7):**
-   Grounding faculties operate on universal topological, geometric, and dynamic primitives (connectivity, bounding boxes, displacement vectors, velocity, collision manifolds) rather than task-specific or game-specific token names.
+   Grounding faculties operate on universal topological, geometric, and dynamic primitives (connectivity, bounding contours, displacement vectors, velocity, morphology) rather than task-specific names.
 
 ---
 
@@ -68,43 +71,45 @@ Rather than relying on ungrounded token statistics or hallucination-prone extern
 
 ### 3.1 Perceptual Feature Extraction (`hbllm.hcir.grounding.features`)
 
-Extractors conform to the `FeatureExtractor` runtime protocol:
-
-- **`HandcraftedFeatureExtractor`:** Evaluates topological connected components, color/property partitions, and bounding contours using zero-parameter algorithms.
-- **`SNNPerceptualFeatureExtractor`:** Simulates leaky integrate-and-fire (LIF) spiking neuronal populations for spatial contrast, edge detection, and temporal event dynamics with sub-millisecond CPU execution.
-- **`LearnedPerceptualFeatureExtractor`:** Offline-trained deterministic representation network producing fixed-dimensional dense embeddings for invariant cluster discovery.
+Extractors conform to the `FeatureExtractor` runtime protocol (`feature_extractor.py`):
+- **`SpatialGridFeatureExtractor`:** Extracts topological connected components, contours, and normalized spatial properties using zero-parameter algorithms (`perception_mode="handcrafted"`).
+- **`SNNPerceptualFeatureExtractor`:** Simulates leaky integrate-and-fire (LIF) spiking populations (`perception_mode="snn"`) for morphology-invariant spatial contrast and temporal dynamics.
+- **`LearnedPerceptualFeatureExtractor`:** Deterministic offline representation encoder (`perception_mode="learned"`).
+- **`KinematicFeatureExtractor` & `SemanticTextFeatureExtractor`:** Continuous control and lexical feature extractors coordinated via `FeatureExtractorRegistry`.
 
 ### 3.2 Spatiotemporal Tracking (`hbllm.hcir.grounding.tracking`)
 
-- **`SpatiotemporalTracker`:** Maintains object permanence and identity across frames despite partial occlusion, rapid displacement, or sensory noise.
-- **`TemporalIdentityManager`:** Employs optimal transport (bipartite Hungarian matching over centroid distance, size delta, and appearance features) to assign stable entity IDs across consecutive epistemic cycles.
+- **`ThreeTierEntityTracker` (`tracker.py`):** Maintains object permanence and identity across frames via `TrackletState` and `CandidateEntityState`, associating entities via `auto_associate()` and spatial distance gating.
+- **`CandidateGenerator` (`candidate_generator.py`) & `IdentityOperation` (`operations.py`):** Emit formal association, merge, split, re-identification, and alias operations.
 
 ### 3.3 Concept Induction (`hbllm.hcir.grounding.concepts`)
 
-- **`ConceptLearner`:** Clusters grounded perceptual observations into discrete semantic categories (`GroundedConceptNode`) based on shared visual, dynamic, and affordance features.
-- **`ConceptRegistry`:** Persistent registry storing learned prototypes and spatial relations.
+- **`ConceptLearner` (`concept_learner.py`):** Clusters perceptual feature vectors inside `WorkingConceptStore` (`store.py`), performing dynamic prototype assignment, splitting, merging, and role binding (`bind_role_to_exemplar`, `bind_linguistic_alias`).
+- **`GroundedConceptRegistry` (`registry.py`) & `ConceptLifecycleManager` (`lifecycle.py`):** Manage `GroundedConcept` prototypes (`model.py`) and promotion proposals across workspace tiers.
+- **`RelationalGraphMatcher` (`relational_graph_matcher.py`):** Computes structural correspondences across `ObjectGraph`s.
 
 ### 3.4 Transactional Commitment (`hbllm.hcir.grounding.committer`)
 
-- **`GroundingCommitter`:** Synthesizes `TransactionOperation` lists for atomic application to `TieredWorkspace`. It guarantees:
-  - Idempotent upserts for existing entities.
-  - Safe retraction of disappeared or annihilated entities.
-  - Edge assertions linking entities to spatial regions and parent frames.
+- **`HCIRCommitter` (`committer.py`):** Translates grounding decisions (`commit_decision()`) into atomic `TransactionOperation` batches via `TransactionManager`.
 
 ---
 
 ## 4. Cortical Epistemic Integration (`CorticalGroundingBridge`)
 
-The `CorticalGroundingBridge` binds the sensory-motor grounding pipeline with the 5-stage cortical epistemic cycle (`AutonomousEpistemicEngine`):
+`CorticalGroundingBridge` (`hbllm.hcir.world.grounding.bridge`) binds the SGE pipeline to `AutonomousEpistemicEngine` and `KernelServices` inside `build_cognitive_system()`:
 
 ```python
-bridge = CorticalGroundingBridge(
-    services=kernel_services,
-    feature_extractor=extractor,
-    tracker=tracker,
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+system = build_cognitive_system(
+    CognitiveSystemConfig(
+        world_id="sge_demo",
+        enable_grounding=True,
+        perception_mode="snn",  # "handcrafted" | "snn" | "learned"
+        memory_dir=None,
+    )
 )
-await bridge.process_observation(raw_observation, step=step_counter)
+# system.bridge is attached to system.engine sharing the same KernelServices
 ```
 
-The bridge extracts entities, updates tracking histories, proposes state mutations via `kernel_services.transaction_manager`, and injects stabilized spatial entities into the perception stage of the cortical loop.
-
+During each step, `CorticalGroundingBridge` processes perception (`process_perception`), synchronizes learned roles (`sync_theory_roles`), integrates assimilation and motor outcomes (`process_assimilation`, `process_motor`, `verify_post_action_outcome`), and handles boundary retention (`on_boundary`).

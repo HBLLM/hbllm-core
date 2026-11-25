@@ -170,6 +170,28 @@ class TestTieredWorkspace:
         result = self.tiered.promote("nonexistent", WorkspaceTier.BRAIN, WorkspaceTier.PERSISTENT)
         assert result is False
 
+    def test_promote_batch_commits_once_and_skips_unchanged(self) -> None:
+        for gid in ("gb_1", "gb_2", "gb_3"):
+            _seed_node(self.tiered.brain, GoalNode(id=gid, description=f"Goal {gid}"))
+
+        promoted = self.tiered.promote_batch(
+            ["gb_1", "gb_2", "gb_3", "missing"],
+            WorkspaceTier.BRAIN,
+            WorkspaceTier.PERSISTENT,
+        )
+        assert promoted == 3
+        for gid in ("gb_1", "gb_2", "gb_3"):
+            assert self.tiered.persistent.get_node(gid) is not None
+
+        events_after_first = self.tiered.persistent.event_store.event_count
+        promoted_again = self.tiered.promote_batch(
+            ["gb_1", "gb_2", "gb_3"],
+            WorkspaceTier.BRAIN,
+            WorkspaceTier.PERSISTENT,
+        )
+        assert promoted_again == 0
+        assert self.tiered.persistent.event_store.event_count == events_after_first
+
     def test_demote_persistent_to_brain(self) -> None:
         node = ObservationNode(id="obs_1", sensor_source="test")
         _seed_node(self.tiered.persistent, node)

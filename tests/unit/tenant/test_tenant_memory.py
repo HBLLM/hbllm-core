@@ -47,10 +47,6 @@ async def test_tenant_isolation_in_memory(memory_env):
             "content": "Hello from Tenant A",
         },
     )
-    await bus.publish("memory.store", store_a)
-    await asyncio.sleep(0.1)
-
-    # Tenant B stores a message in the SAME session_id
     store_b = Message(
         type=MessageType.EVENT,
         source_node_id="test",
@@ -63,17 +59,25 @@ async def test_tenant_isolation_in_memory(memory_env):
             "content": "Hello from Tenant B",
         },
     )
+    await bus.publish("memory.store", store_a)
     await bus.publish("memory.store", store_b)
-    await asyncio.sleep(0.1)
+
+    deadline = asyncio.get_running_loop().time() + 5.0
+    turns_a = []
+    turns_b = []
+    while asyncio.get_running_loop().time() < deadline:
+        turns_a = await mem.db.retrieve_recent("session_1", limit=10, tenant_id="tenant_A")
+        turns_b = await mem.db.retrieve_recent("session_1", limit=10, tenant_id="tenant_B")
+        if len(turns_a) >= 1 and len(turns_b) >= 1:
+            break
+        await asyncio.sleep(0.01)
 
     # Retrieve for Tenant A — should only see Tenant A's message
-    turns_a = await mem.db.retrieve_recent("session_1", limit=10, tenant_id="tenant_A")
     assert len(turns_a) == 1
     assert turns_a[0]["content"] == "Hello from Tenant A"
     assert turns_a[0]["tenant_id"] == "tenant_A"
 
     # Retrieve for Tenant B — should only see Tenant B's message
-    turns_b = await mem.db.retrieve_recent("session_1", limit=10, tenant_id="tenant_B")
     assert len(turns_b) == 1
     assert turns_b[0]["content"] == "Hello from Tenant B"
     assert turns_b[0]["tenant_id"] == "tenant_B"
@@ -100,7 +104,13 @@ async def test_memory_clear_respects_tenant(memory_env):
         )
         await bus.publish("memory.store", msg)
 
-    await asyncio.sleep(0.1)
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while asyncio.get_running_loop().time() < deadline:
+        t1_rows = await mem.db.retrieve_recent("shared_session", limit=10, tenant_id="t1")
+        t2_rows = await mem.db.retrieve_recent("shared_session", limit=10, tenant_id="t2")
+        if len(t1_rows) >= 1 and len(t2_rows) >= 1:
+            break
+        await asyncio.sleep(0.01)
 
     # Clear only t1
     deleted = await mem.db.clear_session("shared_session", tenant_id="t1")

@@ -279,7 +279,10 @@ class WebCapabilityExecutor:
         if auto_ingest and snippets_for_ingestion:
             combined_text = "\n".join(snippets_for_ingestion)
             propositions = extract_propositions_from_text(
-                combined_text, source_file=f"search_{query}"
+                combined_text,
+                source_file=f"search_{query}",
+                include_extended=True,
+                ontology_store=self._ontology_store,
             )
             if propositions:
                 ingested_count = self._ingest_propositions(propositions)
@@ -360,7 +363,12 @@ class WebCapabilityExecutor:
 
         ingested_count = 0
         if auto_ingest and clean_text:
-            propositions = extract_propositions_from_text(clean_text, source_file=target_url)
+            propositions = extract_propositions_from_text(
+                clean_text,
+                source_file=target_url,
+                include_extended=True,
+                ontology_store=self._ontology_store,
+            )
             if propositions:
                 ingested_count = self._ingest_propositions(propositions)
 
@@ -432,7 +440,7 @@ class WebCapabilityExecutor:
 
         from hbllm.hcir.capabilities.belief_revision import BeliefConflictResolver
 
-        conflict_resolver = BeliefConflictResolver()
+        conflict_resolver = BeliefConflictResolver(ontology_store=self._ontology_store)
 
         edge_type_map = {
             "is_a": HCIREdgeType.GENERALIZES,
@@ -521,7 +529,9 @@ class WebCapabilityExecutor:
 
         if self._ontology_store is not None and store_records:
             try:
-                self._ontology_store.upsert_many(store_records, source="web_ingestion")
+                self._ontology_store.upsert_many(
+                    store_records, source="web_ingestion", preserve_existing=True
+                )
             except Exception as exc:
                 logger.warning("WebCapabilityExecutor: failed to update ontology store: %s", exc)
 

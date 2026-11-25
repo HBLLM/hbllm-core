@@ -64,5 +64,9 @@ def get_mode() -> str:
 
 
 def get_tenant_id(request: Request) -> str:
-    """Extract tenant_id from request state (set by JWTAuthMiddleware)."""
-    return getattr(request.state, "tenant_id", "default")
+    """Extract authenticated tenant_id from request state (fail closed with 401)."""
+    state = getattr(request, "state", None)
+    tenant_id = getattr(state, "tenant_id", None) if state is not None else None
+    if not tenant_id or not isinstance(tenant_id, str):
+        raise HTTPException(status_code=401, detail="Authenticated tenant_id required")
+    return tenant_id

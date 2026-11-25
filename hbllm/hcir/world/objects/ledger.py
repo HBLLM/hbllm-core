@@ -44,10 +44,6 @@ class ObjectStateLedger:
         self._baseline_reach_initialized = False
         self._last_connectivity_sig = None
 
-    def reset_level(self) -> None:
-        """Deprecated alias for ``reset_context_epoch``."""
-        self.reset_context_epoch()
-
     def record_interaction(
         self,
         object_id: str,

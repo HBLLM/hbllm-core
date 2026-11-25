@@ -1,11 +1,11 @@
 ---
 title: "CLI Reference — Complete Command-Line Manual"
-description: "Comprehensive guide to all HBLLM command-line utilities: serve, train, data, info, nodes, plugin, agent, code, diagnostics, and DPO export."
+description: "Comprehensive guide to the HBLLM Typer CLI (hbllm): kernel, mind, bench, plugin, diagnostics, info, serve, agent, code, and daemon."
 ---
 
 # CLI Reference Manual
 
-HBLLM provides an extensive command-line interface (`hbllm`) for managing the cognitive server, pre-training pipelines, plugin scaffolding, interactive agents, and system diagnostics.
+HBLLM provides a unified Typer command-line interface (`hbllm` / `python -m hbllm`) defined in `hbllm.cli.main` for booting and inspecting the HCIR kernel, stepping the active-inference mind, running frozen benchmark suites, managing plugins, and launching the serving API.
 
 ---
 
@@ -15,95 +15,82 @@ HBLLM provides an extensive command-line interface (`hbllm`) for managing the co
 hbllm [command] [options]
 ```
 
-| Command | Purpose |
+| Command Group / Command | Purpose |
 |---|---|
-| [`hbllm serve`](#hbllm-serve) | Start the FastAPI REST and MCP server |
-| [`hbllm train`](#hbllm-train) | Start the causal language model pre-training loop |
-| [`hbllm data`](#hbllm-data) | Run the data preparation and tokenization pipeline |
-| [`hbllm info`](#hbllm-info) | Display active system architecture and memory tiers |
-| [`hbllm nodes`](#hbllm-nodes) | List all 28+ loaded cognitive nodes |
-| [`hbllm plugin`](#hbllm-plugin) | List installed plugins or scaffold a new custom plugin |
-| [`hbllm agent`](#hbllm-agent) | Launch the autonomous developer terminal agent |
-| [`hbllm code`](#hbllm-code) | Launch terminal-based pair programming assistant |
-| [`hbllm.cli.diagnostics`](#diagnostics-cli) | System runtime health and native Rust kernel validator |
-| [`hbllm.cli.export_dpo`](#dpo-export-cli) | Export preference data for Direct Preference Optimization |
+| [`hbllm kernel`](#hbllm-kernel) | `boot`, `status`, and `replay` for the HCIR Cognitive OS kernel |
+| [`hbllm mind`](#hbllm-mind) | `run` active inference loop or `step` a single JSON observation |
+| [`hbllm bench`](#hbllm-bench) | Run `dev`, `heldout`, `local-suite`, `sge`, `ablation`, and `profile` suites |
+| [`hbllm plugin`](#hbllm-plugin) | `list` discovered plugins or scaffold a `new` plugin |
+| [`hbllm diagnostics`](#hbllm-diagnostics) | System runtime health, `uvloop`, SQLite, and 13 Rust crates check |
+| [`hbllm info`](#hbllm-info) | Print the 8 architectural invariants and 5-stage cortical loop |
+| [`hbllm serve`](#hbllm-serve) | Start the FastAPI REST and MCP server (`hbllm.serving.api:app`) |
+| [`hbllm agent` / `hbllm code`](#hbllm-agent-and-hbllm-code) | Developer terminal utilities |
+| [`hbllm daemon`](#hbllm-daemon) | Run or manage the background daemon service (`run`, `install`, `uninstall`, `status`) |
 
 ---
 
-## Core Commands
+## Pure-HCIR Core Commands
 
-### `hbllm serve`
+### `hbllm kernel`
 
-Starts the production-ready HTTP server with OpenAI-compatible chat endpoints and cognitive REST APIs.
-
-```bash
-hbllm serve [OPTIONS]
-```
-
-**Options:**
-
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--host` | `str` | `0.0.0.0` | Network interface to bind |
-| `--port` | `int` | `8000` | Port to listen on |
-| `--workers` | `int` | `1` | Number of worker processes |
-| `--model-size` | `str` | `125m` | Native preset (`125m`, `500m`, `1.5b`) or HuggingFace repo |
-
-**Example:**
-```bash
-hbllm serve --host 127.0.0.1 --port 8080 --model-size 500m
-```
-
----
-
-### `hbllm train`
-
-Launches the distributed or local autoregressive pre-training loop with AdamW optimizer and cosine learning rate schedules.
+Manage and inspect the verified HCIR kernel (`build_cognitive_system()`):
 
 ```bash
-hbllm train [OPTIONS]
+# Boot verified HCIR kernel for a world context
+hbllm kernel boot --world-id default
+
+# Inspect verified TransactionManager stages, 4 tiers & native Rust substrate health
+hbllm kernel status
+
+# Replay transactions from an event log
+hbllm kernel replay --log path/to/events.log
 ```
 
-**Options:**
+### `hbllm mind`
 
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--model-size` | `str` | `125m` | Model architecture size (`125m`, `500m`, `1.5b`) |
-| `--work-dir` | `str` | `./workspace` | Directory containing tokenized `.bin` shards |
-| `--wandb-project` | `str` | `None` | Optional Weights & Biases project name for logging |
-
-**Example:**
-```bash
-hbllm train --model-size 500m --work-dir ./data/shards --wandb-project my-hbllm-run
-```
-
----
-
-### `hbllm data`
-
-Runs end-to-end dataset extraction, MinHash deduplication, Rust BPE tokenization, and binary shard generation.
+Run or step `AutonomousEpistemicEngine` over `EmbodiedObservation` inputs:
 
 ```bash
-hbllm data [OPTIONS]
+# Run active inference loop with a driver
+hbllm mind run --driver mock --budget 150 --world-id default --seed 42
+
+# Execute a single deterministic decide() step with full provenance explanation
+hbllm mind step --obs tests/fixtures/obs_minimal.json --world-id default --explain
 ```
 
-**Options:**
+### `hbllm bench`
 
-| Flag | Type | Default | Description |
-|---|---|---|---|
-| `--dataset` | `str` | `fineweb` | Dataset name from HuggingFace Hub |
-| `--samples` | `int` | `100000` | Number of raw documents to process |
-| `--vocab-size` | `int` | `32768` | Target tokenizer vocabulary size |
-| `--seq-len` | `int` | `2048` | Target sequence length for training shards |
-| `--work-dir` | `str` | `./workspace` | Output directory for dataset artifacts |
+Execute frozen evaluation suites, ablations, and latency profilers:
 
----
+```bash
+# Frozen dev evaluation suite (perception: handcrafted | snn | learned)
+hbllm bench dev --perception handcrafted --episodes 5 --shared-memory --cross-seed
 
----
+# Sealed Held-Out v2 suite (anti-tamper: requires clean HEAD with eval-* git tag)
+hbllm bench heldout --perception handcrafted
+
+# 10-game ARC local suite, SGE benchmark, and faculty ablation
+hbllm bench local-suite --game ls20 --seed 0
+hbllm bench sge
+hbllm bench ablation
+
+# Profile hot paths and 32x32 5-stage CorticalPipeline step latency (p95 <= 45ms gate)
+hbllm bench profile
+```
+
+### `hbllm diagnostics`
+
+Verify runtime dependencies, `uvloop`, SQLite support, and availability of the 13 Rust acceleration crates (`NativeAccelerationRegistry`):
+
+```bash
+hbllm diagnostics
+# or
+python -m hbllm.cli.diagnostics
+```
 
 ### `hbllm info`
 
-Display system architecture, active zones, parameter presets, and memory tiers:
+Print version, the 8 non-negotiable architectural invariants, and the 5-stage cortical loop:
 
 ```bash
 hbllm info
@@ -111,100 +98,45 @@ hbllm info
 
 ---
 
-### `hbllm nodes`
-
-List all 28+ loaded cognitive nodes across Perception, Brain, Memory, and Action zones:
-
-```bash
-hbllm nodes
-```
-
----
+## Runtime, Plugins & Developer Commands
 
 ### `hbllm plugin`
 
-Manage dynamic hot-swappable plugins:
-
 ```bash
-# List all discovered plugins in ./plugins directory
+# List discovered plugins under plugins/
 hbllm plugin list
 
-# Scaffold a new plugin boilerplate with message bus subscription decorators
-hbllm plugin new github_syncer
+# Scaffold a new plugin skeleton
+hbllm plugin new my_adapter
 ```
 
----
+### `hbllm serve`
 
-### `hbllm agent`
+Starts the FastAPI REST server (`uvicorn hbllm.serving.api:app` with `uvloop`; requires `pip install ".[server]"`):
 
-Launch the autonomous interactive developer terminal agent with tool sandboxing:
+```bash
+hbllm serve --host 0.0.0.0 --port 8000 --workers 1
+```
+
+### `hbllm daemon`
+
+```bash
+hbllm daemon run        # Run in foreground
+hbllm daemon status     # Check service status
+hbllm daemon install    # Install OS service
+hbllm daemon uninstall  # Remove OS service
+```
+
+### `hbllm agent` and `hbllm code`
 
 ```bash
 hbllm agent
+hbllm code "Summarize module structure"
 ```
 
----
+### Legacy Standalone Utilities
 
-### `hbllm code`
-
-Launch the terminal pair-programming assistant for rapid inline refactoring:
-
-```bash
-hbllm code
-```
-
----
-
-## Standalone Subsystem CLIs
-
-### Diagnostics CLI
-
-Verify runtime dependencies, SIMD CPU instruction set detection, and native Rust acceleration crates:
-
-```bash
-python -m hbllm.cli.diagnostics
-```
-
-**Sample Output:**
-```
-============================================================
-              HBLLM RUNTIME DIAGNOSTICS
-============================================================
-[Python Environment]
-  Python Version:     3.11.8
-  uvloop Active:      YES (High-performance event loop)
-  SQLite Version:     3.45.1 (WAL & mmap supported)
-
-[Native Rust Acceleration Crates]
-  hbllm_compute:          LOADED (AVX-512 / NEON SIMD enabled)
-  hbllm_tokenizer:        LOADED (Fast BPE tokenizer)
-  hbllm_data_tools:       LOADED (MinHash deduplication)
-  hbllm_semantic_search:  LOADED (Native SIMD vector index)
-  hbllm_knowledge_graph:  LOADED (Native Graph Traversal)
-  hbllm_policy_eval:      LOADED (Native Policy Engine)
-  hbllm_confidence:       LOADED (Native Epistemic Calibrator)
-============================================================
-Status: ALL SYSTEMS OPERATIONAL
-```
-
----
-
-### DPO Export CLI
-
-Export positive and negative preference pairs recorded in `ValueMemory` to JSONL datasets ready for Direct Preference Optimization training:
-
-```bash
-python -m hbllm.cli.export_dpo --output ./data/dpo_pairs.jsonl --tenant-id default
-```
-
----
-
-### Standalone Daemon & MCP Server
-
-```bash
-# Run continuous cognitive background daemon (AutonomyCore heartbeat)
-python -m hbllm.serving.daemon --provider openai/gpt-4o-mini
-
-# Run Model Context Protocol (MCP) server for IDE tools integration
-python -m hbllm.serving.mcp_server
-```
+The following standalone CLIs remain available for legacy workflows:
+- `python -m hbllm.serving.mcp_server` — MCP stdio tool server
+- `python -m hbllm.cli.export_dpo --output ./data/dpo_pairs.jsonl` — Legacy preference pair export
+- `hbllm train` / `hbllm data` — Legacy pre-training and data pipeline entry points

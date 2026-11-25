@@ -30,7 +30,6 @@ from hbllm.hcir.world.percept import EpistemicPhase, ExogenousSignalTracker, Pla
 from hbllm.hcir.world.remote_causal_attribution import RemoteCausalAttributor
 from hbllm.hcir.world.symbolic_constraints import SymbolicConstraintSolver
 from hbllm.hcir.world.visuospatial_working_memory import VisuospatialWorkingMemory
-from hbllm.hcir.world.working_memory.buffer import PBWMWorkingMemoryBuffer
 from hbllm.hcir.world.working_memory.models import (
     DomainCompetenceProfile,
     HeldItem,
@@ -75,7 +74,6 @@ class PrefrontalWorkingMemory:
 
         self.homeostatic_state: HomeostaticState = HomeostaticState()
         self.domain_competence_profiles: dict[str, DomainCompetenceProfile] = {}
-        self.pbwm_buffer: PBWMWorkingMemoryBuffer = PBWMWorkingMemoryBuffer()
         self.held_items: list[HeldItem] = []
         self.active_schema: SubgoalSchema | None = None
         self.procedural_library: dict[str, DeclarativeNeuroSymbolicSkill] = {}
@@ -91,6 +89,9 @@ class PrefrontalWorkingMemory:
         self.feedback_assimilated: bool = False
         self.avatar_controllability_evidence: dict[int, list[tuple[int, tuple[int, int]]]] = {}
         self.prev_oriented_threats: list[Any] = []
+        self.consecutive_null_actions: dict[Any, int] = {}
+        self.consecutive_quiescent_actions: int = 0
+        self.structural_goals_cache: tuple[int, list[Any]] | None = None
         self.constraint_solver: SymbolicConstraintSolver = SymbolicConstraintSolver()
         self.executive_directives: list[str] = []
 
@@ -179,6 +180,7 @@ class PrefrontalWorkingMemory:
         # Universal Dynamic Action Affordance Registry
         self.action_affordances: dict[Any, Any] = {}
         self.focus_switch_actions: set[Any] = set()
+        self.controllable_avatar_features: set[int] = set()
         self.undo_actions: set[Any] = set()
         self.index_selector_actions: set[Any] = set()
         self.value_mutator_actions: set[Any] = set()
@@ -194,6 +196,7 @@ class PrefrontalWorkingMemory:
         self.object_macro_tasks: dict[str, list[Any]] = {}
         self.object_trial_counts: dict[str, int] = {}
         self.object_success_counts: dict[str, int] = {}
+        self.target_scorers: list[Any] = []
 
     @property
     def level_epistemic_probes(self) -> int:
@@ -386,6 +389,7 @@ class PrefrontalWorkingMemory:
                         if newly_hidden >= 3 and newly_revealed >= 3:
                             self.shroud_feature = cand_s
                             self.allocentric_belief_grid = prev.copy()
+                            self.exogenous_tracker.reset_episode(retain_long_term=False)
                             break
             elif H >= 7 and W >= 7:
                 c0 = int(arr[0, 0])
@@ -408,6 +412,7 @@ class PrefrontalWorkingMemory:
                     if inner_rings >= 2 and non_s.size >= 9 and len(np.unique(non_s)) >= 2:
                         self.shroud_feature = c0
                         self.allocentric_belief_grid = arr.copy()
+                        self.exogenous_tracker.reset_episode(retain_long_term=False)
 
         self.prev_raw_sensory_grid = arr.copy()
         if self.shroud_feature is None:
@@ -439,6 +444,9 @@ class PrefrontalWorkingMemory:
         self.simulated_goal = None
         self.last_predicted_pos = None
         self.feedback_assimilated = False
+        self.structural_goals_cache = None
+        if not retain_long_term:
+            self.consecutive_null_actions.clear()
         self.mental_plan.clear()
         self.active_hypothesis = None
         self.consecutive_simulation_failures = 0
@@ -514,6 +522,7 @@ class PrefrontalWorkingMemory:
             self.immobile_entity_actions.clear()
             self.action_affordances.clear()
             self.focus_switch_actions.clear()
+            self.controllable_avatar_features.clear()
             self.last_non_displacement_action = None
             self.total_epistemic_probes = 0
             self.known_objects.clear()
@@ -608,10 +617,6 @@ class PrefrontalWorkingMemory:
         """Register a doorway transition as an active macro-subgoal in prefrontal memory."""
         self.topological_subgoals.append(door_coord)
         self.active_macro_goal = f"doorway_to_room_{target_room}"
-
-    def orient_attention(self, coord: tuple[int, int]) -> None:
-        """Orient prefrontal attentional focus to surprising or salient coordinates."""
-        self.focal_attention_point = coord
 
     def acquire_item(
         self,

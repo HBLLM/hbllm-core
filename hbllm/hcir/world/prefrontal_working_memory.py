@@ -7,11 +7,9 @@ This facade re-exports all symbols from `hbllm.hcir.world.working_memory` for ba
 from __future__ import annotations
 
 from hbllm.hcir.world.working_memory import (
-    AttractorMemorySlot,
     DomainCompetenceProfile,
     HeldItem,
     HomeostaticState,
-    PBWMWorkingMemoryBuffer,
     PrefrontalWorkingMemory,
     SubgoalSchema,
     SubgoalStage,
@@ -19,11 +17,9 @@ from hbllm.hcir.world.working_memory import (
 )
 
 __all__ = [
-    "AttractorMemorySlot",
     "DomainCompetenceProfile",
     "HeldItem",
     "HomeostaticState",
-    "PBWMWorkingMemoryBuffer",
     "PrefrontalWorkingMemory",
     "SubgoalSchema",
     "SubgoalStage",

@@ -113,7 +113,7 @@ class NavigateTo(MacroAction):
 
         from hbllm.hcir.world.cortex_perception import PerceptionEngine
 
-        threats = get_engine_state_attr(engine, "_prev_oriented_threats", [])
+        threats = get_engine_state_attr(engine, "prev_oriented_threats", [])
         if not threats:
             threats = PerceptionEngine.detect_oriented_threats(
                 curr_grid,
@@ -199,6 +199,7 @@ class NavigateTo(MacroAction):
             barrier_features=wall_feats,
             avatar_features=av_feats,
             max_candidate_goals=1,
+            transition_kb=engine.symbolic_theory.transition_kb,
         )
 
         if plan and len(plan) > 0:
@@ -757,43 +758,6 @@ class ExploreObject(MacroAction):
                 return a, None
 
         return available_actions[0], None
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. ExploreFrontier Operator (Epistemic Curiosity)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class ExploreFrontier(MacroAction):
-    """Epistemic exploration toward the nearest unvisited traversable coordinate."""
-
-    def __init__(self, description: str = "") -> None:
-        super().__init__(name="ExploreFrontier", intent=SpatialActionIntent.NAVIGATE)
-        self.description = description or "Explore unvisited frontier cells"
-
-    def is_satisfied(
-        self,
-        engine: AutonomousEpistemicEngine,
-        curr_grid: np.ndarray,
-    ) -> bool:
-        return self.consecutive_steps >= 12 or engine.phase != engine.phase.EPISTEMIC_EXPLORATION
-
-    def is_feasible(
-        self,
-        engine: AutonomousEpistemicEngine,
-        curr_grid: np.ndarray,
-        available_actions: Sequence[Any],
-    ) -> bool:
-        return len(available_actions) > 0
-
-    def step(
-        self,
-        engine: AutonomousEpistemicEngine,
-        curr_grid: np.ndarray,
-        available_actions: Sequence[Any],
-    ) -> tuple[Any, dict[str, Any] | None]:
-        self.consecutive_steps += 1
-        return engine.plan_epistemic_probe(curr_grid, available_actions)
 
 
 class TranslateObject(MacroAction):

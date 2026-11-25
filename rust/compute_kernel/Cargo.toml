@@ -10,11 +10,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # PyO3 for Python bindings
-pyo3 = { version = "0.20.0", features = ["abi3-py311"] }
-numpy = "0.20.0"
-
-# SIMD support
-packed_simd_2 = { version = "0.3.8", optional = true }
+pyo3 = { version = "0.25", features = ["abi3-py311"] }
+numpy = "0.25"
 
 # Memory mapping for expert streaming
 memmap2 = "0.9.0"
@@ -25,6 +22,6 @@ rayon = "1.8.0"
 [features]
 default = ["extension-module"]
 extension-module = ["pyo3/extension-module"]
-neon = ["packed_simd_2"]
-avx2 = ["packed_simd_2"]
+neon = []
+avx2 = []
 mps = []

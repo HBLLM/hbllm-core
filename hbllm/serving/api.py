@@ -65,9 +65,7 @@ def require_authenticated_tenant(request: Request) -> str:
 class ChatRequest(BaseModel):
     """Incoming chat message from a tenant."""
 
-    tenant_id: str = Field(
-        default="default", description="Unique tenant identifier (overridden by JWT)"
-    )
+    tenant_id: str = Field(default="", description="Unique tenant identifier (overridden by JWT)")
     user_id: str = Field(default="", description="User identifier (overridden by JWT)")
     device_id: str = Field(default="", description="Device identifier (overridden by JWT)")
     session_id: str = Field(default="default_session", description="Session identifier")
@@ -1458,9 +1456,9 @@ async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
     Automatically routes to the full brain pipeline or external LLM provider
     based on system mode. Use 'provider' field to force a specific provider.
     """
-    request.tenant_id = getattr(api_req.state, "tenant_id", "default")
-    request.user_id = getattr(api_req.state, "user_id", "default")
-    request.device_id = getattr(api_req.state, "device_id", "default")
+    request.tenant_id = require_authenticated_tenant(api_req)
+    request.user_id = getattr(api_req.state, "user_id", None) or request.tenant_id
+    request.device_id = getattr(api_req.state, "device_id", None) or "unknown"
     mode = _state.get("mode", "provider")
 
     # Explicit provider override always uses provider path
@@ -1626,7 +1624,7 @@ async def enroll_speaker(request: Request) -> Any:
     if not speaker_id:
         raise HTTPException(status_code=400, detail="speaker_id is required")
 
-    tenant_id = data.get("tenant_id", "default")
+    tenant_id = require_authenticated_tenant(request)
 
     msg = Message(
         type=MessageType.QUERY,
@@ -1652,12 +1650,13 @@ async def enroll_speaker(request: Request) -> Any:
 
 
 @app.get("/studio/voice/speakers")
-async def list_speakers(tenant_id: str = "default") -> Any:
+async def list_speakers(request: Request) -> Any:
     """List all enrolled speakers for a tenant."""
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Bus not initialized")
 
+    tenant_id = require_authenticated_tenant(request)
     msg = Message(
         type=MessageType.QUERY,
         source_node_id="api",
@@ -1675,12 +1674,13 @@ async def list_speakers(tenant_id: str = "default") -> Any:
 
 
 @app.delete("/studio/voice/speakers/{speaker_id}")
-async def delete_speaker(speaker_id: str, tenant_id: str = "default") -> Any:
+async def delete_speaker(speaker_id: str, request: Request) -> Any:
     """Delete an enrolled speaker profile."""
     bus = _state.get("bus")
     if not bus:
         raise HTTPException(status_code=503, detail="Bus not initialized")
 
+    tenant_id = require_authenticated_tenant(request)
     msg = Message(
         type=MessageType.QUERY,
         source_node_id="api",
@@ -1719,22 +1719,53 @@ async def audio_websocket(ws: WebSocket) -> None:
 
     import jwt as pyjwt
 
-    # ── Auth ──
+    # ── Auth (fail closed unless JWT verifies tenant_id) ──
     token = ws.query_params.get("token", "")
-    tenant_id = "default"
-    user_id = "default"
     session_id = str(uuid.uuid4())
+    unsafe_dev_auth = os.environ.get("HBLLM_UNSAFE_DEV_AUTH", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if not token and os.environ.get("HBLLM_ENV", "").lower() != "production" and unsafe_dev_auth:
+        from hbllm.security.identity_resolver import resolve_sovereign_identity
 
-    if token:
+        tenant_id, _ = resolve_sovereign_identity()
+        user_id = tenant_id
+    else:
+        if not token:
+            await ws.close(code=1008, reason="Missing authentication token")
+            return
         secret_key = os.environ.get("HBLLM_JWT_SECRET", "")
-        if secret_key:
-            try:
-                payload = pyjwt.decode(token, secret_key, algorithms=["HS256"])
-                tenant_id = payload.get("tenant_id", "default")
-                user_id = payload.get("user_id", "default")
-            except pyjwt.InvalidTokenError:
-                await ws.close(code=1008, reason="Invalid token")
+        if not secret_key:
+            auth_mw = next(
+                (
+                    m
+                    for m in getattr(app, "user_middleware", [])
+                    if hasattr(m, "kwargs") and "secret_key" in m.kwargs
+                ),
+                None,
+            )
+            if auth_mw:
+                secret_key = auth_mw.kwargs.get("secret_key", "")
+        if not secret_key:
+            await ws.close(code=1011, reason="Server auth not configured")
+            return
+        try:
+            payload = pyjwt.decode(
+                token, secret_key, algorithms=["HS256"], options={"require": ["tenant_id"]}
+            )
+            tenant_id = payload.get("tenant_id", "")
+            if not tenant_id:
+                await ws.close(code=1008, reason="Token missing tenant_id")
                 return
+            user_id = payload.get("user_id") or tenant_id
+        except pyjwt.ExpiredSignatureError:
+            await ws.close(code=1008, reason="Token expired")
+            return
+        except pyjwt.InvalidTokenError:
+            await ws.close(code=1008, reason="Invalid token")
+            return
 
     await ws.accept()
     logger.info("Audio WebSocket connected: tenant=%s user=%s", tenant_id, user_id)
@@ -2050,7 +2081,7 @@ async def list_devices(request: Request) -> dict[str, Any]:
     bridge = _state.get("device_bridge") or (
         getattr(brain, "device_bridge", None) if brain else None
     )
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = require_authenticated_tenant(request)
 
     client_devices = []
     if bridge is not None:
@@ -2200,7 +2231,7 @@ async def register_client_device(
     if not device_id:
         raise HTTPException(status_code=400, detail="Missing required 'device_id'")
 
-    tenant_id = getattr(request.state, "tenant_id", None) or payload.get("tenant_id", "default")
+    tenant_id = require_authenticated_tenant(request)
     device = DeviceInfo(
         device_id=str(device_id),
         tenant_id=str(tenant_id),
@@ -2282,7 +2313,7 @@ async def get_active_client_devices(
     if bridge is None:
         return {"devices": [], "count": 0}
 
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = require_authenticated_tenant(request)
     active = bridge.get_active_devices(tenant_id)
     return {
         "devices": [
@@ -2313,7 +2344,7 @@ async def get_best_client_device(
     if bridge is None:
         raise HTTPException(status_code=503, detail="DeviceBridge not initialized")
 
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = require_authenticated_tenant(request)
     req_caps = [c.strip() for c in capabilities.split(",") if c.strip()] if capabilities else None
     best = bridge.get_best_device(tenant_id, required_capabilities=req_caps)
     if not best:
@@ -2409,9 +2440,9 @@ async def synapse_websocket(websocket: WebSocket) -> Any:
 @app.post("/v1/synapse/webrtc/offer")
 async def webrtc_offer(api_req: Request, request: WebRTCOfferRequest) -> Any:
     """Negotiate a WebRTC P2P connection for high-bandwidth perception streams."""
-    tenant_id = getattr(api_req.state, "tenant_id", "default")
-    user_id = getattr(api_req.state, "user_id", "default")
-    device_id = getattr(api_req.state, "device_id", "default")
+    tenant_id = require_authenticated_tenant(api_req)
+    user_id = getattr(api_req.state, "user_id", None) or tenant_id
+    device_id = getattr(api_req.state, "device_id", None) or "unknown"
 
     webrtc_gateway = _state.get("webrtc_gateway")
     if not webrtc_gateway:
@@ -2439,9 +2470,9 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
         data: {"token": "...", "done": false, "fragment_id": "..."}
         data: {"token": "", "done": true, "correlation_id": "..."}
     """
-    request.tenant_id = getattr(api_req.state, "tenant_id", "default")
-    request.user_id = getattr(api_req.state, "user_id", "default")
-    request.device_id = getattr(api_req.state, "device_id", "default")
+    request.tenant_id = require_authenticated_tenant(api_req)
+    request.user_id = getattr(api_req.state, "user_id", None) or request.tenant_id
+    request.device_id = getattr(api_req.state, "device_id", None) or "unknown"
     brain = _state.get("brain")
     bus = getattr(brain, "bus", None)
     if not bus:
@@ -2562,7 +2593,7 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
     config = _state.get("config") or BrainConfig()
     api_timeout = config.api_timeout
     stream_timeout = config.stream_timeout
-    tenant_id = getattr(api_req.state, "tenant_id", "default")
+    tenant_id = require_authenticated_tenant(api_req)
     session_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
 
@@ -2573,18 +2604,27 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
             None,
         )
         if last_user_msg:
+            from starlette.concurrency import run_in_threadpool
+
+            from hbllm.serving.cognitive_registry import get_cognitive_registry
+
+            registry = _state.get("cognitive_registry") or get_cognitive_registry()
+            _state.setdefault("cognitive_registry", registry)
             try:
-                from hbllm.runtime.bootstrap import CognitiveSystem
-
-                cognitive_system = _state.get("cognitive_system")
-                if cognitive_system is None:
-                    cognitive_system = CognitiveSystem()
-                    _state["cognitive_system"] = cognitive_system
-
-                hcir_result = cognitive_system.process_dialogue(last_user_msg)
-                if hcir_result.is_success:
+                override_system = _state.get("cognitive_system")
+                if override_system is not None:
+                    hcir_result = await run_in_threadpool(
+                        override_system.process_dialogue,
+                        last_user_msg,
+                    )
+                else:
+                    hcir_result = await registry.process_dialogue(tenant_id, last_user_msg)
+                hcir_ok = bool(getattr(hcir_result, "is_success", False))
+                hcir_text = str(getattr(hcir_result, "response_text", "") or "")
+                if hcir_ok and hcir_text:
                     logger.info(
-                        "HCIR autonomy: success for input: %s",
+                        "HCIR autonomy: success for tenant=%s input=%s",
+                        tenant_id,
                         last_user_msg[:80],
                     )
                     return JSONResponse(
@@ -2598,14 +2638,14 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
                                     "index": 0,
                                     "message": {
                                         "role": "assistant",
-                                        "content": hcir_result.response_text,
+                                        "content": hcir_text,
                                     },
                                     "finish_reason": "stop",
                                 }
                             ],
                             "usage": {
                                 "prompt_tokens": len(last_user_msg.split()),
-                                "completion_tokens": len(hcir_result.response_text.split()),
+                                "completion_tokens": len(hcir_text.split()),
                                 "total_tokens": 0,
                             },
                         },
@@ -2614,12 +2654,14 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
                 else:
                     logger.debug(
                         "HCIR fallback to brain pipeline: %s — %s",
-                        hcir_result.error_type,
+                        getattr(hcir_result, "error_type", type(hcir_result).__name__),
                         last_user_msg[:80],
                     )
             except Exception:
-                logger.debug(
-                    "HCIR unavailable, falling through to brain pipeline",
+                fallbacks = registry.record_fallback()
+                logger.warning(
+                    "Pure-HCIR fast path failed (fallbacks=%d); falling back to brain pipeline",
+                    fallbacks,
                     exc_info=True,
                 )
 
@@ -2763,11 +2805,16 @@ async def chat_websocket(ws: WebSocket) -> None:
 
     # ── 1. Extract and verify JWT ──
     token = ws.query_params.get("token", "")
-    if not token and os.environ.get("HBLLM_ENV", "").lower() != "production":
+    unsafe_dev_auth = os.environ.get("HBLLM_UNSAFE_DEV_AUTH", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if not token and os.environ.get("HBLLM_ENV", "").lower() != "production" and unsafe_dev_auth:
         from hbllm.security.identity_resolver import resolve_sovereign_identity
 
         tenant_id, device_id = resolve_sovereign_identity()
-        user_id = "default"
+        user_id = tenant_id
     else:
         if not token:
             await ws.close(code=1008, reason="Missing authentication token")

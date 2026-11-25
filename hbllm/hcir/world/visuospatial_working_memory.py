@@ -24,7 +24,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.hcir.skills.declarative import SpatialActionIntent, SymbolicSubgoal
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 
@@ -230,38 +229,6 @@ class VisuospatialWorkingMemory:
             return candidates[0]
 
         return None
-
-    def find_any_unresolved_pair(
-        self,
-        bg: int | None = None,
-    ) -> tuple[tuple[int, int], tuple[int, int], int] | None:
-        """Find any two unresolved coordinates in memory that share the same non-zero feature."""
-        for feat, coords in self.feature_to_coords.items():
-            if feat <= 0 or (bg is not None and feat == bg):
-                continue
-            active = [p for p in coords if p not in self.resolved_coords]
-            if len(active) >= 2:
-                # Sort by step observed to match most recently discovered first
-                active.sort(
-                    key=lambda p: self.bound_slots[p].step_observed if p in self.bound_slots else 0,
-                    reverse=True,
-                )
-                return (active[0], active[1], feat)
-        return None
-
-    def find_matching_pair_subgoal(
-        self,
-        current_pos: tuple[int, int],
-        current_feature: int,
-    ) -> SymbolicSubgoal | None:
-        """Emit a formal declarative SymbolicSubgoal targeting a matching pair coordinate."""
-        match_pos = self.find_matching_pair(current_pos, current_feature)
-        if match_pos is None:
-            return None
-        return SymbolicSubgoal(
-            intent=SpatialActionIntent.NAVIGATE,
-            target_query={"target_position": match_pos, "feature_id": current_feature},
-        )
 
     def mark_resolved(self, coords: set[tuple[int, int]]) -> None:
         """Mark coordinates as resolved / cleared."""

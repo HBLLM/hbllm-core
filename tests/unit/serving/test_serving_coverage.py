@@ -325,12 +325,16 @@ class TestDeps:
         request.state.tenant_id = "my-tenant"
         assert get_tenant_id(request) == "my-tenant"
 
-    def test_get_tenant_id_default(self):
+    def test_get_tenant_id_requires_auth(self):
+        from fastapi import HTTPException
+
         from hbllm.serving.deps import get_tenant_id
 
         request = MagicMock(spec=[])
         request.state = MagicMock(spec=[])
-        assert get_tenant_id(request) == "default"
+        with pytest.raises(HTTPException) as exc_info:
+            get_tenant_id(request)
+        assert exc_info.value.status_code == 401
 
 
 # ═══════════════════════════════════════════════════════════════════════

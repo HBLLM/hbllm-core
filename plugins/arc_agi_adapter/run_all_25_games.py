@@ -186,36 +186,8 @@ class ArcAgiConsoleDriver(BaseDriver):
                 "name",
                 str(getattr(self.current_frame, "state", "")),
             ),
+            "action_schemas": [dict(s) for s in self.descriptor.action_schema],
         }
-        game_obj = getattr(self.env, "_game", None) or getattr(self.env, "game", None)
-        cur_lvl = (
-            getattr(game_obj, "current_level", None)
-            if game_obj
-            else getattr(self.env, "current_level", None)
-        )
-        if cur_lvl is not None and hasattr(cur_lvl, "get_data"):
-            try:
-                sc = cur_lvl.get_data("StepCounter")
-                if sc is not None:
-                    metadata["StepCounter"] = int(sc)
-            except Exception:
-                pass
-
-        game_actions = getattr(game_obj, "actions", None)
-        valid_targets: list[dict[str, Any]] = []
-        if game_actions and isinstance(game_actions, (list, tuple)):
-            for act_in in game_actions:
-                d = getattr(act_in, "data", None)
-                if isinstance(d, dict) and d:
-                    valid_targets.append(d)
-
-        schemas = [dict(s) for s in self.descriptor.action_schema]
-        if valid_targets:
-            for s in schemas:
-                if s.get("action_id") == 6:
-                    s["valid_targets"] = valid_targets
-        metadata["action_schemas"] = schemas
-
         return DriverInput(
             raw_data=grid,
             source_id=self.name,
@@ -264,19 +236,6 @@ class ArcAgiConsoleDriver(BaseDriver):
             "available_actions": avail_actions,
             "terminated": is_done,
         }
-        game_obj = getattr(self.env, "_game", None) or getattr(self.env, "game", None)
-        cur_lvl = (
-            getattr(game_obj, "current_level", None)
-            if game_obj
-            else getattr(self.env, "current_level", None)
-        )
-        if cur_lvl is not None and hasattr(cur_lvl, "get_data"):
-            try:
-                sc = cur_lvl.get_data("StepCounter")
-                if sc is not None:
-                    info_dict["StepCounter"] = int(sc)
-            except Exception:
-                pass
 
         return DriverFeedback(
             success=True,
@@ -407,6 +366,7 @@ def run_all_25_games(
             for e in environments
             if e.game_id.lower() in selected_lower
             or getattr(e, "title", "").lower() in selected_lower
+            or any(e.game_id.lower().startswith(s) for s in selected_lower)
         ]
         if not environments:
             print(f"⚠️ No environments matched filters: {selected_games}")
@@ -498,21 +458,9 @@ def run_all_25_games(
             seed=seed,
             trace_dir=str(game_trace_dir) if game_trace_dir is not None else None,
         )
+        if max_level_steps is not None:
+            agent.ACTIONS_PER_LEVEL = max_level_steps
         cognitive_engine = CognitiveAgentAdapter(agent)
-
-        # Phase C: Seed engine with cross-game prior knowledge
-        try:
-            epistemic_engine = getattr(agent, "internal_engine", getattr(agent, "engine", None))
-            if epistemic_engine is not None and hasattr(epistemic_engine, "knowledge_transfer"):
-                epistemic_engine.knowledge_transfer.on_game_start(
-                    epistemic_engine,
-                    set(range(8)),  # Standard 8-action ARC space
-                )
-                # Phase C: Clear per-game episodic macros for tenant isolation
-                if hasattr(epistemic_engine, "episodic_cortex"):
-                    epistemic_engine.episodic_cortex.reset_consolidated_macros()
-        except Exception as e:
-            logger.debug("Phase C on_game_start error: %s", e)
 
         for attempt in range(retries + 1):
             attempts_taken += 1
@@ -523,8 +471,6 @@ def run_all_25_games(
             if env is None:
                 print(f"    ⚠️ Could not make game environment for {gid}")
                 continue
-
-            agent.arc_env = env
 
             driver = ArcAgiConsoleDriver(name="arc_console", env=env, game_id=gid)
             manager = DriverManager()
@@ -803,42 +749,6 @@ def run_all_25_games(
         total_levels_passed += best_completed
         total_levels_possible += best_target
 
-        # Phase C & D: Post-game autonomous learning hooks
-        try:
-            epistemic_engine = getattr(agent, "internal_engine", getattr(agent, "engine", None))
-            if epistemic_engine is not None:
-                # Phase C: Extract and promote learned invariants
-                if hasattr(epistemic_engine, "knowledge_transfer"):
-                    epistemic_engine.knowledge_transfer.on_game_complete(
-                        epistemic_engine,
-                        game_id=gid,
-                        levels_won=best_completed,
-                    )
-                # Phase D: Record strategy outcome for meta-learning governor
-                if hasattr(epistemic_engine, "meta_governor"):
-                    from hbllm.hcir.world.autonomous_learning import (
-                        GameFeatureSignature,
-                        StrategyOutcome,
-                    )
-
-                    features = GameFeatureSignature(
-                        action_space=frozenset(range(8)),
-                        grid_shape=(0, 0),
-                        has_movement_actions=True,
-                    )
-                    epistemic_engine.meta_governor.record_outcome(
-                        StrategyOutcome(
-                            game_id=gid,
-                            features=features,
-                            strategy_name="epistemic_brain",
-                            levels_won=best_completed,
-                            total_levels=best_target,
-                            time_seconds=best_elapsed,
-                        )
-                    )
-        except Exception as e:
-            logger.debug("Phase C/D on_game_complete error: %s", e)
-
         status_label = (
             "✅ WON ALL LEVELS"
             if best_is_win
@@ -916,6 +826,7 @@ def run_all_25_games(
             },
             "games": results,
         }
+        scorecard_path.parent.mkdir(parents=True, exist_ok=True)
         scorecard_path.write_text(json.dumps(checkpoint, indent=2))
 
     total_time_elapsed = time.time() - total_time_start

@@ -67,12 +67,16 @@ class KnowledgeGainSnapshot:
     domain_counts: dict[str, int]
     last_book_title: str
     last_book_id: int = 0
+    source_mode: str = "live"
+    fetch_error: str = ""
 
 
 class GutenbergIndexManager:
     """Discovers, parses, and categorizes titles from the 79,000+ Gutenberg collection."""
 
     INDEX_URL = "https://www.gutenberg.org/dirs/GUTINDEX.ALL"
+    last_index_source: str = ""
+    last_index_error: str = ""
 
     # Domain keyword patterns (specific domains checked before general physics)
     DOMAIN_PATTERNS: dict[str, list[str]] = {
@@ -149,8 +153,10 @@ class GutenbergIndexManager:
     }
 
     @classmethod
-    def fetch_or_load_index(cls, max_chars: int = 5_000_000, cache_dir: Path | None = None) -> str:
-        """Download or load cached GUTINDEX.ALL."""
+    def fetch_or_load_index_with_status(
+        cls, max_chars: int = 5_000_000, cache_dir: Path | None = None
+    ) -> tuple[str, str, str]:
+        """Download or load cached GUTINDEX.ALL, returning ``(text, source_mode, error_msg)``."""
         target_dir = cache_dir or CACHE_DIR
         target_dir.mkdir(parents=True, exist_ok=True)
         local_path = target_dir / "GUTINDEX.ALL"
@@ -158,7 +164,9 @@ class GutenbergIndexManager:
         if local_path.exists() and local_path.stat().st_size > 100_000:
             logger.info(f"Loading Gutenberg index from local cache: {local_path}...")
             with open(local_path, encoding="utf-8", errors="replace") as f:
-                return f.read(max_chars)
+                cls.last_index_source = "cache"
+                cls.last_index_error = ""
+                return f.read(max_chars), "cache", ""
 
         logger.info(f"Downloading Project Gutenberg master catalog from {cls.INDEX_URL}...")
         req = urllib.request.Request(
@@ -169,12 +177,25 @@ class GutenbergIndexManager:
                 data = resp.read(max_chars).decode("utf-8", errors="replace")
                 with open(local_path, "w", encoding="utf-8") as f:
                     f.write(data)
-                return data
+                cls.last_index_source = "live"
+                cls.last_index_error = ""
+                return data, "live", ""
         except Exception as e:
-            logger.warning(
-                f"Failed to fetch live Gutenberg index ({e}). Using offline curated index."
+            err = str(e)
+            cls.last_index_source = "offline_fallback"
+            cls.last_index_error = err
+            logger.error(
+                "OFFLINE, no index fetched from %s (%s). Falling back to 11-title offline stub list.",
+                cls.INDEX_URL,
+                err,
             )
-            return cls._get_offline_sample_index()
+            return cls._get_offline_sample_index(), "offline_fallback", err
+
+    @classmethod
+    def fetch_or_load_index(cls, max_chars: int = 5_000_000, cache_dir: Path | None = None) -> str:
+        """Download or load cached GUTINDEX.ALL."""
+        text, _, _ = cls.fetch_or_load_index_with_status(max_chars=max_chars, cache_dir=cache_dir)
+        return text
 
     @classmethod
     def parse_index(
@@ -360,6 +381,7 @@ class GutenbergCorpusStreamer:
     ) -> None:
         self.cache_dir = Path(cache_dir or CACHE_DIR)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.fetch_status: dict[int, tuple[str, str]] = {}
         self.prefetcher: BackgroundGutenbergPrefetcher | None = None
         if enable_prefetch:
             self.prefetcher = BackgroundGutenbergPrefetcher(cache_dir=self.cache_dir)
@@ -376,26 +398,34 @@ class GutenbergCorpusStreamer:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
 
-    def fetch_book_text(self, metadata: GutenbergBookMetadata) -> str:
-        """Fetch book text from disk cache or download from Gutenberg."""
+    def fetch_book_with_status(self, metadata: GutenbergBookMetadata) -> tuple[str, str, str]:
+        """Fetch book text and return ``(raw_text, source_mode, error_msg)``."""
         book_cache_file = self.cache_dir / f"book_{metadata.book_id}.txt"
-        if book_cache_file.exists() and book_cache_file.stat().st_size > 1000:
+        if book_cache_file.exists() and book_cache_file.stat().st_size > 50:
             with open(book_cache_file, encoding="utf-8", errors="replace") as f:
-                return f.read()
+                self.fetch_status[metadata.book_id] = ("cache", "")
+                return f.read(), "cache", ""
 
-        # Download from Gutenberg with fallback protection
+        err_msg = ""
         try:
-            raw_text = RawBookDownloader.download_gutenberg(metadata.book_id)
-            if raw_text and len(raw_text) > 100:
+            raw_text = RawBookDownloader.download_gutenberg(metadata.book_id, raise_on_error=True)
+            if raw_text and len(raw_text) > 50:
                 with open(book_cache_file, "w", encoding="utf-8") as f:
                     f.write(raw_text)
-                return raw_text
+                self.fetch_status[metadata.book_id] = ("live", "")
+                return raw_text, "live", ""
+            err_msg = RawBookDownloader.last_error or "empty response"
         except Exception as e:
-            logger.warning(
-                f"Error downloading Gutenberg book #{metadata.book_id}: {e}. Using offline fallback."
-            )
+            err_msg = str(e) or RawBookDownloader.last_error or type(e).__name__
 
-        return RawBookDownloader._get_offline_fallback_text(
+        logger.error(
+            "OFFLINE FALLBACK for Gutenberg #%d (%s): %s — OFFLINE, no text fetched!",
+            metadata.book_id,
+            metadata.title,
+            err_msg,
+        )
+        self.fetch_status[metadata.book_id] = ("offline_fallback", err_msg)
+        fallback = RawBookDownloader._get_offline_fallback_text(
             BookCurriculumItem(
                 item_id=str(metadata.book_id),
                 source_type=BookSourceType.GUTENBERG,
@@ -404,6 +434,12 @@ class GutenbergCorpusStreamer:
                 domain=metadata.domain,
             )
         )
+        return fallback, "offline_fallback", err_msg
+
+    def fetch_book_text(self, metadata: GutenbergBookMetadata) -> str:
+        """Fetch book text from disk cache or download from Gutenberg."""
+        text, _, _ = self.fetch_book_with_status(metadata)
+        return text
 
     def stream_curriculum_chapters(
         self,
@@ -442,6 +478,9 @@ class KnowledgeGainTracker:
         trainer: ContinuousTextbookSchoolTrainer,
         current_book: GutenbergBookMetadata,
         raw_text_len: int,
+        *,
+        source_mode: str = "live",
+        fetch_error: str = "",
     ) -> KnowledgeGainSnapshot:
         """Capture cognitive state snapshot after ingesting a book."""
         self.total_chars_processed += raw_text_len
@@ -479,6 +518,8 @@ class KnowledgeGainTracker:
             domain_counts=dict(self.domain_distribution),
             last_book_title=current_book.title,
             last_book_id=current_book.book_id,
+            source_mode=source_mode,
+            fetch_error=fetch_error,
         )
         self.snapshots.append(snapshot)
         return snapshot
@@ -489,17 +530,35 @@ class KnowledgeGainTracker:
             return "No training snapshots recorded."
 
         latest = self.snapshots[-1]
-        lines = [
-            "# Project Gutenberg Cognitive Knowledge Acquisition Report",
-            f"**Total Books Ingested**: {len(self.snapshots)}",
-            f"**Raw Characters Processed**: {latest.total_raw_characters:,}",
-            f"**Total Grounded Vocabulary**: {latest.vocabulary_size} terms",
-            f"**Overall Examination Accuracy**: {latest.mean_examination_accuracy * 100:.2f}%",
-            f"**Mean Epistemic Brier Score**: {latest.mean_brier_score:.4f} (Calibrated Non-Hallucination)",
-            f"**Backward Transfer ($BWT$)**: {latest.mean_backward_transfer:.4f} (Zero Forgetting)",
-            "",
-            "## 1. Grounded Lexicon Distribution",
-        ]
+        offline_snaps = [s for s in self.snapshots if s.source_mode == "offline_fallback"]
+        lines = ["# Project Gutenberg Cognitive Knowledge Acquisition Report"]
+        if offline_snaps and len(offline_snaps) == len(self.snapshots):
+            last_err = next(
+                (s.fetch_error for s in reversed(offline_snaps) if s.fetch_error),
+                "network unreachable",
+            )
+            lines.append(
+                f"> **STATUS: OFFLINE, no text fetched.** All {len(offline_snaps)} book(s) failed to download "
+                f"and used synthetic offline stubs (Last error: {last_err})."
+            )
+        elif offline_snaps:
+            lines.append(
+                f"> **WARNING: PARTIAL OFFLINE FALLBACK.** {len(offline_snaps)}/{len(self.snapshots)} book(s) "
+                f"failed to download and used synthetic offline stubs."
+            )
+
+        lines.extend(
+            [
+                f"**Total Books Ingested**: {len(self.snapshots)}",
+                f"**Raw Characters Processed**: {latest.total_raw_characters:,}",
+                f"**Total Grounded Vocabulary**: {latest.vocabulary_size} terms",
+                f"**Overall Examination Accuracy**: {latest.mean_examination_accuracy * 100:.2f}%",
+                f"**Mean Epistemic Brier Score**: {latest.mean_brier_score:.4f} (Calibrated Non-Hallucination)",
+                f"**Backward Transfer ($BWT$)**: {latest.mean_backward_transfer:.4f} (Zero Forgetting)",
+                "",
+                "## 1. Grounded Lexicon Distribution",
+            ]
+        )
         for pos, count in latest.lexicon_breakdown.items():
             lines.append(f"- **{pos}s**: {count}")
 
@@ -516,14 +575,16 @@ class KnowledgeGainTracker:
             [
                 "",
                 "## 3. Cognitive Acquisition Progression",
-                "| Books | Vocabulary Size | Accuracy | Brier Score | Last Ingested Work |",
-                "|---|---|---|---|---|",
+                "| Books | Vocabulary Size | Accuracy | Brier Score | Source | Last Ingested Work |",
+                "|---|---|---|---|---|---|",
             ]
         )
         for s in self.snapshots:
+            src_label = "OFFLINE STUB" if s.source_mode == "offline_fallback" else s.source_mode
             lines.append(
                 f"| {s.books_processed} | {s.vocabulary_size} words | "
-                f"{s.mean_examination_accuracy * 100:.1f}% | {s.mean_brier_score:.4f} | {s.last_book_title[:45]} |"
+                f"{s.mean_examination_accuracy * 100:.1f}% | {s.mean_brier_score:.4f} | "
+                f"{src_label} | {s.last_book_title[:45]} |"
             )
 
         return "\n".join(lines)

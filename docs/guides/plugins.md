@@ -182,24 +182,15 @@ result = await engine.execute("1. Research topic\n2. Write draft\n3. Review")
 
 ## 🧪 Testing Plugins
 
-Each plugin should include localized tests in a `tests/` directory:
+Each plugin under `plugins/` should include localized tests in a `tests/` directory:
 
 ```bash
 # Run a single plugin's tests
-python -m pytest hbllm/plugins/emotion-modeling/tests/ -v --timeout=30
+python -m pytest plugins/arc_agi_adapter/tests/ -v --timeout=30
 
 # Run all plugin tests
-python -m pytest hbllm/plugins/*/tests/ -v --timeout=30
+python -m pytest plugins/*/tests/ -v --timeout=30
 ```
 
-Tests import the engine directly via `sys.path` manipulation (since plugin directories use hyphens):
-
-```python
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from emotion_engine import EmotionEngine
-```
+Environment adapters and plugins live outside `hbllm/` in `plugins/` (for example `plugins/arc_agi_adapter/`, `plugins/developmental_adapter/`, `plugins/weather-plugin/`). Keep all task-specific domain logic inside `plugins/` rather than `hbllm/hcir/`.
 

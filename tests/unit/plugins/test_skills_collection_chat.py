@@ -189,18 +189,12 @@ async def test_skills_collection_via_chat_api(tmp_path, monkeypatch):
     monkeypatch.setenv("HBLLM_ENV", "production")
     monkeypatch.setenv("HBLLM_TENANT_GUARD_MODE", "strict")
 
-    # Override JWT secret in the *live* middleware instance.
-    # The app.user_middleware list only controls future app rebuilds;
-    # we need to patch the already-instantiated middleware's secret_key.
-    for middleware in app.user_middleware:
-        if middleware.cls.__name__ == "JWTAuthMiddleware":
-            middleware.kwargs["secret_key"] = jwt_secret
-
-    # Also patch the live middleware stack (already instantiated).
+    # Scope any instantiated middleware secret override to this test via monkeypatch
+    # without permanently mutating app.user_middleware kwargs for downstream tests.
     _mw = app.middleware_stack
     while _mw is not None:
         if hasattr(_mw, "secret_key"):
-            _mw.secret_key = jwt_secret
+            monkeypatch.setattr(_mw, "secret_key", jwt_secret)
             break
         _mw = getattr(_mw, "app", None)
 
@@ -216,6 +210,9 @@ async def test_skills_collection_via_chat_api(tmp_path, monkeypatch):
         await bus.start()
         cfg = _test_config(tmp_path)
         brain = await BrainFactory.create(provider=mock_provider, config=cfg, bus=bus)
+        prev_state = {
+            k: (_state[k] if k in _state else ...) for k in ("brain", "config", "bus", "mode")
+        }
         _state["brain"] = brain
         _state["config"] = cfg
         _state["bus"] = bus
@@ -226,6 +223,11 @@ async def test_skills_collection_via_chat_api(tmp_path, monkeypatch):
             if brain:
                 await brain.shutdown()
             await bus.stop()
+            for k, old_val in prev_state.items():
+                if old_val is ...:
+                    _state.pop(k, None)
+                else:
+                    _state[k] = old_val
 
     monkeypatch.setattr(app.router, "lifespan_context", mock_lifespan)
 

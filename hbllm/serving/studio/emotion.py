@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from hbllm.serving.studio.helpers import get_node_map
+from hbllm.serving.studio.helpers import get_node_map, get_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +19,9 @@ router = APIRouter()
 
 
 @router.get("/api/emotion/state")
-async def get_emotion_state(agent_name: str = "assistant", tenant_id: str = "default"):
+async def get_emotion_state(request: Request, agent_name: str = "assistant"):
     """Get current emotional state from the core EmotionEngine."""
+    _ = get_tenant_id(request)
     # Try core EmotionEngine first (new path)
     node_map = get_node_map()
     emotion_engine = node_map.get("EmotionEngine")

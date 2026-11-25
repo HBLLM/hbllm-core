@@ -7,8 +7,9 @@ Inductively discovers non-local topological geodesic mechanisms:
 from __future__ import annotations
 
 import collections
+import heapq
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -104,55 +105,293 @@ class GridTopologyGraph:
         return all_paths[0] if all_paths else None
 
     @staticmethod
-    def shortest_path_on_mask(
-        passable_mask: np.ndarray,
+    def shortest_path_from_kb(
+        grid: np.ndarray,
         start_coord: tuple[int, int],
-        goal_coord: tuple[int, int],
-        connectivity: str = "4_connected",
-    ) -> list[tuple[int, int]] | None:
-        """Find minimum-hop shortest path from start to goal through a boolean traversable mask."""
-        H, W = passable_mask.shape
-        sr, sc = start_coord
-        gr, gc = goal_coord
-        if (sr, sc) == (gr, gc):
-            return [(sr, sc)]
-        if not (0 <= sr < H and 0 <= sc < W and 0 <= gr < H and 0 <= gc < W):
+        goal_coords: set[tuple[int, int]],
+        action_deltas: Mapping[Any, tuple[int, int]],
+        evaluate_edge: Callable[[tuple[int, int], int], Any],
+        *,
+        max_expansions: int = 2000,
+        failed_transitions: set[tuple[tuple[int, int], Any]] | None = None,
+        inhibited_actions: set[Any] | None = None,
+        blocked_destinations: set[tuple[int, int]] | None = None,
+        allow_goal_entry: bool = True,
+        inter_step_cost: Callable[[tuple[int, int], int], float] | None = None,
+        budget: Any | None = None,
+    ) -> list[tuple[Any, tuple[int, int]]] | None:
+        """Find minimum-expected-cost path querying only empirical KB transition evaluations."""
+        if not goal_coords or grid.ndim < 2:
+            return None
+        H, W = int(grid.shape[0]), int(grid.shape[1])
+        sr, sc = int(start_coord[0]), int(start_coord[1])
+        if (sr, sc) in goal_coords:
+            return []
+        if not (0 <= sr < H and 0 <= sc < W):
             return None
 
-        offsets = (
-            [(-1, 0), (1, 0), (0, -1), (0, 1)]
-            if connectivity == "4_connected"
-            else [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-        )
-
-        queue: collections.deque[tuple[int, int]] = collections.deque([(sr, sc)])
-        visited: set[tuple[int, int]] = {(sr, sc)}
-        parent: dict[tuple[int, int], tuple[int, int]] = {}
-
-        found = False
-        while queue:
-            curr_r, curr_c = queue.popleft()
-            if (curr_r, curr_c) == (gr, gc):
-                found = True
-                break
-            for dr, dc in offsets:
-                nr, nc = curr_r + dr, curr_c + dc
-                if 0 <= nr < H and 0 <= nc < W and (nr, nc) not in visited:
-                    if (nr, nc) == (gr, gc) or bool(passable_mask[nr, nc]):
-                        visited.add((nr, nc))
-                        parent[(nr, nc)] = (curr_r, curr_c)
-                        queue.append((nr, nc))
-
-        if not found:
+        valid_actions = [
+            (act, int(d[0]), int(d[1]))
+            for act, d in action_deltas.items()
+            if len(d) >= 2
+            and (int(d[0]) != 0 or int(d[1]) != 0)
+            and (inhibited_actions is None or act not in inhibited_actions)
+        ]
+        if not valid_actions:
             return None
 
-        curr = (gr, gc)
-        path = [curr]
-        while curr != (sr, sc):
-            curr = parent[curr]
-            path.append(curr)
-        path.reverse()
-        return path
+        max_stride = max(abs(dr) + abs(dc) for _, dr, dc in valid_actions)
+        inv_stride = 1.0 / max(1, max_stride)
+
+        def _heuristic(r: int, c: int) -> float:
+            return min(abs(r - gr) + abs(c - gc) for gr, gc in goal_coords) * inv_stride
+
+        grid_rows = grid.tolist()
+        open_heap: list[tuple[float, float, int, int, int]] = [(_heuristic(sr, sc), 0.0, 0, sr, sc)]
+        best_cost: dict[tuple[int, int], float] = {(sr, sc): 0.0}
+        came_from: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+        counter = 0
+        expansions = 0
+
+        while open_heap and (max_expansions <= 0 or expansions < max_expansions):
+            if budget is not None:
+                if not budget.allows("cheap"):
+                    return None
+                budget.charge(1)
+            _, g_cost, _, cr, cc = heapq.heappop(open_heap)
+            if g_cost > best_cost.get((cr, cc), float("inf")) + 1e-9:
+                continue
+            if (cr, cc) in goal_coords:
+                plan: list[tuple[Any, tuple[int, int]]] = []
+                cur = (cr, cc)
+                while cur != (sr, sc):
+                    prev_coord, via_act = came_from[cur]
+                    plan.append((via_act, cur))
+                    cur = prev_coord
+                plan.reverse()
+                return plan
+            expansions += 1
+
+            for act, dr, dc in valid_actions:
+                if failed_transitions is not None and ((cr, cc), act) in failed_transitions:
+                    continue
+                nr, nc = cr + dr, cc + dc
+                if not (0 <= nr < H and 0 <= nc < W):
+                    continue
+
+                next_coord = (nr, nc)
+                if blocked_destinations is not None and next_coord in blocked_destinations:
+                    continue
+
+                steps = max(abs(dr), abs(dc))
+                ray_clear = True
+                extra_inter_cost = 0.0
+                if steps > 1 and (dr == 0 or dc == 0 or abs(dr) == abs(dc)):
+                    step_r = (dr > 0) - (dr < 0)
+                    step_c = (dc > 0) - (dc < 0)
+                    for k in range(1, steps):
+                        ir, ic = cr + step_r * k, cc + step_c * k
+                        if not (0 <= ir < H and 0 <= ic < W):
+                            ray_clear = False
+                            break
+                        mid_feat = int(grid_rows[ir][ic])
+                        mid_ev = evaluate_edge((ir, ic), mid_feat)
+                        if (mid_ev.risk_cost >= 40.0 and mid_ev.goal_value <= 0.0) or (
+                            not mid_ev.traversable
+                            and (not allow_goal_entry or (ir, ic) not in goal_coords)
+                        ):
+                            ray_clear = False
+                            break
+                        if inter_step_cost is not None:
+                            extra_inter_cost += float(inter_step_cost((ir, ic), mid_feat))
+                        else:
+                            extra_inter_cost += float(mid_ev.risk_cost)
+                if not ray_clear:
+                    continue
+
+                edge_ev = evaluate_edge(next_coord, int(grid_rows[nr][nc]))
+                is_goal = next_coord in goal_coords
+                if (edge_ev.risk_cost >= 40.0 and edge_ev.goal_value <= 0.0) or (
+                    not edge_ev.traversable
+                    and not (is_goal and (edge_ev.goal_value > 0.0 or allow_goal_entry))
+                ):
+                    continue
+
+                move_cost = (
+                    (float(edge_ev.step_cost) if edge_ev.traversable else 1.0)
+                    + float(edge_ev.risk_cost)
+                    + extra_inter_cost
+                )
+                new_g = g_cost + move_cost
+                if new_g < best_cost.get(next_coord, float("inf")) - 1e-9:
+                    best_cost[next_coord] = new_g
+                    came_from[next_coord] = ((cr, cc), act)
+                    counter += 1
+                    heapq.heappush(open_heap, (new_g + _heuristic(nr, nc), new_g, counter, nr, nc))
+
+        return None
+
+    @staticmethod
+    def shortest_path_with_causal_ops(
+        grid: np.ndarray,
+        start_coord: tuple[int, int],
+        goal_coords: set[tuple[int, int]],
+        action_deltas: Mapping[Any, tuple[int, int]],
+        transition_kb: Any,
+        *,
+        initial_state_tokens: frozenset[str] = frozenset(),
+        failed_transitions: set[tuple[tuple[int, int], Any]] | None = None,
+        inhibited_actions: set[Any] | None = None,
+        unknown_traversable: bool = True,
+        max_expansions: int = 2000,
+    ) -> list[tuple[Any, tuple[int, int]]] | None:
+        """Find minimum-expected-cost plan over (coord, active_state_tokens) via KB causal rules."""
+        if not goal_coords or grid.ndim < 2 or transition_kb is None:
+            return None
+        H, W = int(grid.shape[0]), int(grid.shape[1])
+        sr, sc = int(start_coord[0]), int(start_coord[1])
+        if (sr, sc) in goal_coords:
+            return []
+        if not (0 <= sr < H and 0 <= sc < W):
+            return None
+
+        valid_actions = [
+            (act, int(d[0]), int(d[1]))
+            for act, d in action_deltas.items()
+            if len(d) >= 2
+            and (int(d[0]) != 0 or int(d[1]) != 0)
+            and (inhibited_actions is None or act not in inhibited_actions)
+        ]
+        if not valid_actions:
+            return None
+
+        locus_rules: dict[tuple[int, int], list[Any]] = {}
+        feature_rules: dict[int, list[Any]] = {}
+        for rule in transition_kb.query_causal_rules():
+            trig = rule.trigger_key
+            if isinstance(trig, tuple) and len(trig) == 2:
+                locus_rules.setdefault((int(trig[0]), int(trig[1])), []).append(rule)
+            elif isinstance(trig, int) and not isinstance(trig, bool):
+                feature_rules.setdefault(int(trig), []).append(rule)
+
+        max_stride = max(abs(dr) + abs(dc) for _, dr, dc in valid_actions)
+        inv_stride = 1.0 / max(1, max_stride)
+
+        def _heuristic(r: int, c: int) -> float:
+            return min(abs(r - gr) + abs(c - gc) for gr, gc in goal_coords) * inv_stride
+
+        def _is_unlocked_by_locus_token(
+            ev: Any, pos: tuple[int, int], tokens: frozenset[str]
+        ) -> bool:
+            return bool(
+                not ev.traversable and float(ev.risk_cost) < 40.0 and f"unlocks:{pos}" in tokens
+            )
+
+        start_state: tuple[tuple[int, int], frozenset[str]] = ((sr, sc), initial_state_tokens)
+        open_heap: list[tuple[float, float, int, tuple[int, int], frozenset[str]]] = [
+            (_heuristic(sr, sc), 0.0, 0, (sr, sc), initial_state_tokens)
+        ]
+        best_cost: dict[tuple[tuple[int, int], frozenset[str]], float] = {start_state: 0.0}
+        came_from: dict[
+            tuple[tuple[int, int], frozenset[str]],
+            tuple[tuple[tuple[int, int], frozenset[str]], Any],
+        ] = {}
+        counter = 0
+        expansions = 0
+
+        while open_heap and (max_expansions <= 0 or expansions < max_expansions):
+            _, g_cost, _, cur_coord, cur_tokens = heapq.heappop(open_heap)
+            cur_state = (cur_coord, cur_tokens)
+            if g_cost > best_cost.get(cur_state, float("inf")) + 1e-9:
+                continue
+            if cur_coord in goal_coords:
+                plan: list[tuple[Any, tuple[int, int]]] = []
+                trace_state = cur_state
+                while trace_state != start_state:
+                    prev_state, via_act = came_from[trace_state]
+                    plan.append((via_act, trace_state[0]))
+                    trace_state = prev_state
+                plan.reverse()
+                return plan
+
+            expansions += 1
+            cr, cc = cur_coord
+
+            for act, dr, dc in valid_actions:
+                if failed_transitions is not None and (cur_coord, act) in failed_transitions:
+                    continue
+                nr, nc = cr + dr, cc + dc
+                if not (0 <= nr < H and 0 <= nc < W):
+                    continue
+
+                steps = max(abs(dr), abs(dc))
+                ray_clear = True
+                extra_inter_cost = 0.0
+                if steps > 1 and (dr == 0 or dc == 0 or abs(dr) == abs(dc)):
+                    step_r = (dr > 0) - (dr < 0)
+                    step_c = (dc > 0) - (dc < 0)
+                    for k in range(1, steps):
+                        ir, ic = cr + step_r * k, cc + step_c * k
+                        if not (0 <= ir < H and 0 <= ic < W):
+                            ray_clear = False
+                            break
+                        mid_pos = (ir, ic)
+                        mid_ev = transition_kb.evaluate_transition(
+                            int(grid[ir, ic]),
+                            locus=mid_pos,
+                            active_state_tokens=cur_tokens,
+                            unknown_traversable=unknown_traversable,
+                        )
+                        if not mid_ev.traversable and not _is_unlocked_by_locus_token(
+                            mid_ev, mid_pos, cur_tokens
+                        ):
+                            ray_clear = False
+                            break
+                        extra_inter_cost += float(mid_ev.risk_cost)
+                if not ray_clear:
+                    continue
+
+                next_coord = (nr, nc)
+                dest_feat = int(grid[nr, nc])
+                edge_ev = transition_kb.evaluate_transition(
+                    dest_feat,
+                    locus=next_coord,
+                    active_state_tokens=cur_tokens,
+                    unknown_traversable=unknown_traversable,
+                )
+                unlocked_here = _is_unlocked_by_locus_token(edge_ev, next_coord, cur_tokens)
+                if not edge_ev.traversable and not unlocked_here:
+                    continue
+
+                next_token_set = set(cur_tokens)
+                for rule in (*locus_rules.get(next_coord, ()), *feature_rules.get(dest_feat, ())):
+                    eff = str(rule.effect_signature)
+                    if not eff or eff in next_token_set:
+                        continue
+                    if not rule.precondition_tokens or all(
+                        tok in cur_tokens for tok in rule.precondition_tokens
+                    ):
+                        next_token_set.add(eff)
+                next_tokens = (
+                    frozenset(next_token_set)
+                    if len(next_token_set) != len(cur_tokens)
+                    else cur_tokens
+                )
+
+                step_cost = 1.0 if unlocked_here else float(edge_ev.step_cost)
+                move_cost = step_cost + float(edge_ev.risk_cost) + extra_inter_cost
+                new_g = g_cost + move_cost
+                next_state = (next_coord, next_tokens)
+                if new_g < best_cost.get(next_state, float("inf")) - 1e-9:
+                    best_cost[next_state] = new_g
+                    came_from[next_state] = (cur_state, act)
+                    counter += 1
+                    heapq.heappush(
+                        open_heap,
+                        (new_g + _heuristic(nr, nc), new_g, counter, next_coord, next_tokens),
+                    )
+
+        return None
 
     @staticmethod
     def shortest_path_with_actions(
@@ -351,7 +590,11 @@ class GeodesicManifoldRouter:
         frontier_candidates = list(zip(fr_r.tolist(), fr_c.tolist()))
 
         opt_eng = engine.option_discovery
-        if opt_eng is not None and opt_eng.discovered_options:
+        if (
+            opt_eng is not None
+            and bool(opt_eng.live_pipeline_enabled)
+            and opt_eng.discovered_options
+        ):
             bottleneck_frontiers = [
                 opt.bottleneck_state
                 for opt in opt_eng.discovered_options.values()
@@ -385,13 +628,14 @@ class GeodesicManifoldRouter:
         prune_cavities: bool = False,
         preserve_goal_order: bool = False,
         soft_avoid_cells: set[tuple[int, int]] | None = None,
+        transition_kb: Any | None = None,
     ) -> list[tuple[Any, tuple[int, int]]] | None:
         """Find deterministic action-space shortest path across the traversable manifold.
 
         1. Constructs boolean passable mask from static barriers, walls, and unknown obstacles.
-        2. Projects dynamic threat trajectories into evasion hazard cones.
-        3. Harmonizes multi-cell action strides.
-        4. Dispatches action-transition BFS search to nearest reachable goals.
+        2. Applies locus-scoped transition KB beliefs when supplied.
+        3. Projects dynamic threat trajectories into evasion hazard cones.
+        4. Harmonizes multi-cell action strides and delegates shortest-path search.
         """
         H, W = curr_grid.shape
         passable_mask = np.ones((H, W), dtype=bool)
@@ -404,6 +648,20 @@ class GeodesicManifoldRouter:
         for ur, uc in unknown_entity_cells:
             if 0 <= ur < H and 0 <= uc < W:
                 passable_mask[ur, uc] = False
+        if transition_kb is not None:
+            for locus_pos in transition_kb._locus_beliefs:
+                lr, lc = int(locus_pos[0]), int(locus_pos[1])
+                if not (0 <= lr < H and 0 <= lc < W):
+                    continue
+                l_ev = transition_kb.evaluate_transition(int(curr_grid[lr, lc]), locus=(lr, lc))
+                if not l_ev.traversable or l_ev.risk_cost >= 40.0:
+                    passable_mask[lr, lc] = False
+                elif (
+                    l_ev.traversable
+                    and l_ev.confidence > 0.0
+                    and (lr, lc) not in unknown_entity_cells
+                ):
+                    passable_mask[lr, lc] = True
 
         hazard_cells: set[tuple[int, int]] = set()
         effective_traj_barriers = set(barrier_features)
@@ -494,33 +752,78 @@ class GeodesicManifoldRouter:
 
         effective_goal_radius = 0 if max_stride <= 1 else max(1, max_stride // 2)
 
-        if soft_avoid_cells:
-            for cand_goal in candidate_goals[:max_candidate_goals]:
-                buf_mask = passable_mask.copy()
-                for sr, sc in soft_avoid_cells:
-                    if 0 <= sr < H and 0 <= sc < W and (sr, sc) != start_pos:
-                        buf_mask[sr, sc] = False
-                buf_mask[cand_goal[0], cand_goal[1]] = True
-                buf_plan = GridTopologyGraph.shortest_path_with_actions(
-                    passable_mask=buf_mask,
-                    start_coord=start_pos,
-                    goal_coord=cand_goal,
-                    actions_with_deltas=effective_actions,
-                    goal_radius=effective_goal_radius,
-                )
-                if buf_plan:
-                    return buf_plan
+        def _search_mask_for_goal(
+            mask: np.ndarray, cand_goal: tuple[int, int]
+        ) -> list[tuple[Any, tuple[int, int]]] | None:
+            if transition_kb is not None and effective_goal_radius == 0:
+                from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
 
-        for cand_goal in candidate_goals[:max_candidate_goals]:
-            cand_mask = passable_mask.copy()
-            cand_mask[cand_goal[0], cand_goal[1]] = True
-            action_plan = GridTopologyGraph.shortest_path_with_actions(
-                passable_mask=cand_mask,
+                action_map = {act: (int(dr), int(dc)) for act, dr, dc in effective_actions}
+                mask_rows = mask.tolist()
+
+                def _eval_mask_kb(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
+                    if pos == cand_goal:
+                        ev = transition_kb.evaluate_transition(feat, locus=pos)
+                        if ev.risk_cost >= 40.0:
+                            return ev
+                        return TransitionEdgeEvaluation(
+                            traversable=True,
+                            step_cost=1.0,
+                            risk_cost=0.0,
+                            goal_value=1.0,
+                            info_gain=0.0,
+                            mutates_state=False,
+                            confidence=1.0,
+                        )
+                    if not bool(mask_rows[pos[0]][pos[1]]):
+                        return TransitionEdgeEvaluation(
+                            traversable=False,
+                            step_cost=float("inf"),
+                            risk_cost=0.0,
+                            goal_value=0.0,
+                            info_gain=0.0,
+                            mutates_state=False,
+                            confidence=1.0,
+                        )
+                    return transition_kb.evaluate_transition(feat, locus=pos)
+
+                return GridTopologyGraph.shortest_path_from_kb(
+                    curr_grid,
+                    start_pos,
+                    {cand_goal},
+                    action_map,
+                    _eval_mask_kb,
+                    max_expansions=0,
+                    allow_goal_entry=True,
+                )
+
+            return GridTopologyGraph.shortest_path_with_actions(
+                passable_mask=mask,
                 start_coord=start_pos,
                 goal_coord=cand_goal,
                 actions_with_deltas=effective_actions,
                 goal_radius=effective_goal_radius,
             )
+
+        if soft_avoid_cells:
+            for cand_goal in candidate_goals[:max_candidate_goals]:
+                if not (0 <= cand_goal[0] < H and 0 <= cand_goal[1] < W):
+                    continue
+                buf_mask = passable_mask.copy()
+                for sr, sc in soft_avoid_cells:
+                    if 0 <= sr < H and 0 <= sc < W and (sr, sc) != start_pos:
+                        buf_mask[sr, sc] = False
+                buf_mask[cand_goal[0], cand_goal[1]] = True
+                buf_plan = _search_mask_for_goal(buf_mask, cand_goal)
+                if buf_plan:
+                    return buf_plan
+
+        for cand_goal in candidate_goals[:max_candidate_goals]:
+            if not (0 <= cand_goal[0] < H and 0 <= cand_goal[1] < W):
+                continue
+            cand_mask = passable_mask.copy()
+            cand_mask[cand_goal[0], cand_goal[1]] = True
+            action_plan = _search_mask_for_goal(cand_mask, cand_goal)
             if action_plan:
                 return action_plan
 

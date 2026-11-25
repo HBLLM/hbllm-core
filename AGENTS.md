@@ -4,17 +4,13 @@
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
 > [!WARNING]
-> **Current project phase: Phase 2 — Instrument first, then subtract (verified 2026-11-17, R1–R9 complete).**  
+> **Current project phase: Phase 2 — Pure-HCIR Cognitive OS Consolidation (verified 2026-11-21, R1–R10 complete).**  
 > R1–R8 established honest all-seed `dev` evaluation (`n=80`, `zero_shot=0.7791`, `solve_rate=0.8750`, CI `[0.7850, 0.9307]`, `cross_seed transfer_solve_rate=0.9342`, `exploration_deaths=3`, mean latency `p50=10.18ms / p95=28.12ms`, `reports/dev/dev_handcrafted_20261116_180441.json`), sealed held-out v2 with `eval-*` gate & `reports/heldout/LEDGER.md`, retired held-out v1, promoted `novelty.yaml` (`zero_shot=0.8365`, `solve_rate=0.9000`, `p50=11.09ms / p95=33.53ms`), wired grounding into runtime decisions, deleted 28 zero-effect/dead faculties + unwired dead hooks, enforced structural debt + `<= 300,000` LOC ratchets (`<= 150,000` LOC for `hbllm/hcir/**`), added risk-aware exploration, implemented bounded event-store compaction + per-tier/world node budgets + per-stage latency profiling (`p50 ~ 10-16ms / p95 <= 45ms` at `32×32`, Rust kernels `< 0.2ms`).
 >
-> **R9 verified across 6 widened task regimes (PO, stochastic dynamics, other agents, long horizons, continuous control, language goals; n=120, 20 seeds/task; before: `reports/dev/widened_dev_before_r9_20261116.json`, after: `reports/dev/widened_dev_after_r9_20261117.json`):**  
-> - `zero_shot` solve rate rose from 0.3167 (38/120) to 0.5083 (61/120, +60.5% rel, CI `[0.4200, 0.5961]`), `generality_score` rose from 0.4977 to 0.6080 (+0.1103).  
-> - `cross_seed transfer_solve_rate` rose from 0.4123 to 0.7456 (+80.8% rel, CI `[0.6586, 0.8166]`), `solve_rate` rose from 0.4083 to 0.7417.  
-> - `exploration_deaths` reduced from 54 to 33 (−38.9%).  
-> - Regimes: `language_goals` 100% zero-shot (20/20, 0 deaths); `multi_agent` 100% transfer solve rate (up from 0%); `continuous_control` 80% zero-shot; `partial_observability` 68.4% transfer solve rate (up from 15.8%); `long_horizon` 89.5% transfer solve rate with transactional chunking preventing constitutional rejection.  
-> - Dev suite maintained without regression (`reports/dev/dev_handcrafted_20261117_041629.json`: `cross_seed transfer_solve_rate=0.9868`, 75/76 solved). Rust kernels `< 0.2ms`; 32×32 E2E `p50=9.65ms / p95=25.98ms`.  
-> - **Official Sealed Held-Out v2 Milestone (`eval-phase2-r9` on `f0587fc1`, n=120, 20 seeds/task, `reports/heldout/LEDGER.md`):** `zero_shot` solve rate = **0.6083** (73/120 solved, CI `[0.5189, 0.6910]`, generality = **0.6472**) vs random baseline 0.0583 (7/120); `cross_seed transfer_solve_rate` = **0.6930** (CI `[0.6032, 0.7702]`); `same_layout_replay` solve rate = **0.8333** (generality = **0.6987**). Partial obs held-out zero-shot = **0.9500** (19/20 solved, 0 deaths); continuous reach zero-shot = **0.7000** (100% transfer); symbolic rules zero-shot = **0.4500** (100% transfer).
-> - Production gaps, HCIR consolidation plan, and Pure-HCIR graduation roadmap are tracked in `reports/audit/2026-11-18_full_project_audit.md`.
+> **R9–R10 & Pure-HCIR Consolidation:**
+> - **R9** lifted widened-regime performance across 6 regimes (`reports/dev/widened_dev_after_r9_20261117.json`: `zero_shot` solve rate `0.3167 → 0.5083`, `cross_seed transfer_solve_rate` `0.4123 → 0.7456`, deaths `54 → 33`), reaching `zero_shot=0.6083` (`73/120`, generality `0.6472`) on `eval-phase2-r9`.
+> - **Official Sealed Held-Out v2 Milestone (`eval-phase2-r10` on `a26f09bd`, 2026-11-21, `n=120`, 20 seeds/task, `reports/heldout/LEDGER.md`):** `zero_shot` solve rate = **0.9250** (`111/120` solved, CI `[0.8636, 0.9600]`, generality = **0.8236**, 4 exploration deaths / `3.33%`); `cross_seed transfer_solve_rate` = **0.9035** (`114` transfer episodes, CI `[0.8354, 0.9453]`, `skills_consolidated=161`); `same_layout_replay` solve rate = **1.0000** (generality = **0.9021**). Per-family zero-shot: `continuous=1.00`, `symbolic=1.00`, `grid=0.95`, `stochastic_dynamic=0.85`, `partial_observability=0.80`.
+> - **Pure-HCIR Core Consolidation:** Consolidated `hcir/reasoning` (14 default operators), `hcir/language` (A16/A17 multilingual `en`/`si`/`ta` + Track T4 `ReadingCurriculumIngestor`), `hcir/snn`, and `hcir/capabilities` (`ConceptExplainer`, `EpistemicCuriosityController`, `BeliefConflictResolver`, sandboxed `Tool`/`Web`/`Memory` executors) directly under `hbllm/hcir/`; modularized `hbllm/hcir/world/` into 17 subpackages with HCIR-backed `TransitionKnowledgeBase` as single source of truth; unified HTTP serving in `Dockerfile`. Production gaps & roadmap are tracked in `reports/audit/2026-11-18_full_project_audit.md`.
 
 ---
 
@@ -33,8 +29,8 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
    Reasoning operators and planners receive immutable snapshots (`FrozenGraphView` / `CognitiveContext`) and return pure result structures (`CognitiveResult`).
 
 3. **Zero LLM Dependency in Cognitive Core:**
-   > The core reasoning runtime (`hbllm.brain.reasoning`, `hbllm.hcir.world`) is **100% LLM-independent**.  
-   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically without requiring external API calls (native Rust spatial/graph kernels run sub-millisecond `< 0.2ms`; the full 5-stage Python `AutonomousEpistemicEngine.step()` loop runs in low tens of milliseconds — `p50 ~ 10-15ms / p95 <= 45ms` at `32×32`, profiled by `hbllm bench profile`).  
+   > The core cognitive runtime (`hbllm.hcir` — including `world`, `grounding`, `reasoning`, `language`, `snn`, `capabilities`, `kernel` — and `hbllm.brain.reasoning`) is **100% LLM-independent**.  
+   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically without requiring external API calls (native Rust spatial/graph kernels run sub-millisecond `< 0.2ms` per op / `combined p95=2.637ms`; on `32×32`, `AutonomousEpistemicEngine.step()` measures `CPU p50=20.47ms / p95=23.25ms`, `Wall p50=52.24ms / p95=149.21ms` in `reports/profile/profile_post_m1.json` with host I/O variance, target budget `<= 45ms` CPU).  
    *(Permitted: deterministic, offline-trained feed-forward neural or spiking neural feature encoders conforming to the `FeatureExtractor` protocol, with zero runtime LLM or cloud dependencies).*
 
 4. **Constitutional Governance:**
@@ -64,35 +60,35 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 ```
   ┌───────────────────────────────────────────────────────────────────┐
   │ 1. SENSORY PERCEPTION & COORDINATE LIFTING (PerceptionStage)     │
-  │    (cortex_perception.py, parietal_coordinate_transform.py)       │
+  │    (perception/, parietal_coordinate_transform.py)                │
   │    Transforms raw lattices/sensory data into typed SpatialEntity  │
   │    components and relative coordinate frames.                     │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 2. ASSIMILATION & SURPRISE INDUCTION (AssimilationStage)          │
-  │    (cortex_assimilator.py, surprise_engine.py)                    │
+  │    (assimilation/assimilator.py, surprise_engine.py)              │
   │    Binds motor diffs to actions; updates EpistemicPhase; detects  │
   │    high surprise to invalidate stale causal hypotheses.           │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 3. COUNTERFACTUAL SIMULATION & SUBGOAL SCHEDULING                 │
-  │    (SimulationStage / cortex_planner.py, frontopolar_subgoal)     │
+  │    (SimulationStage / planning/, frontopolar_subgoal)             │
   │    OFC mental simulation rollouts; dead-end pruning (corners/    │
   │    walls); BA10 recursive subgoal decomposition (keys, doors).    │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 4. PREFRONTAL DELIBERATION & SAFETY GATING (DeliberationStage)   │
-  │    (cortex_deliberation.py, anterior_cingulate_conflict.py)       │
+  │    (deliberation/engine.py, anterior_cingulate_conflict.py)       │
   │    Evaluates candidate plans against looming collision cones,     │
   │    dynamic patroller trajectories, and Habenular action inhibition.│
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 5. MOTOR DISPATCH & TRANSACTION EXECUTION (MotorStage)            │
-  │    (cortex_motor.py, KernelServices, TransactionManager)          │
+  │    (motor/, KernelServices, TransactionManager)                   │
   │    Commits state mutation transactions; dispatches chosen motor   │
   │    action via CapabilityResolver.                                 │
   └───────────────────────────────────────────────────────────────────┘
@@ -102,10 +98,11 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 > **Domain-Agnostic Invariant:** Cortical faculties must never be coupled to a specific game, level, or simulation environment. Mechanisms must be based on universal physical principles (topology, collision cones, reachability, symmetries, causal credit assignment).
 
 > [!NOTE]
-> **Faculty Roster (post-R5 measured R1 ablation, `reports/ablation/20261116_175717_r1_dev.json`):**
+> **Faculty Roster (`reports/ablation/20261124_084702_r1_dev.json` + `reports/ablation/20261125_090037_r1_widened_dev.json`):**
 > - **Stage owners (core, always kept):** `perception`, `assimilator`, `deliberation_engine`, `planner`, `motor`, `episodic_cortex`, `working_memory`, `symbolic_theory`.
-> - **Measured R1 keepers (positive Δgen / Δsr / Δxs):** `prediction_budget` (+0.0880 gen, +0.2375 sr, +0.2369 xs), `budget_governor` (+0.0181 gen, +0.0500 sr, +0.1053 xs), `option_discovery` (+0.0168 gen, +0.0125 sr), `acc_conflict_monitor` (+0.0114 gen), `object_planner` (+0.0067 gen, +0.0125 sr), `remote_causal` (+0.0054 gen, +0.0125 sr).
-> - **Working-memory / hazard stores retained:** `body_schema`, `subgoal_stack`, `habenular_ior`, `hazard_tracker` (patrol/decoy invariance on `novelty.yaml`), `world_kernel`.
+> - **Measured R1 `keep` (`dev` 2026-11-24):** `body_schema`, `habenular_ior`, `remote_causal`, `object_planner`, `prediction_budget`, `budget_governor`.
+> - **Promoted to `keep` on `widened_dev` (2026-11-25, `n=120`, baseline `sr=0.7750`, `gen=0.7503`):** `acc_conflict_monitor` (`Δgen=+0.0527, Δsr=+0.0833, Δdeaths=+7`), `hazard_tracker` (`Δgen=+0.0238, Δsr=+0.0333, Δdeaths=+4`), `subgoal_stack` (`Δgen=+0.0044, Δsr=+0.0167`).
+> - **Remaining `experimental` on `widened_dev`:** `option_discovery` (`Δgen=0.0000`), `grounding_bridge` (`Δgen=0.0000`). (`world_kernel` = `unused`, 0 calls on `dev`).
 > - **Removed in R5 & Rescoped LOC Budget:** 28 zero-effect/dead modules deleted and dead pipeline hooks unwired (`hbllm/**/*.py` reduced to `242,638` LOC in R5). Active codebase budget is **`<= 300,000` LOC** across `hbllm/**/*.py` (with `<= 150,000` LOC scoped to `hbllm/hcir/**`, tracked by `tests/unit/architecture/test_loc_budget.py`) so high-value non-LLM subsystems (`reasoning/`, `snn/`, `A16`/`A17` `language/`, multimodal sensory fusion, and governed tool capabilities) can be consolidated directly into `hcir/` without `__path__.append` shadow-tree shims. Every newly admitted cortical/grounding faculty must still pass R1 ablation (`Δ > 0`) and latency (`p95 <= 45ms` at `32×32`) gates.
 
 ---
@@ -246,7 +243,7 @@ result = await loop.run_in_executor(None, lambda: _await_child(proc, parent_conn
 2. **No Direct SQLite / DB Queries:**  
    Never issue raw SQL queries directly against `working_memory.db`, `procedural_memory.db`, etc. Always route through `HCIRMemoryBackend`.
 3. **No External LLM Client Imports in Core Reasoning:**  
-   Never import `openai`, `anthropic`, `transformers`, or network clients inside `core/hbllm/brain/reasoning/` or `core/hbllm/hcir/world/`.
+   Never import `openai`, `anthropic`, `litellm`, `transformers`, `plugins.llm_scaffold`, or `hbllm.serving.provider` inside `core/hbllm/hcir/**` or `core/hbllm/brain/reasoning/` (enforced by `tests/unit/architecture/test_loc_budget.py`).
 4. **No Bypassing `ConstitutionalVerifier`:**  
    Every state change must be verifiable and reversible. Never commit unvalidated state directly to the graph.
 5. **No Monkey-Patching / Band-Aid Fixes:**  
@@ -278,32 +275,41 @@ HBLLM provides a chunked structural-sharing graph substrate written in native Ru
 HBLLM/
 ├── core/
 │   ├── hbllm/
-│   │   ├── hcir/                    # HCIR Cognitive OS Kernel
+│   │   ├── hcir/                    # Pure-HCIR Cognitive OS Kernel & Subsystems
 │   │   │   ├── bytecode.py          # 8 primitive opcodes + instruction streams
-│   │   │   ├── compiler.py          # NL → Semantic AST → HCIR Bytecode
+│   │   │   ├── compiler.py          # Semantic AST → HCIR Bytecode
 │   │   │   ├── interpreter.py       # Virtual machine & SyscallDispatcher
 │   │   │   ├── graph.py             # CognitiveGraph, HCIRNode, HCIREdge
 │   │   │   ├── workspace_tiers.py   # TieredWorkspace (Working, Brain, Persistent, Meta)
-│   │   │   ├── kernel/              # CognitiveKernel, TransactionManager, Services
+│   │   │   ├── kernel/              # CognitiveKernel, TransactionManager, Services, CommandDispatcher, AutonomyTracker
+│   │   │   ├── world/               # 5-stage CorticalPipeline & 17 domain subpackages
+│   │   │   │   ├── autonomous_epistemic_engine.py # Core epistemic active inference
+│   │   │   │   ├── cortical_pipeline.py           # Perception → Assimilation → Simulation → Deliberation → Motor
+│   │   │   │   ├── causal/transition_kb.py        # HCIR-backed TransitionKnowledgeBase + theory.py
+│   │   │   │   ├── assimilation/, deliberation/, episodic/, grounding/, hypothesis/, learning/
+│   │   │   │   └── macro/, motor/, objects/, perception/, planning/, prediction/, predictors/, spatial/, state/, working_memory/
+│   │   │   ├── grounding/           # Symbol Grounding Engine (features, tracking, concepts, committer)
+│   │   │   ├── language/            # Non-LLM Multilingual Runtime (en/si/ta, discourse, Track T4 reading, acquisition)
+│   │   │   ├── reasoning/           # UnifiedReasoningRuntime + 14 formal operators (0 LLM deps)
+│   │   │   ├── snn/                 # LIF, STDP, STP, WTA, oscillations, neuromodulation, perception
+│   │   │   ├── capabilities/        # ConceptExplainer, EpistemicCuriosity, BeliefConflictResolver, sandboxed tools/web/memory
 │   │   │   ├── skills/declarative.py# Declarative Neuro-Symbolic Skill Grammar
-│   │   │   └── world/               # Cortical faculties & epistemic world models
-│   │   │       ├── cortex_planner.py         # OFC / BA10 mental simulation planner
-│   │   │       ├── cortex_deliberation.py     # dlPFC / vmPFC arbitration & gating
-│   │   │       ├── cortex_causal.py           # Pearl's do(a) causal theory & affordances
-│   │   │       ├── cortex_episodic.py         # Episodic memory consolidation
-│   │   │       ├── cortex_assimilator.py      # Motor dynamic assimilation
-│   │   │       └── autonomous_epistemic_engine.py # Core epistemic active inference
-│   │   ├── brain/                   # Cognitive nodes, composites, & reasoning
-│   │   │   ├── reasoning/           # 13 formal reasoning operators (LLM-free)
-│   │   │   ├── wiring/              # Brain wiring & factory pipelines
-│   │   │   └── self_model/          # Attention manager & metacognition
-│   │   ├── network/                 # Distributed MessageBus, Node protocols
-│   │   └── serving/                 # API server, studio, and pipeline
-│   ├── rust/hcir_graph/             # Rust native chunked structural-sharing graph (PyO3)
-│   └── tests/                       # Unit and integration test suites
-├── docs/                            # Markdown architecture & API documentation
-├── graphify-out/                    # Persistent AST & semantic knowledge graph
-└── AGENTS.md                        # This instruction file
+│   │   │   ├── stores/              # SQLiteEventStore, LexicalOntologyStore, JSONGraphStore
+│   │   │   ├── adapters/            # HCIRMemoryBackend, HCIRBusBridge, MemoryMigrationProxy
+│   │   │   └── algorithms/          # Graph connectivity, paths, centrality, flow, spans
+│   │   ├── runtime/bootstrap.py     # Canonical single composition root (build_cognitive_system)
+│   │   ├── brain/                   # Compatibility shims (reasoning/language/snn) & legacy MessageBus nodes
+│   │   ├── native/registry.py       # NativeAccelerationRegistry (13 Rust crates + Python fallbacks)
+│   │   ├── network/                 # Distributed MessageBus, Federation, Resilience
+│   │   ├── security/                # TenantGuard, AuditTrail, EncryptionVault, PIIRedactor, RBAC
+│   │   └── serving/                 # FastAPI REST/Studio API, fail-closed JWTAuthMiddleware, MCP server
+│   ├── rust/                        # 13 PyO3 native Rust crates (hcir_graph, simulation_engine, structure_matcher, ...)
+│   ├── plugins/                     # External environment adapters & plugin bundles
+│   ├── benchmarks/suites/           # Frozen dev, novelty, widened_dev, heldout, independent YAML suites
+│   ├── docs/                        # Pure-HCIR Markdown architecture, guides & API documentation
+│   ├── graphify-out/                # Persistent AST & semantic knowledge graph
+│   └── tests/                       # Unit, architecture & integration test suites
+└── ...
 ```
 
 ---
@@ -337,23 +343,24 @@ This project maintains a navigable knowledge graph in `graphify-out/`.
 - Maintain existing docstrings and comments. Never delete explanatory cognitive science references without reason.
 
 ### Testing & Validation Protocols
-Run relevant tests before concluding any changes:
+Run relevant tests from `HBLLM/core/` before concluding any changes:
 ```bash
-# Fast HCIR test suite
-pytest core/tests/unit/hcir/ -q
+# Fast HCIR & architecture invariant suites
+pytest tests/unit/hcir/ tests/unit/architecture/ -q
 
 # Epistemic & Cortical world model tests
-pytest core/tests/unit/ -k "epistemic or cortex or hcir" -q
+pytest tests/unit/ -k "epistemic or cortex or hcir" -q
 
 # Specific component test
-pytest core/tests/unit/ -k "<relevant_component>" -q
+pytest tests/unit/ -k "<relevant_component>" -q
 
 # Full system runtime diagnostics
 python -m hbllm diagnostics
 
-# Benchmark evaluation harness
+# Benchmark evaluation & latency profiling
 python -m hbllm bench dev
 python -m hbllm bench local-suite
+python -m hbllm bench profile
 
 # Kernel status and cognitive mind single step
 python -m hbllm kernel status

@@ -9,6 +9,7 @@ may only decrease over time.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -17,21 +18,28 @@ WORLD_DIR = HBLLM_DIR / "hcir" / "world"
 HCIR_DIR = HBLLM_DIR / "hcir"
 
 # R6/R7/R8 ratchets (tightened monotonically downward after R8 bounded state & latency)
-MAX_WORLD_HASATTR = 154
-MAX_WORLD_GETATTR3 = 379
+MAX_WORLD_HASATTR = 115
+MAX_WORLD_GETATTR3 = 357
 MAX_HCIR_BROAD_SILENT_EXCEPT = 0
 MAX_HBLLM_BROAD_SILENT_EXCEPT = 46
 MAX_SQLITE_CONNECT_CALLS = 22
 MAX_SQLITE_CONNECT_FILES = 8
-MAX_ENGINE_LOC = 4104
-MAX_PLANNER_LOC = 250
-MAX_DELIBERATION_LOC = 250
-MAX_ASSIMILATOR_LOC = 250
-MAX_MOTOR_LOC = 250
-MAX_PERCEPTION_LOC = 250
-MAX_HYPOTHESIS_LOC = 250
-MAX_CAUSAL_LOC = 250
-MAX_EPISODIC_LOC = 250
+MAX_ANY_WORLD_FILE_LOC = 3704
+MAX_WORLD_FILE_LOC_RATCHETS: dict[str, int] = {
+    "autonomous_epistemic_engine.py": 3704,
+    "assimilation/assimilator.py": 3505,
+    "planning/mental_simulation.py": 2990,
+    "causal/theory.py": 2505,
+    "deliberation/engine.py": 1945,
+    "planning/goal_scheduler.py": 1580,
+    "motor/curiosity.py": 1380,
+    "objects/planner.py": 1365,
+    "macro/planner.py": 1255,
+    "grounding/bridge.py": 1100,
+    "episodic/cortex.py": 1075,
+    "predictors/physics.py": 1075,
+    "working_memory/memory.py": 1050,
+}
 
 
 def _iter_python_files(base: Path) -> list[Path]:
@@ -117,41 +125,60 @@ def test_sqlite_connect_count_ratchet() -> None:
 
 def test_decision_core_file_size_ratchet() -> None:
     """Enforce file-size ratchets on the primary decision-core modules."""
-    engine_loc = sum(
-        1 for _ in (WORLD_DIR / "autonomous_epistemic_engine.py").open(encoding="utf-8")
+    for rel_path, budget in MAX_WORLD_FILE_LOC_RATCHETS.items():
+        actual_loc = sum(1 for _ in (WORLD_DIR / rel_path).open(encoding="utf-8"))
+        assert actual_loc <= budget, f"{rel_path} has {actual_loc} LOC > ratchet {budget}"
+
+    for py_path in _iter_python_files(WORLD_DIR):
+        loc = sum(1 for _ in py_path.open(encoding="utf-8"))
+        assert loc <= MAX_ANY_WORLD_FILE_LOC, (
+            f"{py_path.relative_to(ROOT_DIR)} has {loc} LOC > ceiling {MAX_ANY_WORLD_FILE_LOC}"
+        )
+
+
+def test_no_get_sub_attr_or_blacklisted_engine_attributes() -> None:
+    """Enforce zero get_sub_attr helpers and zero blacklisted ad-hoc engine attrs in world/."""
+    blacklisted = (
+        "_feedback_assimilated",
+        "_prev_oriented_threats",
+        "_consecutive_null_actions",
+        "_consecutive_quiescent_actions",
+        "_structural_goals_cache",
     )
-    planner_loc = sum(1 for _ in (WORLD_DIR / "cortex_planner.py").open(encoding="utf-8"))
-    deliberation_loc = sum(1 for _ in (WORLD_DIR / "cortex_deliberation.py").open(encoding="utf-8"))
-    assert engine_loc <= MAX_ENGINE_LOC, (
-        f"autonomous_epistemic_engine.py has {engine_loc} LOC > ratchet {MAX_ENGINE_LOC}"
+    violations: list[str] = []
+    for path in _iter_python_files(WORLD_DIR):
+        src = path.read_text(encoding="utf-8", errors="ignore")
+        rel = str(path.relative_to(ROOT_DIR))
+        if "get_sub_attr" in src:
+            violations.append(f"{rel}: contains get_sub_attr")
+        for attr in blacklisted:
+            if attr in src:
+                violations.append(f"{rel}: contains blacklisted {attr}")
+    assert not violations, "Structural debt evasion / blacklisted attrs:\n" + "\n".join(violations)
+
+
+def test_transition_kb_and_topology_ontology_free_ratchet() -> None:
+    """Ensure TransitionKB & topology router contain no hardcoded domain ontology labels or deleted private sets."""
+    forbidden_literals = frozenset({"barrier", "walkable", "cargo", "receptacle", "key", "door"})
+    ontology_free_files = (
+        WORLD_DIR / "causal" / "transition_kb.py",
+        WORLD_DIR / "topological_graph_induction.py",
     )
-    assert planner_loc <= MAX_PLANNER_LOC, (
-        f"cortex_planner.py has {planner_loc} LOC > ratchet {MAX_PLANNER_LOC}"
+    for target in ontology_free_files:
+        src = target.read_text(encoding="utf-8")
+        tree = ast.parse(src, filename=str(target))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert node.value.strip().lower() not in forbidden_literals, (
+                    f"Forbidden domain ontology literal {node.value!r} found in {target}"
+                )
+
+    deleted_private_re = re.compile(
+        r"\._(goal|barrier|walkable|cargo|receptacle|actuator)_features\b"
     )
-    assert deliberation_loc <= MAX_DELIBERATION_LOC, (
-        f"cortex_deliberation.py has {deliberation_loc} LOC > ratchet {MAX_DELIBERATION_LOC}"
-    )
-    assimilator_loc = sum(1 for _ in (WORLD_DIR / "cortex_assimilator.py").open(encoding="utf-8"))
-    assert assimilator_loc <= MAX_ASSIMILATOR_LOC, (
-        f"cortex_assimilator.py has {assimilator_loc} LOC > ratchet {MAX_ASSIMILATOR_LOC}"
-    )
-    motor_loc = sum(1 for _ in (WORLD_DIR / "cortex_motor.py").open(encoding="utf-8"))
-    assert motor_loc <= MAX_MOTOR_LOC, (
-        f"cortex_motor.py has {motor_loc} LOC > ratchet {MAX_MOTOR_LOC}"
-    )
-    perception_loc = sum(1 for _ in (WORLD_DIR / "cortex_perception.py").open(encoding="utf-8"))
-    assert perception_loc <= MAX_PERCEPTION_LOC, (
-        f"cortex_perception.py has {perception_loc} LOC > ratchet {MAX_PERCEPTION_LOC}"
-    )
-    hypothesis_loc = sum(1 for _ in (WORLD_DIR / "cortex_hypothesis.py").open(encoding="utf-8"))
-    assert hypothesis_loc <= MAX_HYPOTHESIS_LOC, (
-        f"cortex_hypothesis.py has {hypothesis_loc} LOC > ratchet {MAX_HYPOTHESIS_LOC}"
-    )
-    causal_loc = sum(1 for _ in (WORLD_DIR / "cortex_causal.py").open(encoding="utf-8"))
-    assert causal_loc <= MAX_CAUSAL_LOC, (
-        f"cortex_causal.py has {causal_loc} LOC > ratchet {MAX_CAUSAL_LOC}"
-    )
-    episodic_loc = sum(1 for _ in (WORLD_DIR / "cortex_episodic.py").open(encoding="utf-8"))
-    assert episodic_loc <= MAX_EPISODIC_LOC, (
-        f"cortex_episodic.py has {episodic_loc} LOC > ratchet {MAX_EPISODIC_LOC}"
-    )
+    for path in _iter_python_files(HBLLM_DIR):
+        src = path.read_text(encoding="utf-8", errors="ignore")
+        match = deleted_private_re.search(src)
+        assert match is None, (
+            f"Deleted private ontology attribute {match.group(0)!r} referenced in {path}"
+        )

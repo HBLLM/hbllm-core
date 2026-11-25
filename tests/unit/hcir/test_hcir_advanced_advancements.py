@@ -18,18 +18,20 @@ from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
 
-class TestPredictiveRealityLoopInEngine:
-    """Tests for PredictiveRealityModel integration inside AutonomousEpistemicEngine."""
+class TestPredictiveRealityLoopInWorldKernel:
+    """Tests for PredictiveRealityModel ensemble evaluation on WorldKernel (retired from engine)."""
 
     def test_evaluate_candidate_action_ensemble(self):
         ws = HCIRWorkspaceState()
         services = KernelServices.create_default(ws)
         engine = AutonomousEpistemicEngine(services=services)
+        assert not hasattr(engine, "world_kernel")
+        assert not hasattr(engine, "evaluate_candidate_action_ensemble")
 
         grid = np.zeros((10, 10), dtype=np.int32)
         grid[2, 3] = 1
 
-        pred, is_high_disagreement = engine.evaluate_candidate_action_ensemble(
+        pred, is_high_disagreement = services.world_kernel.evaluate_candidate_action_ensemble(
             action="MOVE_UP",
             curr_grid=grid,
             horizon_ms=1000,
@@ -44,7 +46,6 @@ class TestPredictiveRealityLoopInEngine:
     def test_ensemble_disagreement_event_publication(self):
         ws = HCIRWorkspaceState()
         services = KernelServices.create_default(ws)
-        engine = AutonomousEpistemicEngine(services=services)
 
         received_events = []
         services.event_bus.subscribe(
@@ -54,7 +55,7 @@ class TestPredictiveRealityLoopInEngine:
 
         # Force disagreement analyzer to return high disagreement
         original_analyze = (
-            engine.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement
+            services.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement
         )
 
         class MockDisagreement:
@@ -62,21 +63,23 @@ class TestPredictiveRealityLoopInEngine:
             disagreement_index = 0.85
             conflicting_predictors = ["physics", "neural"]
 
-        engine.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement = (
+        services.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement = (
             lambda comp: MockDisagreement()
         )
 
         try:
-            pred, is_high = engine.evaluate_candidate_action_ensemble(
+            pred, is_high = services.world_kernel.evaluate_candidate_action_ensemble(
                 action="INTERACT_KEY",
                 curr_grid=np.zeros((5, 5)),
+                event_bus=services.event_bus,
             )
+            assert pred is not None
             assert is_high is True
             assert len(received_events) == 1
             assert received_events[0].data["action_intent"] == "INTERACT_KEY"
             assert received_events[0].data["disagreement_index"] == 0.85
         finally:
-            engine.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement = (
+            services.world_kernel.predictive_reality.disagreement_analyzer.analyze_disagreement = (
                 original_analyze
             )
 

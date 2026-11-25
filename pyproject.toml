@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=83.0.0", "wheel"]
+requires = ["setuptools>=84.1.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -168,7 +168,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 timeout = 300
 timeout_method = "thread"
-addopts = "--ignore=plugins/hbllm_telegram --ignore=plugins/hbllm_terminal --ignore=tests/scratch"
+addopts = "--ignore=plugins/hbllm_telegram --ignore=tests/scratch"
 markers = [
     "unit: Unit tests (single component, fast)",
     "integration: Integration tests (multi-component)",
@@ -207,7 +207,7 @@ enable_error_code = ["attr-defined", "call-arg"]
 
 
 [tool.bandit]
-exclude_dirs = ["tests", "plugins"]
+exclude_dirs = ["tests"]
 skips = [
     "B104",  # hardcoded_bind_all_interfaces: binding 0.0.0.0 is intentional for server/daemon serving
     "B108",  # hardcoded_tmp_directory: /tmp used for benchmark files and OS adapter sandbox allowlist

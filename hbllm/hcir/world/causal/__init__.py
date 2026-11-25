@@ -29,6 +29,13 @@ from hbllm.hcir.world.causal.theory import (
     HCIRSymbolicWorldTheory,
     invalidate_stale_context_ontology,
 )
+from hbllm.hcir.world.causal.transition_kb import (
+    CausalEffectRule,
+    TransitionBelief,
+    TransitionEdgeEvaluation,
+    TransitionKnowledgeBase,
+    TransitionOutcome,
+)
 
 __all__ = [
     "ActionAffordance",
@@ -36,6 +43,7 @@ __all__ = [
     "BaseCausalDiscoveryEngine",
     "BeliefTransitionEvent",
     "BeliefTransitionType",
+    "CausalEffectRule",
     "CausalHypothesis",
     "CausalMediationResult",
     "CausalPredicate",
@@ -46,6 +54,10 @@ __all__ = [
     "MediationIdentifiabilityAssumptions",
     "OntologyEvidenceRank",
     "SpelkePhysicalAxiom",
+    "TransitionBelief",
+    "TransitionEdgeEvaluation",
+    "TransitionKnowledgeBase",
+    "TransitionOutcome",
     "invalidate_stale_context_ontology",
     "parse_evidence",
 ]

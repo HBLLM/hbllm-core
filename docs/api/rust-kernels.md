@@ -13,17 +13,19 @@ HBLLM includes **13 native Rust crates** that provide SIMD-accelerated performan
 
 ## 13 Native Crates Index
 
+Discovered at runtime by `NativeAccelerationRegistry` (`hbllm.native.registry`) and routed via `AdaptiveDispatcher` (`WorkloadProfile`):
+
 | Crate | Directory | Python Module | Purpose | Speedup vs Python |
 |---|---|---|---|---|
 | **`compute_kernel`** | `rust/compute_kernel/` | `hbllm_compute` | INT4/INT8 quantized MatMul, dynamically dispatched SIMD GEMV | 10–30× |
-| **`tokenizer`** | `rust/tokenizer/` | `hbllm-tokenizer` | BPE tokenizer training and ultra-fast text encoding | 15–40× |
-| **`data_tools`** | `rust/data_tools/` | `hbllm-data-tools` | MinHash LSH deduplication, fast UTF-8 cleaning | 10–25× |
+| **`tokenizer`** | `rust/tokenizer/` | `hbllm_tokenizer_rs` | BPE tokenizer training and ultra-fast text encoding | 15–40× |
+| **`data_tools`** | `rust/data_tools/` | `hbllm_data_tools_rs` | MinHash LSH deduplication, fast UTF-8 cleaning | 10–25× |
 | **`semantic_search`**| `rust/semantic_search/` | `hbllm_semantic_search` | SIMD-vectorized cosine & dot product similarity search | 20–50× |
 | **`knowledge_graph`**| `rust/knowledge_graph/` | `hbllm_knowledge_graph` | High-speed graph traversal, neighbor queries, shortest paths | 15–35× |
 | **`policy_eval`** | `rust/policy_eval/` | `hbllm_policy_eval` | Native AST policy evaluation and rule verification | 25–50× |
 | **`confidence`** | `rust/confidence/` | `hbllm_confidence` | Native epistemic uncertainty and confidence scoring | 10–20× |
 | **`concept_extract`**| `rust/concept_extract/` | `hbllm_concept_extract` | Fast episodic text pattern clustering & rule mining | 8–15× |
-| **`perception`** | `rust/perception/` | `hbllm_perception_rs` | Audio frame preprocessing and vector projection | 12–25× |
+| **`perception`** | `rust/perception/` | `hbllm_perception_rs` | Audio/visual preprocessing and vector projection | 12–25× |
 | **`network_utils`** | `rust/network_utils/` | `hbllm_network_utils` | High-throughput binary message framing & serialization | 15–30× |
 | **`hcir_graph`** | `rust/hcir_graph/` | `hbllm_hcir_graph` | Persistent chunked structural-sharing HCIR GraphState with BLAKE3 canonical hashing | 40–100× |
 | **`simulation_engine`** | `rust/simulation_engine/` | `hbllm_simulation_engine` | Resident state multi-branch counterfactual simulation & DAG transition cache | 25–80× |
@@ -51,12 +53,12 @@ The compute kernel provides SIMD-optimized matrix operations for quantized autor
 
 ---
 
-## 2. Tokenizer (`hbllm_tokenizer`)
+## 2. Tokenizer (`hbllm_tokenizer_rs`)
 
 High-performance Byte-Pair Encoding (BPE) engine:
 
 ```python
-from hbllm_tokenizer import Trainer, Vocab
+from hbllm_tokenizer_rs import Trainer, Vocab
 
 # Train a custom tokenizer directly from text files
 trainer = Trainer(vocab_size=32768, min_frequency=2)
@@ -71,7 +73,7 @@ decoded_text = vocab.decode(token_ids)
 
 ---
 
-## 3. Data Tools (`hbllm_data_tools`)
+## 3. Data Tools (`hbllm_data_tools_rs`)
 
 Provides industrial data curation algorithms:
 
@@ -79,7 +81,7 @@ Provides industrial data curation algorithms:
 - **`fast_clean_batch(docs)`**: Multi-threaded Unicode normalization, zero-width space removal, and control character stripping.
 
 ```python
-from hbllm_data_tools import Deduplicator, fast_clean_batch
+from hbllm_data_tools_rs import Deduplicator, fast_clean_batch
 
 cleaned_docs = fast_clean_batch(["Doc 1\x00 dirty", "Doc 2 clean"])
 dedup = Deduplicator(num_perm=128, threshold=0.8)
@@ -232,6 +234,20 @@ match_result = match_structures(
 ```
 
 ---
+
+## Native Acceleration Registry (`hbllm.native.registry`)
+
+Inspect live crate availability and dispatch based on workload size:
+
+```python
+from hbllm.native.registry import WorkloadProfile, native
+
+print(native.status_summary())
+use_rust = native.should_execute_native(
+    "hcir_graph",
+    WorkloadProfile(state_node_count=5000),
+)
+```
 
 ## Building All Crates
 

@@ -16,7 +16,7 @@ HBLLM enforces a verified defense-in-depth sandboxing architecture across two di
     └── Network namespace   (Linux unshare -Urn network isolation)
 
 Capabilities declaring ``IsolationMode.SUBPROCESS`` or executing untrusted Python code
-are automatically dispatched through Tier 2 via ``hbllm.actions.sandbox.run_sandboxed_python``.
+are automatically dispatched through Tier 2 via ``hbllm.hcir.kernel.subprocess_sandbox.run_sandboxed_python``.
 """
 
 from __future__ import annotations
@@ -300,7 +300,7 @@ class SandboxedExecutor:
 
         # If python code is passed, run through sandboxed python subprocess runner
         if "code" in params and isinstance(params["code"], str):
-            from hbllm.actions.sandbox import run_sandboxed_python
+            from hbllm.hcir.kernel.subprocess_sandbox import run_sandboxed_python
 
             res = await run_sandboxed_python(
                 code=params["code"],

@@ -173,11 +173,6 @@ class ArcClickCell(MacroAction):
 
         eff = effector_candidates[0]
         data = {"x": int(self.cell_coord[1]), "y": int(self.cell_coord[0])}
-        # Update visit count for this click coordinate so exploration alternates when quiescent
-        engine.entity_visit_counts[f"actuate_{self.cell_coord[0]}_{self.cell_coord[1]}"] = (
-            engine.entity_visit_counts.get(f"actuate_{self.cell_coord[0]}_{self.cell_coord[1]}", 0)
-            + 1
-        )
         self.has_executed = True
         self.status = MacroActionStatus.SATISFIED
         return eff, data
@@ -283,8 +278,6 @@ def arc_macro_plan_synthesis_hook(
                 (sh for sh in shapes if sh.properties.get("is_active")),
                 shapes[0],
             )
-            engine.avatar_pos = active_shape.pos
-            engine.avatar_feature = active_shape.feature_id
 
             matching_sil = next(
                 (sil for sil in silhouettes if sil.feature_id == active_shape.feature_id),

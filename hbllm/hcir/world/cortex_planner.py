@@ -10,21 +10,14 @@ Biologically modeled on mammalian OFC counterfactual preplay and frontopolar (BA
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
-
-
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
 from hbllm.hcir.world.planning import (
-    ContinuousKinematicPlanner,
     DynamicReplanner,
     EpistemicGoalProposal,
     EpistemicGoalScheduler,
@@ -102,7 +95,6 @@ class SimulationStage:
 
 
 __all__ = [
-    "ContinuousKinematicPlanner",
     "DynamicReplanner",
     "EpistemicGoalProposal",
     "EpistemicGoalScheduler",
@@ -117,5 +109,4 @@ __all__ = [
     "SpatialAffordanceModel",
     "SpatialAffordanceSnapshot",
     "SubgoalType",
-    "get_sub_attr",
 ]

@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Data Tools — High-performance text processing.
 //!
 //! This crate provides fast, parallelized data processing tools for
@@ -36,7 +35,7 @@ use pyo3::prelude::*;
 
 /// Python module entry point
 #[pymodule]
-fn hbllm_data_tools_rs(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_data_tools_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(python::fast_clean_text, m)?)?;
     m.add_function(wrap_pyfunction!(python::fast_clean_batch, m)?)?;
     m.add_class::<python::PyDeduplicator>()?;

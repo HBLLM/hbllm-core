@@ -1,13 +1,13 @@
 ---
 title: "API Reference — Neuromorphic SNN Subsystem"
-description: "API reference for Spiking Neural Network (SNN) modules: LIFNeuron, SNNNetwork, ComprehensionStream, ExpressionStream, BrocaEncoder, TrainedPRM, and Neuromodulation."
+description: "API reference for HBLLM's Spiking Neural Network modules (hbllm.hcir.snn): LIFPopulation, SpikingNetwork, ComprehensionStream, STDP, WTACircuit, NeuromodulationEngine, OscillationManager, and SNN perception gating."
 ---
 
 # SNN Neuromorphic Engine API
 
-The **SNN Neuromorphic Engine** provides spike-rate neural computation, low-power continuous perception, thought planning, and 3-tier prompt compression.
+The **SNN Neuromorphic Engine** provides spike-rate neural computation, low-power continuous perception gating, neuromodulation, and STDP plasticity inside the LLM-free HCIR substrate.
 
-**Package:** `hbllm.brain.snn`
+**Canonical Package:** `hbllm.hcir.snn` *(compatibility re-exports at `hbllm.brain.snn`)*
 
 ---
 
@@ -15,109 +15,74 @@ The **SNN Neuromorphic Engine** provides spike-rate neural computation, low-powe
 
 | Class | Module | Role |
 |---|---|---|
-| `LIFNeuron` / `LIFPopulation` | `lif.py` | Leaky Integrate-and-Fire spiking neuron models |
-| `SNNNetwork` | `network.py` | Multi-layer recurrent spiking neural network graph |
-| `ComprehensionStream` | `comprehension/stream.py` | 5-channel real-time continuous comprehension engine |
-| `ExpressionStream` | `expression/expression_stream.py` | 3-tier adaptive thought articulation pipeline |
-| `ThoughtController` | `expression/thought_controller.py` | Cognitive planning and rendering tier selector |
-| `TrainedPRM` | `expression/trained_prm.py` | 4-layer spiking Process Reward Model ($6 \to 8 \to 4 \to 2$) |
-| `BrocaEncoder` | `expression/broca_encoder.py` | Ultra-compact ~80-token prompt builder for LLM |
-| `ShallowRenderer` | `expression/shallow_renderer.py` | Structured ~300-token prompt builder for LLM |
-| `STDP` | `plasticity.py` | Spike-Timing-Dependent Plasticity learning engine |
-| `WTACircuit` | `wta.py` | Winner-Take-All lateral inhibition competitive circuit |
-| `NeuromodulationEngine` | `neuromodulation.py` | Global dopamine, serotonin, ACh, and noradrenaline dynamics |
-| `OscillationManager` | `oscillations.py` | Cortical oscillation clocks ($\theta, \alpha, \beta, \gamma$) |
-| `PerceptionEnsemble` | `perception/visual_ensemble.py` | 5-channel visual perception SNN gating |
-| `VisualSignalExtractor` | `perception/visual_signals.py` | Cheap frame-level feature extraction |
-| `PerceptionGateDecision` | `perception/gate.py` | SNN-driven processing level decision |
+| `LIFConfig` / `LIFNeuron` / `SpikingAccumulator` | `hbllm.hcir.snn.lif` | Leaky Integrate-and-Fire neuron dynamics and spike accumulation |
+| `IzhikevichNeuron` / `SpikeEvent` | `hbllm.hcir.snn.neurons` | Bursting/chattering neuron models and spike events |
+| `DendriticNeuron` | `hbllm.hcir.snn.dendrite` | Predictive-coding dendritic compartments |
+| `SpikingNetwork` | `hbllm.hcir.snn.network` | Multi-layer recurrent spiking neural network graph |
+| `STDP` / `STDPRule` | `hbllm.hcir.snn.plasticity` | Spike-Timing-Dependent Plasticity learning engine |
+| `STPManager` | `hbllm.hcir.snn.stp` | Short-Term Plasticity (depression/facilitation) |
+| `WTACircuit` | `hbllm.hcir.snn.wta` | Winner-Take-All lateral inhibition competitive circuit |
+| `PopulationEncoder` | `hbllm.hcir.snn.population` | Continuous state to population spike train encoder |
+| `NeuromodulationEngine` | `hbllm.hcir.snn.neuromodulation` | Global dopamine, serotonin, ACh, and noradrenaline dynamics |
+| `OscillationManager` | `hbllm.hcir.snn.oscillations` | Cortical oscillation clocks ($\theta, \alpha, \beta, \gamma$) |
+| `ComprehensionStream` | `hbllm.hcir.snn.comprehension.stream` | Continuous streaming comprehension ensemble |
+| `PerceptionEnsemble` | `hbllm.hcir.snn.perception.visual_ensemble` | 5-channel visual perception SNN gating |
+| `VisualSignalExtractor` | `hbllm.hcir.snn.perception.visual_signals` | Fast NumPy visual frame feature extraction |
+| `AudioPerceptionEnsemble` | `hbllm.hcir.snn.perception.audio_ensemble` | Acoustic perception gating ensemble |
+| `SNNPerceptualFeatureExtractor` | `hbllm.hcir.grounding.features.feature_extractor` | Spiking feature extractor for `perception_mode="snn"` |
 
 ---
 
 ## Key Interfaces
 
-### `LIFPopulation`
+### `LIFNeuron` & `SpikingAccumulator`
 
 ```python
 import numpy as np
-from hbllm.brain.snn.lif import LIFConfig, LIFPopulation
+from hbllm.hcir.snn.lif import LIFConfig, LIFNeuron
 
 config = LIFConfig(
-    num_neurons=64,
-    tau_m=20.0,  # Membrane time constant (ms)
-    v_thresh=-50.0,  # Threshold potential (mV)
-    v_reset=-70.0,  # Reset potential (mV)
-    refractory_period=2.0,  # ms
+    tau_m=20.0,
+    v_thresh=-50.0,
+    v_reset=-70.0,
+    refractory_ms=2.0,
 )
-
-pop = LIFPopulation(config)
-
-# Inject current tensor (shape: [num_neurons])
-currents = np.random.uniform(0.0, 5.0, size=(64,))
-spikes = pop.step(currents, dt=1.0)
-print(f"Active firing neurons: {np.sum(spikes)}")
+neuron = LIFNeuron(config=config)
+fired = neuron.step(input_current=2.5, dt_ms=1.0)
+print(f"Fired: {fired}, V_m={neuron.v_m:.2f}")
 ```
-
----
 
 ### `ComprehensionStream`
 
 ```python
-from hbllm.brain.snn.comprehension.stream import ComprehensionStream
+from hbllm.hcir.snn.comprehension.stream import ComprehensionStream
 
 stream = ComprehensionStream()
-
-# Ingest streaming text chunks
-state = await stream.process_chunk("Critical alert: High latency on node-3")
-print(f"Affective Urgency: {state.urgency_rate:.2f}")
-print(f"Syntactic Complexity: {state.syntactic_complexity:.2f}")
+state = await stream.process_chunk("Critical alert: high latency on node-3")
+print(f"Understanding state: {state}")
 ```
 
----
-
-### `TrainedPRM` & `BrocaEncoder`
+### `NeuromodulationEngine`
 
 ```python
-from hbllm.brain.snn.expression.broca_encoder import BrocaEncoder
-from hbllm.brain.snn.expression.trained_prm import TrainedPRM
+from hbllm.hcir.snn.neuromodulation import NeuromodulationEngine
 
-prm = TrainedPRM()
-encoder = BrocaEncoder()
-
-# Evaluate candidate thought step
-score = prm.evaluate_step(
-    goal="Fix cluster",
-    action="Drain node-3",
-    features=[0.9, 0.8, 0.95, 0.2, 0.9, 1.0],
-)
-print(f"PRM Step Reward Score: {score:.3f}")
-
-# Compress thought to minimal prompt
-compressed_prompt = encoder.encode(intent="drain_node", parameters={"node": "node-3"})
-print(f"Compressed Broca tokens length: ~{len(compressed_prompt.split())}")
+neuro = NeuromodulationEngine()
+neuro.signal_novelty(0.5)
+neuro.signal_reward(0.3)
 ```
-
----
 
 ### Visual Perception Gating
 
-The SNN perception subsystem decides **when** and **how much** visual
-computation to spend on incoming video frames.
-
 ```python
-from hbllm.brain.snn.perception.visual_signals import VisualSignalExtractor
-from hbllm.brain.snn.perception.visual_ensemble import PerceptionEnsemble
+from hbllm.hcir.snn.perception.visual_ensemble import PerceptionEnsemble
+from hbllm.hcir.snn.perception.visual_signals import VisualSignalExtractor
 
 extractor = VisualSignalExtractor(downsample=4)
 ensemble = PerceptionEnsemble()
 
-signals = extractor.extract(frame)  # ~0.1ms, numpy only
-decision = ensemble.step(signals)  # ~0.01ms, 5 LIF neurons
-
+signals = extractor.extract(frame)
+decision = ensemble.step(signals)
 if decision.should_process:
-    # Run expensive VisionProvider encoding
-    assessment = await runtime.perceive(frame)
+    print("High-salience frame -> forward to grounding")
 ```
-
-**Channels:** scene (slow), entity (medium), motion (fast), novelty (medium-slow), stability (very slow).
-
-**Outputs:** `PerceptionProcessingLevel` — NONE / LOW / STANDARD / HIGH / URGENT.

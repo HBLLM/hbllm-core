@@ -102,6 +102,73 @@ class NativeAccelerationRegistry:
     """Centralized registry for high-performance native HCIR substrate capabilities."""
 
     _instance: NativeAccelerationRegistry | None = None
+    REGISTERED_CRATES: tuple[tuple[str, str, str], ...] = (
+        (
+            "hcir_graph",
+            "hbllm_hcir_graph",
+            "Persistent HCIR Graph with chunk-granular structural sharing and canonical BLAKE3 hashing",
+        ),
+        (
+            "simulation",
+            "hbllm_simulation_engine",
+            "Rayon multi-threaded counterfactual mental simulation sandbox with geometric stability",
+        ),
+        (
+            "structure_matcher",
+            "hbllm_structure_matcher",
+            "Bitset-accelerated analogical subgraph isomorphism and systematicity alignment",
+        ),
+        (
+            "tokenizer",
+            "hbllm_tokenizer_rs",
+            "SIMD-accelerated Byte-Pair Encoding (BPE) vocab tokenizer",
+        ),
+        (
+            "compute_kernel",
+            "hbllm_compute",
+            "Vectorized tensor and matrix arithmetic compute kernels",
+        ),
+        (
+            "semantic_search",
+            "hbllm_semantic_search",
+            "Accelerated vector search and cosine similarity ranking",
+        ),
+        (
+            "perception",
+            "hbllm_perception_rs",
+            "Fast 2D/3D visual and spatial perception rasterization kernels",
+        ),
+        (
+            "confidence",
+            "hbllm_confidence",
+            "Bayesian confidence calibration and distribution estimation",
+        ),
+        (
+            "data_tools",
+            "hbllm_data_tools_rs",
+            "Zero-copy streaming JSON/Arrow serialization and data ingest",
+        ),
+        (
+            "policy_eval",
+            "hbllm_policy_eval",
+            "High-throughput rule matching and safety policy evaluation",
+        ),
+        (
+            "concept_extract",
+            "hbllm_concept_extract",
+            "Fast keyword and n-gram lexical concept extraction",
+        ),
+        (
+            "knowledge_graph",
+            "hbllm_knowledge_graph",
+            "High-performance graph traversal and entity relation queries",
+        ),
+        (
+            "network_utils",
+            "hbllm_network_utils",
+            "Optimized packet serialization and protocol encoding",
+        ),
+    )
 
     def __init__(self) -> None:
         self._capabilities: dict[str, NativeCapabilityInfo] = {}
@@ -115,77 +182,9 @@ class NativeAccelerationRegistry:
         return cls._instance
 
     def _discover_capabilities(self) -> None:
-        crates = [
-            (
-                "hcir_graph",
-                "hbllm_hcir_graph",
-                "Persistent HCIR Graph with chunk-granular structural sharing and canonical BLAKE3 hashing",
-            ),
-            (
-                "simulation",
-                "hbllm_simulation_engine",
-                "Rayon multi-threaded counterfactual mental simulation sandbox with geometric stability",
-            ),
-            (
-                "structure_matcher",
-                "hbllm_structure_matcher",
-                "Bitset-accelerated analogical subgraph isomorphism and systematicity alignment",
-            ),
-            (
-                "tokenizer",
-                "hbllm_tokenizer_rs",
-                "SIMD-accelerated Byte-Pair Encoding (BPE) vocab tokenizer",
-            ),
-            (
-                "compute_kernel",
-                "hbllm_compute",
-                "Vectorized tensor and matrix arithmetic compute kernels",
-            ),
-            (
-                "semantic_search",
-                "hbllm_semantic_search",
-                "Accelerated vector search and cosine similarity ranking",
-            ),
-            (
-                "perception",
-                "hbllm_perception_rs",
-                "Fast 2D/3D visual and spatial perception rasterization kernels",
-            ),
-            (
-                "confidence",
-                "hbllm_confidence",
-                "Bayesian confidence calibration and distribution estimation",
-            ),
-            (
-                "data_tools",
-                "hbllm_data_tools_rs",
-                "Zero-copy streaming JSON/Arrow serialization and data ingest",
-            ),
-            (
-                "policy_eval",
-                "hbllm_policy_eval",
-                "High-throughput rule matching and safety policy evaluation",
-            ),
-            (
-                "concept_extract",
-                "hbllm_concept_extract",
-                "Fast keyword and n-gram lexical concept extraction",
-            ),
-            (
-                "knowledge_graph",
-                "hbllm_knowledge_graph",
-                "High-performance graph traversal and entity relation queries",
-            ),
-            (
-                "network_utils",
-                "hbllm_network_utils",
-                "Optimized packet serialization and protocol encoding",
-            ),
-        ]
-
         import importlib
 
-        for cap_name, mod_name, desc in crates:
+        for cap_name, mod_name, desc in self.REGISTERED_CRATES:
             available = False
             try:
                 importlib.import_module(mod_name)

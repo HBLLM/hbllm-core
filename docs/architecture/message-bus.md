@@ -3,9 +3,9 @@ title: "Message Bus Architecture — Async Pub/Sub Communication"
 description: "Architecture deep-dive into HBLLM's async message bus — topic-based routing, distributed deployment with RedisBus, circuit breakers, and message correlation patterns."
 ---
 
-# Network API
+# Message Bus Architecture
 
-The network layer provides asynchronous Pub/Sub communication between all cognitive nodes.
+The network layer provides asynchronous Pub/Sub communication between distributed services and legacy cognitive nodes.
 
 ## MessageBus
 

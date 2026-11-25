@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! Native Relational Structure Matcher — PyO3 Bindings.
 
 pub mod matcher;
@@ -11,14 +10,15 @@ use crate::matcher::{
 };
 
 #[pyfunction]
+#[pyo3(signature = (pattern_dict, target_dict, min_systematicity=None))]
 pub fn match_relational_schema<'py>(
     py: Python<'py>,
-    pattern_dict: &PyDict,
-    target_dict: &PyDict,
+    pattern_dict: &Bound<'py, PyDict>,
+    target_dict: &Bound<'py, PyDict>,
     min_systematicity: Option<f64>,
-) -> PyResult<&'py PyList> {
+) -> PyResult<Bound<'py, PyList>> {
     // 1. Extract pattern
-    let py_vars: &PyList = pattern_dict
+    let py_vars: Bound<'_, PyList> = pattern_dict
         .get_item("variables")?
         .map(|v| v.extract())
         .transpose()?
@@ -28,14 +28,14 @@ pub fn match_relational_schema<'py>(
         variables.push(v.extract::<String>()?);
     }
 
-    let py_edges: &PyList = pattern_dict
+    let py_edges: Bound<'_, PyList> = pattern_dict
         .get_item("edges")?
         .map(|v| v.extract())
         .transpose()?
         .unwrap_or_else(|| PyList::empty(py));
     let mut edges = Vec::with_capacity(py_edges.len());
     for e_item in py_edges.iter() {
-        let e_dict: &PyDict = e_item.extract()?;
+        let e_dict = e_item.downcast::<PyDict>()?;
         let rel_type: String = e_dict
             .get_item("rel_type")?
             .map(|v| v.extract())
@@ -66,7 +66,7 @@ pub fn match_relational_schema<'py>(
     };
 
     // 2. Extract target graph
-    let py_target_nodes: &PyList = target_dict
+    let py_target_nodes: Bound<'_, PyList> = target_dict
         .get_item("nodes")?
         .map(|v| v.extract())
         .transpose()?
@@ -76,14 +76,14 @@ pub fn match_relational_schema<'py>(
         target_nodes.push(n.extract::<String>()?);
     }
 
-    let py_target_edges: &PyList = target_dict
+    let py_target_edges: Bound<'_, PyList> = target_dict
         .get_item("edges")?
         .map(|v| v.extract())
         .transpose()?
         .unwrap_or_else(|| PyList::empty(py));
     let mut target_edges = Vec::with_capacity(py_target_edges.len());
     for te_item in py_target_edges.iter() {
-        let te_dict: &PyDict = te_item.extract()?;
+        let te_dict = te_item.downcast::<PyDict>()?;
         let rel_type: String = te_dict
             .get_item("rel_type")?
             .map(|v| v.extract())
@@ -132,7 +132,7 @@ pub fn match_relational_schema<'py>(
 }
 
 #[pymodule]
-fn hbllm_structure_matcher(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn hbllm_structure_matcher(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(match_relational_schema, m)?)?;
     Ok(())
 }

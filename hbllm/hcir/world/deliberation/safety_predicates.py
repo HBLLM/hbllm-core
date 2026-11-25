@@ -23,9 +23,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from hbllm.hcir.world.cortex_deliberation import get_sub_attr
-
-
 @dataclass
 class SafetyGateResult:
     """Result of a cognitive safety gate evaluation."""
@@ -103,7 +100,8 @@ class StaticLethalHazardPredicate(PlanSafetyPredicate):
                 feat = int(curr_grid[fr, fc])
                 if feat in view.mobile_threat_features:
                     continue
-                if feat in view.hazard_tracker.known_lethal_features:
+                ev = view.symbolic_theory.evaluate_transition(feat, locus=(fr, fc))
+                if feat in view.hazard_tracker.known_lethal_features or ev.risk_cost >= 40.0:
                     return SafetyGateResult(
                         is_safe=False, reason=f"Lethal feature {feat} at ({fr}, {fc})"
                     )
@@ -195,19 +193,23 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                 return SafetyGateResult(is_safe=True)
 
             half_step = max(1, step_size // 2)
-            barrier_feats = view.symbolic_theory.barrier_features
             walkable_and_safe = view.symbolic_theory.walkable_features
             bg_is_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
             patrol_walls: set[tuple[int, int]] = set(view.learned_barriers)
+            kb = view.symbolic_theory.transition_kb
             for rr in range(H):
                 for cc in range(W):
                     v = int(curr_grid[rr, cc])
-                    if (
-                        view.symbolic_theory.is_barrier(v)
-                        or v in barrier_feats
-                        or (bg_is_void and v == bg)
-                    ):
+                    ev = view.symbolic_theory.evaluate_transition(v, locus=(rr, cc))
+                    if not ev.traversable or ev.risk_cost >= 40.0 or (bg_is_void and v == bg):
                         patrol_walls.add((rr, cc))
+                    elif (
+                        kb is not None
+                        and kb.get_belief((rr, cc), scope="locus") is not None
+                        and ev.traversable
+                        and ev.confidence > 0.0
+                    ):
+                        patrol_walls.discard((rr, cc))
 
             def _blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
                 probe = (p[0] + f[0] * half_step, p[1] + f[1] * half_step)
@@ -317,7 +319,8 @@ class AnteriorCingulateConflictPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
-        acc = get_sub_attr(view.working_memory, "acc_conflict", None)
+        wm = getattr(view, "working_memory", None)
+        acc = wm.acc_conflict if wm is not None else None
         if acc is None:
             return SafetyGateResult(is_safe=True)
 

@@ -222,6 +222,63 @@ class WorldKernel:
         )
         return pred_node
 
+    def evaluate_candidate_action_ensemble(
+        self,
+        action: Any,
+        curr_grid: Any = None,
+        horizon_ms: int = 60000,
+        event_bus: Any = None,
+    ) -> tuple[Any, bool]:
+        """Evaluate candidate action through PredictiveRealityModel ensemble.
+
+        Returns the ensemble prediction and whether high inter-predictor disagreement
+        was detected, publishing an epistemic disagreement event if an event bus is provided.
+        """
+        from hbllm.hcir.kernel.event_bus import KernelEvent
+        from hbllm.hcir.world.world_context import WorldModelScope
+
+        base_snapshot = self.digital_twin.create_snapshot()
+        variables: dict[str, Any] = dict(base_snapshot.variables)
+        if curr_grid is not None:
+            variables["grid"] = curr_grid
+
+        snapshot = WorldStateSnapshot(
+            world_id=self.digital_twin.world_id,
+            timestamp=time.time(),
+            variables=variables,
+            entity_states=base_snapshot.entity_states,
+        )
+        scope = WorldModelScope(world_id=self.digital_twin.world_id)
+        action_intent = (
+            action.intent
+            if isinstance(action, ActionNode)
+            else str(getattr(action, "name", action))
+        )
+
+        pred = self.predictive_reality.predict(
+            snapshot=snapshot,
+            action_intent=action_intent,
+            horizon_ms=horizon_ms,
+            scope=scope,
+        )
+        disagreement = self.predictive_reality.disagreement_analyzer.analyze_disagreement(
+            pred.component_predictions
+        )
+        if disagreement.high_disagreement and event_bus is not None:
+            event_bus.publish(
+                KernelEvent(
+                    event_type="epistemic.ensemble_disagreement",
+                    source="WorldKernel",
+                    data={
+                        "action_intent": action_intent,
+                        "disagreement_index": disagreement.disagreement_index,
+                        "conflicting_predictors": disagreement.conflicting_predictors,
+                        "world_id": self.digital_twin.world_id,
+                    },
+                )
+            )
+        return pred, bool(disagreement.high_disagreement)
+
     def observe_and_update(
         self,
         action: ActionNode,

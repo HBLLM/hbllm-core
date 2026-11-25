@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from hbllm.hcir.world.macro.custom import (
-    CustomMacroAction,
     ProceduralReplayAction,
     attribute_macro_action_outcome,
 )
@@ -14,7 +13,6 @@ from hbllm.hcir.world.macro.models import (
     MicroActionSpec,
     ObjectSpec,
     _spatial_effector_payload,
-    get_sub_attr,
 )
 from hbllm.hcir.world.macro.planner import (
     MacroActionPlan,
@@ -23,7 +21,6 @@ from hbllm.hcir.world.macro.planner import (
 )
 from hbllm.hcir.world.macro.primitives import (
     DepositCargo,
-    ExploreFrontier,
     ExploreObject,
     InteractWith,
     NavigateTo,
@@ -35,9 +32,7 @@ from hbllm.hcir.world.macro.primitives import (
 )
 
 __all__ = [
-    "CustomMacroAction",
     "DepositCargo",
-    "ExploreFrontier",
     "ExploreObject",
     "InteractWith",
     "MacroAction",
@@ -57,5 +52,4 @@ __all__ = [
     "UseToolOnBarrier",
     "_spatial_effector_payload",
     "attribute_macro_action_outcome",
-    "get_sub_attr",
 ]

@@ -42,6 +42,9 @@ class CorticalGroundingState:
     dialogue_role_priors: dict[int, dict[str, float]] = field(default_factory=dict)
     last_scene_sig: tuple[Any, ...] | None = None
     episode_feature_memory: dict[int, PerceptualFeatureVector] = field(default_factory=dict)
+    cached_entity_features: dict[str, PerceptualFeatureVector] = field(default_factory=dict)
+    cached_entity_concepts: dict[str, ConceptAssignment] = field(default_factory=dict)
+    cached_entity_priors: dict[str, dict[str, float]] = field(default_factory=dict)
     adapted_role_pairs: set[tuple[int, str]] = field(default_factory=set)
     verified_outcomes_count: int = 0
     rejected_actions_count: int = 0

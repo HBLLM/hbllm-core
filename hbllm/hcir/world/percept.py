@@ -19,7 +19,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -60,6 +60,29 @@ class ActuatorSchema:
     kind: Literal["discrete", "point", "none"]
     params: Mapping[str, Any] = field(default_factory=dict)
     valid_targets: Sequence[tuple[int, int]] | None = None
+
+
+@runtime_checkable
+class ObservationProtocol(Protocol):
+    """Domain-neutral structural protocol satisfied by lattice and non-lattice observations."""
+
+    @property
+    def available_actions(self) -> Sequence[Any]: ...
+
+    @property
+    def entities(self) -> Sequence[Any]: ...
+
+    @property
+    def context_id(self) -> str: ...
+
+    @property
+    def episode_id(self) -> str: ...
+
+    @property
+    def metadata(self) -> Mapping[str, Any]: ...
+
+    @property
+    def terminal(self) -> TerminalSignal | None: ...
 
 
 @dataclass(frozen=True)
@@ -149,19 +172,35 @@ class EpisodeBoundary:
         EpisodeBoundaryKind.CONTEXT_RESET
     )
     retain_dynamics: bool = True
-    same_level: bool = False
+    same_level: bool | None = None
     same_context: bool | None = None
 
     def __post_init__(self) -> None:
         if self.same_context is not None:
-            object.__setattr__(self, "same_level", bool(self.same_context))
+            resolved = bool(self.same_context)
+        elif self.same_level is not None:
+            resolved = bool(self.same_level)
         else:
-            object.__setattr__(self, "same_context", bool(self.same_level))
+            resolved = bool(
+                self.retain_dynamics and self.kind in (EpisodeBoundaryKind.DEATH, "death", "retry")
+            )
+        object.__setattr__(self, "same_level", resolved)
+        object.__setattr__(self, "same_context", resolved)
 
     @property
     def is_same_context(self) -> bool:
         """True when episode resets within the exact same spatial/situational context."""
         return bool(self.same_context if self.same_context is not None else self.same_level)
+
+
+def resolve_boundary_flags(boundary: Any) -> tuple[Any, bool, bool]:
+    """Return ``(kind, retain_dynamics, is_same_context)`` for a boundary marker or kind."""
+    if isinstance(boundary, EpisodeBoundary):
+        retain_dyn = bool(boundary.retain_dynamics)
+        return boundary.kind, retain_dyn, bool(boundary.is_same_context and retain_dyn)
+    kind = boundary
+    is_same_ctx = kind in (EpisodeBoundaryKind.DEATH, "death", "retry")
+    return kind, True, is_same_ctx
 
 
 @dataclass
@@ -267,6 +306,24 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
             lethal_features = set(context.hazard_tracker.known_lethal_features)
             lethal_positions = set(context.hazard_tracker.static_lethal_positions)
 
+        av_feats: set[int] = set()
+        ref_av_pos: tuple[int, int] | None = None
+        if context is not None:
+            try:
+                if context.avatar_features:
+                    av_feats.update(context.avatar_features)
+            except AttributeError:
+                pass
+            try:
+                if context.avatar_feature is not None:
+                    av_feats.add(context.avatar_feature)
+            except AttributeError:
+                pass
+            try:
+                ref_av_pos = context.avatar_pos
+            except AttributeError:
+                ref_av_pos = None
+
         entities: list[SpatialEntity] = []
         unique_feats = [int(x) for x in np.unique(grid) if int(x) != bg]
         for feat in unique_feats:
@@ -288,11 +345,7 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
                         role = EntityRole.GOAL
                     elif context.symbolic_theory.is_barrier(feat):
                         role = EntityRole.OBSTACLE
-                if (
-                    context
-                    and hasattr(context, "avatar_feature")
-                    and context.avatar_feature == feat
-                ):
+                if feat in av_feats:
                     role = EntityRole.AGENT
 
                 ent = SpatialEntity(
@@ -307,9 +360,66 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
                 )
                 entities.append(ent)
 
+        agent_candidates = [e for e in entities if e.role == EntityRole.AGENT]
+        if len(agent_candidates) > 1 and ref_av_pos is not None:
+            exact_ag = [
+                e
+                for e in agent_candidates
+                if ref_av_pos in e.properties.get("cells", [e.grid_pos]) or e.grid_pos == ref_av_pos
+            ]
+            best_ag = (
+                exact_ag[0]
+                if exact_ag
+                else min(
+                    agent_candidates,
+                    key=lambda e: (
+                        abs(e.grid_pos[0] - ref_av_pos[0]) + abs(e.grid_pos[1] - ref_av_pos[1])
+                    ),
+                )
+            )
+
+            def _boxes_touch(b1: tuple[int, int, int, int], b2: tuple[int, int, int, int]) -> bool:
+                r_gap = max(0, b1[0] - b2[1] - 1, b2[0] - b1[1] - 1)
+                c_gap = max(0, b1[2] - b2[3] - 1, b2[2] - b1[3] - 1)
+                return (b1[0] <= b2[1] and b2[0] <= b1[1] and c_gap == 0) or (
+                    b1[2] <= b2[3] and b2[2] <= b1[3] and r_gap == 0
+                )
+
+            avatar_body = [best_ag]
+            body_ids = {id(best_ag)}
+            grew = True
+            while grew:
+                grew = False
+                for e in agent_candidates:
+                    if id(e) in body_ids:
+                        continue
+                    if any(_boxes_touch(e.bounding_box, b.bounding_box) for b in avatar_body):
+                        avatar_body.append(e)
+                        body_ids.add(id(e))
+                        grew = True
+            learned_gp_set: set[tuple[int, int]] = set()
+            if context is not None:
+                try:
+                    learned_gp_set = set(context.learned_goal_positions or ())
+                except AttributeError:
+                    learned_gp_set = set()
+            for e in agent_candidates:
+                if id(e) not in body_ids:
+                    is_sym_goal = (
+                        context is not None
+                        and hasattr(context, "symbolic_theory")
+                        and context.symbolic_theory.is_goal(e.feature_id)
+                    )
+                    e.role = (
+                        EntityRole.GOAL
+                        if e.grid_pos in learned_gp_set or is_sym_goal
+                        else EntityRole.UNKNOWN
+                    )
+
         barriers: set[tuple[int, int]] = set()
         goals: list[tuple[int, int]] = []
         avatar_pos: tuple[int, int] | None = None
+        final_agents: list[SpatialEntity] = []
         lethal_cells: set[tuple[int, int]] = set(lethal_positions)
         for e in entities:
             if e.role == EntityRole.DYNAMIC_HAZARD or (
@@ -321,7 +431,13 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
             elif e.role == EntityRole.GOAL:
                 goals.append(e.grid_pos)
             elif e.role == EntityRole.AGENT:
-                avatar_pos = e.grid_pos
+                final_agents.append(e)
+        if final_agents:
+            tot_area = sum(max(1, e.area) for e in final_agents)
+            avatar_pos = (
+                int(round(sum(e.centroid[0] * max(1, e.area) for e in final_agents) / tot_area)),
+                int(round(sum(e.centroid[1] * max(1, e.area) for e in final_agents) / tot_area)),
+            )
 
         if context and hasattr(context, "learned_barriers"):
             barriers.update(context.learned_barriers)
@@ -457,13 +573,18 @@ class ExogenousSignalTracker:
         "exogenous_loci": RetentionPolicy.EPISODE_LOCAL,
         "_untargeted_actions": RetentionPolicy.EPISODE_LOCAL,
         "_untargeted_counts": RetentionPolicy.EPISODE_LOCAL,
+        "_colinear_tracks": RetentionPolicy.EPISODE_LOCAL,
     }
 
     exogenous_loci: set[PlaceLocus] = field(default_factory=set)
     _untargeted_actions: dict[PlaceLocus, set[Any]] = field(default_factory=dict, repr=False)
     _untargeted_counts: dict[PlaceLocus, int] = field(default_factory=dict, repr=False)
+    _colinear_tracks: dict[tuple[int, int], tuple[int, int, set[Any], list[PlaceLocus]]] = field(
+        default_factory=dict, init=False, repr=False
+    )
     _cached_partition_key: tuple[Any, ...] | None = field(default=None, init=False, repr=False)
     _cached_partition_rows: Any | None = field(default=None, init=False, repr=False)
+    _PARTITION_CACHE: ClassVar[dict[tuple[Any, ...], Any]] = {}
 
     def reset_episode(self, *, retain_long_term: bool = True) -> None:
         """Reset transient empirical exogeneity statistics on episode boundary."""
@@ -473,6 +594,7 @@ class ExogenousSignalTracker:
             self.exogenous_loci.clear()
             self._untargeted_actions.clear()
             self._untargeted_counts.clear()
+            self._colinear_tracks.clear()
 
     def mark_exogenous(self, loci: Any) -> None:
         """Register externally supplied exogenous / non-interactive loci."""
@@ -486,6 +608,7 @@ class ExogenousSignalTracker:
         *,
         avatar_locus: PlaceLocus | None = None,
         target_locus: PlaceLocus | None = None,
+        extra_local_loci: tuple[PlaceLocus | None, ...] = (),
         local_radius: float = 2.5,
     ) -> None:
         """Record non-local mutations to empirically discover exogenous ticking signals."""
@@ -499,8 +622,10 @@ class ExogenousSignalTracker:
                 return False
             return all(abs(float(x) - float(y)) <= local_radius for x, y in zip(a, b, strict=True))
 
+        local_refs = (avatar_locus, target_locus, *extra_local_loci)
+        nonlocal_2d: list[tuple[int, int]] = []
         for loc in mutated_loci:
-            if _is_near(loc, avatar_locus) or _is_near(loc, target_locus):
+            if any(_is_near(loc, ref) for ref in local_refs if ref is not None):
                 # Re-grounded by local motor or effector proximity
                 continue
             cnt = self._untargeted_counts.get(loc, 0) + 1
@@ -510,6 +635,40 @@ class ExogenousSignalTracker:
                 acts.add(action)
             if len(acts) >= 2 or cnt >= 3:
                 self.exogenous_loci.add(loc)
+            if isinstance(loc, tuple) and len(loc) == 2:
+                nonlocal_2d.append((int(loc[0]), int(loc[1])))
+
+        # 1D colinear sequential gauge aggregation (e.g. timer/fuel bars shifting 1-2px/step):
+        for axis in (0, 1):
+            groups: dict[int, list[int]] = {}
+            for r_i, c_i in nonlocal_2d:
+                key_coord = r_i if axis == 0 else c_i
+                val_coord = c_i if axis == 0 else r_i
+                groups.setdefault(key_coord, []).append(val_coord)
+            for key_coord, coords in groups.items():
+                if not (1 <= len(coords) <= 4):
+                    continue
+                line_locs: list[PlaceLocus] = [
+                    (key_coord, vc) if axis == 0 else (vc, key_coord) for vc in coords
+                ]
+                tkey = (axis, key_coord)
+                prev = self._colinear_tracks.get(tkey)
+                if prev is not None and min(abs(vc - prev[0]) for vc in coords) <= 2:
+                    last_vc, tick_cnt, acts_set, hist = prev
+                    if any(vc != last_vc for vc in coords):
+                        tick_cnt += 1
+                    next_vc = min(coords) if min(coords) < last_vc else max(coords)
+                    if action is not None:
+                        acts_set.add(action)
+                    hist.extend(line_locs)
+                    if len(hist) > 64:
+                        del hist[:-64]
+                    self._colinear_tracks[tkey] = (next_vc, tick_cnt, acts_set, hist)
+                    if tick_cnt >= 3 or (tick_cnt >= 2 and len(acts_set) >= 2):
+                        self.exogenous_loci.update(hist)
+                else:
+                    init_acts = {action} if action is not None else set()
+                    self._colinear_tracks[tkey] = (coords[0], 1, init_acts, list(line_locs))
 
     def _compute_partitioned_rows(self, lattice: Any, bg: Any = 0) -> Any:
         """Identify rows residing in topologically separated peripheral divider bands."""
@@ -524,14 +683,21 @@ class ExogenousSignalTracker:
         except (TypeError, ValueError):
             bg_val = 0
 
+        use_shared_cache = arr.size <= 16384
         cache_sig = (
             H,
             W,
             bg_val,
-            arr.tobytes() if arr.size <= 16384 else id(lattice),
+            arr.tobytes() if use_shared_cache else id(lattice),
         )
         if self._cached_partition_key == cache_sig and self._cached_partition_rows is not None:
             return self._cached_partition_rows
+        if use_shared_cache:
+            shared_cached = self._PARTITION_CACHE.get(cache_sig)
+            if shared_cached is not None:
+                self._cached_partition_key = cache_sig
+                self._cached_partition_rows = shared_cached
+                return shared_cached
 
         flags = np.zeros(H, dtype=bool)
         max_val = int(arr.max())
@@ -564,7 +730,8 @@ class ExogenousSignalTracker:
                 if div_rows[rr + 1 : min(band_depth + 1, H)].any():
                     flags[rr] = True
         thresh_85 = int(W * 0.85)
-        for div_r in range(band_depth, 2, -1):
+        thresh_50 = int(W * 0.50)
+        for div_r in range(band_depth, 1, -1):
             if fast_hist:
                 line_idx = int(dom_vals[div_r])
                 line_cnt = int(dom_counts[div_r])
@@ -577,7 +744,16 @@ class ExogenousSignalTracker:
                     has_distinct_bg = (banner_dom != field_dom) and (
                         (b_max_cnt / (div_r * W)) >= 0.85
                     )
-                    has_divider_line = (line_idx != field_dom) and (line_cnt >= thresh_85)
+                    adj_bordered = (
+                        line_cnt == W
+                        and div_r <= 5
+                        and (b_max_cnt < div_r * W or banner_dom != field_dom)
+                        and int(dom_vals[div_r + 1]) != field_dom
+                        and int(dom_counts[div_r + 1]) >= thresh_50
+                    )
+                    has_divider_line = (
+                        (line_idx != field_dom or line_idx != bg_val) and (line_cnt >= thresh_85)
+                    ) or adj_bordered
                     if has_distinct_bg or has_divider_line:
                         flags[: div_r + 1] = True
                         break
@@ -599,7 +775,7 @@ class ExogenousSignalTracker:
                         has_distinct_bg = (banner_dom != field_dom) and (
                             (b_cnts[b_max] / banner_region.size) >= 0.85
                         )
-                        has_divider_line = (line_color != field_dom) and (
+                        has_divider_line = (line_color != field_dom or line_color != bg_val) and (
                             int(cnts[idx]) >= thresh_85
                         )
                         if has_distinct_bg or has_divider_line:
@@ -611,7 +787,7 @@ class ExogenousSignalTracker:
             for rr in range(bot_start, H):
                 if not flags[rr] and div_rows[bot_start:rr].any():
                     flags[rr] = True
-        for div_r in range(H - 4, max(H - band_depth - 2, H - H // 3), -1):
+        for div_r in range(H - 3, max(H - band_depth - 2, H - H // 3), -1):
             if not (0 <= div_r < H):
                 continue
             if fast_hist:
@@ -626,7 +802,16 @@ class ExogenousSignalTracker:
                     has_distinct_bg = (banner_dom != field_dom) and (
                         (b_max_cnt / ((H - div_r - 1) * W)) >= 0.85
                     )
-                    has_divider_line = (line_idx != field_dom) and (line_cnt >= thresh_85)
+                    adj_bordered = (
+                        line_cnt == W
+                        and div_r >= H - 6
+                        and (b_max_cnt < (H - div_r - 1) * W or banner_dom != field_dom)
+                        and int(dom_vals[div_r - 1]) != field_dom
+                        and int(dom_counts[div_r - 1]) >= thresh_50
+                    )
+                    has_divider_line = (
+                        (line_idx != field_dom or line_idx != bg_val) and (line_cnt >= thresh_85)
+                    ) or adj_bordered
                     if has_distinct_bg or has_divider_line:
                         flags[div_r:] = True
                         break
@@ -648,13 +833,18 @@ class ExogenousSignalTracker:
                         has_distinct_bg = (banner_dom != field_dom) and (
                             (b_cnts[b_max] / banner_region.size) >= 0.85
                         )
-                        has_divider_line = (line_color != field_dom) and (
+                        has_divider_line = (line_color != field_dom or line_color != bg_val) and (
                             int(cnts[idx]) >= thresh_85
                         )
                         if has_distinct_bg or has_divider_line:
                             flags[div_r:] = True
                             break
 
+        flags.setflags(write=False)
+        if use_shared_cache:
+            if len(self._PARTITION_CACHE) >= 8:
+                self._PARTITION_CACHE.pop(next(iter(self._PARTITION_CACHE)))
+            self._PARTITION_CACHE[cache_sig] = flags
         self._cached_partition_key = cache_sig
         self._cached_partition_rows = flags
         return flags

@@ -24,7 +24,6 @@ from hbllm.hcir.world.macro.models import (
     MacroActionStatus,
     MicroActionSpec,
     ObjectSpec,
-    get_sub_attr,
 )
 from hbllm.hcir.world.macro.primitives import (
     DepositCargo,
@@ -98,12 +97,13 @@ class MacroActionPlan:
                 break
 
         # Check and advance BA10 frontopolar subgoal stack
-        if hasattr(engine, "subgoal_stack") and engine.subgoal_stack.has_pending_goals:
-            top_sg = engine.subgoal_stack.current_subgoal
+        sg_stack = engine.subgoal_stack
+        if sg_stack is not None and sg_stack.has_pending_goals:
+            top_sg = sg_stack.current_subgoal
             if top_sg is not None:
                 held_feats = {t.feature_id for t in engine.working_memory.body_schema.held_tools}
                 bg = engine.estimate_background(curr_grid)
-                if engine.subgoal_stack.is_subgoal_satisfied(
+                if sg_stack.is_subgoal_satisfied(
                     top_sg,
                     current_entity_positions=set(),
                     avatar_pos=engine.avatar_pos,
@@ -111,7 +111,7 @@ class MacroActionPlan:
                     grid=curr_grid,
                     background_feature=bg,
                 ):
-                    engine.subgoal_stack.pop_subgoal()
+                    sg_stack.pop_subgoal()
 
         return len(self.actions) > 0
 
@@ -180,8 +180,9 @@ class MacroActionPlan:
         available_actions: Sequence[Any],
     ) -> MacroActionPlan | None:
         """Compile a MacroActionPlan directly from a declarative skill."""
-        if hasattr(skill, "compile_to_macro_plan"):
-            plan = skill.compile_to_macro_plan(engine, curr_grid, available_actions)
+        compile_fn = getattr(skill, "compile_to_macro_plan", None)
+        if callable(compile_fn):
+            plan = compile_fn(engine, curr_grid, available_actions)
             if plan is not None and not plan.is_empty():
                 return plan
 
@@ -190,13 +191,13 @@ class MacroActionPlan:
         if not subgoals:
             return None
 
-        cursor_pos = getattr(engine, "avatar_pos", None)
+        cursor_pos = engine.avatar_pos
         if cursor_pos is None:
             return None
 
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
-        theory = getattr(engine, "symbolic_theory", None)
+        theory = engine.symbolic_theory
         H, W = curr_grid.shape
 
         def _find_target(
@@ -220,26 +221,26 @@ class MacroActionPlan:
                     or "key" in role_q
                     or "resource" in role_q
                 ):
-                    cand_feats.update(getattr(theory, "cargo_features", set()))
+                    cand_feats.update(theory.cargo_features)
                 elif (
                     "interact" in intent_str
                     or "actuate" in intent_str
                     or "switch" in role_q
                     or "actuator" in role_q
                 ):
-                    cand_feats.update(getattr(theory, "actuator_features", set()))
+                    cand_feats.update(theory.actuator_features)
                 elif (
                     "drop" in intent_str
                     or "barrier" in role_q
                     or "door" in role_q
                     or "portal" in role_q
                 ):
-                    cand_feats.update(getattr(theory, "conditional_affordances", {}).keys())
+                    cand_feats.update(theory.conditional_affordances.keys())
                 elif "nav" in intent_str or "goal" in role_q:
-                    for gp in getattr(engine, "learned_goal_positions", ()):
+                    for gp in engine.learned_goal_positions:
                         if 0 <= gp[0] < H and 0 <= gp[1] < W:
                             return gp, int(curr_grid[gp[0], gp[1]])
-                    cand_feats.update(getattr(theory, "goal_features", set()))
+                    cand_feats.update(theory.goal_features)
 
             best_coord: tuple[int, int] | None = None
             best_feat: int | None = None
@@ -251,10 +252,8 @@ class MacroActionPlan:
                 if not feat_match and not role_match:
                     continue
                 ent_cells = (
-                    ent.properties.get("cells")
-                    if isinstance(getattr(ent, "properties", None), dict)
-                    else None
-                ) or ([ent.grid_pos] if getattr(ent, "grid_pos", None) is not None else [])
+                    ent.properties.get("cells") if isinstance(ent.properties, dict) else None
+                ) or ([ent.grid_pos] if ent.grid_pos is not None else [])
                 for pt in ent_cells:
                     r_p, c_p = int(pt[0]), int(pt[1])
                     if (r_p, c_p) == cur_p:
@@ -419,10 +418,12 @@ class MacroPlanSynthesizer:
                     pos = obj.pos
                     feat = obj.feature_id
                     props = obj.properties
-                    m_tasks = getattr(obj, "macro_tasks", [])
-                elif hasattr(obj, "role") and hasattr(obj, "grid_pos"):
-                    role = str(obj.role.value if hasattr(obj.role, "value") else obj.role).lower()
-                    pos = obj.grid_pos
+                    m_tasks = obj.macro_tasks
+                elif (obj_role := getattr(obj, "role", None)) is not None and (
+                    obj_gpos := getattr(obj, "grid_pos", None)
+                ) is not None:
+                    role = str(getattr(obj_role, "value", obj_role)).lower()
+                    pos = obj_gpos
                     feat = getattr(obj, "feature_id", 0) or 0
                     props = getattr(obj, "properties", {})
                     obj_id = getattr(obj, "id", f"{role}_{pos[0]}_{pos[1]}")
@@ -439,7 +440,8 @@ class MacroPlanSynthesizer:
                         obj_id = f"{role}_{pos[0]}_{pos[1]}"
 
                     # Store in working memory knowledge base (Rule 1.8)
-                    if hasattr(engine, "working_memory"):
+                    wm_ref = engine.working_memory
+                    if wm_ref is not None:
                         spec = (
                             obj
                             if isinstance(obj, ObjectSpec)
@@ -452,19 +454,20 @@ class MacroPlanSynthesizer:
                                 macro_tasks=m_tasks,
                             )
                         )
-                        engine.working_memory.known_objects[obj_id] = spec
+                        wm_ref.known_objects[obj_id] = spec
                         if m_tasks:
-                            engine.working_memory.object_macro_tasks[obj_id] = list(m_tasks)
-                        engine.working_memory.object_trial_counts.setdefault(obj_id, 0)
+                            wm_ref.object_macro_tasks[obj_id] = list(m_tasks)
+                        wm_ref.object_trial_counts.setdefault(obj_id, 0)
                         sw_acts = props.get("focus_switch_actions")
                         if sw_acts:
                             for sw_a in sw_acts:
                                 engine.focus_switch_actions.add(sw_a)
-                                engine.working_memory.focus_switch_actions.add(sw_a)
+                                wm_ref.focus_switch_actions.add(sw_a)
 
                     av_feats = set(get_engine_state_attr(engine, "avatar_features", set()) or set())
-                    if getattr(engine, "avatar_feature", None) is not None:
-                        av_feats.add(engine.avatar_feature)
+                    av_feat_val = get_engine_state_attr(engine, "avatar_feature", None)
+                    if av_feat_val is not None:
+                        av_feats.add(av_feat_val)
 
                     if role == "goal" or "exit" in role or role == "candidate_goal":
                         rec_pos = get_engine_state_attr(engine, "recent_positions", set())
@@ -481,8 +484,9 @@ class MacroPlanSynthesizer:
                             ) in ("terminal_reward", str(TerminalSignal.SUCCESS))
                             if is_confirmed and has_reward:
                                 engine.learned_goal_positions.add(pos)
-                                if hasattr(engine, "goals") and pos not in engine.goals:
-                                    engine.goals.append(pos)
+                                eng_goals = getattr(engine, "goals", None)
+                                if eng_goals is not None and pos not in eng_goals:
+                                    eng_goals.append(pos)
                                 if feat:
                                     engine.symbolic_theory.induce_goal(
                                         feat, evidence="sync_known_objects:confirmed_terminal"
@@ -532,9 +536,8 @@ class MacroPlanSynthesizer:
                             and feat not in av_feats
                             and (not engine.avatar_features or feat not in engine.avatar_features)
                             and feat != engine.avatar_feature
-                            and feat
-                            not in getattr(engine.symbolic_theory, "walkable_features", set())
-                            and feat not in getattr(engine, "verified_safe_features", set())
+                            and feat not in engine.symbolic_theory.walkable_features
+                            and feat not in engine.verified_safe_features
                         ):
                             engine.symbolic_theory.induce_actuator(
                                 feat, evidence="sync_known_objects"
@@ -563,7 +566,8 @@ class MacroPlanSynthesizer:
         # 0B. Query declarative skills registered on engine
         skills = get_engine_state_attr(engine, "declarative_skills", []) or []
         for skill in skills:
-            if hasattr(skill, "can_handle") and skill.can_handle(
+            can_h = getattr(skill, "can_handle", None)
+            if callable(can_h) and can_h(
                 curr_grid, list(available_actions), metadata={"engine": engine}
             ):
                 skill_plan = MacroActionPlan.from_skill(skill, engine, curr_grid, available_actions)
@@ -632,8 +636,8 @@ class MacroPlanSynthesizer:
 
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
-        known_objs = list(get_sub_attr(engine.working_memory, "known_objects", {}).values())
-        trial_counts = get_sub_attr(engine.working_memory, "object_trial_counts", {})
+        known_objs = list(engine.working_memory.known_objects.values())
+        trial_counts = engine.working_memory.object_trial_counts
 
         # Collect candidate goals
         av_pos = engine.avatar_pos
@@ -695,7 +699,13 @@ class MacroPlanSynthesizer:
                     cand_feature_map[e.grid_pos] = e.feature_id
 
         for g_pos in engine.learned_goal_positions:
-            if g_pos not in confirmed_goals and g_pos != av_pos and g_pos not in recent_pos:
+            if (
+                0 <= g_pos[0] < curr_grid.shape[0]
+                and 0 <= g_pos[1] < curr_grid.shape[1]
+                and g_pos not in confirmed_goals
+                and g_pos != av_pos
+                and g_pos not in recent_pos
+            ):
                 confirmed_goals.append(g_pos)
 
         if confirmed_goals:
@@ -725,7 +735,7 @@ class MacroPlanSynthesizer:
         has_multi_agent = (
             len(engine.working_memory.focus_switch_actions) > 0
             or len(engine.focus_switch_actions) > 0
-            or len(get_sub_attr(engine.working_memory, "controllable_avatar_features", set())) > 1
+            or len(engine.working_memory.controllable_avatar_features) > 1
         )
         focus_switch = next(
             (
@@ -809,7 +819,9 @@ class MacroPlanSynthesizer:
         _nav_cache: dict[tuple[int, int], bool] = {}
 
         def _can_navigate_to(dest: tuple[int, int]) -> bool:
-            if av_pos is None:
+            if av_pos is None or not (
+                0 <= dest[0] < curr_grid.shape[0] and 0 <= dest[1] < curr_grid.shape[1]
+            ):
                 return False
             if dest == av_pos:
                 return True
@@ -845,6 +857,7 @@ class MacroPlanSynthesizer:
                 barrier_features=wall_f,
                 avatar_features=av_feats,
                 max_candidate_goals=1,
+                transition_kb=engine.symbolic_theory.transition_kb,
             )
             reached = p is not None and len(p) > 0
             _nav_cache[dest] = reached
@@ -900,14 +913,11 @@ class MacroPlanSynthesizer:
                     if 0 <= b[0] < curr_grid.shape[0] and 0 <= b[1] < curr_grid.shape[1]
                     else None
                 )
-                if hasattr(
-                    engine.symbolic_theory, "is_tool_barrier_incompatible"
-                ) and engine.symbolic_theory.is_tool_barrier_incompatible(held_feat, b_feat):
+                incompat_fn = getattr(engine.symbolic_theory, "is_tool_barrier_incompatible", None)
+                if callable(incompat_fn) and incompat_fn(held_feat, b_feat):
                     continue
-                if (
-                    hasattr(engine.symbolic_theory, "has_tool_barrier_affinity")
-                    and engine.symbolic_theory.has_tool_barrier_affinity(held_feat, b_feat)
-                ) or held_feat is not None:
+                aff_fn = getattr(engine.symbolic_theory, "has_tool_barrier_affinity", None)
+                if (callable(aff_fn) and aff_fn(held_feat, b_feat)) or held_feat is not None:
                     barriers_to_clear.append(b)
             if barriers_to_clear:
                 closest_barrier = min(
@@ -1024,9 +1034,22 @@ class MacroPlanSynthesizer:
                     engine.has_displacement_capabilities(available_actions)
                     and engine.avatar_pos is not None
                 ):
-                    is_bar = (
+                    sw_ev = engine.symbolic_theory.evaluate_transition(
+                        best_switch.feature_id, locus=best_switch.pos
+                    )
+                    sw_locus = (
+                        engine.symbolic_theory.transition_kb.get_belief(
+                            best_switch.pos, scope="locus"
+                        )
+                        if engine.symbolic_theory.transition_kb is not None
+                        else None
+                    )
+                    is_bar = not sw_ev.traversable or (
                         best_switch.pos in engine.learned_barriers
-                    ) or engine.symbolic_theory.is_barrier(best_switch.feature_id)
+                        and not (
+                            sw_locus is not None and sw_ev.traversable and sw_ev.confidence > 0.0
+                        )
+                    )
                     switch_rad = 1 if is_bar else 0
                     plan.append(
                         NavigateTo(
@@ -1119,9 +1142,24 @@ class MacroPlanSynthesizer:
                         engine.has_displacement_capabilities(available_actions)
                         and engine.avatar_pos is not None
                     ):
-                        is_bar = (
+                        obj_ev = engine.symbolic_theory.evaluate_transition(
+                            best_obj.feature_id, locus=best_obj.pos
+                        )
+                        obj_locus = (
+                            engine.symbolic_theory.transition_kb.get_belief(
+                                best_obj.pos, scope="locus"
+                            )
+                            if engine.symbolic_theory.transition_kb is not None
+                            else None
+                        )
+                        is_bar = not obj_ev.traversable or (
                             best_obj.pos in engine.learned_barriers
-                        ) or engine.symbolic_theory.is_barrier(best_obj.feature_id)
+                            and not (
+                                obj_locus is not None
+                                and obj_ev.traversable
+                                and obj_ev.confidence > 0.0
+                            )
+                        )
                         obj_rad = 1 if is_bar else 0
                         plan.append(
                             NavigateTo(

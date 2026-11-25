@@ -44,10 +44,57 @@ def _indefinite_article(word: str) -> str:
 
 
 def _clean_concept_name(name: str) -> str:
-    """Normalize concept name (strip prefixes like 't4_concept_')."""
-    clean = re.sub(r"^t4_concept_", "", name.strip())
+    """Normalize concept name (strip prefixes like 't4_concept_', 'web_concept_', etc.)."""
+    clean = re.sub(r"^(?:t4_concept_|web_concept_|concept_|sem_)", "", name.strip())
     clean = clean.replace("_", " ").strip()
     return clean
+
+
+def _resolve_concept_node_ids(p_graph: Any, name: str) -> list[str]:
+    """Resolve persistent graph node IDs matching a concept name or label."""
+    from hbllm.hcir.graph import ConceptNode, HCIRNodeType
+
+    clean = name.strip().lower().replace("_", " ")
+    if not clean:
+        return []
+    clean_under = clean.replace(" ", "_")
+    words = clean.split()
+    variants: list[str] = [clean, clean_under]
+    if words:
+        from hbllm.hcir.language.english.morphology import singularize_noun
+
+        sg_words = " ".join(singularize_noun(w) for w in words)
+        if sg_words != clean:
+            variants.extend([sg_words, sg_words.replace(" ", "_")])
+    candidates: list[str] = []
+    for var in dict.fromkeys(variants):
+        candidates.extend(
+            (
+                var,
+                f"t4_concept_{var}",
+                f"web_concept_{var}",
+                f"concept_{var}",
+                f"sem_{var}",
+            )
+        )
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for cid in candidates:
+        if cid not in seen and p_graph.get_node(cid) is not None:
+            resolved.append(cid)
+            seen.add(cid)
+
+    if getattr(p_graph, "node_count", 0) <= 2000:
+        for node in p_graph.nodes_by_type(HCIRNodeType.CONCEPT):
+            if (
+                isinstance(node, ConceptNode)
+                and node.label
+                and node.label.strip().lower() in (clean, clean_under)
+                and node.id not in seen
+            ):
+                resolved.append(node.id)
+                seen.add(node.id)
+    return resolved
 
 
 @dataclass
@@ -71,6 +118,30 @@ class ConceptKnowledgeSnapshot:
         return bool(
             self.definition or self.hypernyms or self.causes or self.requires or self.beliefs
         )
+
+
+_BIO_YEARS_RE = re.compile(r"\(\d{4}\s*[-–]\s*\d{4}\)")
+
+
+def _is_obscure_or_biographical_definition(defn: str) -> bool:
+    """Return True for biographical year-span stubs or dictionary meta-entries."""
+    low = defn.strip().lower()
+    if not low:
+        return True
+    if _BIO_YEARS_RE.search(defn):
+        return True
+    return low.startswith(
+        (
+            "a surname",
+            "a male given name",
+            "a female given name",
+            "pronunciation spelling of",
+            "plural of ",
+            "simple past",
+            "past participle of ",
+            "present participle of ",
+        )
+    )
 
 
 class ConceptExplainer:
@@ -98,7 +169,7 @@ class ConceptExplainer:
         _allow_fuzzy: bool = True,
     ) -> ConceptKnowledgeSnapshot:
         """Traverse ontology and tiered workspace to gather multi-dimensional knowledge."""
-        concept = concept_query.strip().lower()
+        concept = concept_query.strip().lower().replace("_", " ")
         # Strip common leading words
         for prefix in ("a ", "an ", "the ", "about "):
             if concept.startswith(prefix):
@@ -107,18 +178,32 @@ class ConceptExplainer:
         snapshot = ConceptKnowledgeSnapshot(concept=concept)
 
         # 1. Lexical Ontology Store (Definitions, Hypernyms, Synonyms)
+        def_is_obscure = False
         if self._ontology_store is not None:
             try:
                 entries = self._ontology_store.lookup(concept)
+                fallback_def = ""
+                fallback_domain = "general"
+                fallback_src = "lexical_store"
                 for entry in entries:
                     if entry.definition and not snapshot.definition:
-                        snapshot.definition = entry.definition
-                        snapshot.domain = entry.domain
-                        snapshot.provenance = f"ontology:{entry.source or 'lexical_store'}"
+                        if not _is_obscure_or_biographical_definition(entry.definition):
+                            snapshot.definition = entry.definition
+                            snapshot.domain = entry.domain
+                            snapshot.provenance = f"ontology:{entry.source or 'lexical_store'}"
+                        elif not fallback_def:
+                            fallback_def = entry.definition
+                            fallback_domain = entry.domain
+                            fallback_src = entry.source or "lexical_store"
                     if entry.synonyms and not snapshot.synonyms:
                         snapshot.synonyms = [
                             s.replace("_", " ") for s in entry.synonyms if s.lower() != concept
                         ]
+                if not snapshot.definition and fallback_def:
+                    snapshot.definition = fallback_def
+                    snapshot.domain = fallback_domain
+                    snapshot.provenance = f"ontology:{fallback_src}"
+                    def_is_obscure = True
 
                 # Hypernyms / Taxonomy
                 hyps = self._ontology_store.get_hypernyms(concept)
@@ -130,12 +215,55 @@ class ConceptExplainer:
             except Exception as exc:
                 logger.debug("ConceptExplainer: ontology gather error for %r: %s", concept, exc)
 
-        # 2. Tiered Workspace Graph Traversal (Concepts, Edges, Beliefs)
+        # 2. Tiered Workspace Graph Traversal (Concepts, Edges, Beliefs take precedence)
         if self._tiered_workspace is not None:
             try:
-                self._traverse_workspace_graph(concept, snapshot)
+                if def_is_obscure:
+                    obscure_backup = snapshot.definition
+                    snapshot.definition = ""
+                    self._traverse_workspace_graph(concept, snapshot)
+                    if not snapshot.definition:
+                        snapshot.definition = obscure_backup
+                else:
+                    self._traverse_workspace_graph(concept, snapshot)
             except Exception as exc:
                 logger.debug("ConceptExplainer: workspace traversal error for %r: %s", concept, exc)
+
+        # 2b. Commonsense relations fallback (ConceptNet Causes / HasPrerequisite / UsedFor)
+        if self._ontology_store is not None and hasattr(self._ontology_store, "get_relations"):
+            try:
+                for rel, obj, _weight in self._ontology_store.get_relations(
+                    concept, language="en", limit=12
+                ):
+                    clean_obj = obj.replace("_", " ").strip()
+                    if not clean_obj or clean_obj == concept:
+                        continue
+                    if (
+                        rel == "Causes"
+                        and clean_obj not in snapshot.causes
+                        and len(snapshot.causes) < 5
+                    ):
+                        snapshot.causes.append(clean_obj)
+                    elif (
+                        rel == "HasPrerequisite"
+                        and clean_obj not in snapshot.requires
+                        and len(snapshot.requires) < 5
+                    ):
+                        snapshot.requires.append(clean_obj)
+                    elif rel in ("UsedFor", "CapableOf", "HasProperty", "AtLocation", "MadeOf"):
+                        if len(snapshot.beliefs) < 3:
+                            rel_phrase = {
+                                "UsedFor": "is used for",
+                                "CapableOf": "is capable of",
+                                "HasProperty": "has property",
+                                "AtLocation": "is typically found at",
+                                "MadeOf": "is made of",
+                            }[rel]
+                            stmt = f"{concept} {rel_phrase} {clean_obj}"
+                            if stmt not in snapshot.beliefs:
+                                snapshot.beliefs.append(stmt)
+            except Exception as exc:
+                logger.debug("ConceptExplainer: relation fallback error for %r: %s", concept, exc)
 
         # 3. Fuzzy concept recovery when unknown typo queried (e.g. "why does focsu happen?")
         if (
@@ -151,29 +279,55 @@ class ConceptExplainer:
         return snapshot
 
     def _fuzzy_resolve_concept(self, concept: str) -> str | None:
-        """Attempt bounded edit-distance recovery against ConceptNodes and ontology store."""
+        """Attempt precision-bounded edit-distance recovery against ConceptNodes and ontology store."""
         from hbllm.hcir.graph import ConceptNode, HCIRNodeType
         from hbllm.hcir.language.core.normalizer import damerau_levenshtein
 
-        # Avoid overwriting valid trusted English words (except corpus OCR noise)
-        if self._ontology_store is not None and hasattr(self._ontology_store, "is_trusted_word"):
-            if self._ontology_store.is_trusted_word(concept, language="en"):
+        # Never overwrite valid/high-frequency words
+        if self._ontology_store is not None:
+            if hasattr(
+                self._ontology_store, "is_trusted_word"
+            ) and self._ontology_store.is_trusted_word(concept, language="en"):
+                return None
+            if (
+                hasattr(self._ontology_store, "get_word_frequency")
+                and self._ontology_store.get_word_frequency(concept, language="en") >= 5
+            ):
                 return None
 
-        max_dist = 2 if len(concept) >= 6 else 1
+        def _is_high_precision_typo(cand: str) -> bool:
+            if abs(len(cand) - len(concept)) > 1:
+                return False
+            if sorted(cand) == sorted(concept):
+                return True
+            if cand == concept + "e":
+                return True
+            if re.sub(r"(.)\1+", r"\1", concept) == re.sub(r"(.)\1+", r"\1", cand):
+                return True
+            if len(concept) >= 6 and cand[:4] == concept[:4]:
+                return True
+            return False
+
         best_label: str | None = None
-        best_dist = max_dist + 1
+        best_dist = 2
 
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
         if p_graph is not None:
             for node in p_graph.nodes_by_type(HCIRNodeType.CONCEPT):
                 if isinstance(node, ConceptNode) and node.label:
                     cand = node.label.lower()
-                    d = damerau_levenshtein(concept, cand, max_dist)
-                    if d <= max_dist and (d < 2 or cand[0] == concept[0]):
-                        if d < best_dist:
-                            best_dist = d
-                            best_label = cand
+                    if abs(len(cand) - len(concept)) > 1:
+                        continue
+                    if cand[0] != concept[0] and not (
+                        len(cand) >= 2 and cand[1] == concept[0] and cand[0] == concept[1]
+                    ):
+                        continue
+                    if not _is_high_precision_typo(cand):
+                        continue
+                    d = damerau_levenshtein(concept, cand, 1)
+                    if d <= 1 and d < best_dist:
+                        best_dist = d
+                        best_label = cand
         if best_label is not None:
             return best_label
 
@@ -181,20 +335,8 @@ class ConceptExplainer:
             hits = self._ontology_store.fuzzy_lookup(concept, language="en", limit=3)
             for raw_cand in hits:
                 cand = str(raw_cand).lower()
-                is_anagram_transposition = sorted(cand) == sorted(concept)
-                is_missing_trailing_e = cand == concept + "e"
-                is_double_letter = re.sub(r"(.)\1+", r"\1", concept) == re.sub(
-                    r"(.)\1+", r"\1", cand
-                )
-                is_strong_prefix = len(concept) >= 6 and cand[:4] == concept[:4]
-                if (
-                    is_anagram_transposition
-                    or is_missing_trailing_e
-                    or is_double_letter
-                    or is_strong_prefix
-                ):
-                    if damerau_levenshtein(concept, cand, 1) <= 1:
-                        return cand
+                if _is_high_precision_typo(cand) and damerau_levenshtein(concept, cand, 1) <= 1:
+                    return cand
 
         return None
 
@@ -215,11 +357,13 @@ class ConceptExplainer:
             tiers=[WorkspaceTier.PERSISTENT, WorkspaceTier.BRAIN, WorkspaceTier.WORKING],
         )
 
+        clean_under = concept.replace(" ", "_")
         for node in result.nodes:
             # ConceptNode definition fallback
             if isinstance(node, ConceptNode):
                 if node.label.lower() == concept or node.id.lower() in (
                     f"t4_concept_{concept}",
+                    f"web_concept_{clean_under}",
                     f"concept_{concept}",
                 ):
                     if not snapshot.definition and node.definition:
@@ -270,40 +414,55 @@ class ConceptExplainer:
                     if clean_c not in snapshot.beliefs and len(clean_c) > 10:
                         snapshot.beliefs.append(clean_c)
 
-        # Inspect graph edges from persistent tier for typed relational traversal
+        # Inspect graph edges from persistent tier for typed relational traversal (O(degree))
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
         if p_graph is not None:
-            candidate_node_ids = {
-                concept,
-                f"t4_concept_{concept}",
-                f"concept_{concept}",
-                f"sem_{concept}",
-            }
-            for edge in p_graph.edges.values():
-                src_matches = any(
-                    cid in s.lower() for s in edge.sources for cid in candidate_node_ids
-                )
-                dst_matches = any(
-                    cid in t.lower() for t in edge.targets for cid in candidate_node_ids
-                )
-
-                if src_matches:
+            candidate_node_ids = _resolve_concept_node_ids(p_graph, concept)
+            seen_edges: set[str] = set()
+            for cid in candidate_node_ids:
+                for edge in p_graph.edges_from(cid):
+                    if edge.id in seen_edges:
+                        continue
+                    seen_edges.add(edge.id)
+                    if edge.edge_type == HCIREdgeType.CONTRADICTS:
+                        continue
+                    props = getattr(edge, "properties", {}) or {}
+                    if props.get("polarity") is False:
+                        continue
+                    rel = str(props.get("relation", "")).lower()
+                    if rel.startswith("not_"):
+                        continue
                     for target_id in edge.targets:
                         target_clean = _clean_concept_name(target_id)
-                        if edge.edge_type in (HCIREdgeType.CAUSES,):
+                        if edge.edge_type == HCIREdgeType.CAUSES or rel in ("causes", "enables"):
                             snapshot.causes.append(target_clean)
-                        elif edge.edge_type in (HCIREdgeType.REQUIRES,):
+                        elif edge.edge_type == HCIREdgeType.REQUIRES or rel == "requires":
                             snapshot.requires.append(target_clean)
-                        elif edge.edge_type in (HCIREdgeType.GENERALIZES,):
+                        elif edge.edge_type == HCIREdgeType.GENERALIZES or rel == "is_a":
                             if target_clean not in snapshot.hypernyms:
                                 snapshot.hypernyms.append(target_clean)
+                        elif rel and len(snapshot.beliefs) < 5:
+                            rel_stmt = f"{concept} {rel.replace('_', ' ')} {target_clean}"
+                            if rel_stmt not in snapshot.beliefs:
+                                snapshot.beliefs.append(rel_stmt)
 
-                if dst_matches:
+                for edge in p_graph.edges_to(cid):
+                    if edge.id in seen_edges:
+                        continue
+                    seen_edges.add(edge.id)
+                    if edge.edge_type == HCIREdgeType.CONTRADICTS:
+                        continue
+                    props = getattr(edge, "properties", {}) or {}
+                    if props.get("polarity") is False:
+                        continue
+                    rel = str(props.get("relation", "")).lower()
+                    if rel.startswith("not_"):
+                        continue
                     for source_id in edge.sources:
                         source_clean = _clean_concept_name(source_id)
-                        if edge.edge_type in (HCIREdgeType.CAUSES,):
+                        if edge.edge_type == HCIREdgeType.CAUSES or rel in ("causes", "enables"):
                             snapshot.caused_by.append(source_clean)
-                        elif edge.edge_type in (HCIREdgeType.REQUIRES,):
+                        elif edge.edge_type == HCIREdgeType.REQUIRES or rel == "requires":
                             snapshot.required_by.append(source_clean)
 
         # De-duplicate lists
@@ -338,10 +497,20 @@ class ConceptExplainer:
         # 1. Definition Sentence
         if snapshot.definition:
             defn = snapshot.definition.rstrip(".")
-            # Ensure definition begins smoothly
-            if defn.lower().startswith(f"a {name} is") or defn.lower().startswith(f"an {name} is"):
-                sentences.append(f"{defn}.")
-            elif defn.lower().startswith("is ") or defn.lower().startswith("are "):
+            lower_defn = defn.lower()
+            name_lower = name.lower()
+            # Ensure definition begins smoothly (including plural forms like "Florbs are...")
+            if (
+                lower_defn.startswith(f"a {name_lower} is")
+                or lower_defn.startswith(f"an {name_lower} is")
+                or lower_defn.startswith(f"{name_lower} is")
+                or lower_defn.startswith(f"{name_lower} was")
+                or lower_defn.startswith(f"{name_lower}s are")
+                or lower_defn.startswith(f"{name_lower}es are")
+                or lower_defn.startswith(f"{name_lower} are")
+            ):
+                sentences.append(f"{defn[0].upper() + defn[1:]}.")
+            elif lower_defn.startswith("is ") or lower_defn.startswith("are "):
                 sentences.append(f"{prefix}{name} {defn}.")
             else:
                 sentences.append(f"{prefix}{name} is {defn}.")
@@ -419,10 +588,24 @@ class ConceptExplainer:
         """
         if snapshot is None:
             snapshot = self.gather_knowledge(concept_query)
+        if not snapshot.caused_by and " " in concept_query.strip():
+            # Multi-word event queries (e.g. "river flood") probe compound and head forms
+            parts = concept_query.strip().lower().split()
+            for alt in (concept_query.strip().lower().replace(" ", "_"), parts[-1]):
+                alt_snap = self.gather_knowledge(alt, _allow_fuzzy=False)
+                if alt_snap.caused_by:
+                    snapshot.caused_by = list(
+                        dict.fromkeys([*snapshot.caused_by, *alt_snap.caused_by])
+                    )[:5]
+                    if alt_snap.causes and not snapshot.causes:
+                        snapshot.causes = alt_snap.causes
+                    if alt_snap.beliefs and not snapshot.beliefs:
+                        snapshot.beliefs = alt_snap.beliefs
+                    break
         name = snapshot.concept
         article = _indefinite_article(name)
 
-        # Multi-hop backwards traversal across persistent graph
+        # Multi-hop backwards traversal across persistent graph (O(degree) via edges_to)
         causal_chains: list[list[str]] = []
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
 
@@ -431,16 +614,18 @@ class ConceptExplainer:
                 chain = [direct_cause]
                 curr = direct_cause
                 for _ in range(max_depth - 1):
-                    curr_ids = {curr, f"t4_concept_{curr}", f"concept_{curr}"}
+                    curr_ids = _resolve_concept_node_ids(p_graph, curr)
                     parent_cause: str | None = None
-                    for edge in p_graph.edges.values():
-                        if edge.edge_type == HCIREdgeType.CAUSES:
-                            if any(cid in t.lower() for t in edge.targets for cid in curr_ids):
+                    for cid in curr_ids:
+                        for edge in p_graph.edges_to(cid):
+                            if edge.edge_type == HCIREdgeType.CAUSES:
                                 for s in edge.sources:
                                     s_clean = _clean_concept_name(s)
                                     if s_clean not in chain:
                                         parent_cause = s_clean
                                         break
+                            if parent_cause:
+                                break
                         if parent_cause:
                             break
                     if parent_cause:
@@ -517,7 +702,7 @@ class ConceptExplainer:
         name = snapshot.concept
         article = _indefinite_article(name)
 
-        # Multi-hop forward dependency traversal
+        # Multi-hop forward dependency traversal (O(degree) via edges_from)
         dep_chains: list[list[str]] = []
         p_graph = getattr(getattr(self._tiered_workspace, "persistent", None), "graph", None)
 
@@ -526,16 +711,18 @@ class ConceptExplainer:
                 chain = [direct_req]
                 curr = direct_req
                 for _ in range(max_depth - 1):
-                    curr_ids = {curr, f"t4_concept_{curr}", f"concept_{curr}"}
+                    curr_ids = _resolve_concept_node_ids(p_graph, curr)
                     next_req: str | None = None
-                    for edge in p_graph.edges.values():
-                        if edge.edge_type == HCIREdgeType.REQUIRES:
-                            if any(cid in s.lower() for s in edge.sources for cid in curr_ids):
+                    for cid in curr_ids:
+                        for edge in p_graph.edges_from(cid):
+                            if edge.edge_type == HCIREdgeType.REQUIRES:
                                 for t in edge.targets:
                                     t_clean = _clean_concept_name(t)
                                     if t_clean not in chain:
                                         next_req = t_clean
                                         break
+                            if next_req:
+                                break
                         if next_req:
                             break
                     if next_req:

@@ -35,11 +35,6 @@ def client(jwt_secret, monkeypatch):
     monkeypatch.setenv("HBLLM_ENV", "production")
     monkeypatch.setenv("HBLLM_TENANT_GUARD_MODE", "strict")
 
-    # Set the middleware secret key directly for testing
-    for middleware in app.user_middleware:
-        if middleware.cls.__name__ == "JWTAuthMiddleware":
-            middleware.kwargs["secret_key"] = jwt_secret
-
     return TestClient(app)
 
 

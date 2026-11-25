@@ -60,7 +60,7 @@ class WeatherNode(Node):
 |---|---|---|
 | `NodeType.ROUTER` | `router` | RouterNode |
 | `NodeType.CORE` | `core` | Critic, Decision, Workspace |
-| `NodeType.DOMAIN_MODULE` | `domain_module` | Domain LoRA modules |
+| `NodeType.DOMAIN_MODULE` | `domain_module` | Specialized domain modules |
 | `NodeType.MEMORY` | `memory` | MemoryNode |
 | `NodeType.PLANNER` | `planner` | PlannerNode |
 | `NodeType.LEARNER` | `learner` | LearnerNode |
@@ -73,18 +73,18 @@ class WeatherNode(Node):
 
 There are two primary ways to register your custom node.
 
-### 1. Via Python Scripts
+### 1. Via `InProcessBus` (Legacy MessageBus Nodes)
 
-Add your node to the brain manually via `BrainFactory`:
+Attach your node directly to a running `InProcessBus`:
 
 ```python
-from hbllm.brain.core.factory import BrainFactory
+from hbllm.network.bus import InProcessBus
 
-brain = await BrainFactory.create("openai/gpt-4o")
+bus = InProcessBus()
+await bus.start()
 
-# Register and start your custom node
 weather = WeatherNode(api_key="your-key")
-await weather.start(brain.bus)
+await weather.start(bus)
 ```
 
 ### 2. Via the Dynamic Plugin Registry

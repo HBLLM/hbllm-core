@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import heapq
 import logging
 import math
 from collections.abc import Sequence
@@ -11,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from hbllm.hcir.spatial_planner import EntityRole
+from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.objects.ledger import ObjectStateLedger
 from hbllm.hcir.world.objects.models import (
@@ -43,9 +43,11 @@ class ObjectStateGraphPlanner:
         self.relational_matcher: RelationalGraphMatcher = RelationalGraphMatcher()
 
     def on_boundary(self, boundary) -> None:
-        """Episode lifecycle boundary handler (WP0.5). Delegates to the
-        deprecated reset_episode for backward-compatible semantics."""
-        self.reset_episode()
+        """Episode lifecycle boundary handler (WP0.5)."""
+        from hbllm.hcir.world.percept import resolve_boundary_flags
+
+        _, retain_dyn, is_same_ctx = resolve_boundary_flags(boundary)
+        self.reset_episode(is_new_context=not (retain_dyn and is_same_ctx))
 
     @property
     def boundary_retention(self):
@@ -87,16 +89,23 @@ class ObjectStateGraphPlanner:
             or engine.avatar_features
             or ({engine.avatar_feature} if engine.avatar_feature is not None else set())
         )
-        barrier_features = engine.symbolic_theory.barrier_features
+        theory = engine.symbolic_theory
+        kb = theory.transition_kb
+        barrier_features = theory.barrier_features
         lethal_features = set(engine.hazard_tracker.known_lethal_features)
         known_goal_positions = set(percept.candidate_goals)
-        known_goal_features = set(engine.symbolic_theory.goal_features)
+        known_goal_features = set(theory.goal_features)
 
         salient_objects: list[SalientObject] = []
+        grid_arr = percept.metadata.get("grid")
+        bg_val = int(percept.metadata.get("bg", engine.bg_feature or 0))
         for e in percept.entities:
-            # Skip avatar
-            if e.feature_id in av_feats or (
-                bool(av_feats) and av_pos is not None and e.grid_pos == av_pos
+            # Skip avatar (rely on EntityRole.AGENT lifted by perception so disjoint
+            # non-avatar objects sharing a palette color with the avatar remain visible)
+            if e.role == EntityRole.AGENT or (av_pos is None and e.feature_id in av_feats):
+                continue
+            if grid_arr is not None and engine.working_memory.is_exogenous_locus(
+                e.grid_pos, lattice=grid_arr, bg=bg_val, include_outer_edge=False
             ):
                 continue
             # Skip massive background or bulk perimeter walls
@@ -107,36 +116,76 @@ class ObjectStateGraphPlanner:
                 e.feature_id in lethal_features or e.role == EntityRole.DYNAMIC_HAZARD
             ) and e.area > 9:
                 continue
+
+            ev = theory.evaluate_transition(e.feature_id, locus=e.grid_pos)
+            kb_goal = (
+                ev.goal_value > 0.5
+                or e.feature_id in known_goal_features
+                or (
+                    kb is not None
+                    and kb.has_feature_outcome(e.feature_id, TransitionOutcome.TERMINAL_WIN)
+                )
+            )
+            kb_actuator = (
+                ev.mutates_state
+                or (
+                    kb is not None
+                    and kb.has_feature_outcome(e.feature_id, TransitionOutcome.MUTATED_STATE)
+                )
+                or e.feature_id in theory.actuator_features
+            )
+            kb_cargo = (
+                (
+                    kb is not None
+                    and kb.has_feature_outcome(e.feature_id, TransitionOutcome.DISPLACED_OTHER)
+                )
+                or e.feature_id in theory.cargo_features
+                or theory.is_cargo(e.feature_id)
+            )
+            kb_walk = (
+                ev.traversable and ev.confidence > 0.0 and ev.risk_cost < 40.0
+            ) or theory.is_walkable(e.feature_id)
             # Skip known walkable floor substrates unless they carry an interactive/goal role
             if (
-                engine.symbolic_theory.is_walkable(e.feature_id)
-                and e.feature_id not in known_goal_features
-                and not engine.symbolic_theory.is_goal(e)
-                and e.feature_id not in engine.symbolic_theory.actuator_features
-                and e.feature_id not in engine.symbolic_theory.cargo_features
+                kb_walk
+                and not kb_goal
+                and not theory.is_goal(e)
+                and not kb_actuator
+                and not kb_cargo
                 and e.role not in (EntityRole.GOAL, EntityRole.ACTUATOR, EntityRole.MANIPULABLE)
             ):
                 continue
 
             entity_cells = set(e.properties.get("cells", [e.grid_pos]))
 
-            # Categorize object based on role, symbolic theory, and known goals
-            is_barrier = (
+            locus_open = bool(
+                kb is not None
+                and kb._locus_beliefs
+                and kb.get_belief(e.grid_pos, scope="locus") is not None
+                and ev.traversable
+                and ev.confidence > 0.0
+                and ev.risk_cost < 40.0
+            )
+            # Categorize object based on role, TransitionKB beliefs, and known goals
+            is_barrier = not locus_open and (
                 e.role == EntityRole.OBSTACLE
-                or engine.symbolic_theory.is_barrier(e.feature_id)
+                or (not ev.traversable or ev.risk_cost >= 40.0)
+                or theory.is_barrier(e.feature_id)
                 or e.feature_id in barrier_features
             )
             is_goal = not is_barrier and (
                 e.role == EntityRole.GOAL
-                or engine.symbolic_theory.is_goal(e)
-                or e.feature_id in known_goal_features
+                or kb_goal
+                or theory.is_goal(e)
                 or any(cp in known_goal_positions for cp in entity_cells)
             )
+            if not is_goal and all(
+                theory.is_locus_explored(cp) or cp in engine.exhausted_candidate_goals
+                for cp in entity_cells
+            ):
+                continue
             is_switch = (
-                (
-                    bool(engine.symbolic_theory)
-                    and e.feature_id in engine.symbolic_theory.actuator_features
-                )
+                kb_actuator
                 or e.role == EntityRole.ACTUATOR
                 or any(
                     m.trigger_pos in entity_cells
@@ -144,13 +193,7 @@ class ObjectStateGraphPlanner:
                     for m in engine.state_mutations
                 )
             )
-            is_cargo = e.role == EntityRole.MANIPULABLE or (
-                bool(engine.symbolic_theory)
-                and (
-                    e.feature_id in engine.symbolic_theory.cargo_features
-                    or engine.symbolic_theory.is_cargo(e.feature_id)
-                )
-            )
+            is_cargo = e.role == EntityRole.MANIPULABLE or kb_cargo
 
             if is_goal:
                 category = ObjectCategory.EXIT
@@ -235,6 +278,24 @@ class ObjectStateGraphPlanner:
 
         return salient_objects
 
+    def _resolve_perception_frame(
+        self,
+        engine: Any,
+        curr_grid: np.ndarray | PerceptionFrame,
+    ) -> tuple[PerceptionFrame | None, np.ndarray | None]:
+        """Resolve a PerceptionFrame and backing grid array without duplicating lifting paths."""
+        if isinstance(curr_grid, PerceptionFrame):
+            return curr_grid, curr_grid.metadata.get("grid")
+        perceive_fn = get_engine_state_attr(engine, "perceive", None)
+        if callable(perceive_fn):
+            return perceive_fn(curr_grid), curr_grid
+        adapter = PerceptionRegistry.get_default()
+        if adapter is not None:
+            return adapter.lift_percept(curr_grid, context=engine), curr_grid
+        if isinstance(curr_grid, np.ndarray) and curr_grid.ndim >= 2:
+            return PerceptionFrame(shape=(curr_grid.shape[0], curr_grid.shape[1])), curr_grid
+        return None, None
+
     def extract_salient_objects(
         self,
         engine: Any,
@@ -242,19 +303,9 @@ class ObjectStateGraphPlanner:
         bg: int,
     ) -> list[SalientObject]:
         """Extract and categorize K salient objects via domain perception adapter."""
-        if isinstance(curr_grid, PerceptionFrame):
-            percept = curr_grid
-        elif hasattr(engine, "perceive") and callable(engine.perceive):
-            percept = engine.perceive(curr_grid)
-        else:
-            adapter = PerceptionRegistry.get_default()
-            if adapter is not None:
-                percept = adapter.lift_percept(curr_grid, context=engine)
-            else:
-                if not (hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2):
-                    raise ValueError("lattice extent unknown")
-                H, W = curr_grid.shape[0], curr_grid.shape[1]
-                percept = PerceptionFrame(shape=(H, W))
+        percept, _ = self._resolve_perception_frame(engine, curr_grid)
+        if percept is None:
+            raise ValueError("lattice extent unknown")
         return self.lift_salient_objects(percept, engine)
 
     def find_shortest_path(
@@ -280,108 +331,119 @@ class ObjectStateGraphPlanner:
         if start_pos in target_stances:
             return []
 
-        H, W = grid_shape
         from hbllm.hcir.world.autonomous_epistemic_engine import MentalSimulationStep
+        from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
+        from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
 
         bg_val = int(engine.bg_feature) if engine is not None else 0
-        max_step_span = max((abs(dr) + abs(dc) for _, dr, dc in movable_actions), default=1) or 1
-        target_list = list(target_stances)
-        seq = 0
-        h0 = (
-            min(abs(start_pos[0] - tr) + abs(start_pos[1] - tc) for tr, tc in target_list)
-            / max_step_span
-        )
-        heap: list[tuple[float, float, int, tuple[int, int]]] = [(h0, 0.0, seq, start_pos)]
-        best_cost: dict[tuple[int, int], float] = {start_pos: 0.0}
-        came_from: dict[tuple[int, int], tuple[tuple[int, int], Any]] = {}
+        action_deltas = {act: (int(dr), int(dc)) for act, dr, dc in movable_actions}
+        if not action_deltas:
+            return None
+
+        grid = curr_grid if curr_grid is not None else np.zeros(grid_shape, dtype=int)
         verified_cache: dict[int, bool] = {bg_val: True}
         unverified_penalty_cache: dict[int, float] = {}
-
         _budget = engine.compute_budget if engine is not None else None
-        while heap:
-            if _budget is not None and not _budget.allows("cheap"):
-                return None  # anytime: expansion budget exhausted
-            if _budget is not None:
-                _budget.charge(1)
-            _, cur_cost, _, cur_pos = heapq.heappop(heap)
-            if cur_cost > best_cost.get(cur_pos, float("inf")):
-                continue
-            if cur_pos in target_stances:
-                win_path: list[MentalSimulationStep] = []
-                node_cur = cur_pos
-                while node_cur in came_from:
-                    prev_p, prev_act = came_from[node_cur]
-                    win_path.append(
-                        MentalSimulationStep(action=prev_act, predicted_avatar_pos=node_cur)
-                    )
-                    node_cur = prev_p
-                win_path.reverse()
-                return win_path
 
-            cr, cc = cur_pos
-            for act, dr, dc in movable_actions:
-                if failed_transitions and (cur_pos, act) in failed_transitions:
-                    continue
-                nr, nc = cr + dr, cc + dc
-                if not (0 <= nr < H and 0 <= nc < W):
-                    continue
+        def _blocked_eval() -> TransitionEdgeEvaluation:
+            return TransitionEdgeEvaluation(
+                traversable=False,
+                step_cost=1.0,
+                risk_cost=50.0,
+                goal_value=0.0,
+                info_gain=0.0,
+                mutates_state=False,
+                confidence=1.0,
+            )
 
-                step_r = 1 if dr > 0 else (-1 if dr < 0 else 0)
-                step_c = 1 if dc > 0 else (-1 if dc < 0 else 0)
-                dist = max(abs(dr), abs(dc))
-                blocked = False
-                step_cost = 1.0
+        def _eval_edge(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
+            if pos in target_stances:
+                return TransitionEdgeEvaluation(
+                    traversable=True,
+                    step_cost=1.0,
+                    risk_cost=0.0,
+                    goal_value=1.0,
+                    info_gain=0.0,
+                    mutates_state=False,
+                    confidence=1.0,
+                )
+            if pos in static_barriers:
+                return _blocked_eval()
+            if percept is not None and not percept.is_passable(pos[0], pos[1]):
+                return _blocked_eval()
+            if curr_grid is None:
+                return TransitionEdgeEvaluation(
+                    traversable=True,
+                    step_cost=1.0,
+                    risk_cost=0.0,
+                    goal_value=0.0,
+                    info_gain=0.0,
+                    mutates_state=False,
+                    confidence=0.0,
+                )
+            val = int(feat)
+            if val in lethal_features:
+                return _blocked_eval()
 
-                for k in range(1, dist + 1):
-                    kr = cr + step_r * k
-                    kc = cc + step_c * k
-                    k_pos = (kr, kc)
-                    is_target = k == dist and k_pos in target_stances
-                    if not is_target:
-                        if k_pos in static_barriers:
-                            blocked = True
-                            break
-                        if percept is not None and not percept.is_passable(kr, kc):
-                            blocked = True
-                            break
-                    if curr_grid is not None:
-                        val = int(curr_grid[kr, kc])
-                        if not is_target and val in lethal_features:
-                            blocked = True
-                            break
-                        if not is_target and engine is not None:
-                            is_ver = verified_cache.get(val)
-                            if is_ver is None:
-                                is_ver = not engine.is_feature_unverified(val, bg_val)
-                                verified_cache[val] = is_ver
-                            if not is_ver:
-                                cached_pen = unverified_penalty_cache.get(val)
-                                if cached_pen is None:
-                                    risk = estimate_entity_risk(
-                                        engine, val, {k_pos}, curr_grid, bg_val, ledger=self.ledger
-                                    )
-                                    cached_pen = engine.UNVERIFIED_FEATURE_COST * 4.0 + risk * 50.0
-                                    if len(self.ledger.object_causal_effects) == 0:
-                                        unverified_penalty_cache[val] = cached_pen
-                                step_cost += cached_pen
+            kb_step = 1.0
+            kb_risk = 0.0
+            kb_goal = 0.0
+            kb_info = 0.0
+            kb_mut = False
+            kb_conf = 0.0
+            if engine is not None:
+                kb_ev = engine.symbolic_theory.evaluate_transition(val, locus=pos)
+                if not kb_ev.traversable:
+                    return kb_ev
+                kb_step = float(kb_ev.step_cost)
+                kb_risk = float(kb_ev.risk_cost)
+                kb_goal = float(kb_ev.goal_value)
+                kb_info = float(kb_ev.info_gain)
+                kb_mut = bool(kb_ev.mutates_state)
+                kb_conf = float(kb_ev.confidence)
 
-                if blocked:
-                    continue
-                nxt = (nr, nc)
-                if patroller_cells and nxt in patroller_cells:
-                    continue
+                is_ver = verified_cache.get(val)
+                if is_ver is None:
+                    is_ver = not engine.is_feature_unverified(val, bg_val)
+                    verified_cache[val] = is_ver
+                if not is_ver:
+                    cached_pen = unverified_penalty_cache.get(val)
+                    if cached_pen is None:
+                        risk = estimate_entity_risk(
+                            engine, val, {pos}, curr_grid, bg_val, ledger=self.ledger
+                        )
+                        cached_pen = engine.UNVERIFIED_FEATURE_COST * 4.0 + risk * 50.0
+                        if len(self.ledger.object_causal_effects) == 0:
+                            unverified_penalty_cache[val] = cached_pen
+                    kb_risk += cached_pen
 
-                next_cost = cur_cost + step_cost
-                if next_cost < best_cost.get(nxt, float("inf")):
-                    best_cost[nxt] = next_cost
-                    came_from[nxt] = (cur_pos, act)
-                    h_nxt = (
-                        min(abs(nr - tr) + abs(nc - tc) for tr, tc in target_list) / max_step_span
-                    )
-                    seq += 1
-                    heapq.heappush(heap, (next_cost + h_nxt, next_cost, seq, nxt))
+            return TransitionEdgeEvaluation(
+                traversable=True,
+                step_cost=kb_step,
+                risk_cost=kb_risk,
+                goal_value=kb_goal,
+                info_gain=kb_info,
+                mutates_state=kb_mut,
+                confidence=kb_conf,
+            )
 
-        return None
+        steps = GridTopologyGraph.shortest_path_from_kb(
+            grid,
+            start_pos,
+            target_stances,
+            action_deltas,
+            _eval_edge,
+            max_expansions=0,
+            failed_transitions=failed_transitions,
+            blocked_destinations=patroller_cells,
+            allow_goal_entry=True,
+            budget=_budget,
+        )
+        if steps is None:
+            return None
+        return [
+            MentalSimulationStep(action=act, predicted_avatar_pos=coord) for act, coord in steps
+        ]
 
     def plan_macro_option(
         self,
@@ -392,30 +454,13 @@ class ObjectStateGraphPlanner:
         """Synthesize a complete macro-option plan adhering to the 5 executive cognitive directives.
         Supports continuous spatial displacement paths (BFS/A*) and allocentric spatial effector (point actuation) actions.
         """
-        if not available_actions:
+        if not available_actions or curr_grid is None:
             return None
-        if curr_grid is None:
-            return None  # lattice extent unknown — no plan on a guessed shape
 
         # 1. Resolve PerceptionFrame from domain sensory adapter
-        percept: PerceptionFrame
-        grid_arr: np.ndarray | None
-        if isinstance(curr_grid, PerceptionFrame):
-            percept = curr_grid
-            grid_arr = percept.metadata.get("grid")
-        elif hasattr(engine, "perceive") and callable(engine.perceive):
-            percept = engine.perceive(curr_grid)
-            grid_arr = curr_grid
-        else:
-            adapter = PerceptionRegistry.get_default()
-            if adapter is not None:
-                percept = adapter.lift_percept(curr_grid, context=engine)
-            else:
-                if not (hasattr(curr_grid, "shape") and len(curr_grid.shape) >= 2):
-                    return None  # lattice extent unknown — no plan on a guessed shape
-                H, W = curr_grid.shape[0], curr_grid.shape[1]
-                percept = PerceptionFrame(shape=(H, W))
-            grid_arr = curr_grid
+        percept, grid_arr = self._resolve_perception_frame(engine, curr_grid)
+        if percept is None:
+            return None  # lattice extent unknown — no plan on a guessed shape
 
         H, W = percept.shape
         av_pos = percept.avatar_pos or engine.avatar_pos
@@ -434,6 +479,7 @@ class ObjectStateGraphPlanner:
         # Extract calibrated movable actions and spatial effector actions
         movable_actions: list[tuple[Any, int, int]] = []
         spatial_effector_actions: list[Any] = []
+        action_deltas = engine.action_deltas
         for act in available_actions:
             if (
                 get_engine_state_attr(engine, "inhibited_actions", None)
@@ -448,14 +494,8 @@ class ObjectStateGraphPlanner:
                 and act in engine.immobile_entity_actions
             ):
                 continue
-            if (
-                get_engine_state_attr(engine, "inhibited_actions", None)
-                and engine.inhibited_actions.get(act, 0) > 0
-            ):
-                continue
-            dyn = engine.action_dynamics.get(act)
-            if dyn is not None and dyn.is_displacement_action():
-                dr, dc = dyn.get_displacement()
+            if act in action_deltas:
+                dr, dc = action_deltas[act]
                 movable_actions.append((act, dr, dc))
 
         if not movable_actions and not spatial_effector_actions:
@@ -810,16 +850,12 @@ class ObjectStateGraphPlanner:
                             blocking_barrier_feats.add(o.feature_id)
 
                 # Step-budget and temporal horizon awareness
-                remaining_budget = (
-                    engine.get_remaining_step_budget()
-                    if hasattr(engine, "get_remaining_step_budget")
-                    else 1000
+                rem_budget_fn = get_engine_state_attr(engine, "get_remaining_step_budget", None)
+                remaining_budget = rem_budget_fn() if callable(rem_budget_fn) else 1000
+                strict_budget_fn = get_engine_state_attr(
+                    engine, "is_under_strict_step_budget", None
                 )
-                is_strict_budget = (
-                    engine.is_under_strict_step_budget()
-                    if hasattr(engine, "is_under_strict_step_budget")
-                    else False
-                )
+                is_strict_budget = strict_budget_fn() if callable(strict_budget_fn) else False
 
                 # ── DIRECTIVE 5: If not, play with it (interact) and see what is the outcome. ───
                 scored_candidates: list[tuple[SalientObject, list[Any], float]] = []
@@ -961,51 +997,6 @@ class ObjectStateGraphPlanner:
                             )
                         ]
 
-                    # 2. Greedy displacement step towards target stance
-                    best_step_act = None
-                    min_dist = abs(dr_target) + abs(dc_target)
-                    rec = list(get_engine_state_attr(engine, "recent_positions", []))
-                    ior = getattr(
-                        get_engine_state_attr(engine, "working_memory", None), "habenular_ior", None
-                    )
-                    for act, dr, dc in movable_actions:
-                        if failed_transitions and (av_pos, act) in failed_transitions:
-                            continue
-                        if engine.inhibited_actions.get(act, 0) > 0:
-                            continue
-                        if ior is not None and ior.is_action_inhibited(av_pos, act):
-                            continue
-                        nr, nc = av_pos[0] + dr, av_pos[1] + dc
-                        if not (0 <= nr < H and 0 <= nc < W):
-                            continue
-                        if not percept.is_passable(nr, nc):
-                            continue
-                        if patroller_cells and (nr, nc) in patroller_cells:
-                            continue
-                        if rec:
-                            if len(rec) >= 2 and (nr, nc) == rec[-2]:
-                                continue
-                            if len(rec) >= 4 and (nr, nc) in rec[-4:]:
-                                continue
-                            if len(rec) >= 6 and rec[-6:].count((nr, nc)) >= 2:
-                                continue
-                        cand_dist = abs(target_stance[0] - nr) + abs(target_stance[1] - nc)
-                        if cand_dist < min_dist:
-                            min_dist = cand_dist
-                            best_step_act = (act, nr, nc)
-
-                    if best_step_act is not None:
-                        from hbllm.hcir.world.cortex_planner import MentalSimulationStep
-
-                        self.active_target_object_id = best_candidate_obj.object_id
-                        return [
-                            MentalSimulationStep(
-                                action=best_step_act[0],
-                                predicted_avatar_pos=(best_step_act[1], best_step_act[2]),
-                                expected_mutation="APPROACH_OBJECT",
-                            )
-                        ]
-
         # 2B. Spatial Effector (Point Actuation) Object Interaction
         if spatial_effector_actions:
             eff_act = spatial_effector_actions[0]
@@ -1018,10 +1009,9 @@ class ObjectStateGraphPlanner:
 
             # Check if this effector action defines discrete valid targets
             eff_aff = get_engine_state_attr(engine, "action_affordances", {}).get(eff_act)
+            eff_meta = get_engine_state_attr(eff_aff, "metadata", None)
             raw_valid_targets = (
-                eff_aff.metadata.get("valid_targets")
-                if (eff_aff and hasattr(eff_aff, "metadata") and isinstance(eff_aff.metadata, dict))
-                else None
+                eff_meta.get("valid_targets") if isinstance(eff_meta, dict) else None
             )
 
             valid_targets_list: list[tuple[int, int, dict[str, Any]]] = []
@@ -1048,16 +1038,15 @@ class ObjectStateGraphPlanner:
                 """Find the closest un-quiescent valid target to (target_r, target_c)."""
                 best_vt_tuple = None
                 best_d = float("inf")
+                wm_ref = get_engine_state_attr(engine, "working_memory", None)
+                hab_ior = get_engine_state_attr(wm_ref, "habenular_ior", None)
                 for vy, vx, vt in valid_targets_list:
                     if (vy, vx) in quiescent_coords:
                         continue
-                    if hasattr(engine, "working_memory") and hasattr(
-                        engine.working_memory, "habenular_ior"
+                    if hab_ior is not None and hab_ior.is_action_inhibited(
+                        engine.avatar_pos, eff_act, action_data={"x": vx, "y": vy}
                     ):
-                        if engine.working_memory.habenular_ior.is_action_inhibited(
-                            engine.avatar_pos, eff_act, action_data={"x": vx, "y": vy}
-                        ):
-                            continue
+                        continue
                     vis = get_engine_state_attr(engine, "entity_visit_counts", {}).get(
                         f"actuate_{vy}_{vx}", 0
                     )

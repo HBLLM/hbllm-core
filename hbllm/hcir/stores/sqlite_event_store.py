@@ -117,9 +117,14 @@ def _compute_event_hash(
     event_type: str,
     data_json: str,
     previous_hash: str,
+    *,
+    author: str = "",
+    tenant_id: str = "default",
+    timestamp: float = 0.0,
 ) -> str:
-    """Compute a deterministic 256-bit SHA-256 hash for an event in the chain."""
-    payload = f"{sequence}:{event_type}:{data_json}:{previous_hash}"
+    """Compute a deterministic SHA-256 hash over the full event envelope in the chain."""
+    ts_repr = repr(float(timestamp))
+    payload = f"{sequence}:{event_type}:{author}:{tenant_id}:{ts_repr}:{data_json}:{previous_hash}"
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -145,19 +150,30 @@ class SQLiteEventStore(IEventStore):
         ))
     """
 
-    def __init__(self, db_path: str | Path, max_events: int | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        max_events: int | None = None,
+        *,
+        synchronous_full: bool = False,
+        tenant_id: str | None = None,
+    ) -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute(
+            "PRAGMA synchronous=FULL" if synchronous_full else "PRAGMA synchronous=NORMAL"
+        )
         self._conn.execute("PRAGMA busy_timeout=5000")
         self._max_events: int | None = max_events
+        self._tenant_id: str | None = tenant_id
         self._last_hash: str = ""
         self._sequence: int = 0
+        self._event_count: int = 0
         self._batch_depth: int = 0
-        self._batch_saved_state: tuple[str, int] | None = None
+        self._batch_saved_state: tuple[str, int, int] | None = None
         self._initialize()
 
     def _initialize(self) -> None:
@@ -170,13 +186,16 @@ class SQLiteEventStore(IEventStore):
             + _CREATE_EDGES_INDEX
         )
         self._conn.commit()
-        # Recover last hash and sequence
+        # Recover last hash, sequence, and count
         row = self._conn.execute(
             "SELECT sequence, content_hash FROM hcir_events ORDER BY id DESC LIMIT 1"
         ).fetchone()
         if row:
             self._sequence = row["sequence"]
             self._last_hash = row["content_hash"]
+        self._event_count = int(
+            self._conn.execute("SELECT COUNT(*) FROM hcir_events").fetchone()[0]
+        )
 
     # ── IEventStore interface ────────────────────────────────────────
 
@@ -184,7 +203,7 @@ class SQLiteEventStore(IEventStore):
     def batch(self) -> Iterator[None]:
         """Coalesce all appends/updates inside a block into one SQLite commit."""
         if self._batch_depth == 0:
-            self._batch_saved_state = (self._last_hash, self._sequence)
+            self._batch_saved_state = (self._last_hash, self._sequence, self._event_count)
         self._batch_depth += 1
         try:
             yield
@@ -192,7 +211,7 @@ class SQLiteEventStore(IEventStore):
             if self._batch_depth == 1:
                 self._conn.rollback()
                 if self._batch_saved_state is not None:
-                    self._last_hash, self._sequence = self._batch_saved_state
+                    self._last_hash, self._sequence, self._event_count = self._batch_saved_state
                 self._batch_saved_state = None
             raise
         else:
@@ -206,10 +225,17 @@ class SQLiteEventStore(IEventStore):
                     self.compact(max_events=self._max_events)
 
     def append(self, event: GraphEvent) -> None:
-        """Append an event with hash chaining."""
+        """Append an event with full-envelope hash chaining."""
         data_json = json.dumps(event.data, default=str)
+        tenant_id = str(event.data.get("tenant_id") or self._tenant_id or "default")
         content_hash = _compute_event_hash(
-            event.sequence, event.event_type, data_json, self._last_hash
+            event.sequence,
+            str(event.event_type),
+            data_json,
+            self._last_hash,
+            author=event.author,
+            tenant_id=tenant_id,
+            timestamp=event.timestamp,
         )
         self._conn.execute(
             """
@@ -222,13 +248,14 @@ class SQLiteEventStore(IEventStore):
                 event.sequence,
                 event.event_type,
                 event.author,
-                event.data.get("tenant_id", "default"),
+                tenant_id,
                 event.timestamp,
                 data_json,
                 content_hash,
                 self._last_hash,
             ),
         )
+        self._event_count += 1
         if self._batch_depth == 0:
             self._conn.commit()
         self._last_hash = content_hash
@@ -285,23 +312,38 @@ class SQLiteEventStore(IEventStore):
         }
         ckpt_json = json.dumps(ckpt_data, default=str)
         now = time.time()
-        ckpt_hash = _compute_event_hash(anchor_seq, EventType.SNAPSHOT_CREATED, ckpt_json, "")
+        ckpt_tenant = str(self._tenant_id or rows[cut - 1]["tenant_id"] or "default")
+        ckpt_hash = _compute_event_hash(
+            anchor_seq,
+            str(EventType.SNAPSHOT_CREATED),
+            ckpt_json,
+            pre_hash,
+            author="event_compactor",
+            tenant_id=ckpt_tenant,
+            timestamp=now,
+        )
         rebuilt_rows: list[tuple[Any, ...]] = [
             (
                 anchor_seq,
                 str(EventType.SNAPSHOT_CREATED),
                 "event_compactor",
-                "default",
+                ckpt_tenant,
                 now,
                 ckpt_json,
                 ckpt_hash,
-                "",
+                pre_hash,
             )
         ]
         prev_hash = ckpt_hash
         for r in suffix_rows:
             row_hash = _compute_event_hash(
-                r["sequence"], r["event_type"], r["data_json"], prev_hash
+                r["sequence"],
+                str(r["event_type"]),
+                r["data_json"],
+                prev_hash,
+                author=r["author"],
+                tenant_id=r["tenant_id"],
+                timestamp=r["timestamp"],
             )
             rebuilt_rows.append(
                 (
@@ -330,6 +372,7 @@ class SQLiteEventStore(IEventStore):
         if self._batch_depth == 0:
             self._conn.commit()
         self._last_hash = prev_hash
+        self._event_count = len(rebuilt_rows)
         return len(rows) - len(rebuilt_rows)
 
     def get_events(
@@ -381,6 +424,7 @@ class SQLiteEventStore(IEventStore):
         self._conn.commit()
         self._last_hash = ""
         self._sequence = 0
+        self._event_count = 0
 
     # ── Snapshot management ──────────────────────────────────────────
 
@@ -482,21 +526,25 @@ class SQLiteEventStore(IEventStore):
     # ── Integrity verification ───────────────────────────────────────
 
     def verify_chain_integrity(self) -> bool:
-        """Verify the hash chain hasn't been tampered with.
+        """Verify the full-envelope hash chain hasn't been tampered with.
 
-        Returns True if all event hashes are consistent.
+        Returns True if all event hashes, metadata columns, and compaction anchors are consistent.
         """
         cursor = self._conn.execute(
-            "SELECT sequence, event_type, data_json, content_hash, previous_hash "
+            "SELECT sequence, event_type, author, tenant_id, timestamp, "
+            "data_json, content_hash, previous_hash "
             "FROM hcir_events ORDER BY id ASC"
         )
-        prev_hash = ""
-        for row in cursor:
+        prev_hash: str | None = None
+        for idx, row in enumerate(cursor):
             expected = _compute_event_hash(
                 row["sequence"],
-                row["event_type"],
+                str(row["event_type"]),
                 row["data_json"],
                 row["previous_hash"],
+                author=row["author"],
+                tenant_id=row["tenant_id"],
+                timestamp=row["timestamp"],
             )
             if expected != row["content_hash"]:
                 logger.error(
@@ -506,7 +554,23 @@ class SQLiteEventStore(IEventStore):
                     row["content_hash"],
                 )
                 return False
-            if row["previous_hash"] != prev_hash:
+            if idx == 0:
+                if str(row["event_type"]) == str(EventType.SNAPSHOT_CREATED):
+                    try:
+                        ckpt = json.loads(row["data_json"])
+                    except Exception:
+                        logger.error(
+                            "Malformed compaction checkpoint at sequence %d", row["sequence"]
+                        )
+                        return False
+                    anchor = ckpt.get("pre_compaction_hash", "")
+                    if row["previous_hash"] != anchor:
+                        logger.error("Compaction anchor mismatch at sequence %d", row["sequence"])
+                        return False
+                elif row["previous_hash"] != "":
+                    logger.error("Unexpected non-empty previous_hash at chain head")
+                    return False
+            elif row["previous_hash"] != prev_hash:
                 logger.error("Previous hash mismatch at sequence %d", row["sequence"])
                 return False
             prev_hash = row["content_hash"]
@@ -514,8 +578,7 @@ class SQLiteEventStore(IEventStore):
 
     @property
     def event_count(self) -> int:
-        cursor = self._conn.execute("SELECT COUNT(*) FROM hcir_events")
-        return cursor.fetchone()[0]
+        return self._event_count
 
     def close(self) -> None:
         self._conn.close()

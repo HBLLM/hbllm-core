@@ -125,6 +125,35 @@ class IQueryEngine(ABC):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+_QUERY_TEXT_ATTRS: tuple[str, ...] = (
+    "claim",
+    "description",
+    "label",
+    "summary",
+    "skill_name",
+    "procedure_name",
+    "intent",
+    "capability_name",
+    "name",
+    "expression",
+)
+_CLASS_TEXT_ATTRS_CACHE: dict[type, tuple[str, ...]] = {}
+
+
+def _text_attrs_for_class(cls: type) -> tuple[str, ...]:
+    """Return cached tuple of searchable text attributes present on *cls*."""
+    cached = _CLASS_TEXT_ATTRS_CACHE.get(cls)
+    if cached is not None:
+        return cached
+    model_fields = getattr(cls, "model_fields", None)
+    if isinstance(model_fields, dict):
+        attrs = tuple(a for a in _QUERY_TEXT_ATTRS if a in model_fields)
+    else:
+        attrs = tuple(a for a in _QUERY_TEXT_ATTRS if hasattr(cls, a))
+    _CLASS_TEXT_ATTRS_CACHE[cls] = attrs
+    return attrs
+
+
 class InMemoryQueryEngine(IQueryEngine):
     """Query engine that operates over an in-memory ``CognitiveGraph``.
 
@@ -171,6 +200,7 @@ class InMemoryQueryEngine(IQueryEngine):
             candidate_nodes = [n for n in candidate_nodes if n is not None]
 
         # Post-filter
+        text_lower = query.text_contains.lower() if query.text_contains is not None else None
         results: list[HCIRNode] = []
         for node in candidate_nodes:
             if query.min_confidence is not None:
@@ -179,26 +209,22 @@ class InMemoryQueryEngine(IQueryEngine):
             if query.min_salience is not None:
                 if node.attention.salience < query.min_salience:
                     continue
-            if query.text_contains is not None:
-                text_lower = query.text_contains.lower()
-                # Search common text fields based on node attributes
+            if text_lower is not None:
                 found = False
-                for attr_name in (
-                    "claim",
-                    "description",
-                    "label",
-                    "summary",
-                    "skill_name",
-                    "procedure_name",
-                    "intent",
-                    "capability_name",
-                    "name",
-                    "expression",
-                ):
-                    val = getattr(node, attr_name, None)
-                    if val and isinstance(val, str) and text_lower in val.lower():
+                node_dict = node.__dict__
+                for attr_name in _text_attrs_for_class(type(node)):
+                    val = node_dict.get(attr_name)
+                    if isinstance(val, str) and val and text_lower in val.lower():
                         found = True
                         break
+                if not found:
+                    extra = node_dict.get("__pydantic_extra__")
+                    if isinstance(extra, dict) and extra:
+                        for attr_name in _QUERY_TEXT_ATTRS:
+                            val = extra.get(attr_name)
+                            if isinstance(val, str) and val and text_lower in val.lower():
+                                found = True
+                                break
                 if not found:
                     continue
 

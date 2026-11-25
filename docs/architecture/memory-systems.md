@@ -110,7 +110,7 @@ Nodes flow upward through tiers based on salience and consolidation:
 Working (transient) → Brain (session) → Persistent (permanent) → Meta (self-reflection)
 ```
 
-The `TieredWorkspace` provides `promote_to_brain()` and `archive_to_persistent()` methods for explicit promotion. The `SleepCycleNode` handles automatic consolidation during idle periods.
+The `TieredWorkspace` provides `promote()`, `promote_batch()`, `demote()`, `archive_brain()`, `enforce_node_budgets()`, `compact_event_stores()`, and `run_memory_hygiene_cycle()`. Combined with `SQLiteEventStore` bounded compaction and `ExecutiveRuntime` offline consolidation, active memory stays bounded without losing proven lifelong beliefs.
 
 ---
 
@@ -135,29 +135,18 @@ This replaces the previous approach of querying each memory subsystem independen
 
 ---
 
-## MemorySystem Composite
+## Pure-HCIR Memory & World Stores
 
-The `MemorySystem` composite node manages the memory lifecycle:
+In the consolidated Pure-HCIR architecture, memory spans four specialized stores wired through `build_cognitive_system()`:
 
-```python
-from hbllm.brain.composites.memory_system import MemorySystem
-
-memory = MemorySystem(
-    node_id="memory_system",
-    llm=llm_provider,
-    registry=service_registry,
-)
-```
-
-### Components
-
-| Component | Role | Status |
-|-----------|------|--------|
-| `HCIRMemoryBackend` | All memory storage/recall | **Active** (sole backend) |
-| `MemoryMigrationProxy` | Phase-aware routing | **Active** (Phase 5: LEGACY_REMOVED) |
-| `ExperienceNode` | Interaction recording, salience detection | **Active** |
-| `SleepCycleNode` | Offline memory consolidation | **Active** |
-| `MemoryNode` (legacy) | SQLite/vector stores | **Retired** (fallback only) |
+| Store / Component | Module | Role |
+|---|---|---|
+| `TieredWorkspace` & `HCIRMemoryBackend` | `hbllm.hcir.workspace_tiers`, `hbllm.hcir.adapters.hcir_memory_backend` | **Active** — 4-tier graph storage, typed memory nodes, batch promotion, hygiene |
+| `SQLiteEventStore` | `hbllm.hcir.stores.sqlite_event_store` | **Active** — Persistent hash-chained event journal with `compact()` hysteresis |
+| `LexicalOntologyStore` | `hbllm.hcir.stores.ontology_store` | **Active** — SQLite lexical/taxonomic store (`lookup`, `is_a`, `fuzzy_lookup`) |
+| `TransitionKnowledgeBase` | `hbllm.hcir.world.causal.transition_kb` | **Active** — HCIR `BeliefNode` & `LearnedRuleNode` backing for empirical world transitions |
+| `PrefrontalWorkingMemory` | `hbllm.hcir.world.working_memory.memory` | **Active** — Episode-transient working state, inhibitions, and `procedural_library` |
+| `MemoryMigrationProxy` | `hbllm.hcir.adapters.memory_migration_proxy` | **Active** (Phase 5: `LEGACY_REMOVED`) |
 
 ---
 

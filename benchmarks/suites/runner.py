@@ -70,7 +70,13 @@ def _is_exploration_death(
     """True when a terminal death occurred during exploration rather than policy exploitation."""
     if not died:
         return False
-    if baseline in ("fatal_memory_bfs", "dyna_q", "random"):
+    if baseline in (
+        "fatal_memory_bfs",
+        "dyna_q",
+        "random",
+        "rules_known_planner",
+        "object_centric_hypothesis",
+    ):
         return True
     if engine is None:
         return baseline != "oracle"
@@ -163,6 +169,14 @@ def run_closed_loop_task(
                 from benchmarks.baselines import TabularDynaQAgent
 
                 engine = TabularDynaQAgent()
+            elif baseline == "rules_known_planner":
+                from benchmarks.baselines import RulesKnownPlannerAgent
+
+                engine = RulesKnownPlannerAgent(retain_fatal_memory=shared_memory)
+            elif baseline == "object_centric_hypothesis":
+                from benchmarks.baselines import ObjectCentricHypothesisAgent
+
+                engine = ObjectCentricHypothesisAgent()
             elif use_engine and shared_memory:
                 system = _make_system(
                     tmp_dir, f"{baseline}_s{primary_seed}", baseline in ("system", "demonstration")
@@ -173,7 +187,12 @@ def run_closed_loop_task(
             for ep_idx in range(episodes):
                 ep_errors: list[str] = []
                 ep_death_info: dict[str, bool] = {}
-                if baseline in ("fatal_memory_bfs", "dyna_q"):
+                if baseline in (
+                    "fatal_memory_bfs",
+                    "dyna_q",
+                    "rules_known_planner",
+                    "object_centric_hypothesis",
+                ):
                     if ep_idx > 0 and hasattr(engine, "reset_episode"):
                         engine.reset_episode(reset_memory=not shared_memory)
                     env_instance = env_cls(max_steps=max_budget)
@@ -282,7 +301,16 @@ def run_closed_loop_task(
 
     _run_primary_replay(
         use_engine=(
-            baseline in ("system", "no_grounding", "demonstration", "fatal_memory_bfs", "dyna_q")
+            baseline
+            in (
+                "system",
+                "no_grounding",
+                "demonstration",
+                "fatal_memory_bfs",
+                "dyna_q",
+                "rules_known_planner",
+                "object_centric_hypothesis",
+            )
         )
     )
 
@@ -328,6 +356,40 @@ def run_closed_loop_task(
                 from benchmarks.baselines import TabularDynaQAgent
 
                 s_agent = TabularDynaQAgent()
+                s_env = env_cls(max_steps=max_budget)
+                s_obs = s_env.reset(seed=s)
+                succ, steps, lats, errs, died = _run_loop_with_info(
+                    s_env,
+                    s_obs,
+                    s_agent,
+                    baseline,
+                    max_budget,
+                    [],
+                    seed_errs,
+                    seed=s,
+                    death_info=seed_death_info,
+                )
+            elif baseline == "rules_known_planner":
+                from benchmarks.baselines import RulesKnownPlannerAgent
+
+                s_agent = RulesKnownPlannerAgent(retain_fatal_memory=False)
+                s_env = env_cls(max_steps=max_budget)
+                s_obs = s_env.reset(seed=s)
+                succ, steps, lats, errs, died = _run_loop_with_info(
+                    s_env,
+                    s_obs,
+                    s_agent,
+                    baseline,
+                    max_budget,
+                    [],
+                    seed_errs,
+                    seed=s,
+                    death_info=seed_death_info,
+                )
+            elif baseline == "object_centric_hypothesis":
+                from benchmarks.baselines import ObjectCentricHypothesisAgent
+
+                s_agent = ObjectCentricHypothesisAgent()
                 s_env = env_cls(max_steps=max_budget)
                 s_obs = s_env.reset(seed=s)
                 succ, steps, lats, errs, died = _run_loop_with_info(
@@ -460,7 +522,15 @@ def run_closed_loop_task(
     cross_seed_transfer: dict[str, Any] = {}
     if (
         cross_seed
-        and baseline in ("system", "no_grounding", "fatal_memory_bfs", "dyna_q")
+        and baseline
+        in (
+            "system",
+            "no_grounding",
+            "fatal_memory_bfs",
+            "dyna_q",
+            "rules_known_planner",
+            "object_centric_hypothesis",
+        )
         and len(seeds) > 1
     ):
         xs_seeds = list(seeds)
@@ -479,6 +549,14 @@ def run_closed_loop_task(
                 from benchmarks.baselines import TabularDynaQAgent
 
                 xs_engine = TabularDynaQAgent()
+            elif baseline == "rules_known_planner":
+                from benchmarks.baselines import RulesKnownPlannerAgent
+
+                xs_engine = RulesKnownPlannerAgent(retain_fatal_memory=True)
+            elif baseline == "object_centric_hypothesis":
+                from benchmarks.baselines import ObjectCentricHypothesisAgent
+
+                xs_engine = ObjectCentricHypothesisAgent()
             prev_ok = False
             for ep_idx, ep_seed in enumerate(xs_seeds):
                 xs_errs: list[str] = []
@@ -636,6 +714,16 @@ def run_closed_loop_episode(
 
         agent = TabularDynaQAgent()
         return _run_loop(env, obs, agent, baseline, max_budget, latencies, errors, seed=seed)
+    elif baseline == "rules_known_planner":
+        from benchmarks.baselines import RulesKnownPlannerAgent
+
+        agent = RulesKnownPlannerAgent(retain_fatal_memory=False)
+        return _run_loop(env, obs, agent, baseline, max_budget, latencies, errors, seed=seed)
+    elif baseline == "object_centric_hypothesis":
+        from benchmarks.baselines import ObjectCentricHypothesisAgent
+
+        agent = ObjectCentricHypothesisAgent()
+        return _run_loop(env, obs, agent, baseline, max_budget, latencies, errors, seed=seed)
 
     return _run_loop(env, obs, None, baseline, max_budget, latencies, errors, seed=seed)
 
@@ -700,6 +788,18 @@ def _run_loop_with_info(
 
                     engine = TabularDynaQAgent()
                 action = engine.step(obs)
+            elif baseline == "rules_known_planner":
+                if engine is None or not hasattr(engine, "step"):
+                    from benchmarks.baselines import RulesKnownPlannerAgent
+
+                    engine = RulesKnownPlannerAgent(retain_fatal_memory=True)
+                action = engine.step(obs)
+            elif baseline == "object_centric_hypothesis":
+                if engine is None or not hasattr(engine, "step"):
+                    from benchmarks.baselines import ObjectCentricHypothesisAgent
+
+                    engine = ObjectCentricHypothesisAgent()
+                action = engine.step(obs)
             elif baseline == "demonstration_oracle":
                 if engine is not None:
                     raw_action = engine.step(obs, last_action=last_oracle_action)
@@ -748,7 +848,11 @@ def _run_loop_with_info(
                     baseline,
                     pre_uncalibrated=pre_uncalibrated,
                 )
-            if baseline == "fatal_memory_bfs" and hasattr(engine, "record_transition"):
+            if hasattr(engine, "record_transition") and baseline in (
+                "fatal_memory_bfs",
+                "rules_known_planner",
+                "object_centric_hypothesis",
+            ):
                 engine.record_transition(pre_obs, action, obs, died, info)
             elif baseline == "dyna_q" and hasattr(engine, "record_transition"):
                 engine.record_transition(pre_obs, action, obs, reward, done)
@@ -768,7 +872,11 @@ def _run_loop_with_info(
                     errors.append(f"Terminal feedback error at step {step_count}: {e}")
                     success = False
             break
-        elif baseline == "fatal_memory_bfs" and hasattr(engine, "record_transition"):
+        elif hasattr(engine, "record_transition") and baseline in (
+            "fatal_memory_bfs",
+            "rules_known_planner",
+            "object_centric_hypothesis",
+        ):
             engine.record_transition(pre_obs, action, obs, False, info)
         elif baseline == "dyna_q" and hasattr(engine, "record_transition"):
             engine.record_transition(pre_obs, action, obs, reward, False)
@@ -864,12 +972,14 @@ def run_suite(
     baselines_dict: dict[str, Any] = {}
     if baseline == "system":
         print(
-            "\n--- Evaluating Reference Baselines (random, fatal_memory_bfs, dyna_q, oracle, no_grounding, demonstration) ---"
+            "\n--- Evaluating Reference Baselines (random, fatal_memory_bfs, dyna_q, rules_known_planner, object_centric_hypothesis, oracle, no_grounding, demonstration) ---"
         )
         for b_name in (
             "random",
             "fatal_memory_bfs",
             "dyna_q",
+            "rules_known_planner",
+            "object_centric_hypothesis",
             "oracle",
             "no_grounding",
             "demonstration",
@@ -890,7 +1000,15 @@ def run_suite(
                     episodes=episodes_per_task,
                     shared_memory=shared_memory,
                     cross_seed=(
-                        b_name in ("no_grounding", "fatal_memory_bfs", "dyna_q") and cross_seed
+                        b_name
+                        in (
+                            "no_grounding",
+                            "fatal_memory_bfs",
+                            "dyna_q",
+                            "rules_known_planner",
+                            "object_centric_hypothesis",
+                        )
+                        and cross_seed
                     ),
                 )
                 b_task_res = TaskResult(
@@ -1007,7 +1125,10 @@ def run_suite(
                 f"  Baseline [{b_name}]: zero_shot={zs_b_gen:.4f} ({zs_tot_solved}/{zs_tot_trials}, CI={zs_ci}, deaths={b_deaths}), replay={b_gen:.4f}"
             )
 
-    report = protocol.compute_report(split=split, tasks=tasks, baselines=baselines_dict)
+    suite_name = Path(manifest_path).stem if manifest_path else split
+    report = protocol.compute_report(
+        split=split, tasks=tasks, baselines=baselines_dict, suite_name=suite_name
+    )
 
     print("\n=== Benchmark Results Summary ===")
     print(f"Split: {report.split.upper()} | Baseline: {baseline}")
@@ -1064,6 +1185,8 @@ def main() -> int:
             "random",
             "fatal_memory_bfs",
             "dyna_q",
+            "rules_known_planner",
+            "object_centric_hypothesis",
             "oracle",
             "no_grounding",
             "demonstration",

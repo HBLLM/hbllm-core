@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 use numpy::ndarray::Array2;
 use numpy::{PyArray1, PyArray2, PyReadonlyArray2};
 use pyo3::prelude::*;
@@ -9,6 +8,12 @@ use std::collections::BinaryHeap;
 use core::arch::aarch64::*;
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
+
+type LifStepOutput<'py> = (
+    Bound<'py, PyArray2<i32>>,
+    Bound<'py, PyArray2<f32>>,
+    Bound<'py, PyArray2<i32>>,
+);
 
 #[pyclass]
 pub struct UniversalEngine {
@@ -47,7 +52,7 @@ impl UniversalEngine {
         scale: PyReadonlyArray2<'py, f32>,
         bias: PyReadonlyArray2<'py, f32>,
         group_size: usize,
-    ) -> PyResult<&'py PyArray1<f32>> {
+    ) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let packed = packed.as_array();
         let scale = scale.as_array();
         let bias = bias.as_array();
@@ -140,7 +145,7 @@ impl UniversalEngine {
         scale: PyReadonlyArray2<'py, f32>,
         bias: PyReadonlyArray2<'py, f32>,
         group_size: usize,
-    ) -> PyResult<&'py PyArray1<f32>> {
+    ) -> PyResult<Bound<'py, PyArray1<f32>>> {
         let x = x.as_array();
         let packed = packed.as_array();
         let scale = scale.as_array();
@@ -237,7 +242,7 @@ impl UniversalEngine {
         v_reset: f32,
         decay: f32,
         refractory_steps: i32,
-    ) -> PyResult<(&'py PyArray2<i32>, &'py PyArray2<f32>, &'py PyArray2<i32>)> {
+    ) -> PyResult<LifStepOutput<'py>> {
         snn_step_lif_simd(
             py,
             membrane,
@@ -258,7 +263,7 @@ impl UniversalEngine {
         width: usize,
         tracks: Vec<(i32, i32, i32, i32)>,
         horizon_steps: usize,
-    ) -> PyResult<&'py PyArray2<f32>> {
+    ) -> PyResult<Bound<'py, PyArray2<f32>>> {
         forecast_hazard_density_simd(py, height, width, tracks, horizon_steps)
     }
 
@@ -980,7 +985,7 @@ pub fn snn_step_lif_simd<'py>(
     v_reset: f32,
     decay: f32,
     refractory_steps: i32,
-) -> PyResult<(&'py PyArray2<i32>, &'py PyArray2<f32>, &'py PyArray2<i32>)> {
+) -> PyResult<LifStepOutput<'py>> {
     let mem = membrane.as_array();
     let ref_arr = refractory.as_array();
     let inp = current_input.as_array();
@@ -1044,7 +1049,7 @@ pub fn forecast_hazard_density_simd<'py>(
     width: usize,
     tracks: Vec<(i32, i32, i32, i32)>,
     horizon_steps: usize,
-) -> PyResult<&'py PyArray2<f32>> {
+) -> PyResult<Bound<'py, PyArray2<f32>>> {
     let total = height * width;
     let density = py.allow_threads(|| {
         let mut density = vec![0.0f32; total];
@@ -1357,7 +1362,7 @@ pub fn grid_cell_path_integrate_simd(
 }
 
 #[pymodule]
-fn hbllm_compute(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_compute(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<UniversalEngine>()?;
     m.add_function(wrap_pyfunction!(snn_step_lif_simd, m)?)?;
     m.add_function(wrap_pyfunction!(forecast_hazard_density_simd, m)?)?;

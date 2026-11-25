@@ -28,49 +28,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class CustomMacroAction(MacroAction):
-    """Declarative custom macro action parameterized by arbitrary user/runner predicates."""
-
-    def __init__(
-        self,
-        name: str,
-        satisfaction_fn: Any,
-        feasibility_fn: Any,
-        step_fn: Any,
-        intent: SpatialActionIntent | SubgoalType = SpatialActionIntent.NAVIGATE,
-        description: str = "",
-    ) -> None:
-        super().__init__(name=name, intent=intent)
-        self._satisfaction_fn = satisfaction_fn
-        self._feasibility_fn = feasibility_fn
-        self._step_fn = step_fn
-        self.description = description or name
-
-    def is_satisfied(
-        self,
-        engine: AutonomousEpistemicEngine,
-        curr_grid: np.ndarray,
-    ) -> bool:
-        return bool(self._satisfaction_fn(engine, curr_grid))
-
-    def is_feasible(
-        self,
-        engine: AutonomousEpistemicEngine,
-        curr_grid: np.ndarray,
-        available_actions: Sequence[Any],
-    ) -> bool:
-        return bool(self._feasibility_fn(engine, curr_grid, available_actions))
-
-    def step(
-        self,
-        engine: AutonomousEpistemicEngine,
-        curr_grid: np.ndarray,
-        available_actions: Sequence[Any],
-    ) -> tuple[Any, dict[str, Any] | None]:
-        self.consecutive_steps += 1
-        return self._step_fn(engine, curr_grid, available_actions)
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 8b. ProceduralReplayAction (Replay Consolidated Macro)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -97,8 +54,9 @@ class ProceduralReplayAction(MacroAction):
             intent=SpatialActionIntent.NAVIGATE,
         )
         self._macro = macro
-        if hasattr(macro, "get_execution_sequence"):
-            act_seq, data_seq = macro.get_execution_sequence()
+        get_seq_fn = getattr(macro, "get_execution_sequence", None)
+        if callable(get_seq_fn):
+            act_seq, data_seq = get_seq_fn()
             self._action_seq = list(act_seq)
             self._data_seq = list(data_seq)
         else:
@@ -150,21 +108,24 @@ class ProceduralReplayAction(MacroAction):
                 self._cursor,
             )
             self.status = MacroActionStatus.FAILED
-            if hasattr(self._macro, "record_replay_outcome"):
-                self._macro.record_replay_outcome(False)
+            rec_fn = getattr(self._macro, "record_replay_outcome", None)
+            if callable(rec_fn):
+                rec_fn(False)
             return None
 
         return (action, data)
 
     def record_success(self) -> None:
         """Record successful replay completion back to the source macro."""
-        if hasattr(self._macro, "record_replay_outcome"):
-            self._macro.record_replay_outcome(True)
+        rec_fn = getattr(self._macro, "record_replay_outcome", None)
+        if callable(rec_fn):
+            rec_fn(True)
 
     def record_failure(self) -> None:
         """Record replay failure back to the source macro."""
-        if hasattr(self._macro, "record_replay_outcome"):
-            self._macro.record_replay_outcome(False)
+        rec_fn = getattr(self._macro, "record_replay_outcome", None)
+        if callable(rec_fn):
+            rec_fn(False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -182,8 +143,9 @@ def attribute_macro_action_outcome(
     action_data: dict[str, Any] | None = None,
 ) -> None:
     """Attribute macro-action completion or failure into Pearl's do(a) causal theory and body schema."""
-    if prev_grid is None and hasattr(engine, "grid_history") and len(engine.grid_history) >= 2:
-        prev_grid = engine.grid_history[-2]
+    grid_hist = engine.grid_history
+    if prev_grid is None and grid_hist is not None and len(grid_hist) >= 2:
+        prev_grid = grid_hist[-2]
 
     if is_success:
         macro_action.status = MacroActionStatus.SATISFIED
@@ -245,6 +207,11 @@ def attribute_macro_action_outcome(
                 engine.working_memory.body_schema.register_resonance(tool_feat, barrier_feat)
                 engine.working_memory.body_schema.expend_tool(tool_feat)
                 engine.learned_barriers.discard((r, c))
+                from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                engine.symbolic_theory.transition_kb.retract_outcome(
+                    (r, c), TransitionOutcome.BLOCKED, scope="locus"
+                )
                 logger.info(
                     "Pearl do(a) causal attribution: tool %d cleared barrier %d at %s",
                     tool_feat,
@@ -253,6 +220,11 @@ def attribute_macro_action_outcome(
                 )
             elif cell_cleared:
                 engine.learned_barriers.discard((r, c))
+                from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                engine.symbolic_theory.transition_kb.retract_outcome(
+                    (r, c), TransitionOutcome.BLOCKED, scope="locus"
+                )
 
             if engine.subgoal_stack.has_pending_goals:
                 cur_sg = engine.subgoal_stack.current_subgoal
@@ -294,6 +266,11 @@ def attribute_macro_action_outcome(
                         or new_feat == bg
                     ):
                         engine.learned_barriers.discard((dr, dc))
+                        from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+
+                        engine.symbolic_theory.transition_kb.retract_outcome(
+                            (dr, dc), TransitionOutcome.BLOCKED, scope="locus"
+                        )
                         engine.symbolic_theory.record_distal_actuation(
                             trig_feat, orig_feat, affected_pos=(dr, dc)
                         )

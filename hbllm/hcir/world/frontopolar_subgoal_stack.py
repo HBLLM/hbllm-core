@@ -393,41 +393,6 @@ class FrontopolarSubgoalStack:
 
         return chain
 
-    def decompose_and_push_prerequisite(
-        self,
-        target_subgoal_id: str,
-        prerequisite_subgoal: FrontopolarSubgoal,
-    ) -> bool:
-        """Temporarily suspend an active subgoal and push a prerequisite to top of stack."""
-        for sg in self.stack:
-            if sg.subgoal_id == target_subgoal_id:
-                if prerequisite_subgoal.subgoal_id not in sg.prerequisite_subgoal_ids:
-                    sg.prerequisite_subgoal_ids.append(prerequisite_subgoal.subgoal_id)
-                self.push_subgoal(prerequisite_subgoal)
-                return True
-        # If target not found in stack, push prerequisite anyway
-        self.push_subgoal(prerequisite_subgoal)
-        return False
-
-    def synthesize_declarative_program(
-        self,
-        completed_only: bool = True,
-    ) -> list[dict[str, Any]]:
-        """Export executed subgoals as a structured declarative program with causal preconditions."""
-        steps: list[dict[str, Any]] = []
-        source_subgoals = (
-            self.completed_subgoals if completed_only else [sg.subgoal_id for sg in self.stack]
-        )
-
-        for sg_id in source_subgoals:
-            steps.append(
-                {
-                    "subgoal_id": sg_id,
-                    "completed": True,
-                }
-            )
-        return steps
-
     def is_subgoal_satisfied(
         self,
         subgoal: FrontopolarSubgoal,
@@ -500,69 +465,6 @@ class FrontopolarSubgoalStack:
         )
         self.push_subgoal(subgoal)
         return subgoal
-
-    def decompose_target_goal(
-        self,
-        target_goal: tuple[int, int],
-        grid: np.ndarray,
-        avatar_pos: tuple[int, int],
-        static_barriers: set[tuple[int, int]],
-        tools: list[Any],
-        receptacles_or_gates: list[tuple[int, int]],
-        held_features: set[int] | None = None,
-        theory: Any = None,
-    ) -> list[FrontopolarSubgoal]:
-        """Decompose a high-level target goal into prerequisite frontopolar subgoals.
-
-        If transit to target_goal is obstructed by gates/receptacles requiring tools/keys:
-        Schedules: [ACQUIRE_TOOL / COLLECT_ITEM] -> [CLEAR_OBSTACLE] -> [DELIVER_TO_GOAL].
-        """
-        held = held_features or set()
-        subgoals: list[FrontopolarSubgoal] = []
-
-        if tools and not held:
-            closest_tool = min(
-                tools,
-                key=lambda t: (
-                    abs(t.grid_pos[0] - avatar_pos[0]) + abs(t.grid_pos[1] - avatar_pos[1])
-                ),
-            )
-            subgoals.append(
-                FrontopolarSubgoal(
-                    subgoal_id=f"acquire_tool_{closest_tool.grid_pos[0]}_{closest_tool.grid_pos[1]}",
-                    subgoal_type=SubgoalType.ACQUIRE_TOOL,
-                    target_entity_pos=closest_tool.grid_pos,
-                    target_destination=closest_tool.grid_pos,
-                    required_feature=getattr(closest_tool, "feature_id", None),
-                    priority=2.0,
-                )
-            )
-
-        if receptacles_or_gates:
-            closest_gate = min(
-                receptacles_or_gates,
-                key=lambda g: abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1]),
-            )
-            subgoals.append(
-                FrontopolarSubgoal(
-                    subgoal_id=f"clear_gate_{closest_gate[0]}_{closest_gate[1]}",
-                    subgoal_type=SubgoalType.CLEAR_OBSTACLE,
-                    target_entity_pos=closest_gate,
-                    target_destination=closest_gate,
-                    priority=1.5,
-                )
-            )
-
-        subgoals.append(
-            FrontopolarSubgoal(
-                subgoal_id=f"reach_goal_{target_goal[0]}_{target_goal[1]}",
-                subgoal_type=SubgoalType.DELIVER_TO_GOAL,
-                target_entity_pos=target_goal,
-                target_destination=target_goal,
-                priority=1.0,
-            )
-        )
-        return subgoals
 
     @staticmethod
     def find_safe_holding_bay(

@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -130,13 +131,16 @@ class TaskFrame:
         self,
         goal_id: str,
         frame_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         self.frame_id: str = frame_id or f"frame_{uuid.uuid4().hex[:8]}"
         self.goal_id: str = goal_id
+        self.tenant_id: str | None = tenant_id
         self.workspace: HCIRWorkspaceState = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name=f"frame_{self.frame_id}",
             tier=WorkspaceTier.WORKING,
+            tenant_id=tenant_id,
         )
         self.created_at: float = time.time()
         self.closed_at: float | None = None
@@ -200,9 +204,10 @@ class WorkingWorkspace:
     the goal completes, topics change, or eviction is needed.
     """
 
-    def __init__(self, max_frames: int = 10) -> None:
+    def __init__(self, max_frames: int = 10, tenant_id: str | None = None) -> None:
         self._frames: dict[str, TaskFrame] = {}
         self._max_frames = max_frames
+        self._tenant_id = tenant_id
         self._interruption_stack: list[InterruptionCheckpoint] = []
         # Set by TieredWorkspace.attach_authorities (WP6.4) — when present, new
         # frames get a dedicated TransactionManager sharing these stages/bus.
@@ -327,7 +332,7 @@ class WorkingWorkspace:
                 if not evicted:
                     break  # Can't evict anything
 
-        frame = TaskFrame(goal_id=goal_id)
+        frame = TaskFrame(goal_id=goal_id, tenant_id=self._tenant_id)
         self._frames[frame.frame_id] = frame
         # Attach a dedicated TM when kernel authorities have been provisioned
         # (WP6.4) so future frames are governed like the tier workspaces.
@@ -442,17 +447,20 @@ class TieredWorkspace:
         persistent_store: IEventStore | None = None,
         snapshot_interval: int = 1000,
         tier_policies: dict[WorkspaceTier, TierRetentionPolicy] | None = None,
+        tenant_id: str | None = None,
     ) -> None:
+        self.tenant_id: str | None = tenant_id
         self._tier_policies: dict[WorkspaceTier, TierRetentionPolicy] = {
             **DEFAULT_TIER_POLICIES,
             **(tier_policies or {}),
         }
-        self.working = WorkingWorkspace()
+        self.working = WorkingWorkspace(tenant_id=tenant_id)
         self.brain = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="brain",
             tier=WorkspaceTier.BRAIN,
             max_nodes=self._tier_policies[WorkspaceTier.BRAIN].max_nodes,
+            tenant_id=tenant_id,
         )
         self.persistent = HCIRWorkspaceState(
             event_store=persistent_store or InMemoryEventStore(),
@@ -460,12 +468,14 @@ class TieredWorkspace:
             branch_name="persistent",
             tier=WorkspaceTier.PERSISTENT,
             max_nodes=self._tier_policies[WorkspaceTier.PERSISTENT].max_nodes,
+            tenant_id=tenant_id,
         )
         self.meta = HCIRWorkspaceState(
             branch_mode=BranchMode.LIVE,
             branch_name="meta",
             tier=WorkspaceTier.META,
             max_nodes=self._tier_policies[WorkspaceTier.META].max_nodes,
+            tenant_id=tenant_id,
         )
 
         self._snapshot_interval = snapshot_interval
@@ -674,6 +684,64 @@ class TieredWorkspace:
         )
         return True
 
+    def promote_batch(
+        self,
+        node_ids: Sequence[str],
+        from_tier: WorkspaceTier,
+        to_tier: WorkspaceTier,
+        *,
+        batch_size: int = 400,
+    ) -> int:
+        """Promote multiple nodes in chunked atomic transactions, skipping unchanged entries."""
+        if not node_ids:
+            return 0
+        dest_ws = self.get_tier(to_tier)
+        if dest_ws is None:
+            logger.warning("promote_batch: invalid destination tier %s", to_tier)
+            return 0
+
+        seen: set[str] = set()
+        ops: list[TransactionOperation] = []
+        for node_id in node_ids:
+            if node_id in seen:
+                continue
+            seen.add(node_id)
+            source_node = self._find_node_in_tier(node_id, from_tier)
+            if source_node is None:
+                continue
+            promoted_dump = source_node.model_copy(deep=True).model_dump()
+            existing = dest_ws.get_node(source_node.id)
+            if existing is not None and existing.model_dump() == promoted_dump:
+                continue
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=source_node.id,
+                    node_data=promoted_dump,
+                )
+            )
+        if not ops:
+            return 0
+
+        promoted_count = 0
+        chunk_lim = max(1, int(batch_size))
+        grant = getattr(self, "_system_grant", None)
+        author = f"promotion:{from_tier}→{to_tier}"
+        meta = {"tier_transfer": "promote", "from": str(from_tier), "to": str(to_tier)}
+        for i in range(0, len(ops), chunk_lim):
+            chunk = ops[i : i + chunk_lim]
+            result = dest_ws.commit_operations(chunk, author=author, grant=grant, metadata=meta)
+            if result.is_committed:
+                promoted_count += len(chunk)
+            else:
+                logger.warning(
+                    "promote_batch: chunk rejected (%d ops) %s → %s",
+                    len(chunk),
+                    from_tier,
+                    to_tier,
+                )
+        return promoted_count
+
     def demote(
         self,
         node_id: str,
@@ -723,11 +791,23 @@ class TieredWorkspace:
                 from_tier,
                 to_tier,
             )
-            dest_ws.commit_operations(
+            comp = dest_ws.commit_operations(
                 [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
                 author=f"{author}:compensate",
                 grant=getattr(self, "_system_grant", None),
             )
+            if not comp.is_committed:
+                logger.error(
+                    "TieredWorkspace.demote compensation failed for node %s (%s -> %s): %s",
+                    node_id,
+                    from_tier,
+                    to_tier,
+                    comp.status,
+                )
+                raise RuntimeError(
+                    f"TieredWorkspace.demote compensation failed for node {node_id} "
+                    f"({from_tier} -> {to_tier}): {comp.status}"
+                )
             return False
 
         logger.info("Demoted node %s from %s to %s", node_id, from_tier, to_tier)

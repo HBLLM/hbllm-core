@@ -1,5 +1,4 @@
 //! Rust-native ONNX vision engine and perception primitives for HBLLM.
-#![allow(non_local_definitions)] // pyo3 macros generate these; not fixable on our side
 
 use ort::session::Session;
 use pyo3::prelude::*;
@@ -180,7 +179,7 @@ impl PyVisionEngine {
 }
 
 #[pymodule]
-fn hbllm_perception_rs(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_perception_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVisionEngine>()?;
     m.add_class::<PyChangeDetector>()?;
     Ok(())

@@ -44,15 +44,17 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 ABSTAIN_RE = re.compile(
-    r"(i do not know|i don't know|do not have enough|not sure|no (?:record|information|evidence)"
+    r"(i do not know|i don't know|do not have (?:enough|recorded|sufficient|any)"
+    r"|not sure|no (?:record|information|evidence)"
     r"|cannot|can't|could not|did not understand|unclear|clarif|which one|what do you mean"
     r"|not aware|unknown|not know)",
     re.I,
 )
 ACK_RE = re.compile(r"^\s*(understood|ok(?:ay)?|got it|noted|sure)[.!]?\s*$", re.I)
 LEAK_RE = re.compile(
-    r"(\bis_a\b|property_property|knowledge\.[a-z_]+|command executed|\bt4_|traceback"
-    r"|\bNone\b|\{[a-z_]+\})",
+    r"(\bis_a\b|property_property|has_property|knowledge\.[a-z_]+|planning\.[a-z_]+"
+    r"|command executed|\bt4_|traceback|\bNone\b|\{[a-z_]+\}"
+    r"|\{['\"][a-z_]+['\"]\s*:|<HCIR[A-Za-z]+|HCIRNodeType|HCIREdgeType)",
     re.I,
 )
 GARBAGE_OBJ = frozenset(
@@ -149,6 +151,20 @@ CHAT_CASES: list[Case] = [
         all_of(says("orbit"), forbids(r"command executed|knowledge\.")),
         read="Gravity enables orbit.",
     ),
+    Case(
+        "causal_enable_polar_yes",
+        "causal",
+        "Does gravity enable orbit?",
+        yes,
+        read="Gravity enables orbit.",
+    ),
+    Case(
+        "causal_enable_inverse_what",
+        "causal",
+        "What enables orbit?",
+        says("gravity"),
+        read="Gravity enables orbit.",
+    ),
     # dialogue negation & belief revision
     Case(
         "neg_dialogue_bat_bird",
@@ -170,6 +186,34 @@ CHAT_CASES: list[Case] = [
         "Is a whale a fish?",
         no_or_abstain,
         taught=("A whale is a fish.", "A whale is not a fish."),
+    ),
+    Case(
+        "neg_dialogue_whale_revision_reverse",
+        "negation",
+        "Is a whale a fish?",
+        yes,
+        taught=("A whale is not a fish.", "A whale is a fish."),
+    ),
+    Case(
+        "neg_dialogue_plural_snakes",
+        "negation",
+        "Is a snake a reptile?",
+        no_or_abstain,
+        taught=("Snakes are not reptiles.",),
+    ),
+    Case(
+        "neg_dialogue_no_dog_cat",
+        "negation",
+        "Is a dog a cat?",
+        no_or_abstain,
+        taught=("No dog is a cat.",),
+    ),
+    Case(
+        "neg_dialogue_heat_rust",
+        "negation",
+        "Does heat cause rust?",
+        no_or_abstain,
+        taught=("Heat does not cause rust.",),
     ),
     # imperatives without internal leaks
     Case(
@@ -246,6 +290,144 @@ CHAT_CASES: list[Case] = [
         all_of(says("network"), forbids(r"(a|an|of) neural\b(?!\s+network)")),
         read="A transformer is a deep neural network.",
     ),
+    # ── 18 reading-comprehension cases (invented words & paragraph Q&A) ─────────
+    Case(
+        "read_florb_what_are",
+        "reading",
+        "What are florbs?",
+        says("creature"),
+        taught=("Florbs are small aquatic creatures. Florbs live in caves. Florbs eat moss.",),
+    ),
+    Case(
+        "read_florb_what_eat",
+        "reading",
+        "What do florbs eat?",
+        says("moss"),
+        taught=("Florbs are small aquatic creatures. Florbs live in caves. Florbs eat moss.",),
+    ),
+    Case(
+        "read_florb_where_live",
+        "reading",
+        "Where do florbs live?",
+        says("cave"),
+        taught=("Florbs are small aquatic creatures. Florbs live in caves. Florbs eat moss.",),
+    ),
+    Case(
+        "read_florb_neg_meat",
+        "reading",
+        "Do florbs eat meat?",
+        no_or_abstain,
+        taught=("Florbs eat moss. Florbs do not eat meat.",),
+    ),
+    Case(
+        "read_florb_adj_aquatic",
+        "reading",
+        "Are florbs aquatic?",
+        yes,
+        taught=("Florbs are small aquatic creatures.",),
+    ),
+    Case(
+        "read_florb_unanswerable_fly",
+        "reading",
+        "Do florbs fly?",
+        abstains,
+        taught=("Florbs are small aquatic creatures. Florbs live in caves. Florbs eat moss.",),
+        answerable=False,
+    ),
+    Case(
+        "read_drell_transitive",
+        "reading",
+        "Is a drell an animal?",
+        yes,
+        taught=("A drell is a mammal. A mammal is an animal. A drell is warm-blooded.",),
+    ),
+    Case(
+        "read_drell_warm_blooded",
+        "reading",
+        "Is a drell warm-blooded?",
+        yes,
+        taught=("A drell is a mammal. A mammal is an animal. A drell is warm-blooded.",),
+    ),
+    Case(
+        "read_drell_where_sleep",
+        "reading",
+        "Where does a drell sleep?",
+        says("tree"),
+        taught=("A drell is a mammal. A drell sleeps in trees.",),
+    ),
+    Case(
+        "read_narr_who_tired",
+        "reading",
+        "Who was tired?",
+        says("mira"),
+        taught=(
+            "Mira walked home in the rain. Mira was tired. Heavy rain caused the river to flood.",
+        ),
+    ),
+    Case(
+        "read_narr_who_walked",
+        "reading",
+        "Who walked home?",
+        says("mira"),
+        taught=(
+            "Mira walked home in the rain. Mira was tired. Heavy rain caused the river to flood.",
+        ),
+    ),
+    Case(
+        "read_narr_why_flood",
+        "reading",
+        "Why did the river flood?",
+        all_of(says("rain"), forbids(r"\bfloor\b")),
+        taught=(
+            "Mira walked home in the rain. Mira was tired. Heavy rain caused the river to flood.",
+        ),
+    ),
+    Case(
+        "read_narr_who_closed_gate",
+        "reading",
+        "Who closed the gate?",
+        says("tomas"),
+        taught=("Tomas closed the gate before sunset.",),
+    ),
+    Case(
+        "read_photo_absorb",
+        "reading",
+        "What do plants absorb?",
+        all_of(says("sunlight"), forbids(r"\bplan\b|HCIRNodeType|planning\.")),
+        taught=(
+            "Plants absorb sunlight through their leaves. Photosynthesis converts sunlight and water into glucose and releases oxygen.",
+        ),
+    ),
+    Case(
+        "read_photo_release",
+        "reading",
+        "What does photosynthesis release?",
+        all_of(says("oxygen"), forbids(r"photosynthesi\b")),
+        taught=(
+            "Plants absorb sunlight through their leaves. Photosynthesis converts sunlight and water into glucose and releases oxygen.",
+        ),
+    ),
+    Case(
+        "read_gravity_what_is",
+        "reading",
+        "What is gravity?",
+        all_of(says("force"), forbids(r"(?:is|type of|classified as) (?:an? )?other\b")),
+        taught=("Gravity is a force that attracts objects with mass toward each other.",),
+    ),
+    Case(
+        "read_gravity_attracts",
+        "reading",
+        "What attracts objects?",
+        says("gravity"),
+        taught=("Gravity is a force that attracts objects with mass toward each other.",),
+    ),
+    Case(
+        "read_coref_zint_hunt",
+        "reading",
+        "What does a zint hunt?",
+        says("beetle"),
+        taught=("A zint is a nocturnal bird. It hunts beetles at night.",),
+    ),
 ]
 
 
@@ -257,6 +439,7 @@ class ExtCase:
     expect: tuple[tuple[str, str, str], ...] = ()
     forbid_obj: frozenset[str] = frozenset()
     forbid_triples: tuple[tuple[str, str, str], ...] = ()
+    include_extended: bool = False
 
 
 EXT_CASES: list[ExtCase] = [
@@ -309,13 +492,32 @@ EXT_CASES: list[ExtCase] = [
         "**Self-improvement**: The system must improve its own reasoning over time.",
         forbid_obj=GARBAGE_OBJ,
     ),
+    ExtCase(
+        "ext_gravity_rel_clause",
+        "Gravity is a force that attracts objects with mass toward each other.",
+        expect=(("gravity", "is_a", "force"), ("gravity", "attract", "object")),
+        forbid_obj=frozenset({"other"}),
+    ),
+    ExtCase(
+        "ext_photosynthesis_svo",
+        "Plants absorb sunlight through their leaves. Photosynthesis converts sunlight and water into glucose and releases oxygen.",
+        expect=(
+            ("plant", "absorb", "sunlight"),
+            ("photosynthesis", "release", "oxygen"),
+        ),
+        forbid_obj=frozenset({"photosynthesi", "plan"}),
+        include_extended=True,
+    ),
 ]
 
 
 def run_ext_case(c: ExtCase) -> tuple[bool, str]:
     from hbllm.hcir.language.reading_curriculum import extract_propositions_from_text
 
-    got = {(p.subject, p.relation, p.obj) for p in extract_propositions_from_text(c.text, "adv")}
+    got = {
+        (p.subject, p.relation, p.obj)
+        for p in extract_propositions_from_text(c.text, "adv", include_extended=c.include_extended)
+    }
     missing = [t for t in c.expect if t not in got]
     bad_obj = [t for t in got if t[2] in c.forbid_obj]
     bad_trip = [t for t in c.forbid_triples if t in got]
@@ -358,8 +560,16 @@ def run_chat_case(c: Case) -> dict[str, Any]:
                 )
                 system.tiered_workspace.notify_commit()
                 system.attach_ontology_store(store)
+            taught_leak = False
             for t in c.taught:
-                system.process_dialogue(t, speaker_id="user")
+                taught_turn = system.process_dialogue(t, speaker_id="user")
+                taught_resp = (
+                    str(taught_turn.get("response", taught_turn.get("text", "")))
+                    if isinstance(taught_turn, dict)
+                    else (getattr(taught_turn, "response_text", "") or "")
+                )
+                if LEAK_RE.search(taught_resp):
+                    taught_leak = True
             t0 = time.perf_counter()
             turn = system.process_dialogue(c.utterance, speaker_id="user")
             ms = (time.perf_counter() - t0) * 1000.0
@@ -371,13 +581,14 @@ def run_chat_case(c: Case) -> dict[str, Any]:
                 ep = getattr(turn, "epistemic_state", None)
             err = ""
         except Exception as exc:  # noqa: BLE001 - an exception is a failed case, not a crash
-            resp, ep, ms, err = "", None, 0.0, f"{type(exc).__name__}: {exc}"
+            resp, ep, ms, err, taught_leak = "", None, 0.0, f"{type(exc).__name__}: {exc}", False
         finally:
             if store is not None:
                 store.close()
 
     cls = "error" if err else classify(resp)
-    ok = (not err) and bool(c.check(resp))
+    has_leak = bool(LEAK_RE.search(resp)) or taught_leak
+    ok = (not err) and (not has_leak) and bool(c.check(resp))
     return {
         "id": c.id,
         "category": c.category,
@@ -387,7 +598,7 @@ def run_chat_case(c: Case) -> dict[str, Any]:
         "passed": ok,
         "answerable": c.answerable,
         "confident_wrong": (not ok) and cls in ("answer", "ack"),
-        "leak": bool(LEAK_RE.search(resp)),
+        "leak": has_leak,
         "ack_on_question": "?" in c.utterance and cls == "ack",
         "confidence": (
             float(ep.confidence) if ep is not None and hasattr(ep, "confidence") else None
@@ -398,7 +609,12 @@ def run_chat_case(c: Case) -> dict[str, Any]:
 
 
 def ece(rows: list[dict[str, Any]], bins: int = 10) -> tuple[float | None, int]:
-    pts = [(r["confidence"], r["passed"]) for r in rows if r["confidence"] is not None]
+    # Score answered turns only; abstentions make no truth claim
+    pts = [
+        (r["confidence"], r["passed"])
+        for r in rows
+        if r["confidence"] is not None and r.get("class") == "answer"
+    ]
     if not pts:
         return None, 0
     total = 0.0

@@ -78,6 +78,8 @@ def test_live_pipeline_executes_g8_g11_and_dynamic_bridge() -> None:
     engine.avatar_pos = (3, 1)
     engine.goals = [(5, 5)]
     engine.mobile_threat_features = {9}
+    assert engine.option_discovery.live_pipeline_enabled is False
+    engine.option_discovery.live_pipeline_enabled = True
 
     obs1 = EmbodiedObservation(
         lattice=grid1,
@@ -370,3 +372,77 @@ def test_independent_external_benchmarks_frozenlake_and_minigrid() -> None:
         assert errs_s == []
         assert steps_s >= 1
         assert isinstance(succ_s, bool)
+
+
+def test_unmoved_entity_cache_preserves_role_priors_across_avatar_steps() -> None:
+    """Static-entity concept caching must retain transferred role priors across moving-avatar frames."""
+    from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+    from hbllm.hcir.world.state.context import CognitiveContext
+
+    bridge = CorticalGroundingBridge(perception_mode="learned")
+    theory = HCIRSymbolicWorldTheory()
+    theory.seed_core_knowledge(bg_feature=0)
+    bridge.symbolic_theory = theory
+
+    # Episode 1: observe static entity (color 7) and empirically bind it as a hazard
+    grid_ep1 = np.zeros((7, 7), dtype=int)
+    grid_ep1[1, 1] = 1
+    grid_ep1[3, 3] = 7
+    grid_ep1[4, 3] = 7
+    ents_ep1 = [
+        {"id": "av_1", "position": (1.0, 1.0), "color": 1, "size": 1},
+        {
+            "id": "haz_1",
+            "position": (3.5, 3.0),
+            "color": 7,
+            "size": 2,
+            "bbox": (3.0, 3.0, 2.0, 1.0),
+        },
+    ]
+    bridge.process_perception(
+        CognitiveContext(curr_grid=grid_ep1, bg_feature=0),
+        extracted_entities=ents_ep1,
+    )
+    bound = bridge.sync_theory_roles(theory, hazard_features={7})
+    assert bound >= 1
+
+    # New episode with unseen palette (17 for same 2x1 vertical morphology) while concept store transfers
+    bridge.on_boundary(EpisodeBoundary(kind=EpisodeBoundaryKind.CONTEXT_RESET, same_context=False))
+    grid_ep2_s0 = np.zeros((7, 7), dtype=int)
+    grid_ep2_s0[1, 1] = 11
+    grid_ep2_s0[3, 3] = 17
+    grid_ep2_s0[4, 3] = 17
+    res0 = bridge.process_perception(
+        CognitiveContext(curr_grid=grid_ep2_s0, bg_feature=0),
+        extracted_entities=[
+            {"id": "av_2", "position": (1.0, 1.0), "color": 11, "size": 1},
+            {
+                "id": "haz_2",
+                "position": (3.5, 3.0),
+                "color": 17,
+                "size": 2,
+                "bbox": (3.0, 3.0, 2.0, 1.0),
+            },
+        ],
+    )
+    assert res0["sge_role_priors"].get(17, {}).get("hazard", 0.0) > 0.0
+
+    # Avatar moves on Step 1 (scene_sig changes, hazard remains static and hits cache)
+    grid_ep2_s1 = np.zeros((7, 7), dtype=int)
+    grid_ep2_s1[1, 2] = 11
+    grid_ep2_s1[3, 3] = 17
+    grid_ep2_s1[4, 3] = 17
+    res1 = bridge.process_perception(
+        CognitiveContext(curr_grid=grid_ep2_s1, bg_feature=0),
+        extracted_entities=[
+            {"id": "av_2", "position": (1.0, 2.0), "color": 11, "size": 1},
+            {
+                "id": "haz_2",
+                "position": (3.5, 3.0),
+                "color": 17,
+                "size": 2,
+                "bbox": (3.0, 3.0, 2.0, 1.0),
+            },
+        ],
+    )
+    assert res1["sge_role_priors"].get(17, {}).get("hazard", 0.0) > 0.0

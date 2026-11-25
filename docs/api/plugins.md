@@ -58,7 +58,7 @@ manager = PluginManager(
 
 ### Plugin Discovery
 
-Scan configured directories and auto-load new v2 bundles:
+Scan configured directories (`plugins/` at repository root, plus `~/.hbllm/plugins`) and auto-load v2 bundles:
 
 ```python
 # Discover and load all plugins at startup

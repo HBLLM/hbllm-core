@@ -1,11 +1,11 @@
 ---
 title: "API Reference — HCIR Cognitive OS Kernel"
-description: "API reference for the Human-Cognitive Intermediate Representation (HCIR) kernel: CognitiveKernel, ExecutiveRuntime, KernelServices, TieredWorkspace, and TransactionManager."
+description: "API reference for the Human-Cognitive Intermediate Representation (HCIR) kernel: CognitiveKernel, ExecutiveRuntime, KernelServices, TieredWorkspace, TransactionManager, ConstitutionalVerifier, and InstructionStream."
 ---
 
 # HCIR Cognitive OS Kernel API
 
-The **Human-Cognitive Intermediate Representation (HCIR)** is the canonical runtime substrate for HBLLM Core.
+The **Human-Cognitive Intermediate Representation (HCIR)** is the canonical event-sourced execution substrate for HBLLM Core.
 
 **Package:** `hbllm.hcir`
 
@@ -15,27 +15,30 @@ The **Human-Cognitive Intermediate Representation (HCIR)** is the canonical runt
 
 ```mermaid
 graph TB
-    subgraph "Executive Layer"
-        ER["ExecutiveRuntime\n(Cycle Scheduler & Control Plane)"]
-        KS["KernelServices\n(Dependency Container)"]
+    subgraph "Composition &amp; Executive Layer"
+        BOOT["build_cognitive_system()<br/>(hbllm.runtime.bootstrap)"]
+        ER["ExecutiveRuntime<br/>(Cycle Scheduler &amp; Idle Consolidation)"]
+        KS["KernelServices<br/>(Dependency Container)"]
     end
 
     subgraph "Kernel Subsystems (hbllm.hcir.kernel)"
         CK["CognitiveKernel"]
-        TM["TransactionManager\n(Atomic Commits & Rollbacks)"]
-        CV["ConstitutionalVerifier\n(Governance Invariants)"]
-        CR["CapabilityResolver\n(Sandboxed Permissions)"]
+        TM["TransactionManager<br/>(Atomic Commits &amp; Rollbacks)"]
+        CV["ConstitutionalVerifier<br/>(Governance Invariants)"]
+        CAR["CommitAuthorityRegistry"]
+        CR["CapabilityResolver &amp; SandboxManager"]
+        CD["CommandDispatcher"]
     end
 
-    subgraph "State & Workspace (hbllm.hcir)"
-        TW["TieredWorkspace\n(Working, Brain, Persistent, Meta)"]
-        CJ["CognitiveJournal\n(Append-only mutation stream)"]
-        CEL["CognitiveEventLog\n(Event Sourcing fold())"]
+    subgraph "State, Workspace &amp; Stores (hbllm.hcir)"
+        TW["TieredWorkspace<br/>(Working, Brain, Persistent, Meta)"]
+        CJ["CognitiveJournal &amp; CognitiveEventLog"]
+        ES["SQLiteEventStore (Bounded Compaction)"]
     end
 
-    ER --> KS --> CK
-    CK --> TM & CV & CR
-    TM --> TW & CJ & CEL
+    BOOT --> ER --> KS --> CK
+    CK --> TM & CV & CAR & CR & CD
+    TM --> TW & CJ & ES
 ```
 
 ---
@@ -44,27 +47,31 @@ graph TB
 
 **Module:** `hbllm.hcir.kernel.cognitive_kernel.CognitiveKernel`
 
-The core operating system kernel managing cognitive cycles, execution sandboxes, and workspace events.
+Lightweight execution boundary and governance facade for invoking verified capabilities against an HCIR workspace:
 
 ```python
 from hbllm.hcir.kernel.cognitive_kernel import CognitiveKernel
 from hbllm.hcir.kernel.services import KernelServices
+from hbllm.hcir.workspace import HCIRWorkspaceState
 
-kernel = CognitiveKernel(services=KernelServices.create_default())
-await kernel.initialize()
+workspace = HCIRWorkspaceState()
+services = KernelServices.create_default(workspace=workspace)
+kernel = CognitiveKernel(workspace=workspace, services=services)
 
-# Run a cognitive execution cycle
-receipt = await kernel.execute_cycle(task_frame=frame)
-print(f"Cycle execution receipt: {receipt.status}, Gas used: {receipt.gas_used}")
+receipt = await kernel.execute_async(
+    capability_name="world.query_state",
+    arguments={},
+)
+print(f"Status: {receipt.status}, Elapsed: {receipt.elapsed_ms}ms")
 ```
 
 ### Methods
 
 | Method | Signature | Description |
 |---|---|---|
-| `initialize()` | `async () -> None` | Boots event loops, database pools, and verifiers |
-| `execute_cycle()` | `async (task_frame: TaskFrame) -> ExecutionReceipt` | Runs a scheduled cognitive task cycle |
-| `shutdown()` | `async () -> None` | Drains pending transactions and flushes state |
+| `execute_async()` | `async (capability_name: str, arguments: dict[str, Any], context: Any = None) -> KernelExecutionReceipt` | Evaluates governance policies and executes a sandboxed capability asynchronously |
+| `execute()` | `(capability_name: str, arguments: dict[str, Any], context: Any = None) -> KernelExecutionReceipt` | Synchronous wrapper over `execute_async()` |
+| `workspace` / `governance` / `services` | Properties | Expose the bound `HCIRWorkspaceState`, `GovernanceEngine`, and `KernelServices` |
 
 ---
 
@@ -72,13 +79,15 @@ print(f"Cycle execution receipt: {receipt.status}, Gas used: {receipt.gas_used}"
 
 **Module:** `hbllm.hcir.kernel.executive_runtime.ExecutiveRuntime`
 
-Controls the main cognitive execution loop, mode switching (Interactive, Background, Sleep), and resource scheduling.
+Owns the cognitive cycle lifecycle, session tracking, and idle offline consolidation (`run_offline_consolidation()`, `start_autonomous_loop()`):
 
 ```python
 from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
 
-runtime = ExecutiveRuntime(kernel=kernel)
+runtime = ExecutiveRuntime(services=services)
 await runtime.start()
+cycle_result = await runtime.run_cycle()
+await runtime.stop()
 ```
 
 ---
@@ -87,31 +96,31 @@ await runtime.start()
 
 **Module:** `hbllm.hcir.workspace_tiers.TieredWorkspace`
 
-Organizes cognitive graph nodes into four distinct lifetime tiers:
+Organizes cognitive graph state into four lifetime tiers (`WorkspaceTier.WORKING`, `WorkspaceTier.BRAIN`, `WorkspaceTier.PERSISTENT`, `WorkspaceTier.META`) with retention budgets and event-store compaction:
 
 ```python
 from hbllm.hcir.workspace_tiers import TieredWorkspace, WorkspaceTier
 
 workspace = TieredWorkspace()
 
-# Store state in Working tier (task-scoped)
-workspace.put_node(tier=WorkspaceTier.WORKING, node=scratchpad_node)
+# Promote a verified node between tiers
+workspace.promote(
+    node_id="concept-101", from_tier=WorkspaceTier.WORKING, to_tier=WorkspaceTier.PERSISTENT
+)
 
-# Promote to Persistent tier (survives restart)
-workspace.promote(node_id="concept-101", target_tier=WorkspaceTier.PERSISTENT)
-
-# Query nodes
-nodes = workspace.query_by_type("HypothesisNode")
+# Enforce per-tier/world node budgets and run memory hygiene
+workspace.enforce_node_budgets(max_nodes_per_world=5000)
+workspace.run_memory_hygiene_cycle()
 ```
 
 ### Tiers
 
 | Tier | Enum | Lifetime | Purpose |
 |---|---|---|---|
-| **Working** | `WorkspaceTier.WORKING` | Active Task Frame | Scratchpad, short-lived reasoning steps |
-| **Brain** | `WorkspaceTier.BRAIN` | Active Session | Working hypothesis set, active session context |
-| **Persistent** | `WorkspaceTier.PERSISTENT` | Permanent | Distilled semantic beliefs, episodic records |
-| **Meta** | `WorkspaceTier.META` | Permanent | Self-model metrics, capability performance logs |
+| **Working** | `WorkspaceTier.WORKING` | Active `TaskFrame` | Ephemeral task scratchpad and active observations |
+| **Brain** | `WorkspaceTier.BRAIN` | Active Session | Promoted session hypotheses and working concepts |
+| **Persistent** | `WorkspaceTier.PERSISTENT` | Permanent | Consolidated beliefs, `TransitionKnowledgeBase`, ontologies |
+| **Meta** | `WorkspaceTier.META` | Permanent | Tier stats, competence profiles, capability metrics |
 
 ---
 
@@ -119,17 +128,29 @@ nodes = workspace.query_by_type("HypothesisNode")
 
 **Modules:** `hbllm.hcir.kernel.transaction_manager`, `hbllm.hcir.kernel.governance.constitutional_verifier`
 
-Guarantees transactional consistency for all cognitive mutations:
+All mutations are proposed as `TransactionOperation`s, verified by `ConstitutionalVerifier` + pipeline stages (`create_default_pipeline`), and committed atomically with compensating rollback support:
 
 ```python
+from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
-from hbllm.hcir.kernel.transaction_envelope import TransactionEnvelope
+from hbllm.hcir.kernel.verification import create_default_pipeline
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.workspace import HCIRWorkspaceState
 
-tx_mgr = TransactionManager(workspace=workspace)
+ws = HCIRWorkspaceState()
+verifier = ConstitutionalVerifier()
+tx_mgr = TransactionManager(
+    workspace=ws,
+    verification_stages=create_default_pipeline(constitutional_verifier=verifier),
+)
 
-async with tx_mgr.begin_transaction() as tx:
-    tx.add_mutation(mutation_1)
-    tx.add_mutation(mutation_2)
-    # Automatically validated by ConstitutionalVerifier before commit
+async with tx_mgr.begin_transaction(author="api_demo") as tx:
+    tx.add_operation(TransactionOperation(op=TransactionOp.INSERT_NODE, node=my_node))
     await tx.commit()
 ```
+
+---
+
+## HCIR Bytecode ISA (`hbllm.hcir.bytecode`)
+
+8 primitive opcodes (`ASSERT`, `RETRACT`, `QUERY`, `EXECUTE`, `WAIT`, `FORK`, `MERGE`, `ROLLBACK`) assembled into deterministic `InstructionStream`s with `compute_hash()` and `semantic_hash()`.

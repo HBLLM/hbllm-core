@@ -14,6 +14,7 @@ from scipy.ndimage import label as _scipy_label
 from hbllm.hcir.spatial_planner import EntityRole
 from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.engine_state import get_engine_state_attr
@@ -98,14 +99,17 @@ class EpistemicGoalScheduler:
         """Return safe open-push-through approach stances if some approach sides would pin an unverified interior entity."""
         th = engine.symbolic_theory
         er, ec = entity_pos
+        f_ev = th.evaluate_transition(feature_id, locus=entity_pos)
         should_check_reversible = (
             not has_cargo_context
             and avatar_pos is not None
             and int(curr_grid[er, ec]) == int(feature_id)
-            and not th.is_walkable(feature_id)
+            and not (f_ev.traversable and f_ev.confidence > 0.0)
+            and f_ev.goal_value <= 0.5
             and feature_id not in th.goal_features
             and entity_pos not in engine.learned_goal_positions
-            and not th.is_barrier(feature_id)
+            and f_ev.traversable
+            and f_ev.risk_cost < 40.0
             and 1 <= entity_area <= 4
             and 0 < er < H - 1
             and 0 < ec < W - 1
@@ -115,14 +119,24 @@ class EpistemicGoalScheduler:
         goal_like = th.goal_features | th.candidate_goal_features | th.receptacle_features
         safe_stances: list[tuple[int, int]] = []
         unsafe_stances: list[tuple[int, int]] = []
+        kb = th.transition_kb
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             ap = (er + dr, ec + dc)
             if not (0 <= ap[0] < H and 0 <= ap[1] < W):
                 continue
-            if ap in engine.learned_barriers or ap in engine.current_context_hazards:
+            if ap in engine.current_context_hazards:
                 continue
             ap_feat = int(curr_grid[ap[0], ap[1]])
-            if not (ap_feat == bg or th.is_walkable(ap_feat) or ap == avatar_pos):
+            ev_ap = th.evaluate_transition(ap_feat, locus=ap)
+            if not ev_ap.traversable or ev_ap.risk_cost >= 40.0:
+                continue
+            if ap in engine.learned_barriers and not (
+                kb.get_belief(ap, scope="locus") is not None and ev_ap.confidence > 0.0
+            ):
+                continue
+            if not (
+                ap_feat == bg or (ev_ap.traversable and ev_ap.confidence > 0.0) or ap == avatar_pos
+            ):
                 continue
             b1 = (er - dr, ec - dc)
             b2 = (er - 2 * dr, ec - 2 * dc)
@@ -130,28 +144,40 @@ class EpistemicGoalScheduler:
             b2_open = False
             if 0 <= b1[0] < H and 0 <= b1[1] < W:
                 f1 = int(curr_grid[b1[0], b1[1]])
+                ev1 = th.evaluate_transition(f1, locus=b1)
+                b1_locus = kb.get_belief(b1, scope="locus")
+                b1_bar = b1 in engine.learned_barriers and not (
+                    b1_locus is not None and ev1.traversable and ev1.confidence > 0.0
+                )
                 b1_open = (
-                    b1 not in engine.learned_barriers
+                    not b1_bar
                     and b1 not in engine.current_context_hazards
-                    and not th.is_barrier(f1)
+                    and ev1.traversable
+                    and ev1.risk_cost < 40.0
                     and (
                         f1 == bg
                         or b1 == avatar_pos
                         or th.is_avatar_feature(f1)
-                        or th.is_walkable(f1)
+                        or ev1.confidence > 0.0
                         or f1 in goal_like
                     )
                 )
             if 0 <= b2[0] < H and 0 <= b2[1] < W:
                 f2 = int(curr_grid[b2[0], b2[1]])
+                ev2 = th.evaluate_transition(f2, locus=b2)
+                b2_locus = kb.get_belief(b2, scope="locus")
+                b2_bar = b2 in engine.learned_barriers and not (
+                    b2_locus is not None and ev2.traversable and ev2.confidence > 0.0
+                )
                 b2_open = (
-                    b2 not in engine.learned_barriers
-                    and not th.is_barrier(f2)
+                    not b2_bar
+                    and ev2.traversable
+                    and ev2.risk_cost < 40.0
                     and (
                         f2 == bg
                         or b2 == avatar_pos
                         or th.is_avatar_feature(f2)
-                        or th.is_walkable(f2)
+                        or ev2.confidence > 0.0
                         or f2 in goal_like
                     )
                 )
@@ -234,19 +260,19 @@ class EpistemicGoalScheduler:
         transient_blocked: set[tuple[int, int]] | None = None,
     ) -> None:
         """Queue unprobed adjacent stances first; escalate to contact only once all fail."""
-        adj_walkable = [
-            (entity_pos[0] + dr, entity_pos[1] + dc)
-            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
-            if 0 <= entity_pos[0] + dr < H
-            and 0 <= entity_pos[1] + dc < W
-            and (
-                curr_grid[entity_pos[0] + dr, entity_pos[1] + dc] == bg
-                or engine.symbolic_theory.is_walkable(
-                    int(curr_grid[entity_pos[0] + dr, entity_pos[1] + dc])
-                )
-                or (entity_pos[0] + dr, entity_pos[1] + dc) == avatar_pos
-            )
-        ]
+        th = engine.symbolic_theory
+        adj_walkable: list[tuple[int, int]] = []
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            ap = (entity_pos[0] + dr, entity_pos[1] + dc)
+            if not (0 <= ap[0] < H and 0 <= ap[1] < W):
+                continue
+            ap_val = int(curr_grid[ap[0], ap[1]])
+            if ap_val == bg or ap == avatar_pos:
+                adj_walkable.append(ap)
+                continue
+            ap_ev = th.evaluate_transition(ap_val, locus=ap)
+            if ap_ev.traversable and ap_ev.confidence > 0.0 and ap_ev.risk_cost < 40.0:
+                adj_walkable.append(ap)
         last_act = getattr(engine, "last_action", None)
         acc = getattr(engine, "acc_conflict_monitor", None)
         osc = getattr(acc, "_motor_oscillation_monitor", acc) if acc is not None else None
@@ -285,14 +311,20 @@ class EpistemicGoalScheduler:
         allow_contact_escalation = added_adj == 0 or (
             any_adj_probed and (is_singleton or feature_id in engine.symbolic_theory.goal_features)
         )
+        feat_ev = th.evaluate_transition(feature_id, locus=entity_pos)
+        ent_locus_b = th.transition_kb.get_belief(entity_pos, scope="locus")
+        in_learned_bar = entity_pos in engine.learned_barriers and not (
+            ent_locus_b is not None and feat_ev.traversable and feat_ev.confidence > 0.0
+        )
         if (
             allow_contact_escalation
             and adj_walkable
             and entity_pos not in engine.exhausted_candidate_goals
             and not engine.symbolic_theory.is_locus_explored(entity_pos)
-            and entity_pos not in engine.learned_barriers
+            and not in_learned_bar
             and entity_pos not in engine.current_context_hazards
-            and not engine.symbolic_theory.is_barrier(feature_id)
+            and feat_ev.traversable
+            and feat_ev.risk_cost < 40.0
         ):
             if entity_pos not in target_goals:
                 target_goals.append(entity_pos)
@@ -314,7 +346,7 @@ class EpistemicGoalScheduler:
         th = engine.symbolic_theory
         hz = engine.hazard_tracker
         lethal_feats = set(getattr(th, "lethal_features", frozenset()) or ())
-        lethal_feats.update(hz.known_lethal_features)
+        lethal_feats.update(EpistemicGoalScheduler._effective_lethal_features(engine))
         opened_portals: set[tuple[int, int]] = set()
         for mut in engine.state_mutations:
             mut_meta = mut.metadata or {}
@@ -331,17 +363,35 @@ class EpistemicGoalScheduler:
         hard_blocked: set[tuple[int, int]] = set(engine.learned_barriers) | set(static_lethal)
         unverified_blocked: set[tuple[int, int]] = set(hard_blocked)
         non_bg_rs, non_bg_cs = np.nonzero(curr_grid != bg)
+        unique_vals = set(np.unique(curr_grid[curr_grid != bg]))
+        feat_ev: dict[int, Any] = {}
+        for uv in unique_vals:
+            uv_int = int(uv)
+            if uv_int not in av_feats:
+                feat_ev[uv_int] = th.evaluate_transition(uv_int)
         for r_np, c_np in zip(non_bg_rs.tolist(), non_bg_cs.tolist(), strict=False):
             if (r_np, c_np) == avatar_pos:
                 continue
             val = int(curr_grid[r_np, c_np])
             if val in av_feats:
                 continue
-            if th.is_barrier(val) or val in lethal_feats:
+            ev_cell = feat_ev[val]
+            if not ev_cell.traversable or ev_cell.risk_cost >= 40.0 or val in lethal_feats:
                 hard_blocked.add((r_np, c_np))
                 unverified_blocked.add((r_np, c_np))
-            elif not th.is_walkable(val) and val not in th.goal_features:
+            elif ev_cell.confidence == 0.0:
                 unverified_blocked.add((r_np, c_np))
+        for locus_pos in th.transition_kb._locus_beliefs:
+            lr_l, lc_l = int(locus_pos[0]), int(locus_pos[1])
+            if not (0 <= lr_l < H and 0 <= lc_l < W) or (lr_l, lc_l) == avatar_pos:
+                continue
+            lev = th.evaluate_transition(int(curr_grid[lr_l, lc_l]), locus=(lr_l, lc_l))
+            if not lev.traversable or lev.risk_cost >= 40.0:
+                hard_blocked.add((lr_l, lc_l))
+                unverified_blocked.add((lr_l, lc_l))
+            elif lev.traversable and lev.confidence > 0.0:
+                hard_blocked.discard((lr_l, lc_l))
+                unverified_blocked.discard((lr_l, lc_l))
 
         opened_portals.difference_update(unverified_blocked)
         reachable_comp = TopologicalCutSetAnalyzer.get_reachable_component(
@@ -423,6 +473,16 @@ class EpistemicGoalScheduler:
         }
 
     @classmethod
+    def _effective_lethal_features(cls, engine: Any) -> set[int]:
+        """Return lethal features combining hazard tracker and TransitionKB fatal beliefs."""
+        th = engine.symbolic_theory
+        lethal: set[int] = {int(f) for f in engine.hazard_tracker.known_lethal_features}
+        for f in th.transition_kb.features_with_outcome(TransitionOutcome.TERMINAL_FAIL):
+            if isinstance(f, int) and th.evaluate_transition(f).risk_cost >= 40.0:
+                lethal.add(int(f))
+        return lethal
+
+    @classmethod
     def compute_frontier_candidates(
         cls,
         engine: Any,
@@ -433,7 +493,7 @@ class EpistemicGoalScheduler:
     ) -> list[tuple[int, int]]:
         """Return reachable unvisited frontier cells ordered by Manhattan distance from avatar."""
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
-        return GeodesicManifoldRouter.compute_reachable_frontiers(
+        frontiers = GeodesicManifoldRouter.compute_reachable_frontiers(
             engine=engine,
             curr_grid=curr_grid,
             bg=bg,
@@ -441,6 +501,12 @@ class EpistemicGoalScheduler:
             interactive_cluster_loci=interactive_cluster_loci,
             scipy_label_fn=_scipy_label,
         )
+        wm = engine.working_memory
+        return [
+            p
+            for p in frontiers
+            if not wm.is_exogenous_locus(p, lattice=curr_grid, bg=bg, include_outer_edge=False)
+        ]
 
     @classmethod
     def schedule_goals(
@@ -455,6 +521,14 @@ class EpistemicGoalScheduler:
     ) -> EpistemicGoalProposal:
         H, W = curr_grid.shape
         avatar_pos = engine.avatar_pos
+        wm_exog = engine.working_memory
+        entities = [
+            e
+            for e in entities
+            if not wm_exog.is_exogenous_locus(
+                e.grid_pos, lattice=curr_grid, bg=bg, include_outer_edge=False
+            )
+        ]
         has_4d_disp = (
             H > 1
             and W > 1
@@ -465,6 +539,7 @@ class EpistemicGoalScheduler:
             for a in available_actions
         )
         prior_hazard_feats = cls._high_confidence_prior_hazards(engine, bg, av_feats)
+        lethal_feats = cls._effective_lethal_features(engine)
         if curr_grid.size > 0 and np.issubdtype(curr_grid.dtype, np.integer):
             _amin, _amax = int(curr_grid.min()), int(curr_grid.max())
             if 0 <= _amin and _amax < 256:
@@ -502,7 +577,7 @@ class EpistemicGoalScheduler:
                 continue
             if (
                 e.feature_id in engine.mobile_threat_features
-                or e.feature_id in engine.hazard_tracker.known_lethal_features
+                or e.feature_id in lethal_feats
                 or (
                     e.feature_id in engine.hazard_tracker.mobile_entities
                     and e.feature_id not in engine.symbolic_theory.cargo_features
@@ -510,14 +585,7 @@ class EpistemicGoalScheduler:
                 )
             ):
                 continue
-            if e.feature_id in av_feats:
-                if (
-                    avatar_pos is not None
-                    and (abs(e.grid_pos[0] - avatar_pos[0]) + abs(e.grid_pos[1] - avatar_pos[1]))
-                    > 4
-                    and e.role == EntityRole.GOAL
-                ):
-                    confirmed_goals.append(e.grid_pos)
+            if e.role == EntityRole.AGENT or (avatar_pos is None and e.feature_id in av_feats):
                 continue
             # Causal Disambiguation: Pervasive walkable substrates (e.g. tracks, floors)
             # that recur in large quantities cannot be the singular exit/goal.
@@ -685,7 +753,7 @@ class EpistemicGoalScheduler:
         ):
             cond_affs = engine.symbolic_theory.conditional_affordances
             held_ids = engine.working_memory.held_feature_ids
-            lethal_cond_feats = engine.hazard_tracker.known_lethal_features
+            lethal_cond_feats = lethal_feats
             unfulfilled = [
                 aff
                 for aff in cond_affs.values()
@@ -1117,165 +1185,9 @@ class EpistemicGoalScheduler:
                         for cc in range(max(0, c0 - 2), min(W, c1 + 3)):
                             interactive_cluster_loci.add((rr, cc))
 
-        # (b) Hypothesized goals from prior context knowledge or role inference
+        # Tier 2. Unprobed Interactive Entities & Hypothesized Goals (Epistemic Curiosity & Info Gain)
         if not goals:
-            hypothesized_goals: list[tuple[int, int]] = []
-            for e in entities:
-                if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
-                    continue
-                if e.feature_id == bg:
-                    continue
-                if e.grid_pos in engine.learned_barriers and (
-                    e.feature_id in engine.symbolic_theory.goal_features
-                    or e.grid_pos in engine.learned_goal_positions
-                ):
-                    continue
-                if (
-                    engine.symbolic_theory.is_barrier(e.feature_id)
-                    and e.feature_id not in engine.symbolic_theory.candidate_goal_features
-                    and e.feature_id not in engine.symbolic_theory.goal_features
-                ) or (
-                    e.role == EntityRole.OBSTACLE
-                    and e.feature_id not in engine.symbolic_theory.candidate_goal_features
-                    and e.feature_id not in engine.symbolic_theory.goal_features
-                ):
-                    continue
-                is_cargo_entity = (
-                    e.feature_id in engine.symbolic_theory.cargo_features
-                    or e.feature_id in engine.learned_cargo_features
-                )
-                if engine.symbolic_theory.is_locus_explored(e.grid_pos) and (
-                    not has_cargo_context or is_cargo_entity
-                ):
-                    continue
-                if e.grid_pos in engine.exhausted_candidate_goals and (
-                    not has_cargo_context or is_cargo_entity
-                ):
-                    continue
-                if (
-                    e.feature_id in engine.hazard_tracker.known_lethal_features
-                    or e.feature_id in engine.mobile_threat_features
-                    or (
-                        e.feature_id in engine.hazard_tracker.mobile_entities
-                        and not is_cargo_entity
-                    )
-                    or int(e.feature_id) in prior_hazard_feats
-                ):
-                    continue
-                if avatar_pos is not None and e.feature_id in av_feats:
-                    if (
-                        abs(e.grid_pos[0] - avatar_pos[0]) <= 3
-                        and abs(e.grid_pos[1] - avatar_pos[1]) <= 3
-                    ):
-                        continue
-                elif e.feature_id in av_feats:
-                    continue
-                if e.grid_pos in interactive_cluster_loci:
-                    continue
-                max_entity_area = max(64, int(H * W * 0.15))
-                if (
-                    e.feature_id in engine.symbolic_theory.goal_features
-                    and (
-                        1 <= e.area <= max_entity_area
-                        or not engine.symbolic_theory.is_walkable(e.feature_id)
-                    )
-                ) or (
-                    e.feature_id in engine.symbolic_theory.candidate_goal_features
-                    and (
-                        1 <= e.area <= max_entity_area
-                        or not engine.symbolic_theory.is_walkable(e.feature_id)
-                    )
-                ):
-                    is_walk = (
-                        engine.symbolic_theory.is_walkable(e.feature_id)
-                        or (
-                            not has_discrete_interact
-                            and not engine.symbolic_theory.is_barrier(e.feature_id)
-                        )
-                        or e.feature_id in engine.symbolic_theory.goal_features
-                        or e.grid_pos in engine.learned_goal_positions
-                    ) and e.grid_pos not in engine.learned_barriers
-                    if is_walk:
-                        cls._enqueue_walkable_or_reversible_approach(
-                            engine,
-                            curr_grid,
-                            H,
-                            W,
-                            bg,
-                            avatar_pos,
-                            e.grid_pos,
-                            e.feature_id,
-                            e.area,
-                            has_cargo_context,
-                            hypothesized_goals,
-                            satisfied_when,
-                            set_contact_meta=False,
-                            transient_blocked=transient_blocked,
-                        )
-                    else:
-                        cls._enqueue_adjacent_or_contact(
-                            engine,
-                            curr_grid,
-                            H,
-                            W,
-                            bg,
-                            avatar_pos,
-                            e.grid_pos,
-                            e.feature_id,
-                            hypothesized_goals,
-                            satisfied_when,
-                        )
-                elif (
-                    e.role == target_role
-                    or e.feature_id in engine.learned_receptacle_features
-                    or e.grid_pos in engine.learned_goal_positions
-                    or e.grid_pos in engine.learned_receptacle_positions
-                ):
-                    is_walk = (
-                        engine.symbolic_theory.is_walkable(e.feature_id)
-                        or (
-                            not has_discrete_interact
-                            and not engine.symbolic_theory.is_barrier(e.feature_id)
-                        )
-                        or e.feature_id in engine.symbolic_theory.goal_features
-                        or e.grid_pos in engine.learned_goal_positions
-                    ) and e.grid_pos not in engine.learned_barriers
-                    if is_walk:
-                        cls._enqueue_walkable_or_reversible_approach(
-                            engine,
-                            curr_grid,
-                            H,
-                            W,
-                            bg,
-                            avatar_pos,
-                            e.grid_pos,
-                            e.feature_id,
-                            e.area,
-                            has_cargo_context,
-                            hypothesized_goals,
-                            satisfied_when,
-                            set_contact_meta=False,
-                            transient_blocked=transient_blocked,
-                        )
-                    else:
-                        cls._enqueue_adjacent_or_contact(
-                            engine,
-                            curr_grid,
-                            H,
-                            W,
-                            bg,
-                            avatar_pos,
-                            e.grid_pos,
-                            e.feature_id,
-                            hypothesized_goals,
-                            satisfied_when,
-                        )
-            if hypothesized_goals:
-                goals = hypothesized_goals
-
-        # (c) Real Unvisited Novel / Interactive Entities on the Grid (Epistemic Curiosity)
-        if not goals:
-            novel_entity_goals: list[tuple[int, int]] = []
+            candidate_entity_goals: list[tuple[int, int]] = []
             for e in entities:
                 if avatar_pos is not None and e.grid_pos == avatar_pos and not has_cargo_context:
                     continue
@@ -1286,7 +1198,8 @@ class EpistemicGoalScheduler:
                     or e.feature_id in engine.learned_cargo_features
                 )
                 if (
-                    e.feature_id in av_feats
+                    e.role == EntityRole.AGENT
+                    or (avatar_pos is None and e.feature_id in av_feats)
                     or e.feature_id == engine.working_memory.shroud_feature
                     or (e.feature_id in engine.hazard_tracker.mobile_entities and not is_cargo_cand)
                     or e.grid_pos in interactive_cluster_loci
@@ -1301,20 +1214,26 @@ class EpistemicGoalScheduler:
                     and e.feature_id not in engine.symbolic_theory.goal_features
                 )
                 if (
-                    (engine.symbolic_theory.is_barrier(e.feature_id) and not is_isolated_interior)
-                    or (e.role == EntityRole.OBSTACLE and not is_isolated_interior)
-                    or e.feature_id in engine.hazard_tracker.known_lethal_features
+                    (
+                        engine.symbolic_theory.is_barrier(e.feature_id)
+                        and not is_isolated_interior
+                        and e.feature_id not in engine.symbolic_theory.candidate_goal_features
+                        and e.feature_id not in engine.symbolic_theory.goal_features
+                    )
+                    or (
+                        e.role == EntityRole.OBSTACLE
+                        and not is_isolated_interior
+                        and e.feature_id not in engine.symbolic_theory.goal_features
+                    )
+                    or e.grid_pos in engine.learned_barriers
+                    or e.feature_id in lethal_feats
                     or e.feature_id in engine.mobile_threat_features
                     or int(e.feature_id) in prior_hazard_feats
                 ):
                     continue
-                is_cargo_entity = (
-                    e.feature_id in engine.symbolic_theory.cargo_features
-                    or e.feature_id in engine.learned_cargo_features
-                )
                 is_potential_cargo_receptor = (
                     has_cargo_context
-                    and not is_cargo_entity
+                    and not is_cargo_cand
                     and (
                         e.feature_id in engine.symbolic_theory.goal_features
                         or e.feature_id in engine.symbolic_theory.candidate_goal_features
@@ -1327,21 +1246,31 @@ class EpistemicGoalScheduler:
                     and e.grid_pos not in engine.learned_barriers
                     and e.grid_pos not in engine.current_context_hazards
                 )
+                if engine.symbolic_theory.is_locus_explored(e.grid_pos) and (
+                    not has_cargo_context or is_cargo_cand
+                ):
+                    continue
+                if e.grid_pos in engine.exhausted_candidate_goals and (
+                    not has_cargo_context or is_cargo_cand
+                ):
+                    continue
+                is_hypothesized_or_known = (
+                    e.feature_id in engine.symbolic_theory.goal_features
+                    or e.feature_id in engine.symbolic_theory.candidate_goal_features
+                    or e.role == target_role
+                    or e.feature_id in engine.learned_receptacle_features
+                    or e.grid_pos in engine.learned_goal_positions
+                    or e.grid_pos in engine.learned_receptacle_positions
+                )
                 if (
                     engine.symbolic_theory.is_feature_explored(e.feature_id)
+                    and not is_hypothesized_or_known
                     and not is_isolated_interior
                     and not is_potential_cargo_receptor
                 ):
                     continue
-                if engine.symbolic_theory.is_locus_explored(e.grid_pos) and (
-                    not has_cargo_context or is_cargo_entity
-                ):
-                    continue
-                if e.grid_pos in engine.exhausted_candidate_goals and (
-                    not has_cargo_context or is_cargo_entity
-                ):
-                    continue
-                if not (1 <= e.area <= 64):
+                max_entity_area = max(64, int(H * W * 0.15))
+                if not (1 <= e.area <= max_entity_area):
                     continue
                 is_walkable = (
                     engine.symbolic_theory.is_walkable(e.feature_id)
@@ -1349,8 +1278,10 @@ class EpistemicGoalScheduler:
                         not has_discrete_interact
                         and not engine.symbolic_theory.is_barrier(e.feature_id)
                     )
+                    or e.feature_id in engine.symbolic_theory.goal_features
+                    or e.grid_pos in engine.learned_goal_positions
                     or e.feature_id == bg
-                )
+                ) and e.grid_pos not in engine.learned_barriers
                 if is_walkable:
                     cls._enqueue_walkable_or_reversible_approach(
                         engine,
@@ -1363,13 +1294,12 @@ class EpistemicGoalScheduler:
                         e.feature_id,
                         e.area,
                         has_cargo_context,
-                        novel_entity_goals,
+                        candidate_entity_goals,
                         satisfied_when,
-                        set_contact_meta=True,
+                        set_contact_meta=False,
                         transient_blocked=transient_blocked,
                     )
                 else:
-                    # Non-walkable interactive entity: probe adjacent stances, then contact if exhausted
                     cls._enqueue_adjacent_or_contact(
                         engine,
                         curr_grid,
@@ -1379,18 +1309,22 @@ class EpistemicGoalScheduler:
                         avatar_pos,
                         e.grid_pos,
                         e.feature_id,
-                        novel_entity_goals,
+                        candidate_entity_goals,
                         satisfied_when,
-                        set_contact_meta=True,
+                        set_contact_meta=not is_hypothesized_or_known,
                         transient_blocked=transient_blocked,
                     )
                 if is_walkable:
                     new_candidate_feats.add(e.feature_id)
 
-            if novel_entity_goals:
-                goals = novel_entity_goals
+            if candidate_entity_goals:
+                goals = candidate_entity_goals
 
-        if avatar_pos is not None and goals and satisfied_when:
+        if (
+            avatar_pos is not None
+            and goals
+            and (satisfied_when or (not confirmed_goals and len(goals) > 1))
+        ):
             from hbllm.hcir.world.object_state_graph import compute_stance_priority
 
             th = engine.symbolic_theory
@@ -1430,196 +1364,6 @@ class EpistemicGoalScheduler:
                 goals = [g for g in goals if priorities[g][0] == min_tier]
             goals.sort(key=lambda g: priorities[g])
 
-        # (d) Structural inference: geometric patterns suggesting goals
-        if not goals and engine.learned_goal_positions:
-            goals = [
-                g
-                for g in engine.learned_goal_positions
-                if 0 <= g[0] < H
-                and 0 <= g[1] < W
-                and g not in interactive_cluster_loci
-                and (
-                    avatar_pos is None
-                    or (
-                        g != avatar_pos
-                        and (abs(g[0] - avatar_pos[0]) > 1 or abs(g[1] - avatar_pos[1]) > 1)
-                    )
-                )
-            ]
-        if not goals:
-            wm_priors_d: dict[int, dict[str, float]] = engine.working_memory.concept_role_priors
-            has_cargo_d = bool(
-                engine.symbolic_theory.cargo_features or engine.learned_cargo_features
-            )
-            structural_goals = engine.detect_structural_goals(curr_grid, bg=bg)
-            primary_sgs = [
-                sg
-                for sg in structural_goals
-                if sg.get("type")
-                in (
-                    "target_zone",
-                    "exit_marker",
-                    "reflection_target",
-                    "relational_alignment",
-                    "optical_mirror_target",
-                    "constellation_target",
-                )
-            ]
-            cand_sgs = primary_sgs if primary_sgs else structural_goals
-
-            def _is_prior_blocked_feat(feat_val: int) -> bool:
-                if feat_val in engine.symbolic_theory.goal_features:
-                    return False
-                p_s, b_s, h_s = cls._role_scores_from_priors(wm_priors_d, feat_val, has_cargo_d)
-                return (h_s >= 0.65 and p_s < 0.45) or (b_s >= 0.72 and p_s < 0.40)
-
-            for sg in cand_sgs:
-                feat = sg.get("feature")
-                if sg.get("is_midpoint") or sg.get("type") == "relational_alignment":
-                    feat = None
-                if feat is not None and (
-                    (feat in av_feats and not sg.get("is_midpoint"))
-                    or feat in engine.hazard_tracker.known_lethal_features
-                    or (
-                        engine.symbolic_theory.is_barrier(feat)
-                        and feat not in engine.symbolic_theory.goal_features
-                        and feat not in engine.symbolic_theory.candidate_goal_features
-                    )
-                    or _is_prior_blocked_feat(int(feat))
-                ):
-                    continue
-                if (
-                    feat is not None
-                    and feat != bg
-                    and feat not in av_feats
-                    and (engine.symbolic_theory.is_walkable(feat) or not has_discrete_interact)
-                ):
-                    new_candidate_feats.add(feat)
-                is_high_conf = sg.get("confidence", 0.0) >= 0.7 and (
-                    avatar_pos is not None or bool(av_feats)
-                )
-                cells = sg.get("cells")
-                if cells:
-                    for cp in cells:
-                        if (
-                            0 <= cp[0] < H
-                            and 0 <= cp[1] < W
-                            and cp != avatar_pos
-                            and cp not in interactive_cluster_loci
-                            and int(curr_grid[cp[0], cp[1]]) != bg
-                        ):
-                            cp_feat = int(curr_grid[cp[0], cp[1]])
-                            if (
-                                cp_feat in engine.hazard_tracker.known_lethal_features
-                                or _is_prior_blocked_feat(cp_feat)
-                            ):
-                                continue
-                            if cp not in goals:
-                                goals.append(cp)
-                            if is_high_conf and (
-                                feat is not None and feat in engine.symbolic_theory.goal_features
-                            ):
-                                new_learned_positions.add(cp)
-                else:
-                    pos = sg.get("position")
-                    if (
-                        pos
-                        and 0 <= pos[0] < H
-                        and 0 <= pos[1] < W
-                        and pos != avatar_pos
-                        and pos not in interactive_cluster_loci
-                        and int(curr_grid[pos[0], pos[1]]) != bg
-                    ):
-                        pos_feat = int(curr_grid[pos[0], pos[1]])
-                        if (
-                            pos_feat in engine.hazard_tracker.known_lethal_features
-                            or _is_prior_blocked_feat(pos_feat)
-                        ):
-                            continue
-                        if pos not in goals:
-                            goals.append(pos)
-                        if is_high_conf and (
-                            feat is not None and feat in engine.symbolic_theory.goal_features
-                        ):
-                            new_learned_positions.add(pos)
-
-            if len(goals) > 1 and avatar_pos is not None:
-
-                def _structural_priority(g: tuple[int, int]) -> tuple[int, float, int]:
-                    gf = int(curr_grid[g[0], g[1]])
-                    pref_g, bar_g, haz_g = (
-                        cls._role_scores_from_priors(wm_priors_d, gf, has_cargo_d)
-                        if gf != bg
-                        else (0.0, 0.0, 0.0)
-                    )
-                    dist_g = abs(g[0] - avatar_pos[0]) + abs(g[1] - avatar_pos[1])
-                    if gf in engine.symbolic_theory.goal_features:
-                        return (0, -round(pref_g, 3), dist_g)
-                    if haz_g >= 0.65 and pref_g < 0.45:
-                        return (8, haz_g, dist_g)
-                    if bar_g >= 0.72 and pref_g < 0.40:
-                        return (7, bar_g, dist_g)
-                    if pref_g >= 0.55:
-                        return (1, -round(pref_g, 3), dist_g)
-                    if pref_g >= 0.35:
-                        return (2, -round(pref_g, 3), dist_g)
-                    cnt_g = feat_counts.get(gf, 0) if gf != bg else 0
-                    return (3 if cnt_g == 1 else 4, -round(pref_g, 3), dist_g)
-
-                goals.sort(key=_structural_priority)
-
-        # (e) Frontier Exploration (P2-9): Nearest reachable boundary between visited and unvisited
-        if not goals:
-            frontier_candidates = cls.compute_frontier_candidates(
-                engine=engine,
-                curr_grid=curr_grid,
-                bg=bg,
-                av_feats=av_feats,
-                interactive_cluster_loci=interactive_cluster_loci,
-            )
-            if frontier_candidates:
-                nearest_frontier = frontier_candidates[0]
-                goals.append(nearest_frontier)
-                satisfied_when[nearest_frontier] = {"max_visits": 1}
-
-        # Frontier Exhaustion Epistemic Contradiction:
-        # If no reachable targets remain while unverified prior-context blacklists
-        # (known_lethal_features from earlier levels) hide interior entities on the grid,
-        # invalidate the stale prior labels so exploration can proceed.
-        if (
-            not goals
-            and avatar_pos is not None
-            and engine.symbolic_theory.has_prior_context_transition
-            and engine.working_memory.consecutive_simulation_failures >= 2
-        ):
-            th = engine.symbolic_theory
-            verified_lethal = th.context_verified_features("lethal")
-            unverified_lethals = set(engine.hazard_tracker.known_lethal_features) - verified_lethal
-            if unverified_lethals and any(f in unverified_lethals for f in feat_counts):
-                from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
-
-                invalidate_stale_context_ontology(
-                    th,
-                    hazard_tracker=engine.hazard_tracker,
-                    episodic_cortex=engine.episodic_cortex,
-                    working_memory=engine.working_memory,
-                    engine_or_view=engine,
-                    bg_feature=bg,
-                    preserve_current_context=True,
-                    reason="frontier_exhausted_over_prior_blacklist",
-                )
-                for e_blk in entities:
-                    if (
-                        e_blk.feature_id != bg
-                        and e_blk.feature_id not in av_feats
-                        and e_blk.grid_pos != avatar_pos
-                        and not th.is_barrier(e_blk.feature_id)
-                        and e_blk.grid_pos not in engine.learned_barriers
-                        and e_blk.grid_pos not in engine.current_context_hazards
-                    ):
-                        goals.append(e_blk.grid_pos)
-                        satisfied_when[e_blk.grid_pos] = {"max_visits": 2}
-
         if avatar_pos is not None:
             goals = [
                 g
@@ -1654,19 +1398,91 @@ class EpistemicGoalScheduler:
                 and (not engine.symbolic_theory.is_locus_explored(g) or g == avatar_pos)
             )
         ]
-        if unexhausted_goals:
-            goals = unexhausted_goals
-        elif goals:
+        goals = unexhausted_goals
+
+        # Tier 3. Frontier Exploration: Nearest reachable boundary between visited and unvisited
+        # (Activated when confirmed goals and novel entities are either exhausted or absent)
+        if not goals:
+            frontier_candidates = cls.compute_frontier_candidates(
+                engine=engine,
+                curr_grid=curr_grid,
+                bg=bg,
+                av_feats=av_feats,
+                interactive_cluster_loci=interactive_cluster_loci,
+            )
+            if frontier_candidates:
+                nearest_frontier = frontier_candidates[0]
+                goals.append(nearest_frontier)
+                satisfied_when[nearest_frontier] = {"max_visits": 1}
+
+        # Frontier Exhaustion Epistemic Contradiction:
+        # If no reachable targets remain while unverified prior-context blacklists
+        # (known_lethal_features from earlier levels) hide interior entities on the grid,
+        # invalidate the stale prior labels so exploration can proceed.
+        if (
+            not goals
+            and avatar_pos is not None
+            and engine.symbolic_theory.has_prior_context_transition
+            and engine.working_memory.consecutive_simulation_failures >= 2
+        ):
+            th = engine.symbolic_theory
+            verified_lethal = th.context_verified_features("lethal")
+            unverified_lethals = set(lethal_feats) - verified_lethal
+            if unverified_lethals and any(f in unverified_lethals for f in feat_counts):
+                from hbllm.hcir.world.cortex_causal import invalidate_stale_context_ontology
+
+                invalidate_stale_context_ontology(
+                    th,
+                    hazard_tracker=engine.hazard_tracker,
+                    episodic_cortex=engine.episodic_cortex,
+                    working_memory=engine.working_memory,
+                    engine_or_view=engine,
+                    bg_feature=bg,
+                    preserve_current_context=True,
+                    reason="frontier_exhausted_over_prior_blacklist",
+                )
+                lethal_feats = cls._effective_lethal_features(engine)
+                for e_blk in entities:
+                    if (
+                        e_blk.feature_id != bg
+                        and e_blk.feature_id not in av_feats
+                        and e_blk.grid_pos != avatar_pos
+                        and not th.is_barrier(e_blk.feature_id)
+                        and e_blk.feature_id not in lethal_feats
+                        and e_blk.grid_pos not in engine.learned_barriers
+                        and e_blk.grid_pos not in engine.current_context_hazards
+                    ):
+                        goals.append(e_blk.grid_pos)
+                        satisfied_when[e_blk.grid_pos] = {"max_visits": 2}
+
+        # If both entities AND frontiers are completely exhausted:
+        if not goals and engine.exhausted_candidate_goals:
             clear_exhausted = True
 
-        # Exclude all known static lethal coordinates from candidate attractors
+        # Exclude all known static lethal and exogenous coordinates from candidate attractors
         all_lethals = engine.current_context_hazards
-        goals = [g for g in goals if g not in all_lethals]
+        goals = [
+            g
+            for g in goals
+            if g not in all_lethals
+            and int(curr_grid[g[0], g[1]]) not in lethal_feats
+            and not wm_exog.is_exogenous_locus(
+                g, lattice=curr_grid, bg=bg, include_outer_edge=False
+            )
+        ]
+        new_learned_positions = {
+            p
+            for p in new_learned_positions
+            if p not in all_lethals
+            and int(curr_grid[p[0], p[1]]) not in lethal_feats
+            and not wm_exog.is_exogenous_locus(
+                p, lattice=curr_grid, bg=bg, include_outer_edge=False
+            )
+        }
 
         # Reachability Gating: Discard goals physically disconnected from avatar
         if avatar_pos is not None and goals:
             barrier_feats = engine.symbolic_theory.barrier_features
-            lethal_feats = engine.hazard_tracker.known_lethal_features
             learned_b = engine.learned_barriers
 
             # Vectorized 4-connected flood fill over passable cells —
@@ -1679,11 +1495,29 @@ class EpistemicGoalScheduler:
             bad_feats = set(barrier_feats) | set(lethal_feats) | prior_hazard_feats
             if bad_feats:
                 blocked |= np.isin(curr_grid, list(bad_feats))
+            for locus_pos in engine.symbolic_theory.transition_kb._locus_beliefs:
+                lr_l, lc_l = int(locus_pos[0]), int(locus_pos[1])
+                if not (0 <= lr_l < H and 0 <= lc_l < W):
+                    continue
+                l_ev = engine.symbolic_theory.evaluate_transition(
+                    int(curr_grid[lr_l, lc_l]), locus=(lr_l, lc_l)
+                )
+                if not l_ev.traversable or l_ev.risk_cost >= 40.0:
+                    blocked[lr_l, lc_l] = True
+                elif l_ev.traversable and l_ev.confidence > 0.0:
+                    blocked[lr_l, lc_l] = False
             passable = ~blocked
             passable[avatar_pos[0], avatar_pos[1]] = True
             labeled_reach, _ = _scipy_label(passable)
             av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
 
+            reach_offsets = (
+                (-1, 0),
+                (1, 0),
+                (0, -1),
+                (0, 1),
+                *engine.action_deltas.values(),
+            )
             reachable_goals = [
                 g
                 for g in goals
@@ -1692,7 +1526,7 @@ class EpistemicGoalScheduler:
                     0 <= g[0] + dr < H
                     and 0 <= g[1] + dc < W
                     and int(labeled_reach[g[0] + dr, g[1] + dc]) == av_lbl
-                    for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                    for dr, dc in reach_offsets
                 )
             ]
             if reachable_goals:

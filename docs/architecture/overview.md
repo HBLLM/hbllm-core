@@ -1,486 +1,115 @@
 ---
-title: "Architecture Overview — HBLLM Cognitive Architecture"
-description: "Technical deep-dive into HBLLM's modular brain architecture that runs without massive GPU/VRAM: 50+ cognitive nodes, async message bus, HCIR-native memory architecture, 5 cognitive subsystems for human modeling, autonomous goal pursuit, and the edge-optimized zoning model."
+title: "Architecture Overview — Pure-HCIR Cognitive OS"
+description: "System-wide architecture of HBLLM Core: 8 non-negotiable invariants, single composition root (build_cognitive_system), Pure-HCIR subsystems, Rust substrate, and external plugin boundaries."
 ---
 
 # Architecture Overview
 
 > [!NOTE]
-> For the formal architectural decisions, trade-offs, and design invariants covering the entire core, see **[ADR 001: Master Core Architecture](../adr/0001-hbllm-core-architecture.md)**.
+> For formal architectural decisions, see **[ADR 004: Pure-HCIR Cognitive OS](../adr/0004-pure-hcir-cognitive-os.md)** alongside historical **[ADR 001](../adr/0001-hbllm-core-architecture.md)** and **[ADR 002](../adr/0002-operational-architecture-and-governance.md)**.
 
-HBLLM Core is built on four foundational principles:
+**HBLLM Core** is an event-sourced, neuro-symbolic **Cognitive OS** built around the **Human-Cognitive Intermediate Representation (`hbllm.hcir`)**. Rather than treating an autoregressive LLM as the runtime brain, HBLLM separates formal state ownership, cortical active inference, symbol grounding, multilingual parsing/realization, and governed execution into deterministic, verifiable subsystems.
 
-1.  **Local-First Autonomy** — The system is designed to provide full cognitive utility on a single device without cloud dependencies.
-2.  **Sovereign Distributed Cognition** — Optional scaling to a swarm of personal devices via cryptographic trust chaining.
-3.  **Causal Consistency** — Maintains a unified chronological memory state across all distributed nodes.
-4.  **Hardware Efficiency** — Decouples intelligence from model inference, enabling complex reasoning on CPU-only devices.
+---
 
-## Core Architectural Rules & Layer Separation
+## 1. Eight Non-Negotiable Core Invariants
 
-To maintain cognitive predictability, transparency, and prevent black-box decision collapse, HBLLM enforces a strict separation of concerns across its cognitive layers:
+1. **State Ownership Invariant:** *Nodes emit intent. HCIR owns state.* All state changes are proposed as `TransactionOperation`s and committed atomically via `TransactionManager`.
+2. **Reasoning Invariant:** *Operators calculate. HCIR decides what becomes reality.* Reasoning operators receive immutable `FrozenGraphView` / `CognitiveContext` snapshots and return pure `CognitiveResult`s.
+3. **Zero LLM Dependency in Core:** `hbllm.hcir` (`world`, `grounding`, `reasoning`, `language`, `snn`, `capabilities`, `kernel`) has **zero** LLM client or network imports (enforced by `tests/unit/architecture/test_loc_budget.py`).
+4. **Constitutional Governance:** Every mutation passes through `ConstitutionalVerifier` and verification pipeline stages (`ScopeVerifier`, `SchemaVerifier`, `ResourceVerifier`, `PolicyVerifier`, `BranchModeVerifier`) before commit.
+5. **Multi-Tenant Memory Isolation:** Episodic, semantic, procedural, and belief memories are partitioned by `Scope` / `tenant_id` across `TieredWorkspace`.
+6. **Target State Evolution:** Changes upgrade toward declarative HCIR grammar, formal transactions, and dynamic causal predicates — never monkey-patches or task-specific branches.
+7. **General Intelligence Directive:** The core remains strictly domain- and task-agnostic; environment adapters live externally in `plugins/` (see [Innate Priors](priors.md)).
+8. **Internal Memory Governance:** Learned world ontology lives in `HCIRSymbolicWorldTheory` (`TransitionKnowledgeBase`), transient state lives in `PrefrontalWorkingMemory`, and behaviors live in `DeclarativeNeuroSymbolicSkill`.
 
-*   **SNN Layer (Dynamics: Time + Intensity + Content Planning)**:
-    *   *Role:* Temporal integration, decay dynamics, spiking events, and content planning.
-    *   *Rule:* **SNN layers drive both soft biases and hard content decisions.**
-      - In **comprehension/gating**, SNNs act as continuous-time integrators that bias retrieval weights and trigger reflexes.
-      - In **expression** (v4 Broca mode), the ContentPlanNetwork SNN makes hard content decisions: what content type, what key points, what order.
-      - In **reward evaluation**, the TrainedPRM SNN evaluates output quality with STDP-based online learning.
-*   **Memory Layer (Storage: Facts + Embeddings + Graph)**:
-    *   *Role:* Data storage of factual information, embeddings, procedural skills, and relational graphs.
-*   **Retrieval Layer (Ranking: Blending Signals)**:
-    *   *Role:* Blends dense, sparse, knowledge graph, and SNN priming/boost signals into unified ranked lists.
-*   **LLM Layer (Reasoning: Final Synthesis)**:
-    *   *Role:* Performs final synthesis and reasoning over retrieved memories, workspace thoughts, and planning DAGs.
-*   **Telemetry Layer (Observation: No Influence)**:
-    *   *Role:* Observability, metrics collection, and logging.
-    *   *Rule:* **Telemetry must remain strictly observational and have no influence** on the system's cognitive states or decisions.
+---
 
-!!! info "Why This Matters for Hardware"
-    Traditional LLMs require 80GB+ VRAM for a 70B model. HBLLM's cognitive nodes are **zero-parameter pure logic** — they add no GPU load. Only the base model (125M–1.5B) requires compute, and it runs efficiently on CPU via Rust SIMD kernels with INT4 quantization.
-
-## Layered Design
+## 2. Layered Pure-HCIR System Topology
 
 ```mermaid
 graph TB
-    subgraph FED["🔒 Federation & Security Gateway"]
-        EP["🌐 External Peers / Swarms"] -- "signed envelope" --> SG["SynapseGateway / API"]
-        SG <--> FW["🛡️ Cognitive Firewall\n(XML + Cosine Prompt Shield)"]
+    subgraph ENTRY["Entry Points & Adapters"]
+        CLI["Typer CLI (hbllm.cli)"]
+        SERVE["FastAPI + MCP Server (hbllm.serving)"]
+        PLUGINS["Environment & Device Adapters (plugins/*_adapter)"]
+        BOOT["Single Composition Root<br/>build_cognitive_system() (hbllm.runtime.bootstrap)"]
+        CLI & SERVE & PLUGINS --> BOOT
     end
 
-    subgraph PERCEPTION["👁️ Perception Layer"]
-        VIS["📸 Vision (OCR)"]
-        AIN["🎤 Audio In (STT)"]
-        IOT["📡 IoT/MQTT"]
-        VID["🎥 Video Stream"]
-        GES["🤚 Gesture"]
-        AMB["🔊 Ambient Audio\nClassifier"]
-        SID["🗣️ Speaker ID"]
-        CTURN["💬 Conversation\nTurn Manager"]
-        TFUSE["⏱️ Temporal Fuser"]
-        WSTATE["🌍 World State\nTracker"]
+    subgraph HCIR["Pure-HCIR Cognitive OS (hbllm.hcir)"]
+        direction TB
+        subgraph WORLD["Cortical World Model (hcir.world — 17 subpackages)"]
+            AEE["AutonomousEpistemicEngine + 5-Stage CorticalPipeline"]
+            TKB["HCIRSymbolicWorldTheory + TransitionKnowledgeBase"]
+            PWM["PrefrontalWorkingMemory + Predictors (Physics/SNN/WholeGrid)"]
+        end
+
+        subgraph GROUND["Symbol Grounding (hcir.grounding)"]
+            SGE["FeatureExtractors (handcrafted/snn/learned), Tracker, ConceptLearner, HCIRCommitter"]
+        end
+
+        subgraph LANG["Language & Reading (hcir.language)"]
+            MLR["MultilingualLanguageRuntime (en/si/ta), SymSpell Normalizer, HCIRGateway"]
+            READ["ExpositoryProseProcessor &amp; Track T4 ReadingCurriculumIngestor"]
+        end
+
+        subgraph REAS["Composable Reasoning &amp; SNN"]
+            URR["UnifiedReasoningRuntime + 14 Operators (hcir.reasoning)"]
+            SNN["LIF, STDP, WTA, Oscillations, Neuromodulation (hcir.snn)"]
+        end
+
+        subgraph KERNEL["HCIR Kernel &amp; Memory Tiers (hcir.kernel)"]
+            TM["TransactionManager + ConstitutionalVerifier + CommitAuthorityRegistry"]
+            CAP["CommandDispatcher + CapabilitySandboxManager + hcir.capabilities"]
+            TW["TieredWorkspace (Working | Brain | Persistent | Meta) + SQLiteEventStore"]
+        end
+
+        AEE <--> TKB & PWM
+        SGE <--> AEE
+        LANG --> CAP
+        WORLD & GROUND & LANG & REAS & CAP --> TM
+        TM --> TW
+        SNN -.-> WORLD & GROUND & REAS
     end
 
-    subgraph BUS["⚡ Message Bus (Communication)"]
-        MB["InProcessBus / RedisBus"]
-        TI["🛡️ TrustInterceptor\n(Ed25519 + Vector Clocks)"]
-        MB <--> TI
+    subgraph RUST["Native Rust Substrate (13 PyO3 Crates)"]
+        RG["hbllm_hcir_graph (Chunked CoW + BLAKE3)"]
+        SIM["hbllm_simulation_engine &amp; hbllm_structure_matcher"]
+        SIMD["hbllm_compute, hbllm_semantic_search, hbllm_perception_rs, ..."]
     end
 
-    subgraph CORE["🧠 Cognitive Core (Reasoning)"]
-        R["🔀 Router"] --> P["📋 GoT Planner"]
-        P --> W["📝 Workspace (Blackboard)"]
-        W --> C["🔍 Critic (PRM)"]
-        C --> D["⚖️ Decision Node"]
-    end
-
-    subgraph SNN["⚡ SNN Cognitive Stream"]
-        CS["👂 ComprehensionStream\n(5-channel LIF)"]
-        AL["🔗 AssociationLayer\n(4→8→2 SNN)"]
-        RN_SNN["🧩 ReasoningNetwork\n(4→6→2 SNN)"]
-        ES["🗣️ ExpressionStream\n(3-tier rendering)"]
-        TPRM["📊 TrainedPRM\n(6→8→4→2 SNN + STDP)"]
-        DN["🌳 DendriticNeuron\n(predictive coding)"]
-        PE["📊 PopulationEncoder\n(state→spikes)"]
-        OSC["🔄 BrainClock\n(γ/β/θ/δ oscillations)"]
-        NM["💊 Neuromodulation\n(DA/5HT/NE/ACh/GABA/Glu)"]
-    end
-
-    subgraph AUTONOMY["🎯 Autonomy & Executive Control"]
-        CEC["🧠 CognitiveExecutiveController\n(Persistent Orchestrator)"]
-        IWS["📋 IntentionalWorkspace\n(SQLite Goal Agenda)"]
-        COGS["❄️ CognitiveState\n(Immutable Versioned Blackboard)"]
-        SGE["⚡ SkillGraphExecutor\n(DAG-based SkillIR)"]
-        LSE["🛡️ LayeredSimulationEngine\n(Safety, Social, Resource layers)"]
-        ACORE["🫀 AutonomyCore\n(Cognitive Heartbeat)"]
-        CSM["🧠 Cognitive\nState Machine"]
-        ATTN["👁️ Attention\nSystem"]
-        TGR["📋 TaskGraph\nRuntime"]
-        GDECOMP["🎯 Goal\nDecomposition"]
-        REFLEX["⚡ Reflex\nLibrary"]
-        RESTRAINT["🛑 Restraint\nEngine"]
-        IDETECT["🚨 Interrupt\nDetector"]
-        NSUP["🔕 Notification\nSuppressor"]
-        PROACT["💡 Proactive\nInsight"]
-        CLOAD["📊 Cognitive Load\nEstimator"]
-        IWS --> CEC
-        CEC --> COGS
-        COGS --> SGE
-        COGS --> LSE
-    end
-
-    subgraph META["🧬 Meta-Cognitive Layer (Self-Model)"]
-        LEARN["🎓 Learner"]
-        SPAWN["🧬 Spawner (Neurogenesis)"]
-        SLEEP["💤 Sleep Cycle (Compaction)"]
-        CURIO["🔭 Curiosity Node"]
-        ID["🛡️ Identity & Ethics"]
-        SOCIAL["🗓️ Social Timing"]
-    end
-
-    subgraph HUMAN["👤 Cognitive Subsystems (Human Modeling)"]
-        UM["👤 UserModel\n(expertise, preferences, trust)"]
-        PG["📋 ProjectGraph\n(goals, blockers, decisions)"]
-        EC["🧠 ExecutiveCortex\n(focus, budget, interrupts)"]
-        RM["🤝 RelationshipMemory\n(social graph, sentiment)"]
-        RG["🌍 RealityGraph\n(unified world state)"]
-    end
-
-    subgraph MEMORY["💾 HCIR Memory System (Tiered Graph Workspace)"]
-        EPISODIC["📖 EpisodeNode"]
-        SEMANTIC["📚 ConceptNode"]
-        PROCEDURAL["🔧 SkillNode"]
-        KG["🔗 BeliefNode (Graph)"]
-        VALUE["❤️ ValueNode"]
-        WORKING["📋 Working Tier"]
-        SPATIAL["📍 Brain Tier"]
-        TEMPORAL["⏰ Persistent Tier"]
-        IMPORTANCE["📊 Meta Tier"]
-    end
-
-    subgraph ACTIONS["⚡ Action & Embodiment Layer"]
-        EXEC["🖥️ Sandboxed Exec"]
-        BROWSER["🌍 Browser Node"]
-        MCP["🔌 MCP Client"]
-        CONFIRM["✅ Confirmation\nGate"]
-        ROLLBACK["↩️ Rollback\nEngine"]
-        AGENT["🤖 Agent\nExecutor"]
-        TCHAIN["🔗 Tool Chain"]
-    end
-
-    subgraph SECURITY["🔒 Security & Governance"]
-        PII["🔏 PII Redactor"]
-        VAUTH["🎤 Voice Auth"]
-        AUDIT["📜 Audit Trail"]
-        POLICY["📋 Policy Engine"]
-    end
-
-    subgraph MULTIAGENT["🌐 Multi-Agent Network"]
-        COORD["🤝 Coordinator"]
-        PROTO["📡 Protocol"]
-        UPLINK["📡 UplinkNode"]
-    end
-
-    EP -.->|"API Sync"| SG
-    SG ==> BUS
-    PERCEPTION ==> BUS
-    BUS <==> CORE
-    BUS <--> META
-    BUS <--> MEMORY
-    BUS ==> ACTIONS
-    BUS <--> AUTONOMY
-    BUS <--> SECURITY
-    BUS <--> MULTIAGENT
-    BUS <--> HUMAN
-    CORE <==> SNN
-    SNN --> MEMORY
-    AUTONOMY --> CORE
-    AUTONOMY --> ACTIONS
-
-    SLEEP -->|"compact"| MEMORY
-    SPAWN -->|"skill acquisition"| CORE
-    IMPORTANCE -->|"score"| MEMORY
-    UM -->|"user context"| CORE
-    PG -->|"project context"| CORE
-    RM -->|"social context"| CORE
-    RG -->|"world state"| CORE
-    UM -->|"alignment"| EC
+    BOOT --> HCIR
+    TW <-->|"Verified Accelerator"| RG
+    HCIR -.-> SIM & SIMD
 ```
-
-
-### Layer 1: Perception
-
-Perception transforms sensory signals into normalized, structured evidence carrying model provenance, which is committed into the HCIR cognitive graph:
-
-```text
-Providers produce raw/typed perception results
-        ↓
-AudioPerceptionRuntime / VisionPipeline normalizes them into Evidence + ProviderProvenance
-        ↓
-SNN decides processing depth
-        ↓
-Perception Transactions commit observations to HCIR Graph
-        ↓
-CorrelationEngine establishes CORRELATES_WITH edges without early factual collapse
-        ↓
-Cognitive Core & Epistemics interpret the evidence graph
-```
-
-| Component | Role | Description |
-| :--- | :--- | :--- |
-| **`MoonshineSpeechProvider`** | Speech Provider | Fast on-device ASR (<100ms) with Whisper and NVIDIA cloud fallback |
-| **`AmbientEventProvider`** | Event & Scene Provider | YAMNet-based acoustic classification and ambient scene characterization |
-| **`ResemblyzerSpeakerProvider`**| Speaker Provider | 256-dim GE2E speaker embeddings and profile matching |
-| **`AudioInputNode`** | Transport Adapter | Silero VAD, streaming chunk buffer, and bus message bridge |
-| **`AudioPerceptionRuntime`** | Normalization Runtime | Assembles multi-provider evidence, attaches `ProviderProvenance`, and gates SNN depth |
-| **`CorrelationEngine`** | Multimodal Alignment | Pure geometric & temporal correlation across visual and audio observations |
-| **`PerceptionFuser`** | Sliding Window Fuser | Collects multi-modal events and produces `FusedContext` with correlation candidates |
-| **`VisionNode`** | Vision Perception | Captions, OCR text, and dense visual embeddings |
-| **`WorldStateTracker`** | World State | Unified world state model (entities, locations, activities) |
-
-### Layer 2: Cognitive Core
-
-The reasoning pipeline that processes every query:
-
-1. **Router** — Classifies intent and selects the appropriate domain expert(s). Feeds query through ComprehensionStream for structured concept extraction.
-2. **Planner** — Generates a Graph-of-Thoughts (GoT) DAG for multi-step reasoning.
-3. **Workspace** — Blackboard consensus node where thoughts are refined.
-4. **Critic** — Self-evaluation using Process Reward Models (PRM).
-5. **Decision** — Final output synthesis with confidence scoring. Delegates to ExpressionStream for SNN-gated, thought-by-thought text generation.
-
-#### Cognitive Execution Runtime
-
-The execution layer for composable, LLM-free reasoning over canonical HCIR state ([Architecture Deep-Dive &rarr;](cognitive-execution-runtime.md)):
-
-```text
-HCIR State  ──►  FrozenGraphView (Snapshot)  ──►  CognitiveContext
-                                                        │
-                                                        ▼
-                                               OperatorRegistry.select()
-                                                        │
-                                                        ▼
-                                               UnifiedReasoningRuntime
-                                          (Deduction, Induction, Abduction,
-                                           Temporal, Spatial, Analogy,
-                                           Causal, Prediction, ActiveInf, ...)
-                                                        │
-                                                        ▼
-Live HCIR   ◄──  HCIRTransaction (Proposed)  ◄──  CognitiveResult[] (Trace)
-```
-
-- **13 Composable Operators**: Formal deduction, statistical induction, abductive inference, Allen's temporal algebra, RCC-8 spatial containment, structure-mapping analogy, Markov prediction, structural contradiction detection, counterfactual graph traversal, BFS causal chain discovery, active inference action ranking, layered risk simulation, and SNN spiking feature evaluation.
-- **Invariants**: Operators calculate, HCIR decides. Read-only snapshots (`FrozenGraphView`), explicit resource budgets (`ReasoningBudget`), full provenance chains (`ProvenanceChain`), and 100% LLM independence.
-- **Compounding Reasoning**: Proven behavioral benchmark demonstrating multi-cycle cognitive state advancement without LLM intervention.
-
-#### SNN Cognitive Stream
-
-The SNN layer runs alongside the cognitive core:
-
-- **ComprehensionStream** — 5-channel LIF ensemble extracts concepts from input, triggers ONNX embeddings only on spikes (3× faster than per-token).
-- **AssociationLayer** — 4→8→2 SNN discovers concept relationships.
-- **ReasoningNetwork** — 4→6→2 SNN scores causal reasoning chains.
-- **ExpressionStream** — 3-tier rendering: Broca (v4, ~80 tokens) → Shallow (v3, ~300 tokens) → Deep (v1-v2, ~600 tokens).
-- **TrainedPRM** — 6→8→4→2 SNN evaluates response quality with STDP learning.
-- **ContentPlanner** — 8→12→6→3 SNN for content type selection (v4).
-- **BrocaEncoder** — Ultra-minimal prompt builder for pure text production (v4).
-
-#### v3 SNN Extensions
-
-- **DendriticNeuron** — Dual-compartment neuron (basal + apical) for predictive coding. Computes prediction error when top-down expectations mismatch bottom-up evidence.
-- **PopulationEncoder / CognitiveStateEncoder** — Encodes continuous cognitive state (confidence, urgency, etc.) into population spike patterns using Gaussian tuning curves.
-- **ProjectionType** — Typed synaptic projections (`BASAL`, `APICAL`, `MODULATORY`) on `LayerProjection` for routing to appropriate dendritic compartments.
-- **BrainClock (OscillationManager)** — Global timing with 4 bands (gamma, beta, theta, delta). Emits `BrainTick` heartbeat events that all subsystems subscribe to for phase-gated processing.
-- **NeuromodulationEngine** — 6-transmitter system (dopamine, serotonin, norepinephrine, acetylcholine, GABA, glutamate) modulating learning rate, thresholds, and attention globally.
-- **DeliberationBudget** — Adaptive computation: `budget = uncertainty × importance × novelty × goal_priority`. Maps to SKIP (0 candidates) → SINGLE (1) → MULTIPLE (3) → BEAM (5).
-- **EvidencePacket** — Structured evidence for reasoning with confidence, support, contradictions, source lineage, and freshness scoring.
-
-#### v3 Integration Infrastructure
-
-- **BrainContext** — Separates `BrainServices` (stateless infrastructure: clock, bus, registry) from `BrainState` (serializable runtime: goals, neuromod, working memory). Acts as coordination layer, not service locator.
-- **BrainContainer** — Bootstrap factory that wires 7 services with 20 capability tags. Single `BrainContainer.build(config)` call produces a fully wired system.
-- **CapabilityRegistry** — Dynamic service discovery: `registry.find("simulation")` returns all services tagged with that capability.
-- **TraceCollector / CognitiveTrace** — End-to-end observability: every cognitive event gets a trace ID that follows it from perception → saliency → competition → workspace → planner → simulation → decision → memory.
-
-#### DualLLMRouter & Circuit Breaker
-
-The `DualLLMRouter` adds intelligent routing between local and external LLM providers:
-
-```mermaid
-graph LR
-    Q["Query"] --> CL["classify()"]
-    CL -->|simple| LOCAL["Local SLM<br/>(fast, free)"]
-    CL -->|complex| CB{"Circuit<br/>Breaker"}
-    CB -->|closed| EXT["External LLM<br/>(GPT-4o, Claude)"]
-    CB -->|open| LOCAL
-    EXT -->|failure| CB
-    EXT -->|success| CB
-```
-
-- **Classify** — Fast heuristic (word count, question complexity) routes simple queries to local SLM
-- **Circuit Breaker** — Protects against external provider failures:
-    - **Closed** → Normal operation, requests go to external LLM
-    - **Open** → After N failures, all requests automatically fall back to local SLM
-    - **Half-Open** → After recovery timeout, allows one probe request to test recovery
-
-#### Production Resilience
-
-| Feature                | Module                      | Behavior                                                     |
-| ---------------------- | --------------------------- | ------------------------------------------------------------ |
-| **Graceful Shutdown**  | `api.py`                    | Drains in-flight requests before exit (configurable timeout) |
-| **Rate Limiting**      | `middleware/rate_limit.py`  | Per-tenant token bucket (429 when exceeded)                  |
-| **Prometheus Metrics** | `middleware/prometheus.py`  | Request count, latency histogram, error counters             |
-| **API Versioning**     | `middleware/api_version.py` | `Accept-Version` validation, `X-API-Version` header          |
-| **DB Quotas**          | `episodic.py`               | Per-tenant turn limits with automatic eviction               |
-
-### Layer 3: Autonomy & Executive Control
-
-The executive control system that enables continuous, goal-directed behavior. See [Executive Brain Layer](executive-brain-layer.md) for the full deep-dive.
-
-- **AutonomyCore** — Cognitive heartbeat with hybrid event + tick loop architecture.
-- **CognitiveStateMachine** — Hierarchical state model (IDLE → FOCUSED → PLANNING → EXECUTING) with adaptive tick rates.
-- **AttentionSystem** — Multi-factor event scoring with decay, budgets, and salience tracking.
-- **TaskGraphRuntime** — Persistent DAG-based goal execution with retry, failure cascade, and boot recovery.
-- **GoalDecompositionEngine** — Breaks high-level goals into executable sub-task DAGs using LLM planning.
-- **ReflexLibrary** — Zero-cost deterministic reflexes for system health, security, environment, and routine events.
-- **ReflexLearner** — Promotes frequently-triggered patterns from LLM reasoning into compiled reflexes.
-- **RestraintEngine** — Prevents excessive action, API calls, and resource consumption with configurable budgets.
-- **InterruptDetector** — Classifies incoming events as interruptible vs. deferrable based on cognitive state.
-- **NotificationSuppressor** — Batches and deduplicates notifications during focus states.
-- **ProactiveInsightEngine** — Generates background insights and recommendations from idle-time analysis.
-- **CognitiveLoadEstimator** — Tracks working memory load to prevent cognitive overload.
-
-### Layer 4: Meta-Cognitive
-
-Nodes that monitor, improve, and expand the brain itself:
-
-- **LearnerNode** — Continuous DPO training from feedback.
-- **CuriosityNode** — Generates exploratory goals for unknown domains.
-- **SpawnerNode** — Acquires new domain skills and procedural knowledge at runtime via HCIR `SkillNode` creation.
-- **SleepCycleNode** — 3-stage memory consolidation (Replay → Prune → Strengthen).
-- **IdentityNode** — Ethical constraints and personality persistence.
-- **WorldModelNode** — Sandboxed AST simulation for "what-if" reasoning.
-- **SocialTimingNode** — Context-aware timing for proactive communication (avoids interrupting during meetings, late at night, etc.).
-
-### Layer 4b: Cognitive Subsystems (Human Modeling)
-
-The human modeling layer that makes HBLLM feel persistent and personal. See [Cognitive Subsystems](cognitive-subsystems.md) for the full deep-dive.
-
-- **UserModel** — Continuously learns expertise, preferences, beliefs, trust, stress, engagement, and temporal work patterns from every interaction. HCIR-backed (migrating from legacy SQLite).
-- **ProjectGraph** — Graph-based project state tracker with goals, blockers, open questions, decisions, and milestones. Auto-detects which project the user is talking about.
-- **CognitiveExecutiveController / ExecutiveCortex** — Unified cognitive control operating over a state-centric, versioned-immutable kernel. Goal agendas are maintained in the persistent `IntentionalWorkspace`, and policies cascade via a hierarchical priority system (Task → Global) managed in the Bayesian `SelfModel`.
-- **RelationshipMemory** — Social graph of people mentioned in conversations with roles, sentiment trends, interaction history, and notification prioritization.
-- **RealityGraph** — Read-only unified facade over KnowledgeGraph, BrainWorldState, and PerceptionWorldState. Merges entities by confidence.
-
-### Layer 4c: Epistemic Runtime (Autonomous Discovery)
-
-The domain-neutral discovery engine that gives HBLLM the ability to form hypotheses, evaluate evidence, revise beliefs, and calibrate its own reasoning. See [Epistemic Runtime](epistemics.md) for the full deep-dive.
-
-- **EpistemicLoop** — Orchestrator running the full discovery cycle (curiosity → ideas → hypotheses → predictions → experiments → belief revision) on every cognitive tick.
-- **CuriosityEngine** — Self-directed investigation prioritization from unknowns and untested hypotheses.
-- **IdeaGenerator** — Generates hypotheses from unknowns, contradictions, and anomalies. Memory-filtered against past failures.
-- **HypothesisBuilder** — Validates, deduplicates, and promotes raw ideas to HCIR HypothesisNodes.
-- **PredictionTracker** — Registers competing predictions with deadlines and checks outcomes.
-- **ExperimentPlanner** — Designs discriminative experiments ranked by information gain.
-- **EvidenceEvaluator** — Scores evidence quality via graph topology analysis.
-- **BeliefManager** — Bayesian confidence updates from evidence and prediction outcomes.
-- **ContradictionEngine** — Proactive contradiction scanning across the belief graph.
-- **ExplanationEngine** — Graph-traversal provenance chains: belief → evidence → observations.
-- **EpistemicMemory** — SQLite-backed long-term reasoning history (hypotheses, predictions, biases).
-- **CalibrationEngine** — Meta-epistemic self-calibration: "How good am I at knowing things?"
-- **CounterfactualReasoner** — "What if..." graph analysis (sensitivity, evidence removal, falsification).
-- **SourceReputationTracker** — Bayesian source trust scoring.
-
-## Communication & Security
-
-All nodes communicate via the **MessageBus**, which has been hardened for distributed swarms:
-
-- **Trust Model**: Every node has an **Ed25519** cryptographic identity. All messages are signed and verified via the `TrustInterceptor`.
-- **Authority Hierarchy**: Uses **Vector Clocks** for causal ordering and **Authority Scores** (0-100) to resolve state conflicts between devices.
-- **Bus Implementations**:
-    - **InProcessBus** — single-process async (local dev) with interceptor support.
-    - **SynapseGateway** — production edge gateway with JWT/HMAC auth.
-    - **DurableBus** — SQLite-backed persistence wrapper for reliable delivery.
-
-### Layer 5: Memory Systems
-
-See [Memory Systems](memory-systems.md) for the full deep-dive. Memory is fully unified as an **HCIR-native Cognitive OS graph backend** operating across a 4-tier workspace (Working, Brain, Persistent, Meta). All memory types (`EpisodeNode`, `ConceptNode`, `SkillNode`, `ValueNode`, `BeliefNode`) are managed as event-sourced typed nodes, with legacy SQLite/vector stores retired in Phase 5 (`LEGACY_REMOVED`).
-
-### Layer 6: Action & Embodiment
-
-Execution nodes that interact with the external world safely through the [Embodiment](embodiment.md) adapter:
-
-- **ExecutionNode** — Sandboxed Python evaluation with resource limits.
-- **OS Adapter** — Interacts safely with host operating systems via idempotency hashing. Platform-specific backends for **Linux** and **macOS**.
-- **Execution Verifier** — Async polling to verify actual physical/digital state changes.
-- **ConfirmationGate** — Human-in-the-loop approval for high-risk actions before execution.
-- **RollbackEngine** — Undo support for reversible actions with snapshot-based state recovery.
-- **AgentExecutor** — Multi-step agent loop with tool routing and result aggregation.
-- **ToolChain** — Sequential tool execution pipelines with intermediate result passing.
-- **MCPClientNode** — Model Context Protocol tool calls (stdio and SSE transports).
-- **UplinkNode** — WebSocket bridge to central/cloud servers for Hierarchical Swarms.
-- **BrowserNode** — Web page interaction and scraping.
-- **Z3LogicNode** — Formal verification and constraint solving.
-- **FuzzyLogicNode** — Approximate reasoning with scikit-fuzzy.
-
-### Layer 7: Security & Governance
-
-- **PII Redactor** — Automatic detection and redaction of personally identifiable information in inputs and outputs.
-- **Voice Authentication** — Speaker verification for voice-activated commands using embedding similarity.
-- **Audit Trail** — Append-only, SOC2/GDPR-compliant logging of all security-sensitive operations.
-- **Policy Engine** — Constitutional AI layer with per-tenant YAML governance rules.
-
-The [Human Control](human-control.md) layer ensures the user remains in command:
-- **Trust Boundaries** — Scoped tokens mapping actions to specific trust zones (SAFE vs SENSITIVE).
-- **Security Guard** — Triggers explanation-first intents for sensitive actions.
-- **Intervention** — Semantic pause, stop, and reverse functionalities.
 
 ---
 
-## Optional: Hierarchical Swarm & Multi-Agent Architecture
+## 3. Subsystem Map & Documentation Guide
 
-HBLLM supports a decentralized multi-homed architecture. Edge devices (like laptops, mobile phones, or desktop workstations) can run their own local `MessageBus` and connect to a Central Core via WebSockets using the `UplinkNode`.
-
-1. **Auto-Discovery** — Edge devices advertise their local tools (`register_capabilities`) up to the central server.
-2. **Transparent Execution** — The central server sends `tool_call` commands down the WebSocket, the Edge device executes them locally, and pipes the `tool_result` back up.
-3. **Sovereign Sync** — Edge devices append their offline episodic memories and semantic knowledge to the central brain via secure REST APIs (`/v1/sync/*`).
-4. **Multi-Agent Coordination** — The `MultiAgentCoordinator` manages task delegation across agent instances using the `MultiAgentProtocol` for structured message exchange, capability negotiation, and result aggregation.
-
-This allows the central brain to command a swarm of edge limbs dynamically, while edge devices maintain autonomous local execution.
+| Subsystem | Package | Architecture Doc | API Reference |
+|---|---|---|---|
+| **Composition Root & CLI** | `hbllm.runtime.bootstrap`, `hbllm.cli` | [System Entry Points](entry-points.md) | [CLI Reference](../guides/cli.md) |
+| **HCIR Kernel & Transactions** | `hbllm.hcir.kernel`, `hbllm.hcir` | [HCIR Kernel OS](hcir-kernel-os.md) | [HCIR API](../api/hcir.md) |
+| **Cortical World Model** | `hbllm.hcir.world`, `hbllm.hcir.skills` | [Cortical World Model](cortical-world-model.md) | [World Model API](../api/world-model.md) |
+| **Symbol Grounding Engine** | `hbllm.hcir.grounding` | [Symbol Grounding](grounding.md) | — |
+| **Language & Reading** | `hbllm.hcir.language`, `hbllm.hcir.stores` | [Language & Reading](language-and-reading.md) | [Language API](../api/language.md) |
+| **Composable Reasoning** | `hbllm.hcir.reasoning` | [Cognitive Execution Runtime](cognitive-execution-runtime.md) | [Reasoning API](../api/reasoning.md) |
+| **Neuromorphic SNN** | `hbllm.hcir.snn` | [SNN Cognitive Engine](snn-cognitive-engine.md) | [SNN API](../api/snn.md) |
+| **Capabilities & Curiosity** | `hbllm.hcir.capabilities` | [Capabilities & Curiosity](capabilities-and-curiosity.md) | [Capabilities API](../api/capabilities.md) |
+| **Memory & Event Store** | `hbllm.hcir.workspace_tiers`, `hbllm.hcir.stores` | [Memory Systems](memory-systems.md) | [Memory API](../api/memory.md) |
+| **Graph Substrate (Rust)** | `rust/hcir_graph`, `hbllm.native` | [Graph Substrate](graph_substrate.md) | [Rust Kernels](../api/rust-kernels.md) |
+| **Sandboxing & Security** | `hbllm.hcir.kernel.capability_sandboxing`, `hbllm.security` | [Sandboxing](sandboxing.md) | [Security](../security.md), [Governance API](../api/governance.md) |
+| **Developmental Learning** | `plugins/developmental_adapter` | [Developmental Learning](developmental-learning.md) | [Benchmarks](../api/benchmarks.md) |
+| **Boundaries & Telemetry** | `hbllm.telemetry`, `hbllm.observability` | [Packaging & Boundaries](packaging-and-boundaries.md), [Telemetry](telemetry-observability.md) | [Telemetry API](../api/telemetry.md) |
+| **Message Bus & Federation** | `hbllm.network` | [Message Bus](message-bus.md), [Resilience](network-resilience.md), [Distributed Trust](distributed-trust.md) | [Network API](../api/network.md) |
 
 ---
 
-## Data Flow
+## 4. Compatibility & Transition Layers
 
-A typical query flows through the system as follows:
-
-```mermaid
-sequenceDiagram
-    participant P as Peer / User
-    participant G as SynapseGateway (API)
-    participant FW as Cognitive Firewall
-    participant B as MessageBus (Trust Interceptor)
-    participant R as Router
-    participant M as Memory Systems
-    participant Pn as GoT Planner
-    participant W as Workspace
-    participant C as Critic
-    participant D as Decision
-
-    P->>G: Send encrypted/signed message envelope
-    G->>FW: Perform security audit (XML + Cosine Prompt Shield)
-    alt Injection/Breakout Detected
-        FW-->>G: Blocked (403 Forbidden / Threat Logged)
-        G-->>P: Reject message
-    else Approved
-        FW-->>G: Authorized / Decrypted payload
-        G->>B: Publish message to topic
-        B->>B: Verify Ed25519 signature & Vector Clocks
-        B->>R: Route query to Router
-        R->>M: Retrieve episodic & semantic RAG context
-        M-->>R: Context loaded
-        R->>Pn: Dispatch to GoT Planner
-        Pn->>W: Generate thinking DAG in Workspace
-        W->>C: Evaluate intermediate steps (Process Reward Model)
-        C-->>W: Step score: 0.92
-        W->>D: Synthesize final response
-        D->>D: ExpressionStream (SNN-gated rendering)
-        Note over D: ContentPlanner → BrocaEncoder → LLM<br/>TrainedPRM evaluates output
-        D-->>P: Deliver signed response package
-    end
-```
-
-
-## Next Steps
-
-- [Cognitive Nodes](cognitive-nodes.md) — Detailed reference for all 28+ cognitive nodes.
-- [Cognitive Subsystems](cognitive-subsystems.md) — UserModel, ProjectGraph, ExecutiveCortex, RelationshipMemory, RealityGraph.
-- [HCIR Cognitive OS Kernel](hcir-kernel-os.md) — Event-sourced Cognitive OS kernel, tiered workspace, and transactional governance.
-- [Epistemic Runtime](epistemics.md) — Autonomous discovery: hypothesis generation, evidence evaluation, belief revision, and calibration.
-- [SNN Cognitive Engine](snn-cognitive-engine.md) — Neuromorphic dual-stream inference, Broca prompt compression, and STDP learning.
-- [Social Cognition](social-cognition.md) — UserModel predictive human modeling, PersonaEngine, and SocialTiming pacing.
-- [Execution Engine](execution-engine.md) — Declarative ExecutionOrchestrator, ExecutionBus, and runtime modifiers.
-- [Decision & Control Plane](decision-gatekeeper.md) — Gatekeeper safety and 3-tier bounded rationality control loops.
-- [Memory Systems](memory-systems.md) — HCIR-native memory architecture with tiered workspace and cross-memory search.
-- [Message Bus](message-bus.md) — How Pub/Sub routing and distributed bus topologies work.
-- [Embodiment](embodiment.md) — Actuator safety and verification.
-- [Human Control](human-control.md) — Safety boundaries and intent integrity.
-- [Causality & Compaction](causality-and-compaction.md) — Decision trace graphs and memory folding.
+During the Pure-HCIR consolidation (see [ADR 004](../adr/0004-pure-hcir-cognitive-os.md)):
+- `hbllm/brain/reasoning/`, `hbllm/brain/language/`, and core `hbllm/brain/snn/` act as compatibility re-export shims pointing into `hbllm.hcir.*`.
+- Legacy message-bus nodes in `hbllm/brain/` and `hbllm/serving/provider.py` remain strictly isolated from `hbllm/hcir/**` (verified by `tests/unit/architecture/test_loc_budget.py` and `test_layering.py`).
+- External environment integrations (`arc_agi_adapter`, `crafter_adapter`, `babyai_adapter`, `sokoban_adapter`, `overcooked_adapter`, `nethack_adapter`, `ai2thor_adapter`, `safety_gym_adapter`, `alfworld_adapter`, `developmental_adapter`) live in `plugins/` and never leak domain logic into `hbllm/`.

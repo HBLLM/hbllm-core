@@ -28,6 +28,7 @@ import argparse
 import asyncio
 import json
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -73,17 +74,215 @@ def _percentile(values: list[float], pct: float) -> float:
     return round(ordered[idx], 3)
 
 
-def run_pure_hcir_graduation_eval() -> dict[str, Any]:
-    """Execute the full Phase P5 Pure-HCIR graduation benchmark."""
-    system = build_cognitive_system(
-        CognitiveSystemConfig(
-            world_id="p5_graduation_eval",
-            memory_dir=None,  # In-memory isolation so eval never mutates checkpoints/t4_reading
-            enable_grounding=False,
-            enable_brain_llm=False,
-            enable_autonomous_curiosity=False,
+def _build_hermetic_ontology_db(db_path: Path) -> None:
+    """Seed a deterministic, self-contained LexicalOntologyStore for P5 evaluation."""
+    from hbllm.hcir.language.ontology_bootstrap import OntologyBootstrapper
+    from hbllm.hcir.stores.ontology_store import LexicalOntologyStore, StoredLexicalEntry
+
+    store = LexicalOntologyStore(db_path)
+    try:
+        OntologyBootstrapper().ingest_core_ontology(None, ontology_store=store)
+        seed_entries = [
+            StoredLexicalEntry(
+                lemma="microscope",
+                pos="noun",
+                language="en",
+                definition="An optical instrument containing lenses used as a magnifier for small objects.",
+                hypernyms=("instrument", "magnifier", "device"),
+                synonyms=("magnifier",),
+                domain="science",
+                frequency=500,
+            ),
+            StoredLexicalEntry(
+                lemma="algorithm",
+                pos="noun",
+                language="en",
+                definition="A step-by-step computational procedure or rule set for solving a problem.",
+                hypernyms=("procedure", "rule"),
+                synonyms=("procedure",),
+                domain="computing",
+                frequency=600,
+            ),
+            StoredLexicalEntry(
+                lemma="server",
+                pos="noun",
+                language="en",
+                definition="A computer host providing a network service to client programs.",
+                hypernyms=("computer", "system"),
+                domain="computing",
+                frequency=650,
+            ),
+            StoredLexicalEntry(
+                lemma="gravity",
+                pos="noun",
+                language="en",
+                definition="A fundamental physical force of attraction pulling objects with mass together.",
+                hypernyms=("force", "phenomenon"),
+                domain="physics",
+                frequency=550,
+            ),
+            StoredLexicalEntry(
+                lemma="photosynthesis",
+                pos="noun",
+                language="en",
+                definition="The biological process by which a plant converts light energy into chemical energy using chlorophyll.",
+                hypernyms=("process",),
+                domain="biology",
+                frequency=450,
+            ),
+            StoredLexicalEntry(
+                lemma="telescope",
+                pos="noun",
+                language="en",
+                definition="An optical instrument and magnifier for observing distant objects.",
+                hypernyms=("instrument", "magnifier"),
+                domain="science",
+                frequency=480,
+            ),
+            StoredLexicalEntry(
+                lemma="atom",
+                pos="noun",
+                language="en",
+                definition="A tiny particle of matter forming the smallest unit of a chemical element.",
+                hypernyms=("particle", "matter"),
+                domain="physics",
+                frequency=520,
+            ),
+            StoredLexicalEntry(
+                lemma="energy",
+                pos="noun",
+                language="en",
+                definition="The capacity and physical power required to do work or produce change.",
+                hypernyms=("power", "property"),
+                domain="physics",
+                frequency=700,
+            ),
+            StoredLexicalEntry(
+                lemma="molecule",
+                pos="noun",
+                language="en",
+                definition="The simplest chemical unit of a compound formed from bonded atoms.",
+                hypernyms=("particle", "unit"),
+                domain="chemistry",
+                frequency=460,
+            ),
+            StoredLexicalEntry(
+                lemma="focus",
+                pos="noun",
+                language="en",
+                definition="Directed cognitive concentration shaped by neural spiking and selective attention.",
+                hypernyms=("attention", "state"),
+                domain="cognition",
+                frequency=620,
+            ),
+            StoredLexicalEntry(
+                lemma="spiking",
+                pos="noun",
+                language="en",
+                definition="Rapid action-potential firing in neural circuits triggered by a stimulus.",
+                hypernyms=("process", "signal"),
+                domain="cognition",
+                frequency=350,
+            ),
+            StoredLexicalEntry(
+                lemma="stimulus",
+                pos="noun",
+                language="en",
+                definition="A detectable input signal that triggers physiological or cognitive activity.",
+                hypernyms=("signal",),
+                domain="cognition",
+                frequency=360,
+            ),
+            StoredLexicalEntry(
+                lemma="friendship",
+                pos="noun",
+                language="en",
+                definition="A cooperative interpersonal bond built on care and mutual trust.",
+                hypernyms=("relationship",),
+                domain="social",
+                frequency=500,
+            ),
+            StoredLexicalEntry(
+                lemma="care",
+                pos="noun",
+                language="en",
+                definition="Attentive stewardship and concern for another agent or system.",
+                hypernyms=("attention", "action"),
+                domain="social",
+                frequency=580,
+            ),
+            StoredLexicalEntry(
+                lemma="attention",
+                pos="noun",
+                language="en",
+                definition="Selective allocation of cognitive resources toward relevant inputs.",
+                hypernyms=("process",),
+                domain="cognition",
+                frequency=640,
+            ),
+            StoredLexicalEntry(
+                lemma="ball",
+                pos="noun",
+                language="en",
+                definition="A spherical physical object.",
+                hypernyms=("object",),
+                frequency=500,
+            ),
+            StoredLexicalEntry(
+                lemma="table",
+                pos="noun",
+                language="en",
+                definition="A flat-topped piece of furniture.",
+                hypernyms=("furniture", "object"),
+                frequency=500,
+            ),
+            StoredLexicalEntry(
+                lemma="shelf",
+                pos="noun",
+                language="en",
+                definition="A flat horizontal surface for storing objects.",
+                hypernyms=("object",),
+                frequency=450,
+            ),
+        ]
+        store.upsert_many(seed_entries, source="p5_hermetic_eval")
+        # Ensure unknown-concept calibration probe ('neuron') remains absent
+        store._conn.execute("DELETE FROM lexical_entries WHERE lemma = 'neuron'")
+        store._conn.execute(
+            "DELETE FROM hypernym_edges WHERE child = 'neuron' OR parent = 'neuron'"
         )
-    )
+        store._conn.commit()
+        store._lookup_cache.clear()
+        store._hypernyms_cache.clear()
+        store._is_a_cache.clear()
+    finally:
+        store.close()
+
+
+def run_pure_hcir_graduation_eval() -> dict[str, Any]:
+    """Execute the full Phase P5 Pure-HCIR graduation benchmark hermetically."""
+    with tempfile.TemporaryDirectory(prefix="hbllm_p5_eval_") as tmp_dir:
+        ont_db_path = Path(tmp_dir) / "eval_lexical_ontology.db"
+        _build_hermetic_ontology_db(ont_db_path)
+        system = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id="p5_graduation_eval",
+                memory_dir=None,  # In-memory isolation so eval never mutates checkpoints/t4_reading
+                seed_ontology_path=ont_db_path,
+                enable_grounding=False,
+                enable_brain_llm=False,
+                enable_autonomous_curiosity=False,
+            )
+        )
+        try:
+            return _run_pure_hcir_graduation_cases(system)
+        finally:
+            ont_store = system.services.extensions.get("ontology_store")
+            if ont_store is not None and hasattr(ont_store, "close"):
+                ont_store.close()
+
+
+def _run_pure_hcir_graduation_cases(system: Any) -> dict[str, Any]:
     # Seed minimal causal/procedural chains in isolated persistent graph for deterministic eval
     from hbllm.hcir.graph import ConceptNode, HCIREdge, HCIREdgeType
 

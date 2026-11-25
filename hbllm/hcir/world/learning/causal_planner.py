@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -12,10 +12,6 @@ if TYPE_CHECKING:
     from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
 
 logger = logging.getLogger(__name__)
-
-
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
 
 
 @dataclass
@@ -34,6 +30,10 @@ class CausalPlanningContext:
     walkable_features: set[int]
     action_displacements: dict[int, tuple[int, int]]  # action_id -> (dr, dc)
     grid_shape: tuple[int, int] = (0, 0)
+    failed_transitions: set[tuple[tuple[int, int], int]] = field(default_factory=set)
+    inhibited_actions: set[Any] = field(default_factory=set)
+    transition_kb: Any | None = None
+    active_state_tokens: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -87,18 +87,28 @@ class CausalTheoryPlanner:
         """Extract a frozen planning context from the engine's current causal theory."""
         theory = engine.symbolic_theory
 
-        # Extract goal positions from grid using discovered goal features
+        # Extract goal positions from grid using discovered TransitionKB / theory beliefs
         goal_positions: set[tuple[int, int]] = set(engine.learned_goal_positions)
         barrier_positions: set[tuple[int, int]] = set(engine.learned_barriers)
+        has_loci = bool(theory.transition_kb._locus_beliefs)
 
         # Scan grid for goal and barrier cells
         for r in range(curr_grid.shape[0]):
             for c in range(curr_grid.shape[1]):
+                pos = (r, c)
                 feat = int(curr_grid[r, c])
-                if feat in theory.goal_features:
-                    goal_positions.add((r, c))
-                if feat in theory.barrier_features:
-                    barrier_positions.add((r, c))
+                ev = theory.evaluate_transition(feat, locus=pos)
+                if ev.goal_value > 0.5 or feat in theory.goal_features:
+                    goal_positions.add(pos)
+                if not ev.traversable or ev.risk_cost >= 40.0 or feat in theory.barrier_features:
+                    barrier_positions.add(pos)
+                elif (
+                    has_loci
+                    and ev.traversable
+                    and ev.confidence > 0.0
+                    and theory.transition_kb.get_belief(pos, scope="locus") is not None
+                ):
+                    barrier_positions.discard(pos)
 
         lethal_features = set(engine.episodic_cortex.discovered_lethal_features) | set(
             engine.hazard_tracker.known_lethal_features
@@ -110,10 +120,21 @@ class CausalTheoryPlanner:
         )
         shroud_f = engine.working_memory.shroud_feature
 
+        wm_exog = engine.working_memory
+        visited_cells = wm_exog.visited_cells
+        exhausted = wm_exog.exhausted_candidate_goals
+        bg_val = 0
+        if curr_grid.size > 0:
+            vals, cnts = np.unique(curr_grid, return_counts=True)
+            bg_val = int(vals[int(np.argmax(cnts))])
+
         # Fallback to candidate goal features if no concrete goal cells located
         if not goal_positions and theory.candidate_goal_features:
             for r in range(curr_grid.shape[0]):
                 for c in range(curr_grid.shape[1]):
+                    cp = (r, c)
+                    if cp in visited_cells or cp in exhausted or theory.is_locus_explored(cp):
+                        continue
                     feat = int(curr_grid[r, c])
                     if (
                         feat in theory.candidate_goal_features
@@ -121,7 +142,7 @@ class CausalTheoryPlanner:
                         and feat not in mob_feats
                         and feat != shroud_f
                     ):
-                        goal_positions.add((r, c))
+                        goal_positions.add(cp)
 
         # Fallback to structural perception goals if still empty
         if not goal_positions:
@@ -135,16 +156,48 @@ class CausalTheoryPlanner:
                         or int(sg_f) == shroud_f
                     ):
                         continue
+                    added_nonexog = False
                     if sg.get("cells"):
                         for cp in sg["cells"]:
-                            if cp != engine.avatar_pos:
+                            if (
+                                cp != engine.avatar_pos
+                                and cp not in visited_cells
+                                and cp not in exhausted
+                                and not theory.is_locus_explored(cp)
+                                and not wm_exog.is_exogenous_locus(
+                                    cp, lattice=curr_grid, bg=bg_val, include_outer_edge=False
+                                )
+                            ):
                                 goal_positions.add(cp)
-                    elif sg.get("position") and sg["position"] != engine.avatar_pos:
+                                added_nonexog = True
+                    elif (
+                        sg.get("position")
+                        and sg["position"] != engine.avatar_pos
+                        and sg["position"] not in visited_cells
+                        and sg["position"] not in exhausted
+                        and not theory.is_locus_explored(sg["position"])
+                        and not wm_exog.is_exogenous_locus(
+                            sg["position"], lattice=curr_grid, bg=bg_val, include_outer_edge=False
+                        )
+                    ):
                         goal_positions.add(sg["position"])
-                    if sg_f is not None and int(np.count_nonzero(curr_grid == int(sg_f))) == 1:
+                        added_nonexog = True
+                    if (
+                        added_nonexog
+                        and sg_f is not None
+                        and int(np.count_nonzero(curr_grid == int(sg_f))) == 1
+                    ):
                         theory.induce_candidate_goal(int(sg_f), evidence="structural_goal_detector")
             except Exception as exc:
                 logger.debug("Structural goal induction at reset skipped: %s", exc)
+
+        goal_positions = {
+            gp
+            for gp in goal_positions
+            if not wm_exog.is_exogenous_locus(
+                gp, lattice=curr_grid, bg=bg_val, include_outer_edge=False
+            )
+        }
 
         if goal_positions and not theory.goal_features:
             singleton_goals = {
@@ -158,15 +211,14 @@ class CausalTheoryPlanner:
         # Discard avatar position and exhausted goals
         if engine.avatar_pos is not None:
             goal_positions.discard(engine.avatar_pos)
-        exhausted = get_sub_attr(engine.working_memory, "exhausted_candidate_goals", set())
+        exhausted = engine.working_memory.exhausted_candidate_goals
         if exhausted and len(goal_positions - exhausted) > 0:
             goal_positions.difference_update(exhausted)
 
-        # Extract action displacements from empirical action dynamics
-        action_displacements: dict[int, tuple[int, int]] = {}
-        for act_id, dyn in engine.action_dynamics.items():
-            if dyn.is_displacement_action():
-                action_displacements[act_id] = (dyn.delta_r, dyn.delta_c)
+        # Extract action displacements from harmonized engine action_deltas
+        action_displacements = dict(engine.action_deltas)
+        inhibited_actions = {act_id for act_id, ttl in engine.inhibited_actions.items() if ttl > 0}
+        failed_transitions = set(engine.failed_transitions)
 
         return CausalPlanningContext(
             goal_positions=goal_positions,
@@ -177,25 +229,11 @@ class CausalTheoryPlanner:
             walkable_features=set(theory.walkable_features),
             action_displacements=action_displacements,
             grid_shape=(int(curr_grid.shape[0]), int(curr_grid.shape[1])),
+            failed_transitions=failed_transitions,
+            inhibited_actions=inhibited_actions,
+            transition_kb=theory.transition_kb,
+            active_state_tokens=frozenset(),
         )
-
-    @staticmethod
-    def compute_causal_heuristic(
-        pos: tuple[int, int],
-        context: CausalPlanningContext,
-    ) -> float:
-        """Manhattan distance heuristic to nearest goal, with barrier penalty.
-
-        Uses discovered causal knowledge rather than hard-coded features.
-        """
-        if not context.goal_positions:
-            return 0.0
-        min_dist = min(abs(pos[0] - g[0]) + abs(pos[1] - g[1]) for g in context.goal_positions)
-        # Penalty if position is adjacent to lethal/barrier cells
-        penalty = 0.0
-        if pos in context.barrier_positions and pos not in context.goal_positions:
-            penalty += 100.0
-        return float(min_dist) + penalty
 
     @staticmethod
     def is_position_safe(
@@ -203,14 +241,34 @@ class CausalTheoryPlanner:
         grid: np.ndarray,
         context: CausalPlanningContext,
     ) -> bool:
-        """Check if a position is safe to traverse based on causal theory."""
+        """Check if a position is safe to traverse based on causal theory and transition KB."""
         r, c = pos
         if r < 0 or c < 0 or r >= context.grid_shape[0] or c >= context.grid_shape[1]:
             return False
         feat = int(grid[r, c])
         if feat in context.lethal_features:
             return False
-        if pos not in context.goal_positions:
+        is_goal = pos in context.goal_positions
+        if context.transition_kb is not None:
+            ev = context.transition_kb.evaluate_transition(
+                feat,
+                locus=pos,
+                active_state_tokens=context.active_state_tokens,
+            )
+            if ev.risk_cost >= 40.0 and ev.goal_value <= 0.0:
+                return False
+            if ev.confidence > 0.0:
+                if not is_goal and not ev.traversable:
+                    return False
+                locus_belief = context.transition_kb.get_belief(pos, scope="locus")
+                if (
+                    not is_goal
+                    and pos in context.barrier_positions
+                    and not (locus_belief is not None and ev.traversable)
+                ):
+                    return False
+                return True
+        if not is_goal:
             if pos in context.barrier_positions:
                 return False
             if feat in context.barrier_features:
@@ -226,53 +284,68 @@ class CausalTheoryPlanner:
         context: CausalPlanningContext,
         max_expansions: int = 500,
     ) -> list[int] | None:
-        """A* pathfinding using causally-discovered action dynamics and hazards.
-
-        Returns a list of action_ids forming a path from start to nearest goal,
-        or None if no path found.
-        """
+        """A* pathfinding via GridTopologyGraph.shortest_path_from_kb and TransitionKB."""
         if not context.goal_positions or not context.action_displacements:
             return None
 
-        import heapq
+        from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
+        from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
 
-        # Priority queue: (f_score, g_score, position, action_path)
-        start_h = CausalTheoryPlanner.compute_causal_heuristic(start, context)
-        open_set: list[tuple[float, int, tuple[int, int], list[int]]] = [(start_h, 0, start, [])]
-        visited: set[tuple[int, int]] = set()
-        expansions = 0
+        H, W = context.grid_shape
 
-        while open_set and expansions < max_expansions:
-            f, g, pos, path = heapq.heappop(open_set)
-            if pos in visited:
-                continue
-            visited.add(pos)
-            expansions += 1
-
-            # Check if we reached a goal
-            if pos in context.goal_positions:
-                logger.info(
-                    "CausalTheoryPlanner: Found path of %d actions (%d nodes expanded)",
-                    len(path),
-                    expansions,
+        def _eval_edge(pos: tuple[int, int], feat: int) -> TransitionEdgeEvaluation:
+            r, c = pos
+            if r < 0 or c < 0 or r >= H or c >= W or feat in context.lethal_features:
+                return TransitionEdgeEvaluation(
+                    traversable=False,
+                    step_cost=1.0,
+                    risk_cost=50.0,
+                    goal_value=0.0,
+                    info_gain=0.0,
+                    mutates_state=False,
+                    confidence=1.0,
                 )
-                return path
+            safe = CausalTheoryPlanner.is_position_safe(pos, grid, context)
+            is_goal = pos in context.goal_positions
+            if context.transition_kb is not None:
+                ev = context.transition_kb.evaluate_transition(
+                    feat,
+                    locus=pos,
+                    active_state_tokens=context.active_state_tokens,
+                )
+                return TransitionEdgeEvaluation(
+                    traversable=safe,
+                    step_cost=float(ev.step_cost),
+                    risk_cost=float(ev.risk_cost),
+                    goal_value=(max(float(ev.goal_value), 1.0) if (is_goal and safe) else 0.0),
+                    info_gain=float(ev.info_gain),
+                    mutates_state=bool(ev.mutates_state),
+                    confidence=float(ev.confidence),
+                )
+            return TransitionEdgeEvaluation(
+                traversable=safe,
+                step_cost=1.0,
+                risk_cost=0.0,
+                goal_value=(1.0 if (is_goal and safe) else 0.0),
+                info_gain=0.0,
+                mutates_state=False,
+                confidence=1.0,
+            )
 
-            # Expand neighbors using discovered action dynamics
-            for act_id, (dr, dc) in context.action_displacements.items():
-                nr, nc = pos[0] + dr, pos[1] + dc
-                next_pos = (nr, nc)
-                if next_pos in visited:
-                    continue
-                if not CausalTheoryPlanner.is_position_safe(next_pos, grid, context):
-                    continue
-                new_g = g + 1
-                new_h = CausalTheoryPlanner.compute_causal_heuristic(next_pos, context)
-                new_f = new_g + new_h
-                new_path = path + [act_id]
-                heapq.heappush(open_set, (new_f, new_g, next_pos, new_path))
-
-        return None
+        steps = GridTopologyGraph.shortest_path_from_kb(
+            grid,
+            start,
+            context.goal_positions,
+            context.action_displacements,
+            _eval_edge,
+            max_expansions=max_expansions,
+            failed_transitions=context.failed_transitions,
+            inhibited_actions=context.inhibited_actions,
+            allow_goal_entry=False,
+        )
+        if steps is None:
+            return None
+        return [int(act_id) for act_id, _ in steps]
 
     @staticmethod
     def plan_chained_path(
@@ -289,6 +362,27 @@ class CausalTheoryPlanner:
         direct = CausalTheoryPlanner.plan_path(start, grid, context, max_expansions=max_expansions)
         if direct is not None:
             return direct
+
+        if (
+            context.transition_kb is not None
+            and context.goal_positions
+            and context.transition_kb.query_causal_rules()
+        ):
+            from hbllm.hcir.world.topological_graph_induction import GridTopologyGraph
+
+            causal_steps = GridTopologyGraph.shortest_path_with_causal_ops(
+                grid,
+                start,
+                context.goal_positions,
+                context.action_displacements,
+                context.transition_kb,
+                initial_state_tokens=context.active_state_tokens,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
+                max_expansions=max_expansions * 2,
+            )
+            if causal_steps is not None:
+                return [int(act_id) for act_id, _ in causal_steps]
 
         if not tool_barrier_affinities or not context.goal_positions:
             return None
@@ -324,6 +418,10 @@ class CausalTheoryPlanner:
                 walkable_features=context.walkable_features,
                 action_displacements=context.action_displacements,
                 grid_shape=context.grid_shape,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
+                transition_kb=context.transition_kb,
+                active_state_tokens=context.active_state_tokens,
             )
             path_to_tool = CausalTheoryPlanner.plan_path(
                 start, grid, stage1_context, max_expansions=max_expansions
@@ -356,6 +454,10 @@ class CausalTheoryPlanner:
                 walkable_features=context.walkable_features | barrier_feats,
                 action_displacements=context.action_displacements,
                 grid_shape=context.grid_shape,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
+                transition_kb=context.transition_kb,
+                active_state_tokens=context.active_state_tokens,
             )
             path_to_goal = CausalTheoryPlanner.plan_path(
                 curr_pos, grid, stage2_context, max_expansions=max_expansions
@@ -379,6 +481,10 @@ class CausalTheoryPlanner:
         context: CausalPlanningContext,
         macro: RelationalSubgoalMacro,
         max_expansions_per_segment: int = 300,
+        *,
+        visited_cells: set[tuple[int, int]] | None = None,
+        working_memory: Any = None,
+        bg: int = 0,
     ) -> list[int] | None:
         """Plan composite path dynamically through a sequence of relational waypoints."""
         if not macro.waypoints:
@@ -391,12 +497,33 @@ class CausalTheoryPlanner:
         total_path: list[int] = []
 
         for wp in macro.waypoints:
+            if (
+                wp.feature in context.barrier_features
+                or wp.feature in context.walkable_features
+                or wp.feature in context.lethal_features
+            ):
+                return None
+
             target_positions: list[tuple[int, int]] = []
+            already_visited = (
+                0 <= curr_start[0] < H
+                and 0 <= curr_start[1] < W
+                and int(grid[curr_start[0], curr_start[1]]) == wp.feature
+            )
             for r in range(H):
                 for c in range(W):
-                    if int(grid[r, c]) == wp.feature and (r, c) != curr_start:
-                        target_positions.append((r, c))
+                    if int(grid[r, c]) == wp.feature:
+                        if working_memory is not None and working_memory.is_exogenous_locus(
+                            (r, c), lattice=grid, bg=bg, include_outer_edge=True
+                        ):
+                            continue
+                        if visited_cells and (r, c) in visited_cells:
+                            already_visited = True
+                        if (r, c) != curr_start:
+                            target_positions.append((r, c))
 
+            if already_visited:
+                continue
             if not target_positions:
                 return None
 
@@ -409,6 +536,10 @@ class CausalTheoryPlanner:
                 walkable_features=context.walkable_features,
                 action_displacements=context.action_displacements,
                 grid_shape=context.grid_shape,
+                failed_transitions=context.failed_transitions,
+                inhibited_actions=context.inhibited_actions,
+                transition_kb=context.transition_kb,
+                active_state_tokens=context.active_state_tokens,
             )
             segment_path = CausalTheoryPlanner.plan_path(
                 curr_start, grid, segment_context, max_expansions=max_expansions_per_segment

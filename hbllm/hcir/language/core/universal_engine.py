@@ -88,12 +88,17 @@ class UniversalLanguageParser:
         if cmd_frame is not None:
             return cmd_frame
 
-        # 5. Spatial Assertion Detection (Prepositional or Postpositional)
+        # 5. Expository Causal/Dependency Assertions (SOV expository markers)
+        exp_frame = self._try_parse_expository_assertion(tokens, meta)
+        if exp_frame is not None:
+            return exp_frame
+
+        # 6. Spatial Assertion Detection (Prepositional or Postpositional)
         spatial_frame = self._try_parse_spatial_assertion(tokens, meta)
         if spatial_frame is not None:
             return spatial_frame
 
-        # 6. Copular Definition Assertion (NP + BE + NP -> is_a)
+        # 7. Copular Definition Assertion (NP + BE + NP -> is_a)
         def_frame = self._try_parse_copular_assertion(tokens, meta)
         if def_frame is not None:
             return def_frame
@@ -358,11 +363,75 @@ class UniversalLanguageParser:
         frame.set_role(ThematicRole.LOCATION, loc_ref)
         return frame
 
+    def _try_parse_expository_assertion(
+        self, tokens: list[str], meta: LanguageMetadata
+    ) -> SemanticFrame | None:
+        if "?" in tokens or self.profile.typology.word_order != "SOV":
+            return None
+        clean_tokens = [t for t in tokens if t not in ("?", ".", "!", ",")]
+        if len(clean_tokens) < 3:
+            return None
+
+        markers = self.profile.closed_class.expository_markers
+        rel_map = {
+            "cause": "causes",
+            "require": "requires",
+            "enable": "enables",
+        }
+        candidates: list[tuple[int, str, str]] = []
+        for cue_key, pred in rel_map.items():
+            for phrase in markers.get(cue_key, ()):
+                phrase_parts = phrase.strip().lower().split()
+                if phrase_parts:
+                    candidates.append((len(phrase_parts), " ".join(phrase_parts), pred))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+
+        matched_len = 0
+        matched_pred = ""
+        for m_len, m_phrase, pred in candidates:
+            if len(clean_tokens) - m_len >= 2:
+                tail = " ".join(t.lower() for t in clean_tokens[-m_len:])
+                if tail == m_phrase:
+                    matched_len = m_len
+                    matched_pred = pred
+                    break
+
+        if not matched_pred:
+            return None
+
+        rem = clean_tokens[:-matched_len]
+        split_idx = 1
+        for i in range(1, len(rem) - 1):
+            if rem[i] in ("යනු", "என்பது"):
+                split_idx = i
+                lhs = rem[:split_idx]
+                rhs = rem[split_idx + 1 :]
+                break
+        else:
+            lhs = rem[:1]
+            rhs = rem[1:]
+
+        theme_ref = self._extract_entity_ref(lhs)
+        pat_ref = self._extract_entity_ref(rhs)
+        if theme_ref is None or pat_ref is None:
+            return None
+
+        frame = SemanticFrame(
+            frame_type=FrameType.ASSERTION,
+            predicate=matched_pred,
+            metadata=meta,
+        )
+        frame.set_role(ThematicRole.THEME, theme_ref)
+        frame.set_role(ThematicRole.PATIENT, pat_ref)
+        return frame
+
     def _try_parse_copular_assertion(
         self, tokens: list[str], meta: LanguageMetadata
     ) -> SemanticFrame | None:
+        if "?" in tokens:
+            return None
         clean_tokens = [t for t in tokens if t not in ("?", ".", "!", ",")]
-        copulas = set(self.profile.closed_class.copula_forms)
+        copulas = {c.lower() for c in self.profile.closed_class.copula_forms}
 
         cop_idx = -1
         for i, tok in enumerate(clean_tokens):
@@ -370,11 +439,29 @@ class UniversalLanguageParser:
                 cop_idx = i
                 break
 
-        if cop_idx <= 0:
+        if cop_idx > 0:
+            lhs = clean_tokens[:cop_idx]
+            rhs = clean_tokens[cop_idx + 1 :]
+        elif (
+            self.profile.typology.word_order == "SOV"
+            and len(clean_tokens) >= 3
+            and clean_tokens[-1].lower() in copulas
+        ):
+            body = clean_tokens[:-1]
+            topic_idx = -1
+            for i in range(1, len(body) - 1):
+                if body[i] in ("යනු", "என்பது"):
+                    topic_idx = i
+                    break
+            if topic_idx > 0:
+                lhs = body[:topic_idx]
+                rhs = body[topic_idx + 1 :]
+            else:
+                lhs = body[:1]
+                rhs = body[1:]
+        else:
             return None
 
-        lhs = clean_tokens[:cop_idx]
-        rhs = clean_tokens[cop_idx + 1 :]
         theme_ref = self._extract_entity_ref(lhs)
         attr_ref = self._extract_entity_ref(rhs)
         if theme_ref is None or attr_ref is None:
@@ -470,17 +557,21 @@ class UniversalLanguageParser:
 
         # 1. Check attached lexicon if available (e.g. SinhalaLexicon / TamilLexicon)
         if self.lexicon is not None and hasattr(self.lexicon, "lookup"):
-            full_phrase = " ".join(tokens)
-            stemmed_phrase = " ".join(self._apply_stemming(t) for t in tokens)
-            for cand_phrase in (full_phrase, stemmed_phrase):
-                phrase_entries = self.lexicon.lookup(cand_phrase)
-                if phrase_entries and "noun" in str(getattr(phrase_entries[0], "pos", "")).lower():
-                    return EntityReference(
-                        concept_name=phrase_entries[0].semantic_predicate,
-                        properties=getattr(phrase_entries[0], "properties", {}) or {},
-                        specifier=spec_type,
-                        raw_text=full_phrase,
-                    )
+            if len(tokens) >= 2:
+                full_phrase = " ".join(tokens)
+                stemmed_phrase = " ".join(self._apply_stemming(t) for t in tokens)
+                for cand_phrase in (full_phrase, stemmed_phrase):
+                    phrase_entries = self.lexicon.lookup(cand_phrase)
+                    if (
+                        phrase_entries
+                        and "noun" in str(getattr(phrase_entries[0], "pos", "")).lower()
+                    ):
+                        return EntityReference(
+                            concept_name=phrase_entries[0].semantic_predicate,
+                            properties=getattr(phrase_entries[0], "properties", {}) or {},
+                            specifier=spec_type,
+                            raw_text=full_phrase,
+                        )
 
             lex_props: dict[str, Any] = {}
             lex_concept: str | None = None
@@ -501,7 +592,24 @@ class UniversalLanguageParser:
                         continue
                 w = clean_words[i]
                 w_stem = self._apply_stemming(w)
-                entries = self.lexicon.lookup(w) or self.lexicon.lookup(w_stem)
+                raw_entries = self.lexicon.lookup(w)
+                stem_entries = self.lexicon.lookup(w_stem) if w_stem != w else []
+                entries = raw_entries or stem_entries
+                if raw_entries and stem_entries:
+                    raw_pred = getattr(raw_entries[0], "semantic_predicate", "")
+                    stem_pred = getattr(stem_entries[0], "semantic_predicate", "")
+                    store = getattr(self.lexicon, "_ontology_store", None)
+                    if (
+                        raw_pred
+                        and stem_pred
+                        and raw_pred != stem_pred
+                        and store is not None
+                        and hasattr(store, "get_word_frequency")
+                    ):
+                        raw_freq = store.get_word_frequency(raw_pred, language="en")
+                        stem_freq = store.get_word_frequency(stem_pred, language="en")
+                        if stem_freq >= max(50, raw_freq * 5):
+                            entries = stem_entries
                 if entries:
                     e = entries[0]
                     p_str = str(getattr(e, "pos", "")).lower()

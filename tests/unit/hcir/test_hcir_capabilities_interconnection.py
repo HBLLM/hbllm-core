@@ -271,26 +271,29 @@ class TestWorldKernelCapabilitiesInterconnection:
         assert res.get("synced") is True
         assert services.world_kernel.digital_twin._variables.get("temp") == 37.0
 
-    def test_autonomous_epistemic_engine_receives_world_kernel(self):
+    def test_autonomous_epistemic_engine_attaches_kernel_services(self):
         from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
         from hbllm.hcir.world.cortex_assimilator import EpistemicPhase
 
         ws = HCIRWorkspaceState()
         services = KernelServices.create_default(ws)
         engine = AutonomousEpistemicEngine(services=services)
-        assert engine.world_kernel is not None
-        assert engine.world_kernel is services.world_kernel
+        assert not hasattr(engine, "world_kernel")
+        assert engine.services is services
+        assert engine.transaction_manager is services.transaction_manager
+        assert services.world_kernel is not None
 
         engine.transition_to_phase(EpistemicPhase.MENTAL_SIMULATION, reason="test_phase_persist")
         node = ws.graph.get_node(f"phase_{engine.world_id}")
         assert node is not None
         assert getattr(node, "event_data", {}).get("phase") == "mental_simulation"
 
-        # Verify re-attaching services preserves and updates world_kernel
+        # Verify re-attaching services preserves and updates services and transaction_manager
         ws2 = HCIRWorkspaceState()
         services2 = KernelServices.create_default(ws2)
         engine.attach_kernel_services(services2)
-        assert engine.world_kernel is services2.world_kernel
+        assert engine.services is services2
+        assert engine.transaction_manager is services2.transaction_manager
 
     @pytest.mark.asyncio
     async def test_frontier_faculties_via_capability_resolver(self):

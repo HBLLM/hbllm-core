@@ -184,6 +184,8 @@ class HierarchicalGoalDecomposer:
         resource_budget: int | None = None,
         recharge_stations: list[dict[str, Any]] | None = None,
         blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+        transition_kb: Any | None = None,
+        grid: np.ndarray | None = None,
     ) -> GoalNode:
         """Analyze reachability of primary goal and return the active prerequisite GoalNode.
 
@@ -216,6 +218,8 @@ class HierarchicalGoalDecomposer:
             blocked_nodes=effective_barriers,
             grid_shape=grid_shape,
             step_size=step_size,
+            transition_kb=transition_kb,
+            grid=grid,
         )
 
         is_primary_reachable = bool(
@@ -263,6 +267,8 @@ class HierarchicalGoalDecomposer:
                     blocked_nodes=effective_barriers,
                     grid_shape=grid_shape,
                     step_size=step_size,
+                    transition_kb=transition_kb,
+                    grid=grid,
                 )
                 if s_path and len(s_path) <= resource_budget and len(s_path) < min_s_len:
                     min_s_len = len(s_path)
@@ -320,6 +326,8 @@ class HierarchicalGoalDecomposer:
                     blocked_nodes=effective_barriers,
                     grid_shape=grid_shape,
                     step_size=step_size,
+                    transition_kb=transition_kb,
+                    grid=grid,
                 )
                 if (
                     c_path
@@ -458,6 +466,8 @@ class HierarchicalGoalDecomposer:
                 blocked_nodes=set(),
                 grid_shape=grid_shape,
                 step_size=step_size,
+                transition_kb=transition_kb,
+                grid=grid,
             )
             if free_path:
                 for pr, pc in free_path:
@@ -482,6 +492,8 @@ class HierarchicalGoalDecomposer:
                                         blocked_nodes=known_obstacles,
                                         grid_shape=grid_shape,
                                         step_size=step_size,
+                                        transition_kb=transition_kb,
+                                        grid=grid,
                                     )
                                     if adj_path:
                                         clear_subgoal = GoalNode(

@@ -1,3 +1,5 @@
+# Local development compose stack ONLY.
+# Never expose or deploy this file in production; use docker-compose.prod.yml for deployment.
 version: '3.8'
 
 services:
@@ -6,10 +8,10 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - HBLLM_DATABASE_URL=postgresql://hbllm:hbllm_password@postgres:5432/hbllm_brain
-      - HBLLM_REDIS_URL=redis://redis:6379/0
+      - HBLLM_DATABASE_URL=${HBLLM_DATABASE_URL:-postgresql://hbllm:${POSTGRES_PASSWORD:-hbllm_dev_local}@postgres:5432/hbllm_brain}
+      - HBLLM_REDIS_URL=${HBLLM_REDIS_URL:-redis://redis:6379/0}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - .:/app
     depends_on:
@@ -21,10 +23,10 @@ services:
     image: ankane/pgvector:v0.5.1
     environment:
       POSTGRES_USER: hbllm
-      POSTGRES_PASSWORD: hbllm_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hbllm_dev_local}
       POSTGRES_DB: hbllm_brain
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -32,7 +34,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     restart: unless-stopped

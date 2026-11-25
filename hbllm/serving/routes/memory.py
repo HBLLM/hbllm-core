@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from hbllm.network.messages import Message, MessageType
+from hbllm.serving.deps import get_tenant_id
 from hbllm.serving.state import _get_node_map, _state
 
 logger = logging.getLogger(__name__)
@@ -117,7 +118,7 @@ def _require_bus() -> Any:
 @router.get("/memory/{session_id}")
 async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
     """Retrieve recent conversation history for a tenant's session."""
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = get_tenant_id(request)
     bus = _require_bus()
 
     correlation_id = str(uuid.uuid4())
@@ -152,9 +153,9 @@ async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
 @router.post("/sync/episodic")
 async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
     """Sync a batch of episodic memories from an edge device (append strategy)."""
-    tenant_id = getattr(api_req.state, "tenant_id", "default")
-    user_id = getattr(api_req.state, "user_id", "default")
-    device_id = getattr(api_req.state, "device_id", "default")
+    tenant_id = get_tenant_id(api_req)
+    user_id = getattr(api_req.state, "user_id", None) or tenant_id
+    device_id = getattr(api_req.state, "device_id", None) or "unknown"
     bus = _require_bus()
 
     synced_count = 0
@@ -198,9 +199,9 @@ async def sync_episodic(api_req: Request, request: SyncEpisodicRequest) -> Any:
 @router.post("/sync/semantic")
 async def sync_semantic(api_req: Request, request: SyncSemanticRequest) -> Any:
     """Sync a batch of semantic knowledge items from an edge device (append strategy)."""
-    tenant_id = getattr(api_req.state, "tenant_id", "default")
-    user_id = getattr(api_req.state, "user_id", "default")
-    device_id = getattr(api_req.state, "device_id", "default")
+    tenant_id = get_tenant_id(api_req)
+    user_id = getattr(api_req.state, "user_id", None) or tenant_id
+    device_id = getattr(api_req.state, "device_id", None) or "unknown"
     bus = _require_bus()
 
     synced_count = 0

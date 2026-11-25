@@ -1,3 +1,8 @@
+---
+title: "System Entry Points & Bootstrapping Architecture"
+description: "Authoritative guide to HBLLM's single composition root (build_cognitive_system), CognitiveSystemConfig, dialogue processing, and unified Typer CLI."
+---
+
 # System Entry Points & Bootstrapping Architecture
 
 > **Document Status:** Authoritative Architectural Specification  
@@ -8,15 +13,13 @@
 
 ## 1. Overview
 
-HBLLM enforces a **single unified composition root** across all runtime contexts. Whether invoked via the Typer CLI, background service workers, evaluation harnesses, or integration tests, the cognitive system is initialized exclusively through `build_cognitive_system()`.
+HBLLM enforces a **single unified composition root** across all runtime contexts. Whether invoked via the Typer CLI, benchmark harnesses, dialogue scripts, or integration tests, the cognitive system is initialized through `build_cognitive_system()`.
 
-Duplicate kernel initializations, unverified `TransactionManager` instances, and ad-hoc wiring scripts are strictly prohibited.
+Duplicate kernel initializations, unverified `TransactionManager` instances, and ad-hoc wiring scripts outside `hbllm.runtime.bootstrap` are prohibited (enforced by `tests/unit/architecture/test_single_composition_root.py`).
 
 ---
 
 ## 2. The Single Composition Root (`hbllm.runtime.bootstrap`)
-
-The canonical entry point for initializing the entire cognitive operating system:
 
 ```python
 from hbllm.runtime.bootstrap import (
@@ -26,10 +29,16 @@ from hbllm.runtime.bootstrap import (
 )
 
 config = CognitiveSystemConfig(
-    tenant_id="primary",
+    world_id="primary",
+    seed=42,
+    exploration_budget=150,
+    enable_logging=True,
+    memory_dir=None,  # None -> in-memory; default -> ~/.hbllm/worlds/<world_id>
     enable_grounding=True,
-    enable_governance=True,
-    perception_mode="handcrafted",
+    perception_mode="handcrafted",  # "handcrafted" | "snn" | "learned"
+    enable_brain_llm=False,
+    enable_autonomous_curiosity=False,
+    max_events_per_store=2000,
 )
 
 system: CognitiveSystem = build_cognitive_system(config)
@@ -37,55 +46,55 @@ system: CognitiveSystem = build_cognitive_system(config)
 
 ### 2.1 Initialization Lifecycle
 
-1. **Workspace & Substrate Initialization:**
-   - Instantiates `TieredWorkspace` with Working, Brain, Persistent, and Meta tiers.
-   - Attaches `CognitiveGraph` (with native Rust PyO3 acceleration when compiled, falling back to pure Python).
+1. **Workspace & Event Store Initialization:**
+   - Resolves `memory_dir` and creates `SQLiteEventStore(..., max_events=cfg.max_events_per_store)` when persisted.
+   - Instantiates `TieredWorkspace` (`Working`, `Brain`, `Persistent`, `Meta`) and unifies `services.workspace = tiered_workspace.working_state`.
 2. **Constitutional Governance:**
-   - Instantiates `ConstitutionalVerifier` with security, safety, and policy verification stages.
-   - Instantiates `TransactionManager` bound to the verifier.
-3. **Kernel Services:**
-   - Assembles `KernelServices` containing `TransactionManager`, `EventBus`, `CapabilityResolver`, and `TieredWorkspace`.
-   - Strictly asserts `not tm.unverified` upon completion.
-4. **Autonomous Epistemic Engine:**
-   - Instantiates `AutonomousEpistemicEngine` with explicit `KernelServices`.
-5. **Cortical Grounding Bridge:**
-   - Binds the Symbol Grounding Engine (`CorticalGroundingBridge`) sharing the identical `KernelServices`.
+   - Instantiates `CommitAuthorityRegistry`, `ConstitutionalVerifier`, and the 6-stage verification pipeline (`create_default_pipeline`).
+3. **Kernel Services (`KernelServices.create_default`):**
+   - Assembles `TransactionManager`, `CapabilityResolver`, `CapabilitySandboxManager`, `KernelEventBus`, `KernelInstructionScheduler`, `KernelExecutor`, `KernelTelemetry`, `WorldKernel`, and registers all governed kernel capabilities (`world.*`, `planning.*`, `routing.*`, `fs.*`, `code.python_ast`, `git.status`, `shell.exec`, `memory.*`, `knowledge.*`, `web.*`).
+4. **Autonomous Epistemic Engine & Hydration:**
+   - Instantiates `AutonomousEpistemicEngine` with shared `KernelServices` and `TieredWorkspace`, hydrating prior lifelong world nodes (`hydrate_from_workspace()`).
+5. **Cortical Grounding Bridge (Optional):**
+   - When `enable_grounding=True`, instantiates `CorticalGroundingBridge` sharing the exact `KernelServices` and attaches it to the engine.
+6. **Reasoning, SNN Neuromodulation, Language & Executive Runtime:**
+   - Wires `UnifiedReasoningRuntime` (14 default operators), `NeuromodulationEngine`, `LexiconAcquisitionLoop`, optional `EpistemicCuriosityController`, and `ExecutiveRuntime`.
+
+### 2.2 `CognitiveSystem.process_dialogue()`
+
+`system.process_dialogue(dialogue, speaker_id="user", language=None)` runs the Pure-HCIR multilingual language loop (`MultilingualLanguageRuntime` → `DiscourseSegmenter` → `ExpositoryProseProcessor` → optional `EpistemicCuriosityController` → governed `CommandDispatcher`), returning a calibrated `LanguageTurnResult`.
 
 ---
 
 ## 3. Unified Typer CLI (`hbllm.cli`)
 
-The CLI is structured into clean cognitive commands replacing legacy transformer-pretraining entry points.
-
-Executable via:
-```bash
-python -m hbllm [COMMAND] [ARGS]...
-# or
-hbllm [COMMAND] [ARGS]...
-```
-
-### 3.1 Command Hierarchy
+Executable via `python -m hbllm [COMMAND] [ARGS]...` or `hbllm [COMMAND] [ARGS]...`:
 
 | Command Group | Command | Description |
-| :--- | :--- | :--- |
-| **`kernel`** | `hbllm kernel boot` | Bootstraps the HCIR kernel and reports verified subsystem readiness. |
-| | `hbllm kernel status` | Queries live graph statistics, dirty sets, substrate acceleration, and active tenants. |
-| | `hbllm kernel replay <tx_log>` | Replays transactional event streams to verify deterministic state reconstruction. |
-| **`mind`** | `hbllm mind run --driver <name>` | Runs continuous active inference loop driven by environment driver. |
-| | `hbllm mind step --obs <file.json>` | Executes a deterministic single-cycle cognitive decision step. |
-| **`bench`** | `hbllm bench dev` | Executes local development evaluation benchmark suite. |
-| | `hbllm bench heldout` | Executes anti-tamper held-out generalization benchmark (gated by Git SHA). |
-| | `hbllm bench local-suite` | Executes standard local game evaluation suite. |
-| | `hbllm bench ablation` | Measures faculty-level ablation impact on task success. |
-| | `hbllm bench sge` | Benchmarks symbol grounding precision, latency, and memory bounds. |
-| **`diagnostics`**| `hbllm diagnostics` | Full system integrity check: verifier health, native substrate, memory discipline. |
+|---|---|---|
+| **`kernel`** | `hbllm kernel boot [--world-id ...]` | Bootstraps the HCIR kernel and verifies `TransactionManager` & stages |
+| | `hbllm kernel status` | Queries live verification status, 4 memory tiers, and native Rust substrate health |
+| | `hbllm kernel replay [--log ...]` | Replays transactional event streams |
+| **`mind`** | `hbllm mind run [--driver ... --budget ...]` | Runs the active-inference loop and persists state |
+| | `hbllm mind step --obs <file.json> [--explain]` | Executes a deterministic single-cycle `step()` with optional provenance explanation |
+| **`bench`** | `hbllm bench dev` | Runs frozen `benchmarks/suites/dev.yaml` evaluation suite |
+| | `hbllm bench heldout` | Runs anti-tamper Held-Out v2 evaluation suite (`eval-*` git tag gated) |
+| | `hbllm bench local-suite` | Runs the 10-game ARC local suite benchmark |
+| | `hbllm bench ablation` | Measures cortical faculty ablation impact |
+| | `hbllm bench sge` | Benchmarks Symbol Grounding Engine integration |
+| | `hbllm bench profile` | Profiles substrate & full `32×32` 5-stage cognitive step latency |
+| **`plugin`** | `hbllm plugin list` / `hbllm plugin new <name>` | Lists or scaffolds plugins under `plugins/` |
+| **Top-level** | `hbllm diagnostics` | Full runtime, Rust SIMD, and Cognitive OS check |
+| | `hbllm info` | Displays the 8 architectural invariants and 5-stage cortical loop |
+| | `hbllm serve [--host ... --port ... --workers ...]` | Starts the FastAPI REST + MCP server (`uvicorn hbllm.serving.api:app`) |
+| | `hbllm agent` / `hbllm code "<prompt>"` | Developer CLI utilities |
+| | `hbllm daemon [run\|install\|uninstall\|status]` | Background daemon lifecycle management |
 
 ---
 
 ## 4. Architectural Layering Guarantees
 
-All entry points adhere to strict AST-level dependency boundaries validated in `tests/unit/architecture/test_layering.py`:
-- `hbllm.hcir` never imports from `hbllm.brain`.
-- Core OS never imports from `plugins`.
-- Direct `sqlite3.connect` and `aiosqlite.connect` calls are confined strictly to infrastructure persistence modules (`hbllm.persistence`, `hbllm.hcir.stores`, `hbllm.security`).
-
+AST-level dependency boundaries are enforced automatically in `tests/unit/architecture/`:
+- `test_layering.py`: `hbllm.hcir` never imports `hbllm.brain`; core `hbllm` never imports `plugins`.
+- `test_loc_budget.py`: `hbllm/hcir/**` stays within `150,000` LOC (`hbllm/**` within `300,000` LOC) with **zero** LLM client/scaffold imports in `hbllm/hcir/**`.
+- `test_no_direct_sqlite.py`: Direct `sqlite3.connect` / `aiosqlite.connect` calls are confined strictly to infrastructure persistence modules (`hbllm.persistence`, `hbllm.hcir.stores`, `hbllm.security`, `hbllm.network.durable_bus`).

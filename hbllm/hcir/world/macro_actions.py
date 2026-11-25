@@ -7,9 +7,7 @@ This facade re-exports all symbols from `hbllm.hcir.world.macro` for backward co
 from __future__ import annotations
 
 from hbllm.hcir.world.macro import (
-    CustomMacroAction,
     DepositCargo,
-    ExploreFrontier,
     ExploreObject,
     InteractWith,
     MacroAction,
@@ -29,13 +27,10 @@ from hbllm.hcir.world.macro import (
     UseToolOnBarrier,
     _spatial_effector_payload,
     attribute_macro_action_outcome,
-    get_sub_attr,
 )
 
 __all__ = [
-    "CustomMacroAction",
     "DepositCargo",
-    "ExploreFrontier",
     "ExploreObject",
     "InteractWith",
     "MacroAction",
@@ -55,5 +50,4 @@ __all__ = [
     "UseToolOnBarrier",
     "_spatial_effector_payload",
     "attribute_macro_action_outcome",
-    "get_sub_attr",
 ]

@@ -79,6 +79,8 @@ class ActionDynamicsModel:
         elif self.delta_r == 0 and self.delta_c == 0 and len(self.displacement) >= 2:
             self.delta_r = int(round(self.displacement[0]))
             self.delta_c = int(round(self.displacement[1]))
+        if not self.delta_counts and (self.delta_r != 0 or self.delta_c != 0):
+            self.delta_counts[(self.delta_r, self.delta_c)] = max(1, int(self.probes_tested))
 
     def record_continuous_delta(self, dx: float, dy: float) -> None:
         """Record an empirically observed continuous displacement vector (dx, dy)."""
@@ -175,11 +177,19 @@ class ActionDynamicsModel:
                     self.delta_c = 0
 
                 # Single-step quantum refinement & unconstrained stride expansion:
-                # If an action previously observed a boundary wrap (e.g. 28) and now demonstrates
-                # a smaller non-zero unit step along the same axis (e.g. 7), adopt the unit quantum.
-                if 0 < abs(target_r) < abs(self.delta_r) and self.delta_r != 0:
+                # Only refine downward to an exact divisor of the current stride so a truncated step
+                # against an obstacle (e.g. +4 vs established +5) never corrupts an established stride.
+                if (
+                    0 < abs(target_r) < abs(self.delta_r)
+                    and self.delta_r != 0
+                    and self.delta_r % target_r == 0
+                ):
                     self.delta_r = target_r
-                if 0 < abs(target_c) < abs(self.delta_c) and self.delta_c != 0:
+                if (
+                    0 < abs(target_c) < abs(self.delta_c)
+                    and self.delta_c != 0
+                    and self.delta_c % target_c == 0
+                ):
                     self.delta_c = target_c
                 # If an action previously observed a partial/truncated step (e.g. 3) and now demonstrates
                 # a larger integer multiple stride along the same axis (e.g. 6), adopt the unconstrained stride.
@@ -209,10 +219,9 @@ class ActionDynamicsModel:
                     and target_c != 0
                     and (target_c % self.delta_c == 0 or self.delta_c % target_c == 0)
                 )
-                is_unit_step = (target_r != 0 or target_c != 0) and max(
-                    abs(target_r), abs(target_c)
-                ) == 1
-                if is_unit_step:
+                has_nonzero_obs = target_r != 0 or target_c != 0
+                is_unit_step = has_nonzero_obs and max(abs(target_r), abs(target_c)) == 1
+                if has_nonzero_obs:
                     if (
                         not self.delta_counts
                         and self.probes_tested > 1
@@ -249,37 +258,43 @@ class ActionDynamicsModel:
                             self.conditional_branches[cond_key].update_from_trial(
                                 observed_delta, success=True, learning_rate=learning_rate
                             )
-                        if is_unit_step:
-                            modal_d, _ = max(self.delta_counts.items(), key=lambda kv: kv[1])
+                        if self.delta_counts:
+                            cur_vec = (self.delta_r, self.delta_c)
+                            modal_d, _ = max(
+                                self.delta_counts.items(),
+                                key=lambda kv: (
+                                    kv[1],
+                                    1 if kv[0] == cur_vec else 0,
+                                    abs(kv[0][0]) + abs(kv[0][1]),
+                                ),
+                            )
                             self.delta_r, self.delta_c = modal_d[0], modal_d[1]
                             self.displacement = (float(self.delta_r), float(self.delta_c))
                         return
 
-                if is_unit_step:
-                    modal_d, modal_cnt = max(self.delta_counts.items(), key=lambda kv: kv[1])
+                if self.delta_counts:
+                    cur_vec = (self.delta_r, self.delta_c)
+                    modal_d, modal_cnt = max(
+                        self.delta_counts.items(),
+                        key=lambda kv: (
+                            kv[1],
+                            1 if kv[0] == cur_vec else 0,
+                            abs(kv[0][0]) + abs(kv[0][1]),
+                        ),
+                    )
                     self.delta_r, self.delta_c = modal_d[0], modal_d[1]
-                    self.displacement = (float(self.delta_r), float(self.delta_c))
-                    tot_obs = sum(self.delta_counts.values())
-                    if modal_cnt >= 2 and modal_cnt / max(1, tot_obs) >= 0.5:
-                        self.confidence = min(1.0, max(self.confidence, 0.75) + 0.05)
-                    else:
-                        self.confidence = min(1.0, self.confidence + 0.1)
-                    return
-
-                if (target_r != 0 or target_c != 0) and self.delta_r == 0 and self.delta_c == 0:
+                    if is_unit_step:
+                        self.displacement = (float(self.delta_r), float(self.delta_c))
+                        tot_obs = sum(self.delta_counts.values())
+                        if modal_cnt >= 2 and modal_cnt / max(1, tot_obs) >= 0.5:
+                            self.confidence = min(1.0, max(self.confidence, 0.75) + 0.05)
+                        else:
+                            self.confidence = min(1.0, self.confidence + 0.1)
+                        return
+                elif has_nonzero_obs and self.delta_r == 0 and self.delta_c == 0:
                     # Transition from ungrounded/obstructed prior to verified empirical displacement
                     self.delta_r = target_r
                     self.delta_c = target_c
-                elif self.probes_tested <= 1:
-                    new_dr = float(target_r)
-                    new_dc = float(target_c)
-                    self.delta_r = int(round(new_dr))
-                    self.delta_c = int(round(new_dc))
-                else:
-                    new_dr = (1.0 - learning_rate) * self.delta_r + learning_rate * float(target_r)
-                    new_dc = (1.0 - learning_rate) * self.delta_c + learning_rate * float(target_c)
-                    self.delta_r = int(round(new_dr))
-                    self.delta_c = int(round(new_dc))
                 if abs(self.delta_c) >= 2 * abs(self.delta_r):
                     self.delta_r = 0
                 elif abs(self.delta_r) >= 2 * abs(self.delta_c):
@@ -606,3 +621,77 @@ class StateMutationModel:
             occurrences=data.get("occurrences", 1),
             **data.get("metadata", {}),
         )
+
+
+def disambiguate_stochastic_motor_basis(
+    action_dynamics: dict[Any, ActionDynamicsModel],
+    action_affordances: dict[Any, Any] | None = None,
+    primary_action: Any | None = None,
+) -> list[Any]:
+    """Resolve motor vector collisions caused by early stochastic wind slips.
+
+    When an uncertain/noisy action shares the same displacement vector as a clean,
+    low-slip action, reassign the noisy action to an unclaimed unit vector supported by
+    its empirical ``delta_counts`` near the mode. When ``action_affordances`` is passed,
+    synchronizes ``is_displacement`` and ``delta`` for reassigned actions and ``primary_action``.
+    """
+    if not action_dynamics:
+        return []
+    by_vec: dict[tuple[int, int], list[tuple[Any, ActionDynamicsModel]]] = {}
+    for aid, dyn in action_dynamics.items():
+        if not dyn.is_displacement_action():
+            continue
+        vec = dyn.get_displacement()
+        if vec != (0, 0):
+            by_vec.setdefault(vec, []).append((aid, dyn))
+
+    clean_claimed = {
+        vec for vec, owners in by_vec.items() if any(d.slip_rate <= 0.05 for _, d in owners)
+    }
+    changed: list[Any] = []
+    for vec, owners in by_vec.items():
+        if len(owners) < 2:
+            continue
+        owners_sorted = sorted(
+            owners,
+            key=lambda item: (
+                -item[1].delta_counts.get(vec, 0),
+                item[1].slip_rate,
+                -item[1].confidence,
+            ),
+        )
+        for aid, dyn in owners_sorted[1:]:
+            if not dyn.delta_counts or dyn.slip_rate <= 0.05:
+                continue
+            max_cnt = max(dyn.delta_counts.values())
+            candidates = [
+                (cnt, cand_v)
+                for cand_v, cnt in dyn.delta_counts.items()
+                if cand_v != vec
+                and cand_v not in clean_claimed
+                and (abs(cand_v[0]) + abs(cand_v[1])) == 1
+                and cnt >= max_cnt - 1
+            ]
+            if not candidates:
+                continue
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            best_v = candidates[0][1]
+            dyn.delta_r, dyn.delta_c = int(best_v[0]), int(best_v[1])
+            dyn.displacement = (float(dyn.delta_r), float(dyn.delta_c))
+            clean_claimed.add(best_v)
+            changed.append(aid)
+            if action_affordances is not None and aid in action_affordances:
+                r_dr, r_dc = dyn.get_displacement()
+                action_affordances[aid].is_displacement = dyn.is_displacement_action()
+                action_affordances[aid].delta = (r_dr, r_dc)
+    if (
+        primary_action is not None
+        and action_affordances is not None
+        and primary_action in action_affordances
+        and primary_action in action_dynamics
+    ):
+        p_dyn = action_dynamics[primary_action]
+        p_dr, p_dc = p_dyn.get_displacement()
+        action_affordances[primary_action].is_displacement = p_dyn.is_displacement_action()
+        action_affordances[primary_action].delta = (p_dr, p_dc)
+    return changed

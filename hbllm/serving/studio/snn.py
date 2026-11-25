@@ -14,7 +14,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request
 
-from hbllm.serving.studio.helpers import get_brain, get_node_map
+from hbllm.serving.studio.helpers import get_brain, get_node_map, get_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ async def replay_cognitive_search(request: Request):
     body = await request.json()
     query = body.get("query")
     priming_state = body.get("priming_state", {})
-    tenant_id = getattr(request.state, "tenant_id", "default")
+    tenant_id = get_tenant_id(request)
 
     if not query:
         raise HTTPException(status_code=400, detail="Query is required")

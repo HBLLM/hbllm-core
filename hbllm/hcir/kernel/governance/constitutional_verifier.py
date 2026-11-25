@@ -222,15 +222,84 @@ class ConstitutionalVerifier:
         transaction: HCIRTransaction,
         workspace: HCIRWorkspaceState,
     ) -> bool:
-        """Verify tenant scope isolation for all operations."""
+        """Verify tenant scope isolation across workspace boundary and operations."""
         if not self._enforce_scope:
             return True
 
+        ws_tenant = getattr(workspace, "tenant_id", None)
         tx_tenant = self._transaction_tenant(transaction)
-        if not tx_tenant:
-            # System-level / unscoped transactions may operate across scopes
+        author = str(getattr(transaction, "author", "") or "")
+        is_internal_kernel_author = (
+            author == "system"
+            or author.startswith(("kernel", "world_", "hcir", "node_budget", "memory_"))
+            or author
+            in (
+                "grounding_resolver",
+                "grounded_concept_registry",
+                "command_dispatcher",
+                "belief_revision",
+                "epistemic_curiosity",
+                "web_ingestion",
+                "t4_reading_curriculum",
+                "discourse_expository",
+                "event_compactor",
+                "executive_runtime",
+                "offline_consolidation",
+                "interpreter",
+                "tiered_workspace",
+                "cortical_pipeline",
+                "assimilator",
+                "assimilation_stage",
+                "deliberation",
+                "motor_stage",
+                "episodic_cortex",
+                "AutonomousEpistemicEngine",
+                "subgoal_exec",
+                "reasoning_runtime",
+                "macro_actions",
+                "macro_action_planner",
+                "cortex_motor",
+                "episode_boundary",
+                "record_learned_barrier",
+                "record_learned_goal",
+                "HippocampalReplayConsolidator",
+                "hierarchical_goal_decomposer",
+                "HCIRSpatialEntityPlanner",
+            )
+        )
+
+        # Enforce structural tenant boundary when workspace is bound to a tenant
+        if ws_tenant:
+            if tx_tenant and tx_tenant != ws_tenant:
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="ConstitutionalVerifier",
+                        assertion=(
+                            f"Scope isolation violation: tx tenant={tx_tenant} "
+                            f"vs workspace tenant={ws_tenant}"
+                        ),
+                        severity="error",
+                    )
+                )
+                return False
+            if not tx_tenant and not is_internal_kernel_author:
+                transaction.annotations.append(
+                    TransactionAnnotation(
+                        author="ConstitutionalVerifier",
+                        assertion=(
+                            f"Scope isolation violation: unscoped transaction by '{author}' "
+                            f"into tenant workspace={ws_tenant}"
+                        ),
+                        severity="error",
+                    )
+                )
+                return False
+
+        if not tx_tenant and not ws_tenant:
+            # Unscoped kernel/unit tests without workspace tenant binding
             return True
 
+        effective_tenant = tx_tenant or ws_tenant
         for op in transaction.operations:
             node_tenant: str | None = None
             if op.op in (TransactionOp.MODIFY_NODE, TransactionOp.REMOVE_NODE):
@@ -239,23 +308,30 @@ class ConstitutionalVerifier:
                     if existing is not None:
                         node_tenant = existing.scope.tenant_id
             elif op.op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
-                scope = (op.node_data or {}).get("scope")
+                scope = (op.node_data or {}).get("scope") or getattr(op.node, "scope", None)
                 if isinstance(scope, dict):
                     node_tenant = scope.get("tenant_id")
                 else:
                     node_tenant = getattr(scope, "tenant_id", None)
-                target_id = (op.node_data or {}).get("id") or op.node_id
+                target_id = (
+                    (op.node_data or {}).get("id") or op.node_id or getattr(op.node, "id", None)
+                )
                 existing = workspace.get_node(target_id) if target_id else None
                 if existing is not None and existing.scope.tenant_id != "default":
                     # Overwriting an existing node is governed by the node's current owner
                     node_tenant = existing.scope.tenant_id
 
-            if node_tenant and node_tenant != "default" and tx_tenant != node_tenant:
+            if (
+                node_tenant
+                and node_tenant != "default"
+                and effective_tenant
+                and effective_tenant != node_tenant
+            ):
                 transaction.annotations.append(
                     TransactionAnnotation(
                         author="ConstitutionalVerifier",
                         assertion=(
-                            f"Scope isolation violation: tx tenant={tx_tenant} "
+                            f"Scope isolation violation: tx tenant={effective_tenant} "
                             f"vs node tenant={node_tenant}"
                         ),
                         severity="error",

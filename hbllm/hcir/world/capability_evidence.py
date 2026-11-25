@@ -44,7 +44,7 @@ class UnitTestStatus(StrEnum):
 
 
 class BenchmarkStatus(StrEnum):
-    """Status on empirical benchmarks (ARC-AGI-1/2 or ARC-AGI-3)."""
+    """Status on empirical evaluation benchmarks."""
 
     BENCHMARKED = "BENCHMARKED"
     UNTESTED = "UNTESTED"

@@ -5,9 +5,9 @@ description: "API reference for PackageBuilder, PackageManifest, SkillInstaller,
 
 # Packages & Skills API
 
-The **Packages and Skills Subsystem** defines the APIs for compiling, packaging, signing, and installing modular extensions into the HBLLM runtime.
+The **Packages and Skills Subsystem** defines APIs for declarative neuro-symbolic skills (`hbllm.hcir.skills`) alongside `.hbpkg` package compilation, signing, and installation (`hbllm.hbpkg`, `hbllm.skills`).
 
-**Packages:** `hbllm.hbpkg`, `hbllm.skills`, `hbllm.brain.skills`
+**Packages:** `hbllm.hcir.skills`, `hbllm.hbpkg`, `hbllm.skills`, `hbllm.brain.skills`
 
 ---
 
@@ -15,32 +15,55 @@ The **Packages and Skills Subsystem** defines the APIs for compiling, packaging,
 
 | Class | Module | Purpose |
 |---|---|---|
-| `PackageManifest` | `hbllm.hbpkg.manifest` | Dataclass representing `manifest.json` metadata & dependencies |
-| `PackageBuilder` | `hbllm.hbpkg.packager` | Compiles source directories into signed `.hbpkg` archives |
-| `PackageExtractor`| `hbllm.hbpkg.packager` | Extracts and verifies `.hbpkg` archives into runtime directories |
+| `DeclarativeNeuroSymbolicSkill` | `hbllm.hcir.skills.declarative` | Composable `SymbolicPredicate` + `SubgoalSequence` skill DSL |
+| `SkillInductionEngine` | `hbllm.hcir.skills.induction` | Autonomous skill synthesis from recurring trajectories |
+| `HBPkgManifest` | `hbllm.hbpkg.manifest` | Dataclass representing `manifest.json` metadata, permissions & lifecycle hooks |
+| `Packager` | `hbllm.hbpkg.packager` | Compiles, verifies, and installs `.hbpkg` archives |
 | `SkillParser` | `hbllm.skills.parser` | Parses YAML frontmatter and markdown instructions from `SKILL.md` |
 | `SkillInstaller` | `hbllm.skills.installer` | Manages local package installation and version upgrades |
 | `SkillRegistry` | `hbllm.brain.skills.skill_registry` | Runtime procedural skill lookup and invocation index |
 
 ---
 
-## `PackageBuilder` & `PackageManifest`
+## `DeclarativeNeuroSymbolicSkill` (`hbllm.hcir.skills.declarative`)
+
+```python
+from hbllm.hcir.skills.declarative import (
+    ActionAffordancePredicate,
+    CutSetPredicate,
+    DeclarativeNeuroSymbolicSkill,
+    SpatialActionIntent,
+    SubgoalSequence,
+    SymbolicSubgoal,
+)
+
+
+class KeyDoorSkill(DeclarativeNeuroSymbolicSkill):
+    name = "key_door_skill"
+    signature = ActionAffordancePredicate(required={1, 2, 3, 4}) & CutSetPredicate(min_partitions=2)
+    program = SubgoalSequence(
+        SymbolicSubgoal(intent=SpatialActionIntent.NAVIGATE_TO, target_query={"role": "cargo"}),
+        SymbolicSubgoal(intent=SpatialActionIntent.INTERACT, target_query={"role": "barrier"}),
+    )
+```
+
+---
+
+## `Packager` & `HBPkgManifest`
 
 ```python
 from pathlib import Path
-from hbllm.hbpkg.manifest import PackageManifest
-from hbllm.hbpkg.packager import PackageBuilder
+from hbllm.hbpkg.manifest import HBPkgManifest
+from hbllm.hbpkg.packager import Packager
 
-manifest = PackageManifest(
+manifest = HBPkgManifest(
     name="system-auditor",
     version="1.0.0",
     description="Security auditing skill package",
-    capabilities_required=["filesystem:read", "process:sandbox"],
 )
 
-builder = PackageBuilder(source_dir=Path("./src/auditor"))
-archive_path = builder.build(output_path=Path("./dist/system-auditor.hbpkg"), manifest=manifest)
-print(f"Archive built at: {archive_path}")
+packager = Packager()
+print(manifest.name, manifest.version)
 ```
 
 ---

@@ -1,0 +1,120 @@
+split: language_heldout
+version: 1
+cases:
+  # ── 1. Spatial Grounding & Anaphora (4) ────────────────────────────────────
+  - id: sp_1
+    category: spatial_grounding
+    utterance: "The silver compass is on the bench."
+    expect_substrings: ["understood"]
+  - id: sp_2
+    category: spatial_grounding
+    utterance: "Where is the silver compass?"
+    expect_substrings: ["bench"]
+  - id: sp_3
+    category: spatial_grounding
+    utterance: "The brass lantern is under the desk."
+    expect_substrings: ["understood"]
+  - id: sp_4
+    category: spatial_grounding
+    utterance: "Where is it?"
+    expect_substrings: ["desk"]
+
+  # ── 2. Taxonomic Prior Knowledge (4) ──────────────────────────────────────
+  - id: tax_1
+    category: taxonomic_knowledge
+    utterance: "Explain prism"
+    expect_substrings: ["optical", "glass", "light", "instrument"]
+    expect_known: true
+  - id: tax_2
+    category: taxonomic_knowledge
+    utterance: "Describe compass"
+    expect_substrings: ["navigation", "instrument", "magnetic"]
+    expect_known: true
+  - id: tax_3
+    category: taxonomic_knowledge
+    utterance: "Explain turbine"
+    expect_substrings: ["rotary", "engine", "energy", "fluid"]
+    expect_known: true
+  - id: tax_4
+    category: taxonomic_knowledge
+    utterance: "Explain glacier"
+    expect_substrings: ["ice", "mass", "slowly", "frozen"]
+    expect_known: true
+
+  # ── 3. Causal Chains & Coreference (4) ────────────────────────────────────
+  - id: cau_1
+    category: causal_chains
+    utterance: "Why torque"
+    expect_substrings: ["rotor", "voltage", "cause", "causal"]
+  - id: cau_2
+    category: causal_chains
+    utterance: "Explain why rotor occurs"
+    expect_substrings: ["voltage", "cause", "causal", "defined"]
+  - id: cau_3
+    category: causal_chains
+    utterance: "Explain torque"
+    expect_substrings: ["rotational", "force", "rotor", "torque"]
+    expect_known: true
+  - id: cau_4
+    category: causal_chains
+    utterance: "Why does it happen?"
+    expect_substrings: ["rotor", "voltage", "cause"]
+
+  # ── 4. Procedural Dependencies & Coreference (4) ──────────────────────────
+  - id: proc_1
+    category: procedural_dependencies
+    utterance: "How ecosystem"
+    expect_substrings: ["biodiversity", "require", "step"]
+  - id: proc_2
+    category: procedural_dependencies
+    utterance: "Explain how biodiversity works"
+    expect_substrings: ["pollination", "require", "step"]
+  - id: proc_3
+    category: procedural_dependencies
+    utterance: "How does a prism work?"
+    expect_substrings: ["light", "optical", "glass", "definition"]
+  - id: proc_4
+    category: procedural_dependencies
+    utterance: "How does it work?"
+    expect_substrings: ["light", "optical", "glass", "definition"]
+
+  # ── 5. Memory Belief Revision & Contradiction (4) ─────────────────────────
+  - id: rev_1
+    category: belief_revision
+    utterance: "Remember that vanadium is brittle"
+    expect_substrings: ["remember", "vanadium"]
+  - id: rev_2
+    category: belief_revision
+    utterance: "Recall vanadium"
+    expect_substrings: ["vanadium", "brittle"]
+  - id: rev_3
+    category: belief_revision
+    utterance: "Remember that vanadium is not brittle"
+    expect_substrings: ["contradiction", "vanadium", "remember"]
+  - id: rev_4
+    category: belief_revision
+    utterance: "Forget vanadium"
+    expect_substrings: ["acknowledged", "vanadium", "memor"]
+
+  # ── 6. Out-of-Vocabulary Epistemic Abstention (4) ─────────────────────────
+  - id: abs_1
+    category: epistemic_abstention
+    utterance: "Explain xenolith"
+    expect_substrings: ["do not have", "sufficient", "knowledge"]
+    expect_known: false
+  - id: abs_2
+    category: epistemic_abstention
+    utterance: "Tell me about magnetar"
+    expect_substrings: ["do not have", "sufficient", "knowledge"]
+    expect_known: false
+  - id: abs_3
+    category: epistemic_abstention
+    utterance: "What is quasarite?"
+    expect_substrings: ["do not have", "sufficient", "knowledge"]
+    expect_known: false
+  - id: abs_4
+    category: epistemic_abstention
+    utterance: "Describe chronoton"
+    expect_substrings: ["do not have", "sufficient", "knowledge"]
+    expect_known: false
+

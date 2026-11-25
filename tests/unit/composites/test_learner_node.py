@@ -97,7 +97,9 @@ async def test_training_triggers_ONLY_on_sleep(temp_queue_path):
         type=MessageType.EVENT, source_node_id="test", topic="system.sleep.dpo_trigger", payload={}
     )
     await bus.publish("system.sleep.dpo_trigger", sleep_trigger)
-    await asyncio.sleep(0.1)
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while node.training_task is None and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
 
     # 3. Training task should now be spawned
     assert node.training_task is not None

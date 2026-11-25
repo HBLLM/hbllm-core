@@ -11,6 +11,7 @@ import numpy as np
 from scipy.ndimage import label
 
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
+from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.perception.diff import OrientedThreat
 from hbllm.hcir.world.perception.thalamus import SensoryThalamus, _fast_unique_counts
 from hbllm.hcir.world.visual_symmetry import VisualSymmetryAnalyzer
@@ -56,17 +57,76 @@ class SpatialRoleClassifier:
             )
         )
 
-        is_theory_barrier = symbolic_theory.is_barrier(val) if symbolic_theory else False
-        is_theory_actuator = val in symbolic_theory.actuator_features if symbolic_theory else False
-        is_theory_cargo = symbolic_theory.is_cargo(val) if symbolic_theory else False
-        is_theory_walkable = val in symbolic_theory.walkable_features if symbolic_theory else False
+        kb = symbolic_theory.transition_kb if symbolic_theory is not None else None
+        ev = (
+            symbolic_theory.evaluate_transition(val, locus=grid_pos)
+            if symbolic_theory is not None
+            else None
+        )
+        is_confirmed_goal = bool(
+            symbolic_theory is not None
+            and val not in av_set
+            and ((ev is not None and ev.goal_value > 0.5) or val in symbolic_theory.goal_features)
+        )
+        is_candidate_cand = bool(
+            symbolic_theory is not None
+            and not is_confirmed_goal
+            and val in symbolic_theory.candidate_goal_features
+            and not symbolic_theory.goal_features
+        )
+        locus_open_override = bool(
+            kb is not None
+            and kb._locus_beliefs
+            and kb.get_belief(grid_pos, scope="locus") is not None
+            and ev is not None
+            and ev.traversable
+            and ev.confidence > 0.0
+            and ev.risk_cost < 40.0
+        )
+        is_theory_barrier = bool(
+            symbolic_theory is not None
+            and val not in av_set
+            and not is_confirmed_goal
+            and not is_candidate_cand
+            and not locus_open_override
+            and (
+                (ev is not None and (not ev.traversable or ev.risk_cost >= 40.0))
+                or symbolic_theory.is_barrier(val)
+            )
+        )
+        is_theory_actuator = bool(
+            symbolic_theory is not None
+            and (
+                (ev is not None and ev.mutates_state)
+                or (kb is not None and kb.has_feature_outcome(val, TransitionOutcome.MUTATED_STATE))
+                or val in symbolic_theory.actuator_features
+            )
+        )
+        is_theory_cargo = bool(
+            symbolic_theory is not None
+            and (
+                (kb is not None and kb.has_feature_outcome(val, TransitionOutcome.DISPLACED_OTHER))
+                or symbolic_theory.is_cargo(val)
+            )
+        )
+        is_theory_walkable = bool(
+            symbolic_theory is not None
+            and (
+                (ev is not None and ev.traversable and ev.confidence > 0.0 and ev.risk_cost < 40.0)
+                or val in symbolic_theory.walkable_features
+            )
+        )
         is_candidate_goal = (
             val != bg
             and symbolic_theory is not None
             and (
-                val in symbolic_theory.goal_features
+                is_confirmed_goal
                 or val in symbolic_theory.candidate_goal_features
                 or val in symbolic_theory.receptacle_features
+                or (
+                    kb is not None
+                    and kb.has_feature_outcome(val, TransitionOutcome.RECEIVED_ENTITY)
+                )
             )
         )
         cell_set = set(cells) if cells is not None else None
@@ -75,7 +135,6 @@ class SpatialRoleClassifier:
             (grid_pos in goal_set or touches_goal) and (cell_set is None or touches_goal)
         ) or grid_pos in receptacle_set
 
-        is_confirmed_goal = bool(symbolic_theory and val in symbolic_theory.goal_features)
         has_known_goals = bool(
             symbolic_theory
             and (symbolic_theory.goal_features or symbolic_theory.receptacle_features)
@@ -85,13 +144,17 @@ class SpatialRoleClassifier:
             and (grid_pos == avatar_pos or (cell_set is not None and avatar_pos in cell_set))
         ):
             return EntityRole.AGENT
+        elif is_border:
+            return EntityRole.OBSTACLE
         elif is_confirmed_goal:
             return EntityRole.GOAL
-        elif is_theory_barrier or is_border:
+        elif is_theory_barrier:
             return EntityRole.OBSTACLE
         elif is_theory_cargo:
             return EntityRole.MANIPULABLE
-        elif is_spatial_goal and (not has_known_goals or val in symbolic_theory.goal_features):
+        elif is_spatial_goal and (
+            not has_known_goals or is_confirmed_goal or val in symbolic_theory.goal_features
+        ):
             return EntityRole.GOAL
         elif is_candidate_goal:
             return EntityRole.UNKNOWN

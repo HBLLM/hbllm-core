@@ -51,8 +51,8 @@ async def test_execution_node_timeout(execution_node):
         payload={"code": "import time\ntime.sleep(10)"},
     )
     resp = await execution_node.handle_message(msg)
-    assert resp.payload["status"] == "FAILURE"
-    assert "timed out" in resp.payload["output"]
+    assert resp.payload["status"] == "TIMEOUT"
+    assert "timed out" in resp.payload["error"]
 
 
 @pytest.mark.asyncio

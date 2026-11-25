@@ -42,9 +42,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from hbllm.hcir.world.cortex_planner import get_sub_attr
-
-
 @dataclass
 class MentalSimulationStep:
     """A step planned purely within internal mental simulation."""
@@ -197,8 +194,9 @@ class MentalSimulationPlanner:
         for r, c in engine.learned_barriers:
             if 0 <= r < H and 0 <= c < W:
                 val = int(curr_grid[r, c])
+                ev_lb = engine.symbolic_theory.evaluate_transition(val, locus=(r, c))
                 if (r, c) in engine.hazard_tracker.static_lethal_positions or (
-                    val != bg and not engine.symbolic_theory.is_walkable(val)
+                    val != bg and not (ev_lb.traversable and ev_lb.confidence > 0.0)
                 ):
                     static_barriers.add((r, c))
 
@@ -206,11 +204,19 @@ class MentalSimulationPlanner:
         prior_hazard_feats = EpistemicGoalScheduler._high_confidence_prior_hazards(
             engine, bg, av_feats
         )
+        has_cond_aff = bool(engine.symbolic_theory._conditional_affordances)
         for r in range(H):
             for c in range(W):
                 val = int(curr_grid[r, c])
+                if has_cond_aff:
+                    is_bar_cell = engine.symbolic_theory.is_barrier(val, agent_state=agent_state)
+                else:
+                    ev_cell = engine.symbolic_theory.evaluate_transition(val, locus=(r, c))
+                    is_bar_cell = (
+                        not ev_cell.traversable or ev_cell.risk_cost >= 40.0
+                    ) and engine.symbolic_theory.is_barrier(val)
                 if (
-                    engine.symbolic_theory.is_barrier(val, agent_state=agent_state)
+                    is_bar_cell
                     or (
                         val in engine.hazard_tracker.known_lethal_features
                         and val not in engine.mobile_threat_features
@@ -234,6 +240,20 @@ class MentalSimulationPlanner:
                 for c in range(W):
                     if int(curr_grid[r, c]) == bg and (r, c) not in goals:
                         static_barriers.add((r, c))
+
+        # Fold sparse locus-scoped KB beliefs into static barriers (blocking exceptions
+        # and releasing loci empirically confirmed traversable/rewarding in this context).
+        for locus_pos in engine.symbolic_theory.transition_kb._locus_beliefs:
+            lr, lc = int(locus_pos[0]), int(locus_pos[1])
+            if not (0 <= lr < H and 0 <= lc < W):
+                continue
+            locus_eval = engine.symbolic_theory.evaluate_transition(
+                int(curr_grid[lr, lc]), locus=(lr, lc)
+            )
+            if not locus_eval.traversable and (lr, lc) not in goals:
+                static_barriers.add((lr, lc))
+            elif locus_eval.traversable and locus_eval.confidence > 0.0:
+                static_barriers.discard((lr, lc))
 
         # Enforce HCIR Attractor Invariant: Non-lethal goals must never be static barriers
         all_lethals = engine.current_context_hazards
@@ -331,6 +351,51 @@ class MentalSimulationPlanner:
                         for c in range(W):
                             if int(curr_grid[r, c]) == m.trigger_feature:
                                 mutation_triggers.setdefault((r, c), set()).update(opened_cells)
+
+        # KB causal unlock rules (feature-scoped and locus-scoped)
+        for rule in engine.symbolic_theory.transition_kb.query_causal_rules():
+            eff = str(rule.effect_signature)
+            if not eff.startswith("unlocks:"):
+                continue
+            target_spec = eff[len("unlocks:") :].strip()
+            opened_cells_kb: set[tuple[int, int]] = set()
+            if target_spec.startswith("(") and target_spec.endswith(")"):
+                parts = target_spec[1:-1].split(",")
+                if len(parts) == 2:
+                    try:
+                        or_i, oc_i = int(parts[0].strip()), int(parts[1].strip())
+                    except ValueError:
+                        or_i, oc_i = -1, -1
+                    if 0 <= or_i < H and 0 <= oc_i < W:
+                        opened_cells_kb.add((or_i, oc_i))
+            else:
+                try:
+                    target_feat = int(target_spec)
+                except ValueError:
+                    target_feat = -1
+                if target_feat >= 0:
+                    for r in range(H):
+                        for c in range(W):
+                            if int(curr_grid[r, c]) == target_feat:
+                                opened_cells_kb.add((r, c))
+            if not opened_cells_kb:
+                continue
+            trig = rule.trigger_key
+            if isinstance(trig, tuple) and len(trig) == 2:
+                tr_r, tr_c = int(trig[0]), int(trig[1])
+                if 0 <= tr_r < H and 0 <= tr_c < W:
+                    mutation_triggers.setdefault((tr_r, tr_c), set()).update(opened_cells_kb)
+            elif isinstance(trig, int) and not isinstance(trig, bool):
+                trig_int = int(trig)
+                if (
+                    trig_int != bg
+                    and trig_int != engine.bg_feature
+                    and not engine.symbolic_theory.is_walkable(trig_int)
+                ):
+                    for r in range(H):
+                        for c in range(W):
+                            if int(curr_grid[r, c]) == trig_int:
+                                mutation_triggers.setdefault((r, c), set()).update(opened_cells_kb)
 
         return mutation_triggers
 
@@ -540,7 +605,7 @@ class MentalSimulationPlanner:
             engine._update_avatar_position_from_grid(curr_grid, known_av)
 
         if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
-            manip = get_sub_attr(engine.working_memory.body_schema, "active_manipulandum", None)
+            manip = engine.working_memory.body_schema.active_manipulandum
             if manip is not None and getattr(manip, "pos", None) is not None:
                 engine.state.avatar_pos = manip.pos
 
@@ -734,10 +799,18 @@ class MentalSimulationPlanner:
 
         # Unknown solid entity cells: risk-aware path planning
         unknown_entity_cells: set[tuple[int, int]] = set()
+        goal_set_coords = set(goals)
         for e in entities:
+            ent_cells = set(e.properties.get("cells", [e.grid_pos]))
+            if (
+                e.role == EntityRole.AGENT
+                or e.grid_pos in goal_set_coords
+                or not ent_cells.isdisjoint(goal_set_coords)
+            ):
+                continue
             if (
                 e.feature_id != bg
-                and e.feature_id not in av_feats
+                and (start_pos is None and e.feature_id not in av_feats or start_pos is not None)
                 and not engine.symbolic_theory.is_walkable(e.feature_id)
                 and e.feature_id not in engine.symbolic_theory.goal_features
                 and not engine.symbolic_theory.is_barrier(e.feature_id)
@@ -745,7 +818,7 @@ class MentalSimulationPlanner:
                 and e.feature_id not in engine.learned_cargo_features
                 and e.role != EntityRole.MANIPULABLE
             ):
-                for cell in e.properties.get("cells", [e.grid_pos]):
+                for cell in ent_cells:
                     unknown_entity_cells.add(cell)
 
         # Determine movement displacement scale
@@ -979,6 +1052,7 @@ class MentalSimulationPlanner:
                     max_candidate_goals=5,
                     preserve_goal_order=True,
                     soft_avoid_cells=soft_avoid or None,
+                    transition_kb=engine.symbolic_theory.transition_kb,
                 )
                 if geodesic_movable_actions
                 else None
@@ -987,17 +1061,18 @@ class MentalSimulationPlanner:
                 plan_valid = True
                 curr_p = start_pos
                 for act, next_p in action_plan:
-                    next_is_open = (
-                        0 <= next_p[0] < H
-                        and 0 <= next_p[1] < W
-                        and (
-                            int(curr_grid[next_p[0], next_p[1]]) == bg
-                            or engine.symbolic_theory.is_walkable(
-                                int(curr_grid[next_p[0], next_p[1]])
+                    next_is_open = False
+                    if 0 <= next_p[0] < H and 0 <= next_p[1] < W:
+                        next_feat = int(curr_grid[next_p[0], next_p[1]])
+                        if next_feat == bg or next_p in goals:
+                            next_is_open = True
+                        else:
+                            ev_n = engine.symbolic_theory.evaluate_transition(
+                                next_feat, locus=next_p
                             )
-                            or next_p in goals
-                        )
-                    )
+                            next_is_open = bool(
+                                ev_n.traversable and ev_n.confidence > 0.0 and ev_n.risk_cost < 40.0
+                            )
                     is_failed = (curr_p, act) in engine.failed_transitions and (
                         not next_is_open or engine.working_memory.reference_frame is not None
                     )
@@ -1113,8 +1188,12 @@ class MentalSimulationPlanner:
                 )
             elif is_block_delivery and blocks:
                 b_list = list(blocks)
-                if len(goals) == 1:
+                if len(goals) == 1 or len(b_list) == 1:
                     goal_dist = float(min(grid_dist_field[b[0], b[1]] for b in b_list))
+                elif len(b_list) < len(goals):
+                    goal_dist = float(
+                        sum(min(abs(g[0] - b[0]) + abs(g[1] - b[1]) for g in goals) for b in b_list)
+                    )
                 else:
                     goal_dist = 0.0
                     for g in goals:
@@ -1142,14 +1221,14 @@ class MentalSimulationPlanner:
             and engine.hazard_tracker.environmental_period >= 2
         )
         has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
-        meta_depth = get_sub_attr(engine.prediction_budget.counterfactual_budget, "max_depth", None)
+        meta_depth = engine.prediction_budget.counterfactual_budget.max_depth
         meta_mode = (
             getattr(
                 engine.working_memory.last_metacognitive_assessment,
                 "recommended_exploration_mode",
                 None,
             )
-            if get_sub_attr(engine.working_memory, "last_metacognitive_assessment", None)
+            if engine.working_memory.last_metacognitive_assessment
             else None
         )
         max_expansions_budget = engine.prediction_budget.compute_search_budget(
@@ -1209,6 +1288,7 @@ class MentalSimulationPlanner:
         ) -> tuple[list[MentalSimulationStep] | None, bool]:
             nonlocal counter
             parent_map: dict[int, tuple[int, MentalSimulationStep]] = {}
+            has_motor_slip = any(d.slip_rate > 0.05 for d in engine.action_dynamics.values())
 
             def _reconstruct_path(node_id: int) -> list[MentalSimulationStep]:
                 curr = node_id
@@ -1316,7 +1396,12 @@ class MentalSimulationPlanner:
                 visited_states.add(state_key)
 
                 if is_block_delivery:
-                    if all(g in cur_blocks for g in goals) and path_len > 0:
+                    required_deliveries = min(len(cur_blocks), len(goals))
+                    if (
+                        required_deliveries > 0
+                        and len(cur_blocks.intersection(goals)) >= required_deliveries
+                        and path_len > 0
+                    ):
                         path = _reconstruct_path(node_id)
                         logger.info(
                             "AutonomousEpistemicEngine: Compound Mental Simulation SUCCEEDED! Synthesized %d-step block delivery plan.",
@@ -1620,6 +1705,25 @@ class MentalSimulationPlanner:
                                     if not is_flanked_threat:
                                         epistemic_cost = float("inf")
                                         break
+                            kb_ev = engine.symbolic_theory.evaluate_transition(
+                                cell_feat, locus=(kr, kc)
+                            )
+                            if (
+                                kb_ev.risk_cost >= 40.0
+                                and cell_feat not in engine.mobile_threat_features
+                                and (kr, kc) not in (init_threats - cur_threats)
+                            ):
+                                is_flanked_threat = (
+                                    (kr, kc) in cur_threats
+                                    and (kr, kc) == (nr, nc)
+                                    and threat_map.get((kr, kc)) is not None
+                                    and cur_pos != threat_map[(kr, kc)].gaze_pos
+                                )
+                                if not is_flanked_threat:
+                                    epistemic_cost = float("inf")
+                                    break
+                            elif kb_ev.traversable and kb_ev.step_cost > 1.05:
+                                epistemic_cost += float(kb_ev.step_cost) - 1.0
                             if (kr, kc) in goals:
                                 g_rank = goals.index((kr, kc)) if (kr, kc) in goals else 0
                                 if g_rank > 0 and k == dist:
@@ -1629,7 +1733,7 @@ class MentalSimulationPlanner:
                             if (kr, kc) in unknown_entity_cells and (kr, kc) not in goals:
                                 epistemic_cost += 20.0
                             if (kr, kc) in _astar_soft_avoid and (kr, kc) not in goals:
-                                epistemic_cost += 18.0
+                                epistemic_cost += 60.0 if has_motor_slip else 18.0
                     if epistemic_cost == float("inf"):
                         continue
 
@@ -1921,6 +2025,114 @@ class MentalSimulationPlanner:
         open_barriers: set[tuple[int, int]] = set()
         accumulated_plan: list[MentalSimulationStep] = []
         max_stages = 8
+        _u_vals, _u_cnts = np.unique(curr_grid, return_counts=True)
+        feat_counts = {
+            int(k): int(v) for k, v in zip(_u_vals.tolist(), _u_cnts.tolist(), strict=False)
+        }
+
+        def build_bfs_tree(
+            s_pos: tuple[int, int],
+            active_barriers: set[tuple[int, int]],
+        ) -> tuple[
+            dict[tuple[int, int], tuple[tuple[int, int] | None, int | None]],
+            dict[tuple[int, int], int],
+            dict[tuple[int, int], tuple[int, tuple[int, int], int]],
+        ]:
+            parent_map: dict[tuple[int, int], tuple[tuple[int, int] | None, int | None]] = {
+                s_pos: (None, None)
+            }
+            dist_map: dict[tuple[int, int], int] = {s_pos: 0}
+            terminal_void_parent: dict[tuple[int, int], tuple[int, tuple[int, int], int]] = {}
+            q: deque[tuple[int, int]] = deque([s_pos])
+            while q:
+                p = q.popleft()
+                d_cur = dist_map[p]
+                for act, dr, dc in movable_actions:
+                    if (p, act) in engine.failed_transitions:
+                        continue
+                    nr, nc = p[0] + dr, p[1] + dc
+                    if not (0 <= nr < H and 0 <= nc < W):
+                        continue
+                    nxt = (nr, nc)
+                    if nxt in parent_map:
+                        continue
+
+                    step_r = int(np.sign(dr))
+                    step_c = int(np.sign(dc))
+                    dist = max(abs(dr), abs(dc))
+                    ray_blocked = False
+                    void_at_terminal = False
+                    for k in range(1, dist + 1):
+                        kr = p[0] + step_r * k
+                        kc = p[1] + step_c * k
+                        if (kr, kc) in active_barriers or (
+                            kr,
+                            kc,
+                        ) in engine.current_context_hazards:
+                            ray_blocked = True
+                            break
+                        if 0 <= kr < H and 0 <= kc < W:
+                            cell_val = int(curr_grid[kr, kc])
+                            if cell_val in engine.hazard_tracker.known_lethal_features:
+                                ray_blocked = True
+                                break
+                            if bg_is_impassable_void and cell_val == bg and (kr, kc) not in goals:
+                                if k == dist:
+                                    void_at_terminal = True
+                                else:
+                                    ray_blocked = True
+                                    break
+                    if ray_blocked:
+                        continue
+                    if void_at_terminal:
+                        if nxt not in terminal_void_parent:
+                            terminal_void_parent[nxt] = (d_cur + 1, p, act)
+                        continue
+
+                    parent_map[nxt] = (p, act)
+                    dist_map[nxt] = d_cur + 1
+                    q.append(nxt)
+            return parent_map, dist_map, terminal_void_parent
+
+        def path_from_tree(
+            target_positions: set[tuple[int, int]],
+            parent_map: dict[tuple[int, int], tuple[tuple[int, int] | None, int | None]],
+            dist_map: dict[tuple[int, int], int],
+            terminal_void_parent: dict[tuple[int, int], tuple[int, tuple[int, int], int]],
+        ) -> list[MentalSimulationStep] | None:
+            if not target_positions:
+                return None
+            best_t: tuple[int, int] | None = None
+            best_d = 1 << 30
+            best_is_void = False
+            for t in target_positions:
+                d = dist_map.get(t)
+                if d is not None and d < best_d:
+                    best_d = d
+                    best_t = t
+                    best_is_void = False
+                elif bg_is_impassable_void:
+                    vp = terminal_void_parent.get(t)
+                    if vp is not None and vp[0] < best_d:
+                        best_d = vp[0]
+                        best_t = t
+                        best_is_void = True
+            if best_t is None:
+                return None
+            rev: list[MentalSimulationStep] = []
+            cur = best_t
+            if best_is_void:
+                _, p, act = terminal_void_parent[cur]
+                rev.append(MentalSimulationStep(action=act, predicted_avatar_pos=cur))
+                cur = p
+            while True:
+                p_prev, act_prev = parent_map[cur]
+                if p_prev is None or act_prev is None:
+                    break
+                rev.append(MentalSimulationStep(action=act_prev, predicted_avatar_pos=cur))
+                cur = p_prev
+            rev.reverse()
+            return rev
 
         def find_shortest_path(
             s_pos: tuple[int, int],
@@ -1982,7 +2194,8 @@ class MentalSimulationPlanner:
         visited_triggers: set[tuple[int, int]] = set()
         for _ in range(max_stages):
             effective_barriers = static_barriers - open_barriers
-            goal_path = find_shortest_path(cur_pos, goals, effective_barriers)
+            p_map, d_map, tv_map = build_bfs_tree(cur_pos, effective_barriers)
+            goal_path = path_from_tree(goals, p_map, d_map, tv_map)
             if goal_path is not None:
                 accumulated_plan.extend(goal_path)
                 logger.info(
@@ -2032,7 +2245,7 @@ class MentalSimulationPlanner:
                 if trig_pos is not None:
                     if trig_pos in visited_triggers:
                         continue
-                    tr_path = find_shortest_path(cur_pos, {trig_pos}, effective_barriers)
+                    tr_path = path_from_tree({trig_pos}, p_map, d_map, tv_map)
                     if tr_path is not None:
                         candidate_triggers.append((trig_pos, tr_path, 100, {b_pos}))
                 elif req_tool is not None:
@@ -2042,9 +2255,7 @@ class MentalSimulationPlanner:
                         tool_found = False
                         for e in entities:
                             if e.feature_id == req_tool and e.grid_pos in reachable_cells:
-                                t_path = find_shortest_path(
-                                    cur_pos, {e.grid_pos}, effective_barriers
-                                )
+                                t_path = path_from_tree({e.grid_pos}, p_map, d_map, tv_map)
                                 if t_path is not None:
                                     candidate_triggers.append((e.grid_pos, t_path, 80, {b_pos}))
                                     tool_found = True
@@ -2077,8 +2288,8 @@ class MentalSimulationPlanner:
                                             )
                                         )
                                         if ib_trig and ib_trig in reachable_cells:
-                                            tr_path = find_shortest_path(
-                                                cur_pos, {ib_trig}, effective_barriers
+                                            tr_path = path_from_tree(
+                                                {ib_trig}, p_map, d_map, tv_map
                                             )
                                             if tr_path is not None:
                                                 candidate_triggers.append(
@@ -2095,8 +2306,8 @@ class MentalSimulationPlanner:
                                                     e2.feature_id == ib_tool
                                                     and e2.grid_pos in reachable_cells
                                                 ):
-                                                    t_path2 = find_shortest_path(
-                                                        cur_pos, {e2.grid_pos}, effective_barriers
+                                                    t_path2 = path_from_tree(
+                                                        {e2.grid_pos}, p_map, d_map, tv_map
                                                     )
                                                     if t_path2 is not None:
                                                         candidate_triggers.append(
@@ -2127,7 +2338,7 @@ class MentalSimulationPlanner:
                     and tr_pos not in effective_barriers
                 )
                 if is_standable:
-                    tr_path = find_shortest_path(cur_pos, {tr_pos}, effective_barriers)
+                    tr_path = path_from_tree({tr_pos}, p_map, d_map, tv_map)
                 else:
                     adj_cells = {
                         (tr_pos[0] + dr, tr_pos[1] + dc)
@@ -2139,7 +2350,7 @@ class MentalSimulationPlanner:
                     if cur_pos in adj_cells:
                         tr_path = []
                     elif adj_cells:
-                        tr_path = find_shortest_path(cur_pos, adj_cells, effective_barriers)
+                        tr_path = path_from_tree(adj_cells, p_map, d_map, tv_map)
                     else:
                         tr_path = None
 
@@ -2156,9 +2367,7 @@ class MentalSimulationPlanner:
                             if (ar, ac) in reachable_cells:
                                 adjacent_barrier_cells.add((ar, ac))
                     if adjacent_barrier_cells:
-                        approach_path = find_shortest_path(
-                            cur_pos, adjacent_barrier_cells, effective_barriers
-                        )
+                        approach_path = path_from_tree(adjacent_barrier_cells, p_map, d_map, tv_map)
                         if approach_path:
                             accumulated_plan.extend(approach_path)
                             for sg in buffered_subgoals:
@@ -2198,7 +2407,7 @@ class MentalSimulationPlanner:
                         and t_pos not in effective_barriers
                     )
                     if t_standable:
-                        t_path = find_shortest_path(cur_pos, {t_pos}, effective_barriers)
+                        t_path = path_from_tree({t_pos}, p_map, d_map, tv_map)
                     else:
                         adj_cells = {
                             (t_pos[0] + dr, t_pos[1] + dc)
@@ -2210,7 +2419,7 @@ class MentalSimulationPlanner:
                         if cur_pos in adj_cells:
                             t_path = []
                         elif adj_cells:
-                            t_path = find_shortest_path(cur_pos, adj_cells, effective_barriers)
+                            t_path = path_from_tree(adj_cells, p_map, d_map, tv_map)
                         else:
                             t_path = None
 
@@ -2218,7 +2427,7 @@ class MentalSimulationPlanner:
                         score = 1
                         if t_feat is not None:
                             # Relational salience: boost if matching a singleton cue
-                            if int(np.sum(curr_grid == t_feat)) == 2:
+                            if feat_counts.get(t_feat, 0) == 2:
                                 score = 5
                         candidate_triggers.append((t_pos, t_path, score, set()))
 
@@ -2265,7 +2474,7 @@ class MentalSimulationPlanner:
                     held_items=held_set,
                     lethal_positions=engine.current_context_hazards,
                     max_iterations=32,
-                    body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
+                    body_schema=engine.working_memory.body_schema,
                     tool_barrier_affinities=getattr(
                         engine.working_memory, "tool_barrier_affinities", None
                     ),
@@ -2553,7 +2762,16 @@ class MentalSimulationPlanner:
         )
 
         for e in entities:
-            if e.grid_pos == start_pos or e.feature_id in av_feats or e.feature_id == bg:
+            if (
+                e.grid_pos == start_pos
+                or e.role == EntityRole.AGENT
+                or (start_pos is None and e.feature_id in av_feats)
+                or e.feature_id == bg
+            ):
+                continue
+            if engine.working_memory.is_exogenous_locus(
+                e.grid_pos, lattice=curr_grid, bg=bg, include_outer_edge=False
+            ):
                 continue
             if engine.symbolic_theory.is_locus_explored(e.grid_pos):
                 continue
@@ -2712,7 +2930,7 @@ class MentalSimulationPlanner:
                 held_items=held_set,
                 lethal_positions=engine.current_context_hazards,
                 max_iterations=32,
-                body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
+                body_schema=engine.working_memory.body_schema,
                 tool_barrier_affinities=getattr(
                     engine.working_memory, "tool_barrier_affinities", None
                 ),

@@ -106,9 +106,9 @@ request.state.user_id  # User within tenant
 request.state.device_id  # Device (edge/IoT)
 ```
 
-- **Production mode**: Requires `HBLLM_JWT_SECRET` env var — refuses to start without it.
-- **Development mode**: Auto-generates an ephemeral secret per boot (with warning).
-- **Skip paths**: `/health`, `/metrics`, `/docs`, `/openapi.json`, admin/studio routes.
+- **Production mode (`HBLLM_ENV=production`)**: Requires `HBLLM_JWT_SECRET` (refuses to boot without it); requires `exp` claim on tokens.
+- **Fail-closed by default**: Missing/invalid `Authorization: Bearer <token>` returns `401` unless `HBLLM_UNSAFE_DEV_AUTH=1` is explicitly enabled outside production.
+- **Skip paths**: `/health`, `/health/live`, `/health/ready`, `/metrics`, `/v1/federation/mailbox` (plus `/docs`, `/openapi.json` outside production).
 
 ### Input Sanitization (`serving/security.py`)
 
@@ -223,7 +223,7 @@ async def my_endpoint(brain=Depends(get_brain)):
 | Route: Notifications | `serving/routes/notifications.py` | REST + SSE notification streaming |
 | Studio: Cognitive | `serving/studio/cognitive.py` | Live cognitive graph and node inspection |
 | Studio: Epistemics | `serving/studio/hcir_epistemics.py`| Epistemic hypothesis and calibration visualizer |
-| Studio: Persona | `serving/studio/persona.py` | Persona traits and UserModel debugger |
+| Studio: Persona | `serving/studio/persona.py` | Persona traits and profile override endpoints |
 | Dependencies | `serving/deps.py` | `Depends()` injection for routes |
 | Chat | `serving/chat.py` | Chat completion logic and streaming |
 | MCP Server | `serving/mcp_server.py` | MCP tool provider |
