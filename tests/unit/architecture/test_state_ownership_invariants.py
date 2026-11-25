@@ -28,14 +28,8 @@ _SANCTIONED_PREFIXES = (
     "hbllm/hcir/reasoning/operators/",
     "hbllm/hcir/grounding/concepts/relational_graph_matcher.py",
 )
-_WORKSPACE_ABSENT_FALLBACK_ALLOWLIST = frozenset(
-    {
-        "hbllm/hcir/language/core/gateway.py",
-        "hbllm/hcir/language/core/grounding.py",
-        "hbllm/hcir/grounding/concepts/registry.py",
-    }
-)
-MAX_WORKSPACE_ABSENT_FALLBACK_CALLS = 7
+_WORKSPACE_ABSENT_FALLBACK_ALLOWLIST: frozenset[str] = frozenset()
+MAX_WORKSPACE_ABSENT_FALLBACK_CALLS = 0
 
 
 def test_transaction_manager_fails_closed_by_default() -> None:

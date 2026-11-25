@@ -145,7 +145,21 @@ class HCIRTransaction(BaseModel):
     approvals: list[str] = Field(default_factory=list)  # Node IDs that approved
     annotations: list[TransactionAnnotation] = Field(default_factory=list)
     provenance: Provenance = Field(default_factory=Provenance)
+    tenant_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _sync_tenant_id(self) -> HCIRTransaction:
+        meta_tid = self.metadata.get("tenant_id") if isinstance(self.metadata, dict) else None
+        if self.tenant_id is not None and meta_tid is not None and self.tenant_id != meta_tid:
+            raise ValueError(
+                f"Conflicting transaction tenant_id={self.tenant_id!r} vs metadata['tenant_id']={meta_tid!r}"
+            )
+        if self.tenant_id is not None and meta_tid is None:
+            self.metadata["tenant_id"] = self.tenant_id
+        elif self.tenant_id is None and isinstance(meta_tid, str) and meta_tid:
+            self.tenant_id = meta_tid
+        return self
 
     @property
     def tx_id(self) -> str:

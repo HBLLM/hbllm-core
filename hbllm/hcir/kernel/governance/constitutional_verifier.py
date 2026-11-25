@@ -342,8 +342,10 @@ class ConstitutionalVerifier:
 
     @staticmethod
     def _transaction_tenant(transaction: HCIRTransaction) -> str | None:
-        tx_metadata = getattr(transaction, "metadata", None)
-        tx_tenant = tx_metadata.get("tenant_id") if isinstance(tx_metadata, dict) else None
+        tx_tenant = getattr(transaction, "tenant_id", None)
+        if not tx_tenant:
+            tx_metadata = getattr(transaction, "metadata", None)
+            tx_tenant = tx_metadata.get("tenant_id") if isinstance(tx_metadata, dict) else None
         if not tx_tenant and getattr(transaction, "provenance", None):
             tx_tenant = (
                 getattr(getattr(transaction.provenance, "scope", None), "tenant_id", None)

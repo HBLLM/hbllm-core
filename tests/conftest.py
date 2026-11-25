@@ -223,6 +223,46 @@ from hbllm.network.bus import InProcessBus
 logger = logging.getLogger(__name__)
 
 
+def _mount_archived_experiments_for_tests() -> None:
+    """Mount archived experiments/ directories onto legacy packages during repo tests."""
+    if os.getenv("HBLLM_DISABLE_EXPERIMENTS_SHIM") == "1":
+        return
+    import importlib
+    from pathlib import Path
+
+    exp_root = Path(base_dir) / "experiments"
+    if not exp_root.is_dir():
+        return
+
+    mounts = {
+        "hbllm.actions": exp_root / "legacy_actions",
+        "hbllm.perception": exp_root / "legacy_perception",
+        "hbllm.experiment": exp_root / "hbllm_experiment",
+        "hbllm.brain.composites": exp_root / "legacy_brain" / "composites",
+        "hbllm.brain.continual": exp_root / "legacy_brain" / "continual",
+        "hbllm.brain.decision": exp_root / "legacy_brain" / "decision",
+        "hbllm.brain.evaluation": exp_root / "legacy_brain" / "evaluation",
+        "hbllm.brain.execution": exp_root / "legacy_brain" / "execution",
+        "hbllm.brain.observability": exp_root / "legacy_brain" / "observability",
+        "hbllm.brain.simulation": exp_root / "legacy_brain" / "simulation",
+        "hbllm.brain.social": exp_root / "legacy_brain" / "social",
+        "hbllm.brain.transfer": exp_root / "legacy_brain" / "transfer",
+    }
+    for pkg_name, exp_path in mounts.items():
+        if not exp_path.is_dir():
+            continue
+        try:
+            pkg = importlib.import_module(pkg_name)
+        except Exception:
+            continue
+        pkg_path = getattr(pkg, "__path__", None)
+        if pkg_path is not None and str(exp_path) not in pkg_path:
+            pkg_path.append(str(exp_path))
+
+
+_mount_archived_experiments_for_tests()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_data_dir(tmp_path, monkeypatch):
     """Isolate each test's data directory to prevent SQLite/file pollution.

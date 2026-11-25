@@ -49,8 +49,12 @@ class GroundedConceptRegistry:
             self._workspace = graph
             self._graph = graph.graph
         else:
-            self._workspace = workspace
             self._graph = graph
+            if workspace is None:
+                from hbllm.hcir.workspace import HCIRWorkspaceState
+
+                workspace = HCIRWorkspaceState(graph=graph)
+            self._workspace = workspace
         self._concept_counter = 0
         # Prediction tracking: concept_id → list of (correct: bool)
         self._prediction_history: dict[str, list[bool]] = {}
@@ -91,41 +95,28 @@ class GroundedConceptRegistry:
             utility_delta=utility_delta,
             tags=["grounded_concept", domain, formation_source],
         )
-        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
-            ops: list[TransactionOperation] = [
-                TransactionOperation(
-                    op=TransactionOp.INSERT_NODE,
-                    node_id=concept.id,
-                    node_data=concept.model_dump(),
+        ops: list[TransactionOperation] = [
+            TransactionOperation(
+                op=TransactionOp.INSERT_NODE,
+                node_id=concept.id,
+                node_data=concept.model_dump(),
+            )
+        ]
+        for member_id in member_ids:
+            if self._graph.get_node(member_id) is not None:
+                edge = HCIREdge(
+                    edge_type=HCIREdgeType.INSTANCE_OF,
+                    sources=[member_id],
+                    targets=[concept.id],
                 )
-            ]
-            for member_id in member_ids:
-                if self._graph.get_node(member_id) is not None:
-                    edge = HCIREdge(
-                        edge_type=HCIREdgeType.INSTANCE_OF,
-                        sources=[member_id],
-                        targets=[concept.id],
+                ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.ADD_EDGE,
+                        edge_id=edge.id,
+                        edge_data=edge.model_dump(),
                     )
-                    ops.append(
-                        TransactionOperation(
-                            op=TransactionOp.ADD_EDGE,
-                            edge_id=edge.id,
-                            edge_data=edge.model_dump(),
-                        )
-                    )
-            self._workspace.commit_operations(ops, author="grounded_concept_registry")
-        else:
-            self._graph.add_node(concept)
-            # Create INSTANCE_OF edges (validated — passed predictive utility test)
-            for member_id in member_ids:
-                if self._graph.get_node(member_id) is not None:
-                    self._graph.add_edge(
-                        HCIREdge(
-                            edge_type=HCIREdgeType.INSTANCE_OF,
-                            sources=[member_id],
-                            targets=[concept.id],
-                        )
-                    )
+                )
+        self._workspace.commit_operations(ops, author="grounded_concept_registry")
 
         self._prediction_history[concept.id] = []
 
@@ -164,32 +155,30 @@ class GroundedConceptRegistry:
         if concept is None:
             return
 
-        concept.prediction_count += 1
+        updated = concept.model_copy(deep=True)
+        updated.prediction_count += 1
 
         # Update prediction accuracy (exponential moving average)
         alpha = 0.15
         outcome = 1.0 if correct else 0.0
-        concept.prediction_accuracy = concept.prediction_accuracy * (1 - alpha) + outcome * alpha
+        updated.prediction_accuracy = updated.prediction_accuracy * (1 - alpha) + outcome * alpha
 
         # Update confidence from prediction performance
         recent = self._prediction_history[concept_id][-20:]
         if len(recent) >= 3:
             success_rate = sum(recent) / len(recent)
-            concept.confidence = success_rate
+            updated.confidence = success_rate
 
-        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
-            self._workspace.commit_operations(
-                [
-                    TransactionOperation(
-                        op=TransactionOp.UPSERT_NODE,
-                        node_id=concept.id,
-                        node_data=concept.model_dump(),
-                    )
-                ],
-                author="grounded_concept_registry",
-            )
-        else:
-            self._graph.upsert_node(concept)
+        self._workspace.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=updated.id,
+                    node_data=updated.model_dump(),
+                )
+            ],
+            author="grounded_concept_registry",
+        )
 
     def concept_members(self, concept_id: str) -> list[str]:
         """Get all entity IDs that are INSTANCE_OF this concept."""

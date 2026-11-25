@@ -60,6 +60,10 @@ class GroundingResolver:
     ) -> None:
         self._graph = graph
         self._ref_resolver = reference_resolver or ReferenceResolver()
+        if workspace is None:
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            workspace = HCIRWorkspaceState(graph=graph)
         self._workspace = workspace
         self._lexicon = lexicon
 
@@ -329,20 +333,17 @@ class GroundingResolver:
             tags=["language_introduced", concept_name],
         )
 
-        # Commit through workspace if available, else direct graph add
-        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
-            self._workspace.commit_operations(
-                [
-                    TransactionOperation(
-                        op=TransactionOp.UPSERT_NODE,
-                        node_id=entity.id,
-                        node_data=entity.model_dump(),
-                    )
-                ],
-                author="grounding_resolver",
-            )
-        else:
-            self._graph.add_node(entity)
+        # Commit atomically through workspace TransactionManager
+        self._workspace.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=entity.id,
+                    node_data=entity.model_dump(),
+                )
+            ],
+            author="grounding_resolver",
+        )
 
         logger.info(
             "GroundingResolver: auto-created PhysicalEntityNode '%s' (id=%s) from assertion",

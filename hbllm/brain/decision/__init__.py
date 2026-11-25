@@ -7,38 +7,35 @@ multi-criteria DecisionEngine, and rational inaction.
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib
+from typing import Any
 
-_exp_path = Path(__file__).resolve().parents[3] / "experiments" / "legacy_brain" / "decision"
-if _exp_path.exists() and str(_exp_path) not in __path__:
-    __path__.append(str(_exp_path))
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "ActiveDiscoveryLoop": ("hbllm.brain.decision.discovery_loop", "ActiveDiscoveryLoop"),
+    "EpistemicGap": ("hbllm.brain.decision.gap", "EpistemicGap"),
+    "EpistemicGapScanner": ("hbllm.brain.decision.gap", "EpistemicGapScanner"),
+    "HypothesisOption": ("hbllm.brain.decision.gap", "HypothesisOption"),
+    "CandidateKind": ("hbllm.brain.decision.policy", "CandidateKind"),
+    "DecisionCandidate": ("hbllm.brain.decision.policy", "DecisionCandidate"),
+    "DecisionEngine": ("hbllm.brain.decision.policy", "DecisionEngine"),
+    "DecisionResult": ("hbllm.brain.decision.policy", "DecisionResult"),
+    "DecisionType": ("hbllm.brain.decision.policy", "DecisionType"),
+    "EpistemicProbe": ("hbllm.brain.decision.probe", "EpistemicProbe"),
+    "ProbeGenerator": ("hbllm.brain.decision.probe", "ProbeGenerator"),
+}
+
+__all__ = sorted(_EXPORTS.keys())
 
 
-from hbllm.brain.decision.discovery_loop import ActiveDiscoveryLoop
-from hbllm.brain.decision.gap import (
-    EpistemicGap,
-    EpistemicGapScanner,
-    HypothesisOption,
-)
-from hbllm.brain.decision.policy import (
-    CandidateKind,
-    DecisionCandidate,
-    DecisionEngine,
-    DecisionResult,
-    DecisionType,
-)
-from hbllm.brain.decision.probe import EpistemicProbe, ProbeGenerator
+def __getattr__(name: str) -> Any:
+    if name in _EXPORTS:
+        mod_path, attr = _EXPORTS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    "ActiveDiscoveryLoop",
-    "CandidateKind",
-    "DecisionCandidate",
-    "DecisionEngine",
-    "DecisionResult",
-    "DecisionType",
-    "EpistemicGap",
-    "EpistemicGapScanner",
-    "EpistemicProbe",
-    "HypothesisOption",
-    "ProbeGenerator",
-]
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_EXPORTS.keys()))

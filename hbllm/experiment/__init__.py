@@ -7,77 +7,64 @@ and master report generators.
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib
+from typing import Any
 
-# Extend package search path to include experiments/hbllm_experiment
-_exp_path = Path(__file__).resolve().parents[2] / "experiments" / "hbllm_experiment"
-if _exp_path.exists() and str(_exp_path) not in __path__:
-    __path__.append(str(_exp_path))
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "ASTLeakageAuditor": ("hbllm.experiment.ast_audit", "ASTLeakageAuditor"),
+    "ASTViolation": ("hbllm.experiment.ast_audit", "ASTViolation"),
+    "AblatedHBLLMCohort": ("hbllm.experiment.cohorts", "AblatedHBLLMCohort"),
+    "BaseCohort": ("hbllm.experiment.cohorts", "BaseCohort"),
+    "CohortOutput": ("hbllm.experiment.cohorts", "CohortOutput"),
+    "HBLLMCoreCohort": ("hbllm.experiment.cohorts", "HBLLMCoreCohort"),
+    "HBLLMPlusLLMCohort": ("hbllm.experiment.cohorts", "HBLLMPlusLLMCohort"),
+    "HeuristicBaselineCohort": ("hbllm.experiment.cohorts", "HeuristicBaselineCohort"),
+    "LLMOnlyCohort": ("hbllm.experiment.cohorts", "LLMOnlyCohort"),
+    "CanonicalTaskEnvironment": ("hbllm.experiment.environments", "CanonicalTaskEnvironment"),
+    "EnvironmentObservation": ("hbllm.experiment.environments", "EnvironmentObservation"),
+    "IndependentEnvironmentOracle": (
+        "hbllm.experiment.environments",
+        "IndependentEnvironmentOracle",
+    ),
+    "PhysicalEnvironmentState": ("hbllm.experiment.environments", "PhysicalEnvironmentState"),
+    "LeakageAuditReport": ("hbllm.experiment.leakage_audit", "LeakageAuditReport"),
+    "LeakageAuditor": ("hbllm.experiment.leakage_audit", "LeakageAuditor"),
+    "ReproducibilityManifest": ("hbllm.experiment.manifests", "ReproducibilityManifest"),
+    "ExperimentMetricsCalculator": ("hbllm.experiment.metrics", "ExperimentMetricsCalculator"),
+    "ScientificExperimentReport": ("hbllm.experiment.reports", "ScientificExperimentReport"),
+    "ExperimentRunner": ("hbllm.experiment.runner", "ExperimentRunner"),
+    "ExperimentStatistics": ("hbllm.experiment.statistics", "ExperimentStatistics"),
+    "MetricSummary": ("hbllm.experiment.statistics", "MetricSummary"),
+    "ProportionSummary": ("hbllm.experiment.statistics", "ProportionSummary"),
+    "E1_ConceptAcquisitionTask": ("hbllm.experiment.tasks", "E1_ConceptAcquisitionTask"),
+    "E2_LexicalAcquisitionTask": ("hbllm.experiment.tasks", "E2_LexicalAcquisitionTask"),
+    "E3_CounterfactualSimulationTask": (
+        "hbllm.experiment.tasks",
+        "E3_CounterfactualSimulationTask",
+    ),
+    "E4_EpistemicCalibrationTask": ("hbllm.experiment.tasks", "E4_EpistemicCalibrationTask"),
+    "E5_ActiveEpistemicDiscoveryTask": (
+        "hbllm.experiment.tasks",
+        "E5_ActiveEpistemicDiscoveryTask",
+    ),
+    "E6_RelationalTransferTask": ("hbllm.experiment.tasks", "E6_RelationalTransferTask"),
+    "E7_LifelongCurriculumTask": ("hbllm.experiment.tasks", "E7_LifelongCurriculumTask"),
+    "E8_CausalInterventionTask": ("hbllm.experiment.tasks", "E8_CausalInterventionTask"),
+    "TaskEvaluationResult": ("hbllm.experiment.tasks", "TaskEvaluationResult"),
+}
 
-from hbllm.experiment.ast_audit import ASTLeakageAuditor, ASTViolation
-from hbllm.experiment.cohorts import (
-    AblatedHBLLMCohort,
-    BaseCohort,
-    CohortOutput,
-    HBLLMCoreCohort,
-    HBLLMPlusLLMCohort,
-    HeuristicBaselineCohort,
-    LLMOnlyCohort,
-)
-from hbllm.experiment.environments import (
-    CanonicalTaskEnvironment,
-    EnvironmentObservation,
-    IndependentEnvironmentOracle,
-    PhysicalEnvironmentState,
-)
-from hbllm.experiment.leakage_audit import LeakageAuditor, LeakageAuditReport
-from hbllm.experiment.manifests import ReproducibilityManifest
-from hbllm.experiment.metrics import ExperimentMetricsCalculator
-from hbllm.experiment.reports import ScientificExperimentReport
-from hbllm.experiment.runner import ExperimentRunner
-from hbllm.experiment.statistics import ExperimentStatistics, MetricSummary, ProportionSummary
-from hbllm.experiment.tasks import (
-    E1_ConceptAcquisitionTask,
-    E2_LexicalAcquisitionTask,
-    E3_CounterfactualSimulationTask,
-    E4_EpistemicCalibrationTask,
-    E5_ActiveEpistemicDiscoveryTask,
-    E6_RelationalTransferTask,
-    E7_LifelongCurriculumTask,
-    E8_CausalInterventionTask,
-    TaskEvaluationResult,
-)
+__all__ = sorted(_EXPORTS.keys())
 
-__all__ = [
-    "ASTLeakageAuditor",
-    "ASTViolation",
-    "AblatedHBLLMCohort",
-    "BaseCohort",
-    "CanonicalTaskEnvironment",
-    "CohortOutput",
-    "E1_ConceptAcquisitionTask",
-    "E2_LexicalAcquisitionTask",
-    "E3_CounterfactualSimulationTask",
-    "E4_EpistemicCalibrationTask",
-    "E5_ActiveEpistemicDiscoveryTask",
-    "E6_RelationalTransferTask",
-    "E7_LifelongCurriculumTask",
-    "E8_CausalInterventionTask",
-    "EnvironmentObservation",
-    "ExperimentMetricsCalculator",
-    "ExperimentRunner",
-    "ExperimentStatistics",
-    "HBLLMCoreCohort",
-    "HBLLMPlusLLMCohort",
-    "HeuristicBaselineCohort",
-    "IndependentEnvironmentOracle",
-    "LLMOnlyCohort",
-    "LeakageAuditReport",
-    "LeakageAuditor",
-    "MetricSummary",
-    "PhysicalEnvironmentState",
-    "ProportionSummary",
-    "ReproducibilityManifest",
-    "ScientificExperimentReport",
-    "TaskEvaluationResult",
-]
+
+def __getattr__(name: str) -> Any:
+    if name in _EXPORTS:
+        mod_path, attr = _EXPORTS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_EXPORTS.keys()))

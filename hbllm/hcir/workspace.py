@@ -212,6 +212,7 @@ class HCIRWorkspaceState:
         author: str = "system",
         metadata: dict[str, Any] | None = None,
         grant: Any = None,
+        tenant_id: str | None = None,
     ) -> HCIRTransaction:
         """Propose and commit a batch of operations through the commit authority.
 
@@ -223,16 +224,17 @@ class HCIRWorkspaceState:
         meta = dict(metadata or {})
         if grant is not None:
             meta["commit_grant"] = grant.grant_id
+        tx_kwargs: dict[str, Any] = {"author": author, "metadata": meta}
+        if tenant_id is not None:
+            tx_kwargs["tenant_id"] = tenant_id
         ops_list = list(operations)
         if len(ops_list) > 400:
             last_committed = None
             for i in range(0, len(ops_list), 400):
-                sub_tx = HCIRTransaction(
-                    author=author, operations=ops_list[i : i + 400], metadata=meta
-                )
+                sub_tx = HCIRTransaction(operations=ops_list[i : i + 400], **tx_kwargs)
                 last_committed = self.transaction_manager.commit(sub_tx)
             return last_committed  # type: ignore[return-value]
-        tx = HCIRTransaction(author=author, operations=ops_list, metadata=meta)
+        tx = HCIRTransaction(operations=ops_list, **tx_kwargs)
         return self.transaction_manager.commit(tx)
 
     # ── Graph Operations (kernel-internal; recorded in event log) ────
