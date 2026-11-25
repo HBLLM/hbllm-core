@@ -1201,6 +1201,7 @@ class PrefrontalDeliberationEngine:
             ):
                 pass
             else:
+                view.mental_plan.clear()
                 view.working_memory.active_plan_step = None
                 active_step = None
 

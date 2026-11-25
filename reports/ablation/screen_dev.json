@@ -11,8 +11,8 @@
     ],
     "deaths": 2,
     "mean_steps": 23.04,
-    "mean_p50_ms": 95.52,
-    "mean_p95_ms": 226.26,
+    "mean_p50_ms": 31.19,
+    "mean_p95_ms": 55.72,
     "family_scores": {
       "grid": 0.8674,
       "continuous": 0.7479,
@@ -26,17 +26,16 @@
     "crash": null
   },
   "calls": {
-    "subgoal_stack": 11599,
-    "body_schema": 2540,
-    "habenular_ior": 100515,
+    "subgoal_stack": 11605,
+    "body_schema": 9442,
+    "habenular_ior": 103807,
     "remote_causal": 3337,
-    "hazard_tracker": 175094,
-    "acc_conflict_monitor": 38069,
+    "hazard_tracker": 174584,
+    "acc_conflict_monitor": 38075,
     "object_planner": 13101,
     "prediction_budget": 609,
-    "option_discovery": 27973,
+    "option_discovery": 2425,
     "budget_governor": 45392,
-    "world_kernel": 0,
     "grounding_bridge": 17547
   },
   "used": [
@@ -52,7 +51,5 @@
     "remote_causal",
     "subgoal_stack"
   ],
-  "unused": [
-    "world_kernel"
-  ]
+  "unused": []
 }

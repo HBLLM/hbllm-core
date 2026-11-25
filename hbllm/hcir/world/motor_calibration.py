@@ -79,6 +79,8 @@ class ActionDynamicsModel:
         elif self.delta_r == 0 and self.delta_c == 0 and len(self.displacement) >= 2:
             self.delta_r = int(round(self.displacement[0]))
             self.delta_c = int(round(self.displacement[1]))
+        if not self.delta_counts and (self.delta_r != 0 or self.delta_c != 0):
+            self.delta_counts[(self.delta_r, self.delta_c)] = max(1, int(self.probes_tested))
 
     def record_continuous_delta(self, dx: float, dy: float) -> None:
         """Record an empirically observed continuous displacement vector (dx, dy)."""
@@ -257,18 +259,28 @@ class ActionDynamicsModel:
                                 observed_delta, success=True, learning_rate=learning_rate
                             )
                         if self.delta_counts:
+                            cur_vec = (self.delta_r, self.delta_c)
                             modal_d, _ = max(
                                 self.delta_counts.items(),
-                                key=lambda kv: (kv[1], abs(kv[0][0]) + abs(kv[0][1])),
+                                key=lambda kv: (
+                                    kv[1],
+                                    1 if kv[0] == cur_vec else 0,
+                                    abs(kv[0][0]) + abs(kv[0][1]),
+                                ),
                             )
                             self.delta_r, self.delta_c = modal_d[0], modal_d[1]
                             self.displacement = (float(self.delta_r), float(self.delta_c))
                         return
 
                 if self.delta_counts:
+                    cur_vec = (self.delta_r, self.delta_c)
                     modal_d, modal_cnt = max(
                         self.delta_counts.items(),
-                        key=lambda kv: (kv[1], abs(kv[0][0]) + abs(kv[0][1])),
+                        key=lambda kv: (
+                            kv[1],
+                            1 if kv[0] == cur_vec else 0,
+                            abs(kv[0][0]) + abs(kv[0][1]),
+                        ),
                     )
                     self.delta_r, self.delta_c = modal_d[0], modal_d[1]
                     if is_unit_step:
@@ -609,3 +621,77 @@ class StateMutationModel:
             occurrences=data.get("occurrences", 1),
             **data.get("metadata", {}),
         )
+
+
+def disambiguate_stochastic_motor_basis(
+    action_dynamics: dict[Any, ActionDynamicsModel],
+    action_affordances: dict[Any, Any] | None = None,
+    primary_action: Any | None = None,
+) -> list[Any]:
+    """Resolve motor vector collisions caused by early stochastic wind slips.
+
+    When an uncertain/noisy action shares the same displacement vector as a clean,
+    low-slip action, reassign the noisy action to an unclaimed unit vector supported by
+    its empirical ``delta_counts`` near the mode. When ``action_affordances`` is passed,
+    synchronizes ``is_displacement`` and ``delta`` for reassigned actions and ``primary_action``.
+    """
+    if not action_dynamics:
+        return []
+    by_vec: dict[tuple[int, int], list[tuple[Any, ActionDynamicsModel]]] = {}
+    for aid, dyn in action_dynamics.items():
+        if not dyn.is_displacement_action():
+            continue
+        vec = dyn.get_displacement()
+        if vec != (0, 0):
+            by_vec.setdefault(vec, []).append((aid, dyn))
+
+    clean_claimed = {
+        vec for vec, owners in by_vec.items() if any(d.slip_rate <= 0.05 for _, d in owners)
+    }
+    changed: list[Any] = []
+    for vec, owners in by_vec.items():
+        if len(owners) < 2:
+            continue
+        owners_sorted = sorted(
+            owners,
+            key=lambda item: (
+                -item[1].delta_counts.get(vec, 0),
+                item[1].slip_rate,
+                -item[1].confidence,
+            ),
+        )
+        for aid, dyn in owners_sorted[1:]:
+            if not dyn.delta_counts or dyn.slip_rate <= 0.05:
+                continue
+            max_cnt = max(dyn.delta_counts.values())
+            candidates = [
+                (cnt, cand_v)
+                for cand_v, cnt in dyn.delta_counts.items()
+                if cand_v != vec
+                and cand_v not in clean_claimed
+                and (abs(cand_v[0]) + abs(cand_v[1])) == 1
+                and cnt >= max_cnt - 1
+            ]
+            if not candidates:
+                continue
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            best_v = candidates[0][1]
+            dyn.delta_r, dyn.delta_c = int(best_v[0]), int(best_v[1])
+            dyn.displacement = (float(dyn.delta_r), float(dyn.delta_c))
+            clean_claimed.add(best_v)
+            changed.append(aid)
+            if action_affordances is not None and aid in action_affordances:
+                r_dr, r_dc = dyn.get_displacement()
+                action_affordances[aid].is_displacement = dyn.is_displacement_action()
+                action_affordances[aid].delta = (r_dr, r_dc)
+    if (
+        primary_action is not None
+        and action_affordances is not None
+        and primary_action in action_affordances
+        and primary_action in action_dynamics
+    ):
+        p_dyn = action_dynamics[primary_action]
+        p_dr, p_dc = p_dyn.get_displacement()
+        action_affordances[primary_action].is_displacement = p_dyn.is_displacement_action()
+        action_affordances[primary_action].delta = (p_dr, p_dc)
+    return changed

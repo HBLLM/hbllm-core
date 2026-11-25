@@ -18,6 +18,7 @@ from hbllm.hcir.world.cortex_perception import PerceptionEngine
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.counterfactual_simulation import CounterfactualDeadlockDetector
 from hbllm.hcir.world.engine_state import get_engine_state_attr
+from hbllm.hcir.world.objects.risk import compute_slip_adjacency_penalty
 from hbllm.hcir.world.spatial_containment import RoomDoor
 
 if TYPE_CHECKING:
@@ -639,21 +640,9 @@ class EpistemicCuriosityExplorer:
             mob_avoid = engine.hazard_tracker.get_mobile_avoidance_cells(
                 curr_grid, set(engine.symbolic_theory.barrier_features), bg
             )
-            dyn_risk_pen = 120.0 if (nr, nc) in mob_avoid else 0.0
-            if any(d.slip_rate > 0.05 for d in engine.action_dynamics.values()):
-                for dr_s, dc_s in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    sr_s, sc_s = nr + dr_s, nc + dc_s
-                    if 0 <= sr_s < H and 0 <= sc_s < W:
-                        sv_s = int(curr_grid[sr_s, sc_s])
-                        if (
-                            sv_s in engine.hazard_tracker.known_lethal_features
-                            or (sr_s, sc_s) in engine.hazard_tracker.static_lethal_positions
-                            or (
-                                rp_map.get(sv_s, {}).get("hazard", 0.0) >= 0.65 if rp_map else False
-                            )
-                        ):
-                            dyn_risk_pen += 80.0
-                            break
+            dyn_risk_pen = (
+                120.0 if (nr, nc) in mob_avoid else 0.0
+            ) + compute_slip_adjacency_penalty(engine, curr_grid, nr, nc, tr, tc, bg, H, W, rp_map)
             dist_to_target = abs(nr - tr) + abs(nc - tc)
             estimated_cost = float(dist_to_target) + cycle_pen + repulsion_penalty + dyn_risk_pen
 

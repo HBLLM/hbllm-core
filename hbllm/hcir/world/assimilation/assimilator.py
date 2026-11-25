@@ -25,6 +25,7 @@ from hbllm.hcir.world.engine_state import get_engine_state_attr
 from hbllm.hcir.world.motor_calibration import (
     ActionDynamicsModel,
     StateMutationModel,
+    disambiguate_stochastic_motor_basis,
 )
 from hbllm.hcir.world.percept import EpistemicPhase, TerminalSignal
 
@@ -1660,14 +1661,17 @@ class EpistemicFeedbackAssimilator:
                         view.action_dynamics[action].update_from_trial(
                             (dr, dc), success=True, learning_rate=0.5
                         )
-                    if action in view.action_affordances:
-                        view.action_affordances[action].is_displacement = dr != 0 or dc != 0
-                        view.action_affordances[action].delta = (dr, dc)
-                    else:
+                    disambiguate_stochastic_motor_basis(
+                        view.action_dynamics,
+                        action_affordances=view.action_affordances,
+                        primary_action=action,
+                    )
+                    if action not in view.action_affordances:
+                        eff_dr, eff_dc = view.action_dynamics[action].get_displacement()
                         view.action_affordances[action] = ActionAffordance(
                             action_id=action,
-                            is_displacement=(dr != 0 or dc != 0),
-                            delta=(dr, dc),
+                            is_displacement=view.action_dynamics[action].is_displacement_action(),
+                            delta=(eff_dr, eff_dc),
                         )
                     if dr != 0 or dc != 0:
                         EpistemicFeedbackAssimilator._synchronize_lattice_stride(

@@ -30,7 +30,7 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and neuro-symbolic
 
 3. **Zero LLM Dependency in Cognitive Core:**
    > The core cognitive runtime (`hbllm.hcir` — including `world`, `grounding`, `reasoning`, `language`, `snn`, `capabilities`, `kernel` — and `hbllm.brain.reasoning`) is **100% LLM-independent**.  
-   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically without requiring external API calls (native Rust spatial/graph kernels run sub-millisecond `< 0.2ms`; the full 5-stage Python `AutonomousEpistemicEngine.step()` loop runs in low tens of milliseconds — `p50 ~ 10-15ms / p95 <= 45ms` at `32×32`, profiled by `hbllm bench profile`).  
+   Core constraint solving, formal logic, A*/MCTS planning, kinematic simulation, and spatial transforms must run deterministically without requiring external API calls (native Rust spatial/graph kernels run sub-millisecond `< 0.2ms` per op / `combined p95=2.637ms`; on `32×32`, `AutonomousEpistemicEngine.step()` measures `CPU p50=20.47ms / p95=23.25ms`, `Wall p50=52.24ms / p95=149.21ms` in `reports/profile/profile_post_m1.json` with host I/O variance, target budget `<= 45ms` CPU).  
    *(Permitted: deterministic, offline-trained feed-forward neural or spiking neural feature encoders conforming to the `FeatureExtractor` protocol, with zero runtime LLM or cloud dependencies).*
 
 4. **Constitutional Governance:**
@@ -98,10 +98,11 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 > **Domain-Agnostic Invariant:** Cortical faculties must never be coupled to a specific game, level, or simulation environment. Mechanisms must be based on universal physical principles (topology, collision cones, reachability, symmetries, causal credit assignment).
 
 > [!NOTE]
-> **Faculty Roster (latest R1 ablation on saturated dev: `reports/ablation/20261124_084702_r1_dev.json`; earlier R5 baseline: `reports/ablation/20261116_175717_r1_dev.json`):**
+> **Faculty Roster (`reports/ablation/20261124_084702_r1_dev.json` + `reports/ablation/20261125_090037_r1_widened_dev.json`):**
 > - **Stage owners (core, always kept):** `perception`, `assimilator`, `deliberation_engine`, `planner`, `motor`, `episodic_cortex`, `working_memory`, `symbolic_theory`.
-> - **Measured R1 `keep` (2026-11-24):** `body_schema`, `habenular_ior`, `remote_causal`, `object_planner`, `prediction_budget`, `budget_governor`.
-> - **Marked `experimental` on saturated dev (pending `widened_dev` R1 ablation):** `subgoal_stack`, `hazard_tracker`, `acc_conflict_monitor`, `option_discovery`, `grounding_bridge` (`world_kernel` = `unused`, 0 calls).
+> - **Measured R1 `keep` (`dev` 2026-11-24):** `body_schema`, `habenular_ior`, `remote_causal`, `object_planner`, `prediction_budget`, `budget_governor`.
+> - **Promoted to `keep` on `widened_dev` (2026-11-25, `n=120`, baseline `sr=0.7750`, `gen=0.7503`):** `acc_conflict_monitor` (`Δgen=+0.0527, Δsr=+0.0833, Δdeaths=+7`), `hazard_tracker` (`Δgen=+0.0238, Δsr=+0.0333, Δdeaths=+4`), `subgoal_stack` (`Δgen=+0.0044, Δsr=+0.0167`).
+> - **Remaining `experimental` on `widened_dev`:** `option_discovery` (`Δgen=0.0000`), `grounding_bridge` (`Δgen=0.0000`). (`world_kernel` = `unused`, 0 calls on `dev`).
 > - **Removed in R5 & Rescoped LOC Budget:** 28 zero-effect/dead modules deleted and dead pipeline hooks unwired (`hbllm/**/*.py` reduced to `242,638` LOC in R5). Active codebase budget is **`<= 300,000` LOC** across `hbllm/**/*.py` (with `<= 150,000` LOC scoped to `hbllm/hcir/**`, tracked by `tests/unit/architecture/test_loc_budget.py`) so high-value non-LLM subsystems (`reasoning/`, `snn/`, `A16`/`A17` `language/`, multimodal sensory fusion, and governed tool capabilities) can be consolidated directly into `hcir/` without `__path__.append` shadow-tree shims. Every newly admitted cortical/grounding faculty must still pass R1 ablation (`Δ > 0`) and latency (`p95 <= 45ms` at `32×32`) gates.
 
 ---

@@ -1288,6 +1288,7 @@ class MentalSimulationPlanner:
         ) -> tuple[list[MentalSimulationStep] | None, bool]:
             nonlocal counter
             parent_map: dict[int, tuple[int, MentalSimulationStep]] = {}
+            has_motor_slip = any(d.slip_rate > 0.05 for d in engine.action_dynamics.values())
 
             def _reconstruct_path(node_id: int) -> list[MentalSimulationStep]:
                 curr = node_id
@@ -1732,7 +1733,7 @@ class MentalSimulationPlanner:
                             if (kr, kc) in unknown_entity_cells and (kr, kc) not in goals:
                                 epistemic_cost += 20.0
                             if (kr, kc) in _astar_soft_avoid and (kr, kc) not in goals:
-                                epistemic_cost += 18.0
+                                epistemic_cost += 60.0 if has_motor_slip else 18.0
                     if epistemic_cost == float("inf"):
                         continue
 

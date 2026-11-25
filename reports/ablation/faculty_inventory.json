@@ -10,8 +10,7 @@
     "prediction_budget": "PredictionBudget",
     "option_discovery": "OptionDiscoveryEngine",
     "budget_governor": "ActionBudgetGovernor",
-    "world_kernel": "WorldKernel",
     "grounding_bridge": "CorticalGroundingBridge"
   },
-  "count": 12
+  "count": 11
 }
