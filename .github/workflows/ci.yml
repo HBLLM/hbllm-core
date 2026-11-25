@@ -50,7 +50,9 @@ jobs:
         run: ruff format --check .
 
       - name: Audit dependencies for CVEs
-        run: pip-audit --strict --skip-editable --desc
+        run: |
+          pip freeze --exclude-editable | grep -E '^[A-Za-z0-9_.-]+==' > /tmp/audit-reqs.txt
+          pip-audit -r /tmp/audit-reqs.txt --strict --no-deps --desc
 
       - name: Static security analysis (bandit)
         run: bandit -r hbllm/ plugins/ -c pyproject.toml --severity-level medium -q
