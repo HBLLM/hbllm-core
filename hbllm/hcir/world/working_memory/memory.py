@@ -180,6 +180,7 @@ class PrefrontalWorkingMemory:
         # Universal Dynamic Action Affordance Registry
         self.action_affordances: dict[Any, Any] = {}
         self.focus_switch_actions: set[Any] = set()
+        self.controllable_avatar_features: set[int] = set()
         self.undo_actions: set[Any] = set()
         self.index_selector_actions: set[Any] = set()
         self.value_mutator_actions: set[Any] = set()
@@ -521,6 +522,7 @@ class PrefrontalWorkingMemory:
             self.immobile_entity_actions.clear()
             self.action_affordances.clear()
             self.focus_switch_actions.clear()
+            self.controllable_avatar_features.clear()
             self.last_non_displacement_action = None
             self.total_epistemic_probes = 0
             self.known_objects.clear()

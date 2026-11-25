@@ -85,7 +85,8 @@ def test_my_agent_arc_plugin_enforces_constitutional_governance():
 def test_unverified_transaction_manager_rejected_when_enforced():
     """Verify that a TransactionManager without verification stages is flagged and rejected."""
     ws = HCIRWorkspaceState()
-    bare_tm = TransactionManager(ws)
+    assert TransactionManager(ws).unverified is False
+    bare_tm = TransactionManager(ws, verification_stages=[], unsafe_allow_unverified=True)
 
     # Must be flagged as unverified
     assert bare_tm.unverified is True
