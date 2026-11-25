@@ -16,7 +16,6 @@ from hbllm.hcir.world.learning import (
     RelationalWaypoint,
     StrategyOutcome,
     TransferableInvariant,
-    get_sub_attr,
 )
 
 __all__ = [
@@ -29,5 +28,4 @@ __all__ = [
     "RelationalWaypoint",
     "StrategyOutcome",
     "TransferableInvariant",
-    "get_sub_attr",
 ]

@@ -19,7 +19,7 @@ from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -60,6 +60,29 @@ class ActuatorSchema:
     kind: Literal["discrete", "point", "none"]
     params: Mapping[str, Any] = field(default_factory=dict)
     valid_targets: Sequence[tuple[int, int]] | None = None
+
+
+@runtime_checkable
+class ObservationProtocol(Protocol):
+    """Domain-neutral structural protocol satisfied by lattice and non-lattice observations."""
+
+    @property
+    def available_actions(self) -> Sequence[Any]: ...
+
+    @property
+    def entities(self) -> Sequence[Any]: ...
+
+    @property
+    def context_id(self) -> str: ...
+
+    @property
+    def episode_id(self) -> str: ...
+
+    @property
+    def metadata(self) -> Mapping[str, Any]: ...
+
+    @property
+    def terminal(self) -> TerminalSignal | None: ...
 
 
 @dataclass(frozen=True)

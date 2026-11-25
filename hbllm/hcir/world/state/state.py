@@ -73,7 +73,7 @@ class EngineState(BaseModel):
     last_surprise: float = 0.0
     last_surprise_eval: Any | None = None
     latest_lifecycle_result: Any | None = None
-    feedback_assimilated: bool = Field(default=False, alias="_feedback_assimilated")
+    feedback_assimilated: bool = False
     feature_quiescent_counts: dict[int, int] = Field(
         default_factory=dict, alias="_feature_quiescent_counts"
     )
@@ -95,7 +95,7 @@ class EngineState(BaseModel):
     verified_safe_features: set[int] = Field(default_factory=set)
     mobile_threat_features: set[int] = Field(default_factory=set)
     context_hazards: dict[int, set[tuple[int, int]]] = Field(default_factory=dict)
-    prev_oriented_threats: list[Any] = Field(default_factory=list, alias="_prev_oriented_threats")
+    prev_oriented_threats: list[Any] = Field(default_factory=list)
     quiescent_features: set[int] = Field(default_factory=set)
     effective_features: set[int] = Field(default_factory=set)
     action_affordances: dict[int, Any] = Field(default_factory=dict)

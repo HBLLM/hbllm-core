@@ -14,10 +14,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
-
-
 @dataclass
 class CausalPlanningContext:
     """Frozen planning context derived from the symbolic world theory.
@@ -126,7 +122,7 @@ class CausalTheoryPlanner:
 
         wm_exog = engine.working_memory
         visited_cells = wm_exog.visited_cells
-        exhausted = get_sub_attr(wm_exog, "exhausted_candidate_goals", set())
+        exhausted = wm_exog.exhausted_candidate_goals
         bg_val = 0
         if curr_grid.size > 0:
             vals, cnts = np.unique(curr_grid, return_counts=True)
@@ -215,7 +211,7 @@ class CausalTheoryPlanner:
         # Discard avatar position and exhausted goals
         if engine.avatar_pos is not None:
             goal_positions.discard(engine.avatar_pos)
-        exhausted = get_sub_attr(engine.working_memory, "exhausted_candidate_goals", set())
+        exhausted = engine.working_memory.exhausted_candidate_goals
         if exhausted and len(goal_positions - exhausted) > 0:
             goal_positions.difference_update(exhausted)
 

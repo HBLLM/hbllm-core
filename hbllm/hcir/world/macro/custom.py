@@ -14,7 +14,6 @@ from hbllm.hcir.world.frontopolar_subgoal_stack import SubgoalType
 from hbllm.hcir.world.macro.models import (
     MacroAction,
     MacroActionStatus,
-    get_sub_attr,
 )
 from hbllm.hcir.world.macro.primitives import (
     DepositCargo,
@@ -55,7 +54,7 @@ class ProceduralReplayAction(MacroAction):
             intent=SpatialActionIntent.NAVIGATE,
         )
         self._macro = macro
-        get_seq_fn = get_sub_attr(macro, "get_execution_sequence", None)
+        get_seq_fn = getattr(macro, "get_execution_sequence", None)
         if callable(get_seq_fn):
             act_seq, data_seq = get_seq_fn()
             self._action_seq = list(act_seq)
@@ -109,7 +108,7 @@ class ProceduralReplayAction(MacroAction):
                 self._cursor,
             )
             self.status = MacroActionStatus.FAILED
-            rec_fn = get_sub_attr(self._macro, "record_replay_outcome", None)
+            rec_fn = getattr(self._macro, "record_replay_outcome", None)
             if callable(rec_fn):
                 rec_fn(False)
             return None
@@ -118,13 +117,13 @@ class ProceduralReplayAction(MacroAction):
 
     def record_success(self) -> None:
         """Record successful replay completion back to the source macro."""
-        rec_fn = get_sub_attr(self._macro, "record_replay_outcome", None)
+        rec_fn = getattr(self._macro, "record_replay_outcome", None)
         if callable(rec_fn):
             rec_fn(True)
 
     def record_failure(self) -> None:
         """Record replay failure back to the source macro."""
-        rec_fn = get_sub_attr(self._macro, "record_replay_outcome", None)
+        rec_fn = getattr(self._macro, "record_replay_outcome", None)
         if callable(rec_fn):
             rec_fn(False)
 
@@ -144,7 +143,7 @@ def attribute_macro_action_outcome(
     action_data: dict[str, Any] | None = None,
 ) -> None:
     """Attribute macro-action completion or failure into Pearl's do(a) causal theory and body schema."""
-    grid_hist = get_sub_attr(engine, "grid_history", None)
+    grid_hist = engine.grid_history
     if prev_grid is None and grid_hist is not None and len(grid_hist) >= 2:
         prev_grid = grid_hist[-2]
 

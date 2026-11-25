@@ -23,9 +23,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from hbllm.hcir.world.cortex_deliberation import get_sub_attr
-
-
 @dataclass
 class SafetyGateResult:
     """Result of a cognitive safety gate evaluation."""
@@ -322,7 +319,8 @@ class AnteriorCingulateConflictPredicate(PlanSafetyPredicate):
         future_steps: Sequence[MentalSimulationStep],
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
-        acc = get_sub_attr(view.working_memory, "acc_conflict", None)
+        wm = getattr(view, "working_memory", None)
+        acc = wm.acc_conflict if wm is not None else None
         if acc is None:
             return SafetyGateResult(is_safe=True)
 

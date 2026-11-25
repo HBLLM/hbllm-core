@@ -4,26 +4,6 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any
-
-import numpy as np
-
-from hbllm.hcir.spatial_planner import SpatialActionIntent
-
-if TYPE_CHECKING:
-    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
-
-logger = logging.getLogger(__name__)
-
-
-def get_sub_attr(target: Any, attr: str, default: Any = None) -> Any:
-    return getattr(target, attr, default) if target is not None else default
-
-
-import logging
-from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum

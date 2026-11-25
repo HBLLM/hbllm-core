@@ -589,6 +589,8 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         persistent_store = SQLiteEventStore(
             resolved_mem_dir / "persistent.db",
             max_events=cfg.max_events_per_store,
+            synchronous_full=True,
+            tenant_id=cfg.tenant_id,
         )
 
     tiered_workspace = TieredWorkspace(

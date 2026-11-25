@@ -170,7 +170,6 @@ from hbllm.hcir.world.cortex_motor import (
 )
 from hbllm.hcir.world.cortex_perception import (
     EpistemicObservationDiff,
-    OrientedThreat,
     PerceptionEngine,
 )
 from hbllm.hcir.world.cortex_planner import (
@@ -251,18 +250,15 @@ class AutonomousEpistemicEngine:
         self.step_budget_ms: float = 150.0
         self.deterministic_budget: bool = True
         self.compute_budget: Any | None = None
-        self._structural_goals_cache: tuple[int, list[Any]] | None = None
         # Discovered lattice quantum (cells per cardinal displacement); 1 until calibrated
         self._spatial_lattice_stride: int = 1
         # WP0.3 motor-effect posterior: per-action counts over observed effect kinds
         self.action_effect_counts: dict[Any, dict[str, int]] = {}
-        self._consecutive_null_actions: dict[Any, int] = {}
 
         # Memory of frames & actions
         self._prev_grid: np.ndarray | None = None
         self._last_action: Any | None = None
         self._last_action_data: dict[str, Any] | None = None
-        self._consecutive_quiescent_actions: int = 0
         self.grid_history: deque[np.ndarray] = deque(maxlen=6)
 
         # Avatar self-model (Motor Grounding)
@@ -689,15 +685,6 @@ class AutonomousEpistemicEngine:
         self.working_memory.last_predicted_pos = val
 
     @property
-    def _feedback_assimilated(self) -> bool:
-        """Sensory feedback assimilation state in authoritative engine state."""
-        return self.state.feedback_assimilated
-
-    @_feedback_assimilated.setter
-    def _feedback_assimilated(self, val: bool) -> None:
-        self.state.feedback_assimilated = val
-
-    @property
     def _avatar_controllability_evidence(self) -> dict[int, list[tuple[int, tuple[int, int]]]]:
         """Motor grounding controllability evidence held in prefrontal working memory."""
         return self.working_memory.avatar_controllability_evidence
@@ -707,15 +694,6 @@ class AutonomousEpistemicEngine:
         self, val: dict[int, list[tuple[int, tuple[int, int]]]]
     ) -> None:
         self.working_memory.avatar_controllability_evidence = val
-
-    @property
-    def _prev_oriented_threats(self) -> list[OrientedThreat]:
-        """Dynamic threat kinematics held in prefrontal working memory."""
-        return self.working_memory.prev_oriented_threats
-
-    @_prev_oriented_threats.setter
-    def _prev_oriented_threats(self, val: list[OrientedThreat]) -> None:
-        self.working_memory.prev_oriented_threats = val
 
     @property
     def active_probe_target(self) -> tuple[int, int] | None:
@@ -2006,7 +1984,7 @@ class AutonomousEpistemicEngine:
     @consecutive_quiescent_actions.setter
     def consecutive_quiescent_actions(self, val: int) -> None:
         self.state.consecutive_quiescent_actions = val
-        self._consecutive_quiescent_actions = val
+        self.working_memory.consecutive_quiescent_actions = val
 
     @property
     def bilateral_state(self) -> Any | None:
@@ -2200,7 +2178,7 @@ class AutonomousEpistemicEngine:
             "level_complete",
         ):
             if (
-                not self._feedback_assimilated
+                not self.state.feedback_assimilated
                 and self.prev_grid is not None
                 and self.last_action is not None
             ):
@@ -2217,7 +2195,7 @@ class AutonomousEpistemicEngine:
             self.reset_episode(retain_dynamics=retain_dyn, is_new_context=not is_same_context)
         elif kind == EpisodeBoundaryKind.DEATH or kind == "death":
             if (
-                not self._feedback_assimilated
+                not self.state.feedback_assimilated
                 and self.prev_grid is not None
                 and self.last_action is not None
             ):
@@ -2280,7 +2258,7 @@ class AutonomousEpistemicEngine:
         self.apply_delta(delta, author="episodic_cortex")
         if isinstance(self._entity_cache, dict):
             self._entity_cache.clear()
-        self._structural_goals_cache = None
+        self.working_memory.structural_goals_cache = None
         if new_context or not retain_dynamics:
             self.active_arbitrated_goal = None
         self.step_counter = 0
@@ -2423,11 +2401,11 @@ class AutonomousEpistemicEngine:
         counts = self.action_effect_counts.setdefault(action, {})
         counts[kind] = counts.get(kind, 0) + 1
         if kind in ("no_op", "blocked"):
-            self._consecutive_null_actions[action] = (
-                self._consecutive_null_actions.get(action, 0) + 1
+            self.working_memory.consecutive_null_actions[action] = (
+                self.working_memory.consecutive_null_actions.get(action, 0) + 1
             )
         else:
-            self._consecutive_null_actions[action] = 0
+            self.working_memory.consecutive_null_actions[action] = 0
 
     def motor_posterior(self, action: Any) -> dict[str, float]:
         """Posterior P(effect_kind | action) from observed samples (WP0.3)."""
@@ -2452,7 +2430,7 @@ class AutonomousEpistemicEngine:
         return -sum(p * math.log2(p) for p in post.values() if p > 0)
 
     def consecutive_null_count(self, action: Any) -> int:
-        return self._consecutive_null_actions.get(action, 0)
+        return self.working_memory.consecutive_null_actions.get(action, 0)
 
     def set_environmental_step_limit(self, limit: int) -> None:
         """Set strict environmental step countdown or step limit."""
@@ -2625,8 +2603,11 @@ class AutonomousEpistemicEngine:
                 hashlib.blake2b(np.ascontiguousarray(grid).tobytes(), digest_size=8).digest(),
                 "little",
             )
-            if self._structural_goals_cache and self._structural_goals_cache[0] == _h:
-                return list(self._structural_goals_cache[1])
+            if (
+                self.working_memory.structural_goals_cache
+                and self.working_memory.structural_goals_cache[0] == _h
+            ):
+                return list(self.working_memory.structural_goals_cache[1])
         except Exception:
             _h = None
         result = PerceptionEngine.detect_structural_goals(
@@ -2640,7 +2621,7 @@ class AutonomousEpistemicEngine:
             **kwargs,
         )
         if _h is not None:
-            self._structural_goals_cache = (_h, list(result))
+            self.working_memory.structural_goals_cache = (_h, list(result))
         return result
 
     def assimilate_feedback(
@@ -2697,7 +2678,7 @@ class AutonomousEpistemicEngine:
         if action is not None:
             self.budget_governor.record_step()
         if is_success or is_failure:
-            self._prev_oriented_threats = []
+            self.working_memory.prev_oriented_threats = []
             if self.grounding_bridge is not None:
                 sync_fn = getattr(self.grounding_bridge, "sync_theory_roles", None)
                 if callable(sync_fn):
@@ -2929,7 +2910,7 @@ class AutonomousEpistemicEngine:
             effective_av_feats.add(self.prior_avatar_feature)
 
         if not effective_av_feats:
-            self._prev_oriented_threats = []
+            self.working_memory.prev_oriented_threats = []
             return
         try:
             bg = self.estimate_background(curr_grid)
@@ -2943,15 +2924,15 @@ class AutonomousEpistemicEngine:
                 avatar_features=effective_av_feats,
             )
         except Exception:
-            self._prev_oriented_threats = []
+            self.working_memory.prev_oriented_threats = []
             return
 
         if self.step_counter <= 1 or self.prev_grid is None:
-            self._prev_oriented_threats = threats
+            self.working_memory.prev_oriented_threats = threats
             return
 
         step_sz = self.infer_motor_step_size(available_actions)
-        prev = self._prev_oriented_threats
+        prev = self.working_memory.prev_oriented_threats
         if prev:
             prev_by_feat: dict[int, set[tuple[int, int]]] = {}
             for t in prev:
@@ -2990,7 +2971,7 @@ class AutonomousEpistemicEngine:
                                 feat,
                             )
                             break
-        self._prev_oriented_threats = threats
+        self.working_memory.prev_oriented_threats = threats
 
     # ── Master Decision Loop ──────────────────────────────────────────────────
 
@@ -3175,7 +3156,7 @@ class AutonomousEpistemicEngine:
         if terminal is not None or is_success or is_failure:
             from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
 
-            self._feedback_assimilated = True
+            self.state.feedback_assimilated = True
             b_kind = EpisodeBoundaryKind.GOAL_REACHED if is_success else EpisodeBoundaryKind.DEATH
             self.on_boundary(EpisodeBoundary(kind=b_kind, same_level=not is_success))
 

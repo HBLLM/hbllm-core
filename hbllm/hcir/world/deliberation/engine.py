@@ -36,9 +36,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from hbllm.hcir.world.cortex_deliberation import get_sub_attr
-
-
 class PrefrontalDeliberationEngine:
     """Executive prefrontal arbitration view coordinating perception, mental simulation,
     affordance chunking, and motor output.
@@ -134,7 +131,7 @@ class PrefrontalDeliberationEngine:
         """Arbitrate interactive control clusters and target affordances via policies or fallbacks."""
         # 1. Query external registered deliberation policies first
         for policy in get_engine_state_attr(view, "deliberation_policies", []):
-            arb_fn = get_sub_attr(policy, "arbitrate_affordances", None)
+            arb_fn = getattr(policy, "arbitrate_affordances", None)
             if callable(arb_fn):
                 res = arb_fn(view, curr_grid, available_actions, known_av_feats)
                 if res is not None:
@@ -171,7 +168,7 @@ class PrefrontalDeliberationEngine:
             if a in view.value_mutator_actions and view.inhibited_actions.get(a, 0) == 0
         ]
         if index_selectors and value_mutators:
-            mut_streak = get_sub_attr(view.working_memory, "dial_mutation_streak", 0)
+            mut_streak = view.working_memory.dial_mutation_streak
             if mut_streak < 2:
                 chosen = value_mutators[view.step_counter % len(value_mutators)]
                 view.working_memory.dial_mutation_streak = mut_streak + 1
@@ -249,10 +246,10 @@ class PrefrontalDeliberationEngine:
                 # samples and never repeat a null-effect action >2x in a row
                 # (unless every action is null-dominated).
                 def _null_score(a: Any) -> tuple[int, float, int]:
-                    post_fn = get_sub_attr(view, "motor_posterior", None)
+                    post_fn = getattr(view, "motor_posterior", None)
                     post = post_fn(a) if callable(post_fn) else {}
                     null_p = post.get("no_op", 0.0) + post.get("blocked", 0.0)
-                    consec_fn = get_sub_attr(view, "consecutive_null_count", None)
+                    consec_fn = getattr(view, "consecutive_null_count", None)
                     consec = consec_fn(a) if callable(consec_fn) else 0
                     return (consec >= 2, null_p, a)
 
@@ -463,7 +460,7 @@ class PrefrontalDeliberationEngine:
 
         # 1. Update background & assimilate sensory feedback from previous action
         view.state.bg_feature = view.estimate_background(curr_grid)
-        if view.prev_grid is not None and not view._feedback_assimilated:
+        if view.prev_grid is not None and not view.state.feedback_assimilated:
             view.assimilate_feedback(
                 curr_grid,
                 available_actions,
@@ -474,7 +471,7 @@ class PrefrontalDeliberationEngine:
                 action_data=view.last_action_data,
                 **kwargs,
             )
-        view.state._feedback_assimilated = False
+        view.state.feedback_assimilated = False
         return curr_grid, terminal
 
     def decide(
@@ -627,7 +624,7 @@ class PrefrontalDeliberationEngine:
                             return False
             return True
 
-        macro_plan = get_sub_attr(view.working_memory, "macro_plan", None)
+        macro_plan = view.working_memory.macro_plan
         if macro_plan is not None and not macro_plan.is_empty():
             macro_step = macro_plan.step(
                 view, curr_grid, available_actions, prev_grid=view.prev_grid
@@ -926,8 +923,8 @@ class PrefrontalDeliberationEngine:
             ) or getattr(getattr(view, "working_memory", None), "last_continuous_moved", False)
             is_deliberate_pacing = has_temporal and view.consecutive_pacing_steps > 0
             if not has_progress and not is_deliberate_pacing:
-                wm_ref = get_sub_attr(view, "working_memory", None)
-                inhibit_fn = get_sub_attr(wm_ref, "inhibit_action", None)
+                wm_ref = getattr(view, "working_memory", None)
+                inhibit_fn = getattr(wm_ref, "inhibit_action", None) if wm_ref is not None else None
                 for cyc_a in cyclic_acts:
                     if callable(inhibit_fn):
                         inhibit_fn(cyc_a, duration=2)
@@ -996,7 +993,7 @@ class PrefrontalDeliberationEngine:
                     forced_acc_perturbation = unverified_fallback
 
         # Faculty: ACC Recurring Catastrophe Conflict Resolution (Metacognitive Executive Shift)
-        acc_death_conflict = get_sub_attr(view.working_memory, "acc_conflict", None)
+        acc_death_conflict = view.working_memory.acc_conflict
         if acc_death_conflict is not None and getattr(acc_death_conflict, "active_conflict", False):
             c_radius = float(getattr(acc_death_conflict, "cluster_radius", 3.0))
             # Invalidate any active plans routing into failure clusters
@@ -1121,7 +1118,7 @@ class PrefrontalDeliberationEngine:
 
         # Faculty: Active Manipulandum Localization
         if view.avatar_pos is None and view.working_memory.body_schema.has_manipulandum():
-            manip = get_sub_attr(view.working_memory.body_schema, "active_manipulandum", None)
+            manip = view.working_memory.body_schema.active_manipulandum
             if manip is not None and getattr(manip, "pos", None) is not None:
                 view.state.avatar_pos = manip.pos
 
@@ -1615,7 +1612,7 @@ class PrefrontalDeliberationEngine:
         chosen_data: dict[str, Any] | None,
     ) -> tuple[Any, dict[str, Any] | None]:
         """Effector Grounding Invariant: Ensure any spatial effector has valid spatial targets."""
-        eff_fn = get_sub_attr(view, "is_spatial_effector", None)
+        eff_fn = getattr(view, "is_spatial_effector", None)
         if callable(eff_fn) and eff_fn(chosen_action):
             aff = view.action_affordances.get(chosen_action)
             req_keys = aff.target_param_keys if aff else ("x", "y")

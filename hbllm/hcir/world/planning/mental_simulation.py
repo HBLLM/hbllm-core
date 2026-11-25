@@ -42,9 +42,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from hbllm.hcir.world.cortex_planner import get_sub_attr
-
-
 @dataclass
 class MentalSimulationStep:
     """A step planned purely within internal mental simulation."""
@@ -608,7 +605,7 @@ class MentalSimulationPlanner:
             engine._update_avatar_position_from_grid(curr_grid, known_av)
 
         if engine.avatar_pos is None and engine.working_memory.body_schema.has_manipulandum():
-            manip = get_sub_attr(engine.working_memory.body_schema, "active_manipulandum", None)
+            manip = engine.working_memory.body_schema.active_manipulandum
             if manip is not None and getattr(manip, "pos", None) is not None:
                 engine.state.avatar_pos = manip.pos
 
@@ -1224,14 +1221,14 @@ class MentalSimulationPlanner:
             and engine.hazard_tracker.environmental_period >= 2
         )
         has_temporal = bool(init_patrols) or bool(init_chasers) or has_periodic
-        meta_depth = get_sub_attr(engine.prediction_budget.counterfactual_budget, "max_depth", None)
+        meta_depth = engine.prediction_budget.counterfactual_budget.max_depth
         meta_mode = (
             getattr(
                 engine.working_memory.last_metacognitive_assessment,
                 "recommended_exploration_mode",
                 None,
             )
-            if get_sub_attr(engine.working_memory, "last_metacognitive_assessment", None)
+            if engine.working_memory.last_metacognitive_assessment
             else None
         )
         max_expansions_budget = engine.prediction_budget.compute_search_budget(
@@ -2476,7 +2473,7 @@ class MentalSimulationPlanner:
                     held_items=held_set,
                     lethal_positions=engine.current_context_hazards,
                     max_iterations=32,
-                    body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
+                    body_schema=engine.working_memory.body_schema,
                     tool_barrier_affinities=getattr(
                         engine.working_memory, "tool_barrier_affinities", None
                     ),
@@ -2932,7 +2929,7 @@ class MentalSimulationPlanner:
                 held_items=held_set,
                 lethal_positions=engine.current_context_hazards,
                 max_iterations=32,
-                body_schema=get_sub_attr(engine.working_memory, "body_schema", None),
+                body_schema=engine.working_memory.body_schema,
                 tool_barrier_affinities=getattr(
                     engine.working_memory, "tool_barrier_affinities", None
                 ),

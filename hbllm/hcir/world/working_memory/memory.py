@@ -89,6 +89,9 @@ class PrefrontalWorkingMemory:
         self.feedback_assimilated: bool = False
         self.avatar_controllability_evidence: dict[int, list[tuple[int, tuple[int, int]]]] = {}
         self.prev_oriented_threats: list[Any] = []
+        self.consecutive_null_actions: dict[Any, int] = {}
+        self.consecutive_quiescent_actions: int = 0
+        self.structural_goals_cache: tuple[int, list[Any]] | None = None
         self.constraint_solver: SymbolicConstraintSolver = SymbolicConstraintSolver()
         self.executive_directives: list[str] = []
 
@@ -439,6 +442,9 @@ class PrefrontalWorkingMemory:
         self.simulated_goal = None
         self.last_predicted_pos = None
         self.feedback_assimilated = False
+        self.structural_goals_cache = None
+        if not retain_long_term:
+            self.consecutive_null_actions.clear()
         self.mental_plan.clear()
         self.active_hypothesis = None
         self.consecutive_simulation_failures = 0

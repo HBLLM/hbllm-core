@@ -27,7 +27,6 @@ from hbllm.hcir.world.macro import (
     UseToolOnBarrier,
     _spatial_effector_payload,
     attribute_macro_action_outcome,
-    get_sub_attr,
 )
 
 __all__ = [
@@ -51,5 +50,4 @@ __all__ = [
     "UseToolOnBarrier",
     "_spatial_effector_payload",
     "attribute_macro_action_outcome",
-    "get_sub_attr",
 ]

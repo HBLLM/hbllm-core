@@ -113,7 +113,7 @@ class NavigateTo(MacroAction):
 
         from hbllm.hcir.world.cortex_perception import PerceptionEngine
 
-        threats = get_engine_state_attr(engine, "_prev_oriented_threats", [])
+        threats = get_engine_state_attr(engine, "prev_oriented_threats", [])
         if not threats:
             threats = PerceptionEngine.detect_oriented_threats(
                 curr_grid,

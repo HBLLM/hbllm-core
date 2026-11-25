@@ -13,7 +13,6 @@ from hbllm.hcir.world.macro.models import (
     MicroActionSpec,
     ObjectSpec,
     _spatial_effector_payload,
-    get_sub_attr,
 )
 from hbllm.hcir.world.macro.planner import (
     MacroActionPlan,
@@ -53,5 +52,4 @@ __all__ = [
     "UseToolOnBarrier",
     "_spatial_effector_payload",
     "attribute_macro_action_outcome",
-    "get_sub_attr",
 ]

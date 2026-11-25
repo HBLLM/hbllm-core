@@ -18,7 +18,6 @@ from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
 from hbllm.hcir.world.causal_discovery import CausalPredicate
-from hbllm.hcir.world.cortex_assimilator import get_sub_attr
 from hbllm.hcir.world.cortex_causal import ActionAffordance
 from hbllm.hcir.world.cortex_perception import FrameDiffType, PerceptionEngine
 from hbllm.hcir.world.cortical_stage import WorkingMemoryDelta
@@ -403,7 +402,7 @@ class EpistemicFeedbackAssimilator:
         # A curiosity goal is satisfied when:
         # 1. Target feature is absent at target coordinate (consumed / collected / changed)
         # 2. Or target coordinate was visited without surprise >= max_visits
-        satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
+        satisfied_when_map = view.working_memory.active_epistemic_conditions
         goals_to_retire: set[tuple[int, int]] = set()
         for target_pos, cond in list(satisfied_when_map.items()):
             tr, tc = cond.get("entity_pos", target_pos)
@@ -663,7 +662,7 @@ class EpistemicFeedbackAssimilator:
                     action,
                 )
 
-        continuous_moved = bool(getattr(view.working_memory, "last_continuous_moved", False))
+        continuous_moved = bool(view.working_memory.last_continuous_moved)
         if continuous_moved:
             view.state.consecutive_quiescent_actions = 0
         elif diff.changed_pixel_count == 0:
@@ -1018,7 +1017,7 @@ class EpistemicFeedbackAssimilator:
         list[tuple[SpatialEntity, SpatialEntity, tuple[int, int]]], list[tuple[int, int]], bool
     ]:
         """Calibrate motor dynamics models and ego-avatar displacement tracking."""
-        satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
+        satisfied_when_map = view.working_memory.active_epistemic_conditions
         manip_moved = False
         # ── A. Motor Calibration & Proprioception ────────────────────────────
         H, W = curr_grid.shape
@@ -1232,7 +1231,11 @@ class EpistemicFeedbackAssimilator:
                                 view.bilateral_state.pos2 = single_centroid
                     else:
                         for feat, attr in [(f1, "pos1"), (f2, "pos2")]:
-                            prev_pos = get_sub_attr(view.bilateral_state, attr)
+                            prev_pos = (
+                                getattr(view.bilateral_state, attr, None)
+                                if view.bilateral_state is not None
+                                else None
+                            )
                             mask = curr_grid == feat
                             lab, num_comp = label(mask)
                             best_c = None
@@ -1726,15 +1729,15 @@ class EpistemicFeedbackAssimilator:
         """Verify proprioceptive efference copy and ground obstacles and collisions in TransitionKB."""
         act_dyn = view.action_dynamics.get(action) if not is_effector_action else None
         # ── Proprioceptive Efference Copy Verification & Obstacle Grounding ──
-        continuous_moved = bool(getattr(view.working_memory, "last_continuous_moved", False))
+        continuous_moved = bool(view.working_memory.last_continuous_moved)
         if continuous_moved and action is not None and not is_effector_action:
-            cd_x, cd_y = getattr(view.working_memory, "continuous_delta", (0.0, 0.0))
+            cd_x, cd_y = view.working_memory.continuous_delta
             if (abs(cd_x) > 1e-4 or abs(cd_y) > 1e-4) and action in view.action_dynamics:
                 view.action_dynamics[action].record_continuous_delta(cd_x, cd_y)
         if not av_moved and continuous_moved and action is not None:
-            cd_x, cd_y = getattr(view.working_memory, "continuous_delta", (0.0, 0.0))
+            cd_x, cd_y = view.working_memory.continuous_delta
             if abs(cd_x) > 1e-4 or abs(cd_y) > 1e-4:
-                rf = getattr(view.working_memory, "reference_frame", None)
+                rf = view.working_memory.reference_frame
                 origin_desc = (
                     getattr(rf, "origin_description", "bottom_left_metric")
                     if rf
@@ -1774,8 +1777,8 @@ class EpistemicFeedbackAssimilator:
                         )
 
         if continuous_moved and (view.avatar_feature is None or view.avatar_pos is None):
-            c_pos = getattr(view.working_memory, "continuous_agent_pos", None)
-            rf = getattr(view.working_memory, "reference_frame", None)
+            c_pos = view.working_memory.continuous_agent_pos
+            rf = view.working_memory.reference_frame
             if c_pos is not None and len(c_pos) >= 2:
                 origin_desc = (
                     getattr(rf, "origin_description", "bottom_left_metric")
@@ -1815,8 +1818,8 @@ class EpistemicFeedbackAssimilator:
 
         if view.avatar_pos is not None:
             if (
-                getattr(view.working_memory, "continuous_agent_pos", None) is None
-                and getattr(view.working_memory, "reference_frame", None) is None
+                view.working_memory.continuous_agent_pos is None
+                and view.working_memory.reference_frame is None
                 and not view.symbolic_theory.cargo_features
                 and not view.symbolic_theory.receptacle_features
             ):
@@ -2305,7 +2308,7 @@ class EpistemicFeedbackAssimilator:
         W: int,
     ) -> None:
         """Induce Pearl causal do(a) environmental state mutations and track cargo manipulation."""
-        satisfied_when_map = getattr(view.working_memory, "active_epistemic_conditions", {})
+        satisfied_when_map = view.working_memory.active_epistemic_conditions
         # ── B. Environmental Mutation Induction ──────────────────────────────
         # Per-call invariants resolved once: the owned-subsystem reads below are
         # re-evaluated per mutated pixel otherwise (journaled-view overhead).
@@ -3294,7 +3297,7 @@ class EpistemicFeedbackAssimilator:
         if view.prev_grid is None or view.last_action is None:
             return
 
-        view.state._feedback_assimilated = True
+        view.state.feedback_assimilated = True
         prev_avatar_pos = view.avatar_pos
 
         curr_grid = view.normalize_sensory_input(curr_grid)

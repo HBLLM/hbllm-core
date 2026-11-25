@@ -24,7 +24,6 @@ from hbllm.hcir.world.macro.models import (
     MacroActionStatus,
     MicroActionSpec,
     ObjectSpec,
-    get_sub_attr,
 )
 from hbllm.hcir.world.macro.primitives import (
     DepositCargo,
@@ -98,7 +97,7 @@ class MacroActionPlan:
                 break
 
         # Check and advance BA10 frontopolar subgoal stack
-        sg_stack = get_sub_attr(engine, "subgoal_stack", None)
+        sg_stack = engine.subgoal_stack
         if sg_stack is not None and sg_stack.has_pending_goals:
             top_sg = sg_stack.current_subgoal
             if top_sg is not None:
@@ -181,7 +180,7 @@ class MacroActionPlan:
         available_actions: Sequence[Any],
     ) -> MacroActionPlan | None:
         """Compile a MacroActionPlan directly from a declarative skill."""
-        compile_fn = get_sub_attr(skill, "compile_to_macro_plan", None)
+        compile_fn = getattr(skill, "compile_to_macro_plan", None)
         if callable(compile_fn):
             plan = compile_fn(engine, curr_grid, available_actions)
             if plan is not None and not plan.is_empty():
@@ -192,13 +191,13 @@ class MacroActionPlan:
         if not subgoals:
             return None
 
-        cursor_pos = getattr(engine, "avatar_pos", None)
+        cursor_pos = engine.avatar_pos
         if cursor_pos is None:
             return None
 
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
-        theory = getattr(engine, "symbolic_theory", None)
+        theory = engine.symbolic_theory
         H, W = curr_grid.shape
 
         def _find_target(
@@ -222,26 +221,26 @@ class MacroActionPlan:
                     or "key" in role_q
                     or "resource" in role_q
                 ):
-                    cand_feats.update(getattr(theory, "cargo_features", set()))
+                    cand_feats.update(theory.cargo_features)
                 elif (
                     "interact" in intent_str
                     or "actuate" in intent_str
                     or "switch" in role_q
                     or "actuator" in role_q
                 ):
-                    cand_feats.update(getattr(theory, "actuator_features", set()))
+                    cand_feats.update(theory.actuator_features)
                 elif (
                     "drop" in intent_str
                     or "barrier" in role_q
                     or "door" in role_q
                     or "portal" in role_q
                 ):
-                    cand_feats.update(getattr(theory, "conditional_affordances", {}).keys())
+                    cand_feats.update(theory.conditional_affordances.keys())
                 elif "nav" in intent_str or "goal" in role_q:
-                    for gp in getattr(engine, "learned_goal_positions", ()):
+                    for gp in engine.learned_goal_positions:
                         if 0 <= gp[0] < H and 0 <= gp[1] < W:
                             return gp, int(curr_grid[gp[0], gp[1]])
-                    cand_feats.update(getattr(theory, "goal_features", set()))
+                    cand_feats.update(theory.goal_features)
 
             best_coord: tuple[int, int] | None = None
             best_feat: int | None = None
@@ -253,10 +252,8 @@ class MacroActionPlan:
                 if not feat_match and not role_match:
                     continue
                 ent_cells = (
-                    ent.properties.get("cells")
-                    if isinstance(getattr(ent, "properties", None), dict)
-                    else None
-                ) or ([ent.grid_pos] if getattr(ent, "grid_pos", None) is not None else [])
+                    ent.properties.get("cells") if isinstance(ent.properties, dict) else None
+                ) or ([ent.grid_pos] if ent.grid_pos is not None else [])
                 for pt in ent_cells:
                     r_p, c_p = int(pt[0]), int(pt[1])
                     if (r_p, c_p) == cur_p:
@@ -421,11 +418,11 @@ class MacroPlanSynthesizer:
                     pos = obj.pos
                     feat = obj.feature_id
                     props = obj.properties
-                    m_tasks = getattr(obj, "macro_tasks", [])
-                elif (obj_role := get_sub_attr(obj, "role", None)) is not None and (
-                    obj_gpos := get_sub_attr(obj, "grid_pos", None)
+                    m_tasks = obj.macro_tasks
+                elif (obj_role := getattr(obj, "role", None)) is not None and (
+                    obj_gpos := getattr(obj, "grid_pos", None)
                 ) is not None:
-                    role = str(get_sub_attr(obj_role, "value", obj_role)).lower()
+                    role = str(getattr(obj_role, "value", obj_role)).lower()
                     pos = obj_gpos
                     feat = getattr(obj, "feature_id", 0) or 0
                     props = getattr(obj, "properties", {})
@@ -443,7 +440,7 @@ class MacroPlanSynthesizer:
                         obj_id = f"{role}_{pos[0]}_{pos[1]}"
 
                     # Store in working memory knowledge base (Rule 1.8)
-                    wm_ref = get_sub_attr(engine, "working_memory", None)
+                    wm_ref = engine.working_memory
                     if wm_ref is not None:
                         spec = (
                             obj
@@ -487,7 +484,7 @@ class MacroPlanSynthesizer:
                             ) in ("terminal_reward", str(TerminalSignal.SUCCESS))
                             if is_confirmed and has_reward:
                                 engine.learned_goal_positions.add(pos)
-                                eng_goals = get_sub_attr(engine, "goals", None)
+                                eng_goals = getattr(engine, "goals", None)
                                 if eng_goals is not None and pos not in eng_goals:
                                     eng_goals.append(pos)
                                 if feat:
@@ -539,9 +536,8 @@ class MacroPlanSynthesizer:
                             and feat not in av_feats
                             and (not engine.avatar_features or feat not in engine.avatar_features)
                             and feat != engine.avatar_feature
-                            and feat
-                            not in getattr(engine.symbolic_theory, "walkable_features", set())
-                            and feat not in getattr(engine, "verified_safe_features", set())
+                            and feat not in engine.symbolic_theory.walkable_features
+                            and feat not in engine.verified_safe_features
                         ):
                             engine.symbolic_theory.induce_actuator(
                                 feat, evidence="sync_known_objects"
@@ -570,7 +566,7 @@ class MacroPlanSynthesizer:
         # 0B. Query declarative skills registered on engine
         skills = get_engine_state_attr(engine, "declarative_skills", []) or []
         for skill in skills:
-            can_h = get_sub_attr(skill, "can_handle", None)
+            can_h = getattr(skill, "can_handle", None)
             if callable(can_h) and can_h(
                 curr_grid, list(available_actions), metadata={"engine": engine}
             ):
@@ -640,8 +636,8 @@ class MacroPlanSynthesizer:
 
         bg = engine.estimate_background(curr_grid)
         entities = engine.extract_entities(curr_grid, bg)
-        known_objs = list(get_sub_attr(engine.working_memory, "known_objects", {}).values())
-        trial_counts = get_sub_attr(engine.working_memory, "object_trial_counts", {})
+        known_objs = list(engine.working_memory.known_objects.values())
+        trial_counts = engine.working_memory.object_trial_counts
 
         # Collect candidate goals
         av_pos = engine.avatar_pos
@@ -739,7 +735,7 @@ class MacroPlanSynthesizer:
         has_multi_agent = (
             len(engine.working_memory.focus_switch_actions) > 0
             or len(engine.focus_switch_actions) > 0
-            or len(get_sub_attr(engine.working_memory, "controllable_avatar_features", set())) > 1
+            or len(engine.working_memory.controllable_avatar_features) > 1
         )
         focus_switch = next(
             (
@@ -917,12 +913,10 @@ class MacroPlanSynthesizer:
                     if 0 <= b[0] < curr_grid.shape[0] and 0 <= b[1] < curr_grid.shape[1]
                     else None
                 )
-                incompat_fn = get_sub_attr(
-                    engine.symbolic_theory, "is_tool_barrier_incompatible", None
-                )
+                incompat_fn = getattr(engine.symbolic_theory, "is_tool_barrier_incompatible", None)
                 if callable(incompat_fn) and incompat_fn(held_feat, b_feat):
                     continue
-                aff_fn = get_sub_attr(engine.symbolic_theory, "has_tool_barrier_affinity", None)
+                aff_fn = getattr(engine.symbolic_theory, "has_tool_barrier_affinity", None)
                 if (callable(aff_fn) and aff_fn(held_feat, b_feat)) or held_feat is not None:
                     barriers_to_clear.append(b)
             if barriers_to_clear:

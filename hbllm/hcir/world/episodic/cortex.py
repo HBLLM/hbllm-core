@@ -747,7 +747,7 @@ class HippocampalEpisodicCortex:
         if target_epoch is not None:
             delta.set("_context_epoch", target_epoch)
         delta.set("prev_grid", None)
-        delta.set("_prev_oriented_threats", [])
+        delta.set("prev_oriented_threats", [])
         delta.set("avatar_pos", None)
         delta.set("last_action", None)
         delta.set("last_action_data", None)
@@ -797,7 +797,7 @@ class HippocampalEpisodicCortex:
         delta.set("simulation_cooldown", 0)
         view.working_memory.reset_salience_baseline()
         delta.set("current_simulated_goal", None)
-        delta.set("_feedback_assimilated", False)
+        delta.set("feedback_assimilated", False)
         view.symbolic_theory.clear_explored_loci(
             clear_features=(new_context or not retain_dynamics)
         )
@@ -854,7 +854,7 @@ class HippocampalEpisodicCortex:
             delta.set("current_room_id", None)
             delta.set("last_surprise", 0.0)
             delta.set("last_surprise_eval", None)
-            delta.set("_prev_oriented_threats", [])
+            delta.set("prev_oriented_threats", [])
             delta.set("prev_grid", None)
             delta.set("last_action", None)
             delta.set("last_predicted_pos", None)
@@ -877,7 +877,7 @@ class HippocampalEpisodicCortex:
             delta.set("last_action", None)
             delta.set("last_predicted_pos", None)
             delta.mutate("mental_plan", view.mental_plan).clear()
-            delta.set("_prev_oriented_threats", [])
+            delta.set("prev_oriented_threats", [])
             delta.mutate("recent_positions", view.recent_positions).clear()
             if hasattr(view, "acc_conflict_monitor"):
                 view.acc_conflict_monitor.reset()
