@@ -169,12 +169,48 @@ class ConceptExplainer:
             except Exception as exc:
                 logger.debug("ConceptExplainer: ontology gather error for %r: %s", concept, exc)
 
-        # 2. Tiered Workspace Graph Traversal (Concepts, Edges, Beliefs)
+        # 2. Tiered Workspace Graph Traversal (Concepts, Edges, Beliefs take precedence)
         if self._tiered_workspace is not None:
             try:
                 self._traverse_workspace_graph(concept, snapshot)
             except Exception as exc:
                 logger.debug("ConceptExplainer: workspace traversal error for %r: %s", concept, exc)
+
+        # 2b. Commonsense relations fallback (ConceptNet Causes / HasPrerequisite / UsedFor)
+        if self._ontology_store is not None and hasattr(self._ontology_store, "get_relations"):
+            try:
+                for rel, obj, _weight in self._ontology_store.get_relations(
+                    concept, language="en", limit=12
+                ):
+                    clean_obj = obj.replace("_", " ").strip()
+                    if not clean_obj or clean_obj == concept:
+                        continue
+                    if (
+                        rel == "Causes"
+                        and clean_obj not in snapshot.causes
+                        and len(snapshot.causes) < 5
+                    ):
+                        snapshot.causes.append(clean_obj)
+                    elif (
+                        rel == "HasPrerequisite"
+                        and clean_obj not in snapshot.requires
+                        and len(snapshot.requires) < 5
+                    ):
+                        snapshot.requires.append(clean_obj)
+                    elif rel in ("UsedFor", "CapableOf", "HasProperty", "AtLocation", "MadeOf"):
+                        if len(snapshot.beliefs) < 3:
+                            rel_phrase = {
+                                "UsedFor": "is used for",
+                                "CapableOf": "is capable of",
+                                "HasProperty": "has property",
+                                "AtLocation": "is typically found at",
+                                "MadeOf": "is made of",
+                            }[rel]
+                            stmt = f"{concept} {rel_phrase} {clean_obj}"
+                            if stmt not in snapshot.beliefs:
+                                snapshot.beliefs.append(stmt)
+            except Exception as exc:
+                logger.debug("ConceptExplainer: relation fallback error for %r: %s", concept, exc)
 
         # 3. Fuzzy concept recovery when unknown typo queried (e.g. "why does focsu happen?")
         if (

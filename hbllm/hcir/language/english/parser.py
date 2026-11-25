@@ -950,7 +950,9 @@ class EnglishParser:
             suffix = [t for t in tokens[c_idx + 1 :] if t.pos != EnglishPOS.PUNCT]
             if prefix and len(suffix) >= 2 and prefix[0].pos in (EnglishPOS.PREP, EnglishPOS.ADV):
                 sub_ast = self._syntax.parse(suffix)
-                if sub_ast is not None:
+                if sub_ast is not None and not (
+                    sub_ast.construction == ConstructionType.IMPERATIVE and len(suffix) > 6
+                ):
                     return self._ast_to_semantic_frame(sub_ast, meta)
 
         return None

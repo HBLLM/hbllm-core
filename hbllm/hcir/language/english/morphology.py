@@ -404,6 +404,25 @@ class EnglishMorphology:
         ):
             return MorphToken(surface=token, lemma=word, pos=EnglishPOS.ADJ, features={})
 
+        # High-collision short function-word typos take priority over open-dictionary stubs
+        # (e.g. Wiktionary's "teh" humor entry or "wht" abbreviation).
+        if _allow_fuzzy:
+            common_typos = getattr(self._normalizer, "_common_typos", None)
+            if common_typos and word in common_typos:
+                reanalyzed = self.analyze(
+                    common_typos[word],
+                    _allow_fuzzy=False,
+                    is_sentence_start=is_sentence_start,
+                )
+                feats = dict(reanalyzed.features)
+                feats["corrected_from"] = word
+                return MorphToken(
+                    surface=token,
+                    lemma=reanalyzed.lemma,
+                    pos=reanalyzed.pos,
+                    features=feats,
+                )
+
         # Direct trusted lexicon lookup
         direct_entries = self._trusted_lookup(word)
         if direct_entries:

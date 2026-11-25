@@ -82,6 +82,14 @@ class EnglishLexicon:
                 "preposition": EnglishPOS.PREP,
             }
             stored = self._ontology_store.lookup(key, language="en")
+            if not stored and key.isalpha() and hasattr(self._ontology_store, "lemmatize_surface"):
+                for lemma, _ in self._ontology_store.lemmatize_surface(key, language="en"):
+                    local_lemma = self._entries.get(lemma)
+                    if local_lemma:
+                        return local_lemma
+                    stored = self._ontology_store.lookup(lemma, language="en")
+                    if stored:
+                        break
             if stored:
                 return [
                     EnglishLexicalEntry(

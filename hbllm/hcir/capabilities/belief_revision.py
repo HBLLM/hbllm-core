@@ -101,13 +101,20 @@ class BeliefConflictResolver:
          than silently deleted.
     """
 
-    def __init__(self, supersede_margin: float = 0.10) -> None:
+    def __init__(
+        self,
+        supersede_margin: float = 0.10,
+        ontology_store: Any | None = None,
+    ) -> None:
         self._supersede_margin = supersede_margin
+        self._ontology_store = ontology_store
 
     def evaluate_belief(
         self,
         new_belief: BeliefNode,
         graph: CognitiveGraph | None,
+        *,
+        ontology_store: Any | None = None,
     ) -> BeliefRevisionReport:
         """Compare a proposed BeliefNode against existing BeliefNodes in ``graph``.
 
@@ -144,6 +151,20 @@ class BeliefConflictResolver:
                 node.statement,
                 new_belief.statement,
             )
+            store = ontology_store or self._ontology_store
+            if not is_conflict and store is not None and hasattr(store, "are_antonyms"):
+                diff_new = sorted(new_tokens - existing_tokens)
+                diff_old = sorted(existing_tokens - new_tokens)
+                if 1 <= len(diff_new) <= 4 and 1 <= len(diff_old) <= 4:
+                    for tok_new in diff_new:
+                        for tok_old in diff_old:
+                            if store.are_antonyms(tok_new, tok_old):
+                                is_conflict = True
+                                explanation = f"Antonym conflict: '{tok_new}' vs '{tok_old}'"
+                                conflict_conf = 0.80
+                                break
+                        if is_conflict:
+                            break
             if not is_conflict:
                 continue
 

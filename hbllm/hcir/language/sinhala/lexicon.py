@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from hbllm.hcir.language.core.multilingual_lookup import resolve_multilingual_lexicon_lookup
+
 
 class SinhalaPOS(StrEnum):
     """Sinhala Part of Speech categories."""
@@ -51,28 +53,22 @@ class SinhalaLexicon:
         self._entries[word].append(entry)
 
     def lookup(self, word: str) -> list[SinhalaLexicalEntry]:
-        key = word.strip()
-        local = self._entries.get(key)
-        if local:
-            return local
-        if self._ontology_store is not None:
-            pos_map = {
+        return resolve_multilingual_lexicon_lookup(
+            word,
+            language="si",
+            local_entries=self._entries,
+            ontology_store=self._ontology_store,
+            pos_map={
                 "noun": SinhalaPOS.NOUN,
                 "verb": SinhalaPOS.VERB,
                 "adj": SinhalaPOS.ADJ,
                 "postp": SinhalaPOS.POSTP,
-            }
-            stored = self._ontology_store.lookup(key, language="si")
-            if stored:
-                return [
-                    SinhalaLexicalEntry(
-                        lemma=s.lemma,
-                        pos=pos_map.get(s.pos, SinhalaPOS.NOUN),
-                        semantic_predicate=s.lemma,
-                    )
-                    for s in stored
-                ]
-        return []
+            },
+            default_pos=SinhalaPOS.NOUN,
+            entry_factory=lambda lemma, pos, pred: SinhalaLexicalEntry(
+                lemma=lemma, pos=pos, semantic_predicate=pred
+            ),
+        )
 
     def _init_vocabulary(self) -> None:
         # Nouns (Physical objects & concepts)
