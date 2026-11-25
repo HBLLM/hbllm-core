@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Policy Evaluator — fast regex-based policy evaluation.
 //!
 //! Pre-compiles regex patterns and evaluates text against a batch of policies
@@ -305,7 +304,7 @@ impl PolicySet {
 }
 
 #[pymodule]
-fn hbllm_policy_eval(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_policy_eval(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PolicySet>()?;
     Ok(())
 }

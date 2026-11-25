@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Confidence Estimator — fast text analysis for response quality scoring.
 //!
 //! Ports the per-response scoring pipeline from Python to Rust:
@@ -208,7 +207,7 @@ fn quick_score(query: &str, response: &str) -> f64 {
 }
 
 #[pymodule]
-fn hbllm_confidence(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_confidence(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_confidence, m)?)?;
     m.add_function(wrap_pyfunction!(quick_score, m)?)?;
     Ok(())

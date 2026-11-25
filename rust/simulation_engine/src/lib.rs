@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! Native Mental Simulation Engine & Resident Cognitive Runtime — PyO3 Bindings.
 
 pub mod geometry;
@@ -86,13 +85,13 @@ impl NativeCognitiveRuntime {
     pub fn evaluate_rollouts<'py>(
         &self,
         py: Python<'py>,
-        branches: &PyList,
+        branches: &Bound<'py, PyList>,
         seed_hash: String,
-    ) -> PyResult<(&'py PyList, &'py PyDict)> {
+    ) -> PyResult<(Bound<'py, PyList>, Bound<'py, PyDict>)> {
         // 1. Extract BranchSpecs from Python
         let mut specs = Vec::with_capacity(branches.len());
         for item in branches.iter() {
-            let dict: &PyDict = item.extract()?;
+            let dict = item.downcast::<PyDict>()?;
             let branch_id: u32 = dict
                 .get_item("branch_id")?
                 .map(|v| v.extract())
@@ -114,7 +113,7 @@ impl NativeCognitiveRuntime {
                 .transpose()?
                 .unwrap_or(20);
 
-            let py_actions: &PyList = dict
+            let py_actions: Bound<'_, PyList> = dict
                 .get_item("actions")?
                 .map(|v| v.extract())
                 .transpose()?
@@ -122,7 +121,7 @@ impl NativeCognitiveRuntime {
             let mut actions = Vec::with_capacity(py_actions.len());
 
             for act_item in py_actions.iter() {
-                let act_dict: &PyDict = act_item.extract()?;
+                let act_dict = act_item.downcast::<PyDict>()?;
                 let operator: String = act_dict
                     .get_item("operator")?
                     .map(|v| v.extract())
@@ -191,6 +190,7 @@ impl NativeCognitiveRuntime {
 }
 
 #[pyfunction]
+#[pyo3(signature = (upper_bounds, base_bounds, tolerance=None))]
 pub fn evaluate_support_stability(
     upper_bounds: (f64, f64, f64, f64, f64, f64),
     base_bounds: (f64, f64, f64, f64, f64, f64),
@@ -218,12 +218,12 @@ pub fn evaluate_support_stability(
 #[pyfunction]
 pub fn evaluate_parallel_rollouts<'py>(
     py: Python<'py>,
-    branches: &PyList,
+    branches: &Bound<'py, PyList>,
     seed_hash: String,
-) -> PyResult<&'py PyList> {
+) -> PyResult<Bound<'py, PyList>> {
     let mut specs = Vec::with_capacity(branches.len());
     for item in branches.iter() {
-        let dict: &PyDict = item.extract()?;
+        let dict = item.downcast::<PyDict>()?;
         let branch_id: u32 = dict
             .get_item("branch_id")?
             .map(|v| v.extract())
@@ -245,7 +245,7 @@ pub fn evaluate_parallel_rollouts<'py>(
             .transpose()?
             .unwrap_or(20);
 
-        let py_actions: &PyList = dict
+        let py_actions: Bound<'_, PyList> = dict
             .get_item("actions")?
             .map(|v| v.extract())
             .transpose()?
@@ -253,7 +253,7 @@ pub fn evaluate_parallel_rollouts<'py>(
         let mut actions = Vec::with_capacity(py_actions.len());
 
         for act_item in py_actions.iter() {
-            let act_dict: &PyDict = act_item.extract()?;
+            let act_dict = act_item.downcast::<PyDict>()?;
             let operator: String = act_dict
                 .get_item("operator")?
                 .map(|v| v.extract())
@@ -311,7 +311,7 @@ pub fn evaluate_parallel_rollouts<'py>(
 }
 
 #[pymodule]
-fn hbllm_simulation_engine(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn hbllm_simulation_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NativeCognitiveRuntime>()?;
     m.add_function(wrap_pyfunction!(evaluate_support_stability, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_parallel_rollouts, m)?)?;

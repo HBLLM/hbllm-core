@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Tokenizer — Custom byte-level BPE tokenizer.
 //!
 //! This crate implements a fast, byte-level Byte Pair Encoding (BPE) tokenizer
@@ -42,7 +41,7 @@ pub mod vocab;
 
 /// Python module entry point
 #[pymodule]
-fn hbllm_tokenizer_rs(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_tokenizer_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<python::PyVocab>()?;
     m.add_class::<python::PyTrainer>()?;
     Ok(())

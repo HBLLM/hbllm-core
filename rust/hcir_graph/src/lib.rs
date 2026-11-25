@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! Native HCIR Graph Substrate — PyO3 Bindings.
 
 pub mod chunk;
@@ -56,6 +55,7 @@ impl PyNativeGraph {
         self.state.read().contains_edge(id)
     }
 
+    #[pyo3(signature = (id, node_type, lifecycle=None, properties=None, created_at=None))]
     pub fn add_node(
         &self,
         id: String,
@@ -76,6 +76,7 @@ impl PyNativeGraph {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (id, edge_type, sources, targets, weight=None, properties=None, created_at=None))]
     pub fn add_edge(
         &self,
         id: String,
@@ -99,7 +100,7 @@ impl PyNativeGraph {
         *state = state.with_edge_added(edge);
     }
 
-    pub fn get_node<'py>(&self, py: Python<'py>, id: &str) -> PyResult<Option<&'py PyDict>> {
+    pub fn get_node<'py>(&self, py: Python<'py>, id: &str) -> PyResult<Option<Bound<'py, PyDict>>> {
         let state = self.state.read();
         if let Some(node) = state.get_node(id) {
             let dict = PyDict::new(py);
@@ -114,7 +115,7 @@ impl PyNativeGraph {
         }
     }
 
-    pub fn get_edge<'py>(&self, py: Python<'py>, id: &str) -> PyResult<Option<&'py PyDict>> {
+    pub fn get_edge<'py>(&self, py: Python<'py>, id: &str) -> PyResult<Option<Bound<'py, PyDict>>> {
         let state = self.state.read();
         if let Some(edge) = state.get_edge(id) {
             let dict = PyDict::new(py);
@@ -131,7 +132,7 @@ impl PyNativeGraph {
         }
     }
 
-    pub fn edges_from<'py>(&self, py: Python<'py>, node_id: &str) -> PyResult<&'py PyList> {
+    pub fn edges_from<'py>(&self, py: Python<'py>, node_id: &str) -> PyResult<Bound<'py, PyList>> {
         let state = self.state.read();
         let edges = state.edges_from(node_id);
         let list = PyList::empty(py);
@@ -149,7 +150,7 @@ impl PyNativeGraph {
         Ok(list)
     }
 
-    pub fn edges_to<'py>(&self, py: Python<'py>, node_id: &str) -> PyResult<&'py PyList> {
+    pub fn edges_to<'py>(&self, py: Python<'py>, node_id: &str) -> PyResult<Bound<'py, PyList>> {
         let state = self.state.read();
         let edges = state.edges_to(node_id);
         let list = PyList::empty(py);
@@ -167,7 +168,11 @@ impl PyNativeGraph {
         Ok(list)
     }
 
-    pub fn nodes_of_type<'py>(&self, py: Python<'py>, node_type: &str) -> PyResult<&'py PyList> {
+    pub fn nodes_of_type<'py>(
+        &self,
+        py: Python<'py>,
+        node_type: &str,
+    ) -> PyResult<Bound<'py, PyList>> {
         let state = self.state.read();
         let nodes = state.nodes_of_type(node_type);
         let list = PyList::empty(py);
@@ -183,18 +188,20 @@ impl PyNativeGraph {
         Ok(list)
     }
 
+    #[pyo3(signature = (start, end, max_depth=None))]
     pub fn bfs_path(&self, start: &str, end: &str, max_depth: Option<usize>) -> Vec<String> {
         self.state
             .read()
             .bfs_path(start, end, max_depth.unwrap_or(10))
     }
 
+    #[pyo3(signature = (center_id, max_depth=None))]
     pub fn subgraph_bfs<'py>(
         &self,
         py: Python<'py>,
         center_id: &str,
         max_depth: Option<usize>,
-    ) -> PyResult<&'py PyTuple> {
+    ) -> PyResult<Bound<'py, PyTuple>> {
         let state = self.state.read();
         let (nodes, edges) = state.subgraph_bfs(center_id, max_depth.unwrap_or(3));
 
@@ -222,7 +229,7 @@ impl PyNativeGraph {
             py_edges.append(dict)?;
         }
 
-        Ok(PyTuple::new(py, [py_nodes, py_edges]))
+        PyTuple::new(py, [py_nodes, py_edges])
     }
 
     pub fn canonical_hash(&self) -> String {
@@ -371,6 +378,7 @@ impl PartialOrd for AStarNode {
 
 /// Computes the optimal geodesic collision-free path on a 2D grid via accelerated A*.
 #[pyfunction]
+#[pyo3(signature = (height, width, start, goal, barriers, step_size=None, max_iterations=None))]
 pub fn fast_geodesic_astar(
     height: usize,
     width: usize,
@@ -504,7 +512,7 @@ pub fn fast_geodesic_astar(
 }
 
 #[pymodule]
-fn hbllm_hcir_graph(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn hbllm_hcir_graph(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyNativeGraph>()?;
     m.add_function(wrap_pyfunction!(blake3_hash, m)?)?;
     m.add_function(wrap_pyfunction!(topological_connected_components, m)?)?;

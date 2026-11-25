@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Knowledge Graph — fast graph algorithms for entity-relation traversal.
 //!
 //! Provides:
@@ -169,7 +168,7 @@ fn entity_similarity(a: &str, b: &str) -> f64 {
 }
 
 #[pymodule]
-fn hbllm_knowledge_graph(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_knowledge_graph(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(shortest_path, m)?)?;
     m.add_function(wrap_pyfunction!(subgraph, m)?)?;
     m.add_function(wrap_pyfunction!(disambiguate_entities, m)?)?;

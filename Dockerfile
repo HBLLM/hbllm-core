@@ -23,7 +23,7 @@ COPY Cargo.toml Cargo.lock* ./
 COPY rust/ rust/
 
 RUN mkdir -p /build/wheels && \
-    for crate in rust/hcir_graph rust/compute_kernel rust/simulation_engine rust/structure_matcher rust/semantic_search rust/perception rust/policy_eval rust/knowledge_graph rust/network_utils rust/confidence rust/concept_extract rust/tokenizer; do \
+    for crate in rust/hcir_graph rust/compute_kernel rust/simulation_engine rust/structure_matcher rust/semantic_search rust/perception rust/policy_eval rust/knowledge_graph rust/network_utils rust/confidence rust/concept_extract rust/tokenizer rust/data_tools; do \
         if [ -f "$crate/Cargo.toml" ]; then \
             echo "Building wheel for $crate..." && \
             (cd "$crate" && maturin build --release --out /build/wheels); \

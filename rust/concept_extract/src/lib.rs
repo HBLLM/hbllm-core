@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Concept Extractor — fast keyword extraction and topic clustering.
 //!
 //! Provides:
@@ -158,7 +157,7 @@ fn extract_text_keywords(text: &str) -> Vec<String> {
 }
 
 #[pymodule]
-fn hbllm_concept_extract(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_concept_extract(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(batch_keyword_count, m)?)?;
     m.add_function(wrap_pyfunction!(cluster_by_keywords, m)?)?;
     m.add_function(wrap_pyfunction!(extract_query_rules, m)?)?;

@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Semantic Search — fast cosine similarity and TF-IDF encoding.
 //!
 //! Provides:
@@ -7,7 +6,7 @@
 //! - Content hashing (MD5) for deduplication
 
 use md5::{Digest, Md5};
-use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2};
+use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use regex::Regex;
@@ -105,7 +104,7 @@ impl TfIdfEncoder {
     }
 
     /// Encode a single text into a TF-IDF vector (returned as numpy array).
-    fn encode_one<'py>(&self, py: Python<'py>, text: &str) -> &'py PyArray1<f64> {
+    fn encode_one<'py>(&self, py: Python<'py>, text: &str) -> Bound<'py, PyArray1<f64>> {
         let dim = self.vocab.len().max(1);
         let mut vec = vec![0.0f64; dim];
 
@@ -153,9 +152,9 @@ impl TfIdfEncoder {
 #[pyfunction]
 fn batch_cosine_similarity<'py>(
     py: Python<'py>,
-    query: PyReadonlyArray1<f64>,
-    matrix: PyReadonlyArray2<f64>,
-) -> &'py PyArray1<f64> {
+    query: PyReadonlyArray1<'py, f64>,
+    matrix: PyReadonlyArray2<'py, f64>,
+) -> Bound<'py, PyArray1<f64>> {
     let q = query.as_slice().unwrap();
     let shape = matrix.shape();
     let (n_rows, n_cols) = (shape[0], shape[1]);
@@ -174,7 +173,7 @@ fn content_hash(text: &str) -> String {
 }
 
 #[pymodule]
-fn hbllm_semantic_search(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_semantic_search(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<TfIdfEncoder>()?;
     m.add_function(wrap_pyfunction!(batch_cosine_similarity, m)?)?;
     m.add_function(wrap_pyfunction!(content_hash, m)?)?;

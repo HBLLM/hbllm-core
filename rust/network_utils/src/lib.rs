@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 //! HBLLM Network Utils — fast circuit breaker and token bucket rate limiter.
 //!
 //! These primitives are called on every message through the bus, so even
@@ -178,7 +177,7 @@ impl RateLimiter {
 // ── Python Module ───────────────────────────────────────────────────────────
 
 #[pymodule]
-fn hbllm_network_utils(_py: Python, m: &PyModule) -> PyResult<()> {
+fn hbllm_network_utils(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CircuitBreaker>()?;
     m.add_class::<RateLimiter>()?;
     Ok(())
