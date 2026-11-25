@@ -219,3 +219,160 @@ def test_multilingual_si_ta_book_reading_aligns_to_hcir_concepts(tmp_path: Path)
     assert ("tree", "is_a", "plant") in ta_triples
     assert ("rain", "causes", "flood") in ta_triples
     store.close()
+
+
+def test_ed_participle_verb_and_proper_noun_recipient_under_noisy_lexicon(
+    tmp_path: Path,
+) -> None:
+    store = LexicalOntologyStore(tmp_path / "ont.db")
+    store.upsert_many(
+        [
+            LexicalOntologyRecord("unlock", "verb", "en", "Release a lock."),
+            LexicalOntologyRecord(
+                "unlocked",
+                "adj",
+                "en",
+                "Not secured or protected by an engaged lock.",
+            ),
+            LexicalOntologyRecord(
+                "give",
+                "verb",
+                "en",
+                "Transfer possession.",
+                thematic_roles=("Agent", "Theme", "Recipient"),
+            ),
+            LexicalOntologyRecord("bob", "verb", "en", "Move up and down."),
+        ],
+        source="kaikki:test",
+    )
+
+    story = "Alice found a brass key. She gave it to Bob. She unlocked the oak door."
+    props = extract_propositions_from_text(
+        story,
+        source_file="story.txt",
+        include_extended=True,
+        ontology_store=store,
+    )
+    triples = {(p.subject, p.relation, p.obj) for p in props}
+    assert ("alice", "find", "key") in triples
+    assert ("alice", "give", "key") in triples
+    assert ("alice", "unlock", "door") in triples
+    give_prop = next(p for p in props if p.relation == "give")
+    assert ("recipient", "bob") in give_prop.modifiers
+
+    tw = TieredWorkspace()
+    commit_propositions(props, tw.persistent, ontology_store=store)
+    before_edges = [
+        e for e in tw.persistent.graph.edges.values() if e.edge_type == HCIREdgeType.BEFORE
+    ]
+    assert len(before_edges) == 2
+    assert any(
+        str(e.properties.get("relation", "")) == "give_recipient"
+        for e in tw.persistent.graph.edges.values()
+    )
+    store.close()
+
+
+def test_noise_filter_edge_dedupe_grant_fallback_and_explainer_sense_ranking(
+    tmp_path: Path,
+) -> None:
+    from hbllm.hcir.capabilities.concept_explainer import ConceptExplainer
+    from hbllm.hcir.language.english.lexicon import EnglishLexicon
+    from hbllm.hcir.language.english.parser import EnglishParser
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+    noisy_book = (
+        "[Illustration: Dear Mother of my hart]\n"
+        "Copyright, 1912\n"
+        "Where you are know is good.\n"
+        "Giovanna 53 found the lamp 105.\n"
+        "Alice watched the bright museum.\n"
+    )
+    props = extract_propositions_from_text(
+        noisy_book, source_file="noisy.txt", include_extended=True
+    )
+    subjects = {p.subject for p in props}
+    objs = {p.obj for p in props}
+    assert "illustration" not in subjects
+    assert "copyright" not in subjects
+    assert "where_you" not in subjects
+    assert not any(o.endswith("_53") or o.endswith("_105") for o in objs)
+    assert ("alice", "watch", "museum") in {(p.subject, p.relation, p.obj) for p in props}
+
+    # Repeated propositions emitting identical edge IDs must not roll back batch commit,
+    # and commit_propositions must fall back to workspace._system_grant when grant=None.
+    sys = build_cognitive_system(
+        CognitiveSystemConfig(
+            world_id="test_grant_dedupe",
+            memory_dir=None,
+            enable_grounding=False,
+            enable_brain_llm=False,
+            enable_autonomous_curiosity=False,
+        )
+    )
+    parser = EnglishParser(lexicon=EnglishLexicon())
+    dup_props = [
+        *extract_propositions_from_text("Rain causes flood.", source_file="b1", parser=parser),
+        *extract_propositions_from_text("Rain causes flood.", source_file="b2", parser=parser),
+        *extract_propositions_from_text(
+            "Arts exposition is in Boston.", source_file="b1", parser=parser
+        ),
+    ]
+    _, edges_committed, _ = commit_propositions(
+        dup_props,
+        sys.tiered_workspace,
+        grant=None,
+    )
+    assert edges_committed >= 2
+
+    store = LexicalOntologyStore(tmp_path / "ont.db")
+    store.upsert_many(
+        [
+            LexicalOntologyRecord(
+                "tree",
+                "n",
+                "en",
+                "English actor and theatrical producer (1853-1917)",
+            ),
+            LexicalOntologyRecord("tree", "noun", "en", "a tall perennial woody plant"),
+        ],
+        source="open_english_wordnet",
+    )
+    explainer = ConceptExplainer(
+        tiered_workspace=sys.tiered_workspace,
+        ontology_store=store,
+    )
+    tree_snap = explainer.gather_knowledge("tree")
+    assert "woody plant" in tree_snap.definition
+    assert "1853-1917" not in tree_snap.definition
+
+    expo_snap = explainer.gather_knowledge("arts_exposition")
+    assert expo_snap.has_knowledge is True
+    assert any("located in boston" in b for b in expo_snap.beliefs)
+    store.close()
+
+
+def test_universal_engine_prefers_higher_frequency_stemmed_alignment(tmp_path: Path) -> None:
+    store = LexicalOntologyStore(tmp_path / "ont.db")
+    store.upsert_many(
+        [
+            LexicalOntologyRecord("peony", "noun", "en", "Flowering plant."),
+            LexicalOntologyRecord("plant", "noun", "en", "Living photosynthetic organism."),
+        ],
+        source="core_ontology",
+    )
+    store.record_frequencies({"peony": 2, "plant": 15000}, language="en")
+    store.upsert_concept_alignments(
+        [
+            ("si", "ශාකයක්", "peony", 0.9, "osdb"),
+            ("si", "ශාකය", "plant", 0.9, "osdb"),
+            ("si", "ගස", "tree", 0.9, "osdb"),
+        ]
+    )
+    props = extract_propositions_from_text(
+        "ගස ශාකයක් වේ.",
+        include_extended=True,
+        ontology_store=store,
+    )
+    assert ("tree", "is_a", "plant") in {(p.subject, p.relation, p.obj) for p in props}
+    store.close()

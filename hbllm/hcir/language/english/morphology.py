@@ -428,10 +428,37 @@ class EnglishMorphology:
         if direct_entries:
             entry = direct_entries[0]
             feats = {"number": "singular", "tense": "present"}
-            if len(direct_entries) > 1:
-                alt = self._alt_pos_str(direct_entries)
-                if "," in alt:
-                    feats["alt_pos"] = alt
+            alt_vals: list[str] = []
+            for e in direct_entries:
+                val = getattr(e.pos, "value", str(e.pos))
+                if val not in alt_vals:
+                    alt_vals.append(val)
+
+            # Regular -ed adjectives (e.g. "unlocked") may also act as past-tense verbs
+            # whose lemma is in the trusted lexicon ("unlock").
+            if (
+                word.endswith("ed")
+                and len(word) > 3
+                and word not in _NON_VERB_ED_NOUNS
+                and "verb" not in alt_vals
+                and EnglishPOS.ADJ in {e.pos for e in direct_entries}
+            ):
+                ed_cand_stems: list[str] = []
+                if word.endswith("ied") and len(word) > 4:
+                    ed_cand_stems.append(word[:-3] + "y")
+                ed_cand_stems.extend([word[:-2], word[:-1]])
+                base_ed = word[:-2]
+                if len(base_ed) >= 3 and base_ed[-1] == base_ed[-2]:
+                    ed_cand_stems.append(base_ed[:-1])
+                for stem in ed_cand_stems:
+                    stem_entries = self._trusted_lookup(stem)
+                    if stem_entries and any(se.pos == EnglishPOS.VERB for se in stem_entries):
+                        alt_vals.append("verb")
+                        feats["verb_stem"] = stem
+                        break
+
+            if len(alt_vals) > 1:
+                feats["alt_pos"] = ",".join(alt_vals)
             return MorphToken(
                 surface=token,
                 lemma=entry.lemma,
@@ -628,12 +655,37 @@ class EnglishMorphology:
                     if not next_is_noun:
                         out[idx] = self._with_pos(tok, EnglishPOS.NOUN)
 
-        # 3. Infinitive "to + <V>" (e.g., "caused the river to flood")
+        # 2b. Mid-sentence capitalized proper names after prepositions/verbs ("to Bob", "told Mark")
         for k in range(1, len(content_idxs)):
             prev_tok = out[content_idxs[k - 1]]
             idx = content_idxs[k]
             tok = out[idx]
-            if prev_tok.lemma == "to" and self._has_alt_pos(tok, EnglishPOS.VERB):
+            is_mid_proper = tok.surface[:1].isupper() and not tok.surface.isupper()
+            if (
+                is_mid_proper
+                and prev_tok.pos in (EnglishPOS.PREP, EnglishPOS.VERB)
+                and tok.pos
+                not in (
+                    EnglishPOS.AUX,
+                    EnglishPOS.DET,
+                    EnglishPOS.PREP,
+                    EnglishPOS.PRON,
+                    EnglishPOS.WH,
+                )
+            ):
+                out[idx] = self._with_pos(tok, EnglishPOS.NOUN)
+
+        # 3. Infinitive "to + <V>" (e.g., "caused the river to flood"), skipping proper names ("to Bob")
+        for k in range(1, len(content_idxs)):
+            prev_tok = out[content_idxs[k - 1]]
+            idx = content_idxs[k]
+            tok = out[idx]
+            is_mid_proper = tok.surface[:1].isupper() and not tok.surface.isupper()
+            if (
+                prev_tok.lemma == "to"
+                and self._has_alt_pos(tok, EnglishPOS.VERB)
+                and not is_mid_proper
+            ):
                 out[idx] = self._with_pos(tok, EnglishPOS.VERB)
 
         # 4. Aux (do/does/did/can/could/will/would/may/might/must) + ... + verb
@@ -700,6 +752,29 @@ class EnglishMorphology:
                     v_tok = out[v_idx]
                     if self._has_alt_pos(v_tok, EnglishPOS.VERB):
                         out[v_idx] = self._with_pos(v_tok, EnglishPOS.VERB)
+
+        # 5b. Disambiguate regular -ed participle adjectives acting as past verbs ("Alice unlocked the door")
+        has_other_verb = any(t.pos in (EnglishPOS.VERB, EnglishPOS.AUX) for t in out)
+        for k in range(1, len(content_idxs) - 1):
+            idx = content_idxs[k]
+            tok = out[idx]
+            verb_stem = tok.features.get("verb_stem", "")
+            if tok.pos == EnglishPOS.ADJ and self._has_alt_pos(tok, EnglishPOS.VERB) and verb_stem:
+                prev_tok = out[content_idxs[k - 1]]
+                next_tok = out[content_idxs[k + 1]]
+                if prev_tok.pos in (EnglishPOS.NOUN, EnglishPOS.PRON) and (
+                    next_tok.pos in (EnglishPOS.DET, EnglishPOS.PRON, EnglishPOS.PREP)
+                    or (next_tok.pos in (EnglishPOS.NOUN, EnglishPOS.ADJ) and not has_other_verb)
+                ):
+                    new_feats = dict(tok.features)
+                    new_feats["tense"] = "past"
+                    out[idx] = MorphToken(
+                        surface=tok.surface,
+                        lemma=verb_stem,
+                        pos=EnglishPOS.VERB,
+                        features=new_feats,
+                    )
+                    has_other_verb = True
 
         # 6. Subject NP + <dual N/V> -> VERB ("Florbs live in caves", "Plants absorb sunlight", "Heavy rain caused...")
         if len(content_idxs) >= 2 and out[content_idxs[0]].pos in (

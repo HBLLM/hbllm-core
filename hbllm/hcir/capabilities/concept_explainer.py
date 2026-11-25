@@ -54,21 +54,29 @@ def _resolve_concept_node_ids(p_graph: Any, name: str) -> list[str]:
     """Resolve persistent graph node IDs matching a concept name or label."""
     from hbllm.hcir.graph import ConceptNode, HCIRNodeType
 
-    clean = name.strip().lower()
+    clean = name.strip().lower().replace("_", " ")
     if not clean:
         return []
     clean_under = clean.replace(" ", "_")
-    candidates = (
-        clean,
-        clean_under,
-        f"t4_concept_{clean_under}",
-        f"t4_concept_{clean}",
-        f"web_concept_{clean_under}",
-        f"web_concept_{clean}",
-        f"concept_{clean_under}",
-        f"concept_{clean}",
-        f"sem_{clean_under}",
-    )
+    words = clean.split()
+    variants: list[str] = [clean, clean_under]
+    if words:
+        from hbllm.hcir.language.english.morphology import singularize_noun
+
+        sg_words = " ".join(singularize_noun(w) for w in words)
+        if sg_words != clean:
+            variants.extend([sg_words, sg_words.replace(" ", "_")])
+    candidates: list[str] = []
+    for var in dict.fromkeys(variants):
+        candidates.extend(
+            (
+                var,
+                f"t4_concept_{var}",
+                f"web_concept_{var}",
+                f"concept_{var}",
+                f"sem_{var}",
+            )
+        )
     resolved: list[str] = []
     seen: set[str] = set()
     for cid in candidates:
@@ -112,6 +120,30 @@ class ConceptKnowledgeSnapshot:
         )
 
 
+_BIO_YEARS_RE = re.compile(r"\(\d{4}\s*[-–]\s*\d{4}\)")
+
+
+def _is_obscure_or_biographical_definition(defn: str) -> bool:
+    """Return True for biographical year-span stubs or dictionary meta-entries."""
+    low = defn.strip().lower()
+    if not low:
+        return True
+    if _BIO_YEARS_RE.search(defn):
+        return True
+    return low.startswith(
+        (
+            "a surname",
+            "a male given name",
+            "a female given name",
+            "pronunciation spelling of",
+            "plural of ",
+            "simple past",
+            "past participle of ",
+            "present participle of ",
+        )
+    )
+
+
 class ConceptExplainer:
     """Traverses HCIR knowledge stores and synthesizes multi-sentence discourse.
 
@@ -137,7 +169,7 @@ class ConceptExplainer:
         _allow_fuzzy: bool = True,
     ) -> ConceptKnowledgeSnapshot:
         """Traverse ontology and tiered workspace to gather multi-dimensional knowledge."""
-        concept = concept_query.strip().lower()
+        concept = concept_query.strip().lower().replace("_", " ")
         # Strip common leading words
         for prefix in ("a ", "an ", "the ", "about "):
             if concept.startswith(prefix):
@@ -146,18 +178,32 @@ class ConceptExplainer:
         snapshot = ConceptKnowledgeSnapshot(concept=concept)
 
         # 1. Lexical Ontology Store (Definitions, Hypernyms, Synonyms)
+        def_is_obscure = False
         if self._ontology_store is not None:
             try:
                 entries = self._ontology_store.lookup(concept)
+                fallback_def = ""
+                fallback_domain = "general"
+                fallback_src = "lexical_store"
                 for entry in entries:
                     if entry.definition and not snapshot.definition:
-                        snapshot.definition = entry.definition
-                        snapshot.domain = entry.domain
-                        snapshot.provenance = f"ontology:{entry.source or 'lexical_store'}"
+                        if not _is_obscure_or_biographical_definition(entry.definition):
+                            snapshot.definition = entry.definition
+                            snapshot.domain = entry.domain
+                            snapshot.provenance = f"ontology:{entry.source or 'lexical_store'}"
+                        elif not fallback_def:
+                            fallback_def = entry.definition
+                            fallback_domain = entry.domain
+                            fallback_src = entry.source or "lexical_store"
                     if entry.synonyms and not snapshot.synonyms:
                         snapshot.synonyms = [
                             s.replace("_", " ") for s in entry.synonyms if s.lower() != concept
                         ]
+                if not snapshot.definition and fallback_def:
+                    snapshot.definition = fallback_def
+                    snapshot.domain = fallback_domain
+                    snapshot.provenance = f"ontology:{fallback_src}"
+                    def_is_obscure = True
 
                 # Hypernyms / Taxonomy
                 hyps = self._ontology_store.get_hypernyms(concept)
@@ -172,7 +218,14 @@ class ConceptExplainer:
         # 2. Tiered Workspace Graph Traversal (Concepts, Edges, Beliefs take precedence)
         if self._tiered_workspace is not None:
             try:
-                self._traverse_workspace_graph(concept, snapshot)
+                if def_is_obscure:
+                    obscure_backup = snapshot.definition
+                    snapshot.definition = ""
+                    self._traverse_workspace_graph(concept, snapshot)
+                    if not snapshot.definition:
+                        snapshot.definition = obscure_backup
+                else:
+                    self._traverse_workspace_graph(concept, snapshot)
             except Exception as exc:
                 logger.debug("ConceptExplainer: workspace traversal error for %r: %s", concept, exc)
 
@@ -388,6 +441,10 @@ class ConceptExplainer:
                         elif edge.edge_type == HCIREdgeType.GENERALIZES or rel == "is_a":
                             if target_clean not in snapshot.hypernyms:
                                 snapshot.hypernyms.append(target_clean)
+                        elif rel and len(snapshot.beliefs) < 5:
+                            rel_stmt = f"{concept} {rel.replace('_', ' ')} {target_clean}"
+                            if rel_stmt not in snapshot.beliefs:
+                                snapshot.beliefs.append(rel_stmt)
 
                 for edge in p_graph.edges_to(cid):
                     if edge.id in seen_edges:

@@ -472,6 +472,58 @@ def _strip_intro_clause(sent: str) -> str:
     return stripped
 
 
+_TRAILING_DIGITS_RE = re.compile(r"_\d+$")
+_NOISY_FRONTMATTER_RE = re.compile(
+    r"^(?:copyright|chapter|part|book|volume|frontispiece|illustrations?\b|"
+    r"contents\b|table\s+of\s+contents|appendix\b|index\b)\b",
+    re.IGNORECASE,
+)
+_ISA_SUBJ_NOISE_WORDS = frozenset(
+    {
+        "i",
+        "me",
+        "my",
+        "myself",
+        "you",
+        "your",
+        "we",
+        "our",
+        "he",
+        "she",
+        "they",
+        "where",
+        "when",
+        "why",
+        "how",
+        "who",
+        "but",
+        "and",
+        "said",
+        "know",
+    }
+)
+
+
+def _is_noisy_prose_line(line: str) -> bool:
+    """Return True for captions, frontmatter metadata, dividers, ALL-CAPS headers, or digit-heavy lines."""
+    s = line.strip()
+    if not s:
+        return True
+    if s.startswith("[") and "]" in s:
+        return True
+    if set(s) <= set("-*=~_ \t"):
+        return True
+    alpha_chars = [ch for ch in s if ch.isalpha()]
+    if len(alpha_chars) >= 6 and s.isupper():
+        return True
+    digits = sum(1 for ch in s if ch.isdigit())
+    if digits / max(1, len(s)) > 0.25:
+        return True
+    if _NOISY_FRONTMATTER_RE.match(s) and len(s) < 60:
+        return True
+    return False
+
+
 def extract_propositions_from_text(
     text: str,
     source_file: str = "",
@@ -512,6 +564,10 @@ def extract_propositions_from_text(
             or subj == obj
             or subj in _SKIP_SUBJECTS
             or obj in _SKIP_SUBJECTS
+            or subj.isdigit()
+            or obj.isdigit()
+            or _TRAILING_DIGITS_RE.search(subj)
+            or _TRAILING_DIGITS_RE.search(obj)
             or len(subj) < 2
             or len(obj) < 2
         ):
@@ -790,6 +846,9 @@ def extract_propositions_from_text(
                 )
                 continue
 
+            if _is_noisy_prose_line(raw_trimmed):
+                continue
+
             if _HEDGE_RE.search(raw_trimmed):
                 continue
 
@@ -921,9 +980,19 @@ def extract_propositions_from_text(
             if not clause_matched and not _NEGATION_RE.search(sent_clean):
                 m_isa = _IS_A_RE.match(sent_clean)
                 if m_isa:
+                    subj_words = [
+                        w.lower() for w in re.findall(r"[a-zA-Z0-9_'-]+", m_isa.group(1).strip())
+                    ]
                     subj = _singularize_basic(_clean_term(m_isa.group(1)))
                     obj = _extract_head_from_np(m_isa.group(2))
-                    if subj and obj and subj != obj and obj not in _GARBAGE_OBJ:
+                    if (
+                        subj
+                        and obj
+                        and subj != obj
+                        and obj not in _GARBAGE_OBJ
+                        and len(subj_words) <= 4
+                        and not (_ISA_SUBJ_NOISE_WORDS & set(subj_words))
+                    ):
                         if _add(
                             subj,
                             "is_a",
@@ -1120,13 +1189,43 @@ def commit_propositions(
 
     Returns ``(nodes_committed, edges_committed, store_hypernyms_added)``.
     """
+    target_ws = (
+        getattr(workspace, "persistent", None)
+        if not hasattr(workspace, "commit_operations") and hasattr(workspace, "persistent")
+        else workspace
+    ) or workspace
     node_ops: list[TransactionOperation] = []
     edge_ops: list[TransactionOperation] = []
     created_concepts: set[str] = set()
-    ws_graph = getattr(workspace, "graph", None)
+    seen_edge_ids: set[str] = set()
+    ws_graph = getattr(target_ws, "graph", None)
     existing_edges = getattr(ws_graph, "edges", {})
     store_records: list[LexicalOntologyRecord] = []
     last_event_by_para: dict[tuple[str, int], tuple[int, str]] = {}
+    effective_grant = (
+        grant
+        if grant is not None
+        else (
+            getattr(workspace, "_system_grant", None) or getattr(target_ws, "_system_grant", None)
+        )
+    )
+
+    def _queue_edge(eid: str, edge: HCIREdge, *, force_upsert: bool = False) -> None:
+        if eid in seen_edge_ids:
+            return
+        seen_edge_ids.add(eid)
+        op_type = (
+            TransactionOp.UPSERT_EDGE
+            if force_upsert or eid in existing_edges
+            else TransactionOp.ADD_EDGE
+        )
+        edge_ops.append(
+            TransactionOperation(
+                op=op_type,
+                edge_id=eid,
+                edge_data=edge.model_dump(),
+            )
+        )
 
     edge_type_map = {
         "is_a": HCIREdgeType.GENERALIZES,
@@ -1218,7 +1317,8 @@ def commit_propositions(
         if is_neg:
             pos_rel = prop.relation[4:] if prop.relation.startswith("not_") else prop.relation
             pos_edge_id = f"t4_{pos_rel}_{src_id}__{dst_id}"
-            if pos_edge_id in existing_edges:
+            if pos_edge_id in existing_edges and pos_edge_id not in seen_edge_ids:
+                seen_edge_ids.add(pos_edge_id)
                 edge_ops.append(
                     TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=pos_edge_id)
                 )
@@ -1237,13 +1337,7 @@ def commit_propositions(
                     "sentence": prop.sentence[:160],
                 },
             )
-            edge_ops.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_EDGE,
-                    edge_id=edge.id,
-                    edge_data=edge.model_dump(),
-                )
-            )
+            _queue_edge(edge.id, edge, force_upsert=True)
         else:
             edge_id = f"t4_{prop.relation}_{src_id}__{dst_id}"
             if edge_id not in existing_edges or mod_dict:
@@ -1261,15 +1355,7 @@ def commit_propositions(
                         "sentence": prop.sentence[:160],
                     },
                 )
-                edge_ops.append(
-                    TransactionOperation(
-                        op=TransactionOp.UPSERT_EDGE
-                        if edge_id in existing_edges
-                        else TransactionOp.ADD_EDGE,
-                        edge_id=edge.id,
-                        edge_data=edge.model_dump(),
-                    )
-                )
+                _queue_edge(edge.id, edge)
 
         recipient_term = str(mod_dict.get("recipient", "")).strip()
         if recipient_term and not is_neg:
@@ -1307,15 +1393,7 @@ def commit_propositions(
                     "sentence": prop.sentence[:160],
                 },
             )
-            edge_ops.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_EDGE
-                    if rec_edge_id in existing_edges
-                    else TransactionOp.ADD_EDGE,
-                    edge_id=rec_edge.id,
-                    edge_data=rec_edge.model_dump(),
-                )
-            )
+            _queue_edge(rec_edge.id, rec_edge)
 
         if (
             link_temporal_events
@@ -1341,15 +1419,7 @@ def commit_propositions(
                             "paragraph_idx": prop.paragraph_idx,
                         },
                     )
-                    edge_ops.append(
-                        TransactionOperation(
-                            op=TransactionOp.UPSERT_EDGE
-                            if before_eid in existing_edges
-                            else TransactionOp.ADD_EDGE,
-                            edge_id=before_edge.id,
-                            edge_data=before_edge.model_dump(),
-                        )
-                    )
+                    _queue_edge(before_edge.id, before_edge)
             last_event_by_para[para_key] = (prop.sentence_idx, belief.id)
 
         if prop.relation == "is_a" and prop.polarity:
@@ -1375,14 +1445,14 @@ def commit_propositions(
     nodes_committed = 0
     for i in range(0, len(node_ops), batch_size):
         batch = node_ops[i : i + batch_size]
-        receipt = workspace.commit_operations(batch, author=author, grant=grant)
+        receipt = target_ws.commit_operations(batch, author=author, grant=effective_grant)
         if getattr(receipt, "is_committed", False):
             nodes_committed += len(batch)
 
     edges_committed = 0
     for i in range(0, len(edge_ops), batch_size):
         batch = edge_ops[i : i + batch_size]
-        receipt = workspace.commit_operations(batch, author=author, grant=grant)
+        receipt = target_ws.commit_operations(batch, author=author, grant=effective_grant)
         if getattr(receipt, "is_committed", False):
             edges_committed += len(batch)
 

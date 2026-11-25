@@ -557,17 +557,21 @@ class UniversalLanguageParser:
 
         # 1. Check attached lexicon if available (e.g. SinhalaLexicon / TamilLexicon)
         if self.lexicon is not None and hasattr(self.lexicon, "lookup"):
-            full_phrase = " ".join(tokens)
-            stemmed_phrase = " ".join(self._apply_stemming(t) for t in tokens)
-            for cand_phrase in (full_phrase, stemmed_phrase):
-                phrase_entries = self.lexicon.lookup(cand_phrase)
-                if phrase_entries and "noun" in str(getattr(phrase_entries[0], "pos", "")).lower():
-                    return EntityReference(
-                        concept_name=phrase_entries[0].semantic_predicate,
-                        properties=getattr(phrase_entries[0], "properties", {}) or {},
-                        specifier=spec_type,
-                        raw_text=full_phrase,
-                    )
+            if len(tokens) >= 2:
+                full_phrase = " ".join(tokens)
+                stemmed_phrase = " ".join(self._apply_stemming(t) for t in tokens)
+                for cand_phrase in (full_phrase, stemmed_phrase):
+                    phrase_entries = self.lexicon.lookup(cand_phrase)
+                    if (
+                        phrase_entries
+                        and "noun" in str(getattr(phrase_entries[0], "pos", "")).lower()
+                    ):
+                        return EntityReference(
+                            concept_name=phrase_entries[0].semantic_predicate,
+                            properties=getattr(phrase_entries[0], "properties", {}) or {},
+                            specifier=spec_type,
+                            raw_text=full_phrase,
+                        )
 
             lex_props: dict[str, Any] = {}
             lex_concept: str | None = None
@@ -588,7 +592,24 @@ class UniversalLanguageParser:
                         continue
                 w = clean_words[i]
                 w_stem = self._apply_stemming(w)
-                entries = self.lexicon.lookup(w) or self.lexicon.lookup(w_stem)
+                raw_entries = self.lexicon.lookup(w)
+                stem_entries = self.lexicon.lookup(w_stem) if w_stem != w else []
+                entries = raw_entries or stem_entries
+                if raw_entries and stem_entries:
+                    raw_pred = getattr(raw_entries[0], "semantic_predicate", "")
+                    stem_pred = getattr(stem_entries[0], "semantic_predicate", "")
+                    store = getattr(self.lexicon, "_ontology_store", None)
+                    if (
+                        raw_pred
+                        and stem_pred
+                        and raw_pred != stem_pred
+                        and store is not None
+                        and hasattr(store, "get_word_frequency")
+                    ):
+                        raw_freq = store.get_word_frequency(raw_pred, language="en")
+                        stem_freq = store.get_word_frequency(stem_pred, language="en")
+                        if stem_freq >= max(50, raw_freq * 5):
+                            entries = stem_entries
                 if entries:
                     e = entries[0]
                     p_str = str(getattr(e, "pos", "")).lower()
