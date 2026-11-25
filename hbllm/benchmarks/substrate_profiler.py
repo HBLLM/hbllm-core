@@ -368,8 +368,13 @@ def print_substrate_profile_report(report: SubstrateProfileReport) -> None:
     print("║          HBLLM Decisional Hot-Path Substrate Acceleration Profile             ║")
     print("╚═══════════════════════════════════════════════════════════════════════════════╝\n")
 
+    from hbllm.native.registry import NativeAccelerationRegistry
+
+    caps = NativeAccelerationRegistry.get_instance().list_capabilities()
+    compiled_count = sum(1 for info in caps.values() if info.available)
+    total_count = len(caps)
     native_str = (
-        "ENABLED (8/8 native crates compiled)"
+        f"ENABLED ({compiled_count}/{total_count} native crates compiled)"
         if report.native_available
         else "DISABLED (pure-Python fallback)"
     )

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -71,6 +72,7 @@ class EvaluationReport:
     config_hash: str
     timestamp: str
     split: str
+    suite_name: str | None = None
     eval_tag: str | None = None
     tasks: list[TaskResult] = field(default_factory=list)
     family_scores: dict[str, float] = field(default_factory=dict)
@@ -355,11 +357,34 @@ class EvaluationProtocol:
         with open(ledger_path, "a", encoding="utf-8") as f:
             f.write(row)
 
+    def _append_dev_ledger(self, report: EvaluationReport, out_file: Path, suite_slug: str) -> None:
+        """Append an audit row to reports/dev/LEDGER.md."""
+        dev_dir = self.reports_dir / "dev"
+        dev_dir.mkdir(parents=True, exist_ok=True)
+        ledger_path = dev_dir / "LEDGER.md"
+        if not ledger_path.exists():
+            ledger_path.write_text(
+                "# Dev Evaluation Ledger\n\n"
+                "| Timestamp (UTC) | Git SHA | Suite | Mode | Zero-Shot Solve | Generality | Exploration Deaths | Mean p50 / p95 (ms) | Report |\n"
+                "|---|---|---|---|---|---|---|---|---|\n",
+                encoding="utf-8",
+            )
+        zs_sr = report.zero_shot.get("solve_rate", 0.0)
+        row = (
+            f"| {report.timestamp} | `{report.git_sha[:8]}` | `{suite_slug}` "
+            f"| {self.perception_mode} | {zs_sr:.4f} | {report.generality_score:.4f} "
+            f"| {report.exploration_deaths} | {report.mean_p50_latency_ms:.2f} / {report.mean_p95_latency_ms:.2f} "
+            f"| `{out_file.name}` |\n"
+        )
+        with open(ledger_path, "a", encoding="utf-8") as f:
+            f.write(row)
+
     def compute_report(
         self,
         split: str,
         tasks: list[TaskResult],
         baselines: dict[str, Any] | None = None,
+        suite_name: str | None = None,
     ) -> EvaluationReport:
         """Aggregate per-seed zero-shot, cross-seed transfer, and replay metrics."""
         families: dict[str, list[TaskResult]] = {}
@@ -559,11 +584,15 @@ class EvaluationProtocol:
         mean_p95 = round(sum(all_p95) / len(all_p95), 2) if all_p95 else 0.0
 
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        suite_slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", (suite_name or split).strip()).strip("_")
+        if not suite_slug:
+            suite_slug = split
         report = EvaluationReport(
             git_sha=self.git_sha,
             config_hash=self.config_hash,
             timestamp=ts,
             split=split,
+            suite_name=suite_name or split,
             eval_tag=self.eval_tag,
             tasks=tasks,
             family_scores=zs_fam_scores,
@@ -588,12 +617,15 @@ class EvaluationProtocol:
         else:
             dev_dir = self.reports_dir / "dev"
             dev_dir.mkdir(parents=True, exist_ok=True)
-            out_file = dev_dir / f"dev_{self.perception_mode}_{ts}.json"
+            prefix = f"{split}_{suite_slug}" if suite_slug != split else split
+            out_file = dev_dir / f"{prefix}_{self.perception_mode}_{ts}.json"
 
         with open(out_file, "w", encoding="utf-8") as f:
             json.dump(report.to_dict(), f, indent=2)
 
         if split == "heldout":
             self._append_heldout_ledger(report, out_file)
+        else:
+            self._append_dev_ledger(report, out_file, suite_slug)
 
         return report

@@ -17,25 +17,14 @@ from typing import Any
 
 
 def check_rust_crates() -> dict[str, bool]:
-    """Check compilation status of native Rust crates."""
-    crates = [
-        "hbllm_hcir_graph",
-        "hbllm_confidence",
-        "hbllm_perception_rs",
-        "hbllm_semantic_search",
-        "hbllm_compute",
-        "hbllm_tokenizer_rs",
-        "hbllm_knowledge_graph",
-        "hbllm_concept_extract",
-    ]
-    status = {}
-    for crate in crates:
-        try:
-            __import__(crate)
-            status[crate] = True
-        except ImportError:
-            status[crate] = False
-    return status
+    """Check compilation status of all registered native Rust crates."""
+    from hbllm.native.registry import NativeAccelerationRegistry
+
+    registry = NativeAccelerationRegistry.get_instance()
+    return {
+        mod_name: registry.available(cap_name)
+        for cap_name, mod_name, _ in registry.REGISTERED_CRATES
+    }
 
 
 def check_event_loop() -> str:

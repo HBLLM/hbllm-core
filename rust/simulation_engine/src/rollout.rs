@@ -373,4 +373,89 @@ mod tests {
         assert_eq!(stats_3.cache_hits, 4); // All 4 action transitions hit cache!
         assert_eq!(stats_3.cache_misses, 0); // Zero misses
     }
+
+    #[test]
+    fn test_risk_exceeded_halts_rollout_early() {
+        let runtime = NativeCognitiveRuntime::new();
+        let risky_branch = BranchSpec {
+            branch_id: 7,
+            actions: vec![
+                ActionStep {
+                    operator: "PUSH".to_string(),
+                    subject: "a".to_string(),
+                    target: "b".to_string(),
+                    parameters: HashMap::new(),
+                },
+                ActionStep {
+                    operator: "PUSH".to_string(),
+                    subject: "b".to_string(),
+                    target: "c".to_string(),
+                    parameters: HashMap::new(),
+                },
+            ],
+            initial_risk: 0.90,
+            initial_cost: 0.0,
+            max_steps: 5,
+        };
+        let (results, _) = runtime.evaluate_rollouts(&[risky_branch], "RISK_SEED");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].terminal_status, "RISK_EXCEEDED");
+        assert_eq!(results[0].steps_executed, 1);
+        assert_eq!(results[0].risk_score, 1.0);
+    }
+
+    #[test]
+    fn test_rollout_hash_deterministic_across_runs_and_distinct_by_seed() {
+        let spec = BranchSpec {
+            branch_id: 1,
+            actions: vec![ActionStep {
+                operator: "MOVE".to_string(),
+                subject: "agent".to_string(),
+                target: "goal".to_string(),
+                parameters: HashMap::new(),
+            }],
+            initial_risk: 0.0,
+            initial_cost: 0.0,
+            max_steps: 3,
+        };
+        let r1 = evaluate_parallel_rollouts(vec![spec.clone()], "SEED_A");
+        let r2 = evaluate_parallel_rollouts(vec![spec.clone()], "SEED_A");
+        let r3 = evaluate_parallel_rollouts(vec![spec], "SEED_B");
+        assert_eq!(r1[0].final_state_hash, r2[0].final_state_hash);
+        assert_ne!(r1[0].final_state_hash, r3[0].final_state_hash);
+    }
+
+    #[test]
+    fn test_max_steps_caps_rollout_execution() {
+        let runtime = NativeCognitiveRuntime::new();
+        let branch = BranchSpec {
+            branch_id: 9,
+            actions: vec![
+                ActionStep {
+                    operator: "PROBE".to_string(),
+                    subject: "s".to_string(),
+                    target: "t1".to_string(),
+                    parameters: HashMap::new(),
+                },
+                ActionStep {
+                    operator: "PROBE".to_string(),
+                    subject: "s".to_string(),
+                    target: "t2".to_string(),
+                    parameters: HashMap::new(),
+                },
+                ActionStep {
+                    operator: "PROBE".to_string(),
+                    subject: "s".to_string(),
+                    target: "t3".to_string(),
+                    parameters: HashMap::new(),
+                },
+            ],
+            initial_risk: 0.0,
+            initial_cost: 0.0,
+            max_steps: 2,
+        };
+        let (results, _) = runtime.evaluate_rollouts(&[branch], "CAP_SEED");
+        assert_eq!(results[0].steps_executed, 2);
+        assert_eq!(results[0].terminal_status, "STEP_LIMIT_EXCEEDED");
+    }
 }

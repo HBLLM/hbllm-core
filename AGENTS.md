@@ -60,35 +60,35 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 ```
   ┌───────────────────────────────────────────────────────────────────┐
   │ 1. SENSORY PERCEPTION & COORDINATE LIFTING (PerceptionStage)     │
-  │    (cortex_perception.py, parietal_coordinate_transform.py)       │
+  │    (perception/, parietal_coordinate_transform.py)                │
   │    Transforms raw lattices/sensory data into typed SpatialEntity  │
   │    components and relative coordinate frames.                     │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 2. ASSIMILATION & SURPRISE INDUCTION (AssimilationStage)          │
-  │    (cortex_assimilator.py, surprise_engine.py)                    │
+  │    (assimilation/assimilator.py, surprise_engine.py)              │
   │    Binds motor diffs to actions; updates EpistemicPhase; detects  │
   │    high surprise to invalidate stale causal hypotheses.           │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 3. COUNTERFACTUAL SIMULATION & SUBGOAL SCHEDULING                 │
-  │    (SimulationStage / cortex_planner.py, frontopolar_subgoal)     │
+  │    (SimulationStage / planning/, frontopolar_subgoal)             │
   │    OFC mental simulation rollouts; dead-end pruning (corners/    │
   │    walls); BA10 recursive subgoal decomposition (keys, doors).    │
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 4. PREFRONTAL DELIBERATION & SAFETY GATING (DeliberationStage)   │
-  │    (cortex_deliberation.py, anterior_cingulate_conflict.py)       │
+  │    (deliberation/engine.py, anterior_cingulate_conflict.py)       │
   │    Evaluates candidate plans against looming collision cones,     │
   │    dynamic patroller trajectories, and Habenular action inhibition.│
   └─────────────────────────────────┬─────────────────────────────────┘
                                     │
   ┌─────────────────────────────────▼─────────────────────────────────┐
   │ 5. MOTOR DISPATCH & TRANSACTION EXECUTION (MotorStage)            │
-  │    (cortex_motor.py, KernelServices, TransactionManager)          │
+  │    (motor/, KernelServices, TransactionManager)                   │
   │    Commits state mutation transactions; dispatches chosen motor   │
   │    action via CapabilityResolver.                                 │
   └───────────────────────────────────────────────────────────────────┘
@@ -98,10 +98,10 @@ All embodied and spatial problem solving follows a biological, 5-stage active in
 > **Domain-Agnostic Invariant:** Cortical faculties must never be coupled to a specific game, level, or simulation environment. Mechanisms must be based on universal physical principles (topology, collision cones, reachability, symmetries, causal credit assignment).
 
 > [!NOTE]
-> **Faculty Roster (post-R5 measured R1 ablation, `reports/ablation/20261116_175717_r1_dev.json`):**
+> **Faculty Roster (latest R1 ablation on saturated dev: `reports/ablation/20261124_084702_r1_dev.json`; earlier R5 baseline: `reports/ablation/20261116_175717_r1_dev.json`):**
 > - **Stage owners (core, always kept):** `perception`, `assimilator`, `deliberation_engine`, `planner`, `motor`, `episodic_cortex`, `working_memory`, `symbolic_theory`.
-> - **Measured R1 keepers (positive Δgen / Δsr / Δxs):** `prediction_budget` (+0.0880 gen, +0.2375 sr, +0.2369 xs), `budget_governor` (+0.0181 gen, +0.0500 sr, +0.1053 xs), `option_discovery` (+0.0168 gen, +0.0125 sr), `acc_conflict_monitor` (+0.0114 gen), `object_planner` (+0.0067 gen, +0.0125 sr), `remote_causal` (+0.0054 gen, +0.0125 sr).
-> - **Working-memory / hazard stores retained:** `body_schema`, `subgoal_stack`, `habenular_ior`, `hazard_tracker` (patrol/decoy invariance on `novelty.yaml`), `world_kernel`.
+> - **Measured R1 `keep` (2026-11-24):** `body_schema`, `habenular_ior`, `remote_causal`, `object_planner`, `prediction_budget`, `budget_governor`.
+> - **Marked `experimental` on saturated dev (pending `widened_dev` R1 ablation):** `subgoal_stack`, `hazard_tracker`, `acc_conflict_monitor`, `option_discovery`, `grounding_bridge` (`world_kernel` = `unused`, 0 calls).
 > - **Removed in R5 & Rescoped LOC Budget:** 28 zero-effect/dead modules deleted and dead pipeline hooks unwired (`hbllm/**/*.py` reduced to `242,638` LOC in R5). Active codebase budget is **`<= 300,000` LOC** across `hbllm/**/*.py` (with `<= 150,000` LOC scoped to `hbllm/hcir/**`, tracked by `tests/unit/architecture/test_loc_budget.py`) so high-value non-LLM subsystems (`reasoning/`, `snn/`, `A16`/`A17` `language/`, multimodal sensory fusion, and governed tool capabilities) can be consolidated directly into `hcir/` without `__path__.append` shadow-tree shims. Every newly admitted cortical/grounding faculty must still pass R1 ablation (`Δ > 0`) and latency (`p95 <= 45ms` at `32×32`) gates.
 
 ---

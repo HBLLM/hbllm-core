@@ -1125,7 +1125,10 @@ def run_suite(
                 f"  Baseline [{b_name}]: zero_shot={zs_b_gen:.4f} ({zs_tot_solved}/{zs_tot_trials}, CI={zs_ci}, deaths={b_deaths}), replay={b_gen:.4f}"
             )
 
-    report = protocol.compute_report(split=split, tasks=tasks, baselines=baselines_dict)
+    suite_name = Path(manifest_path).stem if manifest_path else split
+    report = protocol.compute_report(
+        split=split, tasks=tasks, baselines=baselines_dict, suite_name=suite_name
+    )
 
     print("\n=== Benchmark Results Summary ===")
     print(f"Split: {report.split.upper()} | Baseline: {baseline}")

@@ -223,4 +223,125 @@ mod tests {
         assert_eq!(top.systematicity_score, 1.0);
         assert!(top.structural_consistency);
     }
+
+    #[test]
+    fn test_empty_inputs_return_empty() {
+        let empty_pat = Pattern {
+            variables: vec![],
+            edges: vec![],
+            surface_distractors: vec![],
+        };
+        let target = TargetGraph {
+            nodes: vec!["a".to_string()],
+            edges: vec![],
+        };
+        assert!(match_relational_schema(&empty_pat, &target, 0.3).is_empty());
+
+        let non_empty_pat = Pattern {
+            variables: vec!["X".to_string(), "Y".to_string()],
+            edges: vec![PatternEdge {
+                rel_type: "LINKS".to_string(),
+                source_var: "X".to_string(),
+                target_var: "Y".to_string(),
+            }],
+            surface_distractors: vec![],
+        };
+        let empty_target = TargetGraph {
+            nodes: vec![],
+            edges: vec![],
+        };
+        assert!(match_relational_schema(&non_empty_pat, &empty_target, 0.3).is_empty());
+    }
+
+    #[test]
+    fn test_min_systematicity_filters_partial_matches() {
+        let pattern = Pattern {
+            variables: vec!["X".to_string(), "Y".to_string()],
+            edges: vec![
+                PatternEdge {
+                    rel_type: "R1".to_string(),
+                    source_var: "X".to_string(),
+                    target_var: "Y".to_string(),
+                },
+                PatternEdge {
+                    rel_type: "R2".to_string(),
+                    source_var: "X".to_string(),
+                    target_var: "Y".to_string(),
+                },
+            ],
+            surface_distractors: vec![],
+        };
+        let target = TargetGraph {
+            nodes: vec!["n1".to_string(), "n2".to_string()],
+            edges: vec![TargetEdge {
+                rel_type: "R1".to_string(),
+                source: "n1".to_string(),
+                target: "n2".to_string(),
+            }],
+        };
+        assert_eq!(match_relational_schema(&pattern, &target, 0.4).len(), 1);
+        assert!(match_relational_schema(&pattern, &target, 0.9).is_empty());
+    }
+
+    #[test]
+    fn test_three_variable_chain_alignment() {
+        let pattern = Pattern {
+            variables: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+            edges: vec![
+                PatternEdge {
+                    rel_type: "NEXT".to_string(),
+                    source_var: "A".to_string(),
+                    target_var: "B".to_string(),
+                },
+                PatternEdge {
+                    rel_type: "NEXT".to_string(),
+                    source_var: "B".to_string(),
+                    target_var: "C".to_string(),
+                },
+            ],
+            surface_distractors: vec!["ignored".to_string()],
+        };
+        let target = TargetGraph {
+            nodes: vec!["n1".to_string(), "n2".to_string(), "n3".to_string()],
+            edges: vec![
+                TargetEdge {
+                    rel_type: "NEXT".to_string(),
+                    source: "n1".to_string(),
+                    target: "n2".to_string(),
+                },
+                TargetEdge {
+                    rel_type: "NEXT".to_string(),
+                    source: "n2".to_string(),
+                    target: "n3".to_string(),
+                },
+            ],
+        };
+        let alignments = match_relational_schema(&pattern, &target, 1.0);
+        assert_eq!(alignments.len(), 1);
+        assert_eq!(alignments[0].mapping.get("A").unwrap(), "n1");
+        assert_eq!(alignments[0].mapping.get("B").unwrap(), "n2");
+        assert_eq!(alignments[0].mapping.get("C").unwrap(), "n3");
+    }
+
+    #[test]
+    fn test_unmatchable_relation_returns_empty() {
+        let pattern = Pattern {
+            variables: vec!["X".to_string(), "Y".to_string()],
+            edges: vec![PatternEdge {
+                rel_type: "REQUIRES".to_string(),
+                source_var: "X".to_string(),
+                target_var: "Y".to_string(),
+            }],
+            surface_distractors: vec![],
+        };
+        let target = TargetGraph {
+            nodes: vec!["x".to_string(), "y".to_string()],
+            edges: vec![TargetEdge {
+                rel_type: "BLOCKS".to_string(),
+                source: "x".to_string(),
+                target: "y".to_string(),
+            }],
+        };
+        assert!(match_relational_schema(&pattern, &target, 0.1).is_empty());
+    }
 }

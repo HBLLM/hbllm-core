@@ -195,6 +195,7 @@ class PrefrontalWorkingMemory:
         self.object_macro_tasks: dict[str, list[Any]] = {}
         self.object_trial_counts: dict[str, int] = {}
         self.object_success_counts: dict[str, int] = {}
+        self.target_scorers: list[Any] = []
 
     @property
     def level_epistemic_probes(self) -> int:

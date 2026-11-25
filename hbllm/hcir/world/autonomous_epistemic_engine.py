@@ -407,8 +407,7 @@ class AutonomousEpistemicEngine:
         self.hypotheses: list[CausalHypothesis] = []
         self.belief_history: list[BeliefTransitionEvent] = []
 
-        # External domain & benchmark extension registries (e.g. plugin adapters)
-        self.target_scorers: list[Any] = []
+        # External domain extension registries (per-instance target_scorers live on working_memory)
         self.deliberation_policies: list[Any] = []
 
         # Tiered Cognitive Workspace & Transaction Manager / Kernel Services live mirroring
@@ -1006,17 +1005,24 @@ class AutonomousEpistemicEngine:
     def total_epistemic_probes(self, val: int) -> None:
         self.working_memory.total_epistemic_probes = val
 
+    @property
+    def target_scorers(self) -> list[Any]:
+        """Per-instance external or domain-specific target candidate scorers."""
+        return self.working_memory.target_scorers
+
+    @target_scorers.setter
+    def target_scorers(self, value: list[Any]) -> None:
+        self.working_memory.target_scorers = list(value)
+
     def register_target_scorer(self, scorer: Any) -> None:
-        """Register an external or domain-specific target candidate scorer."""
-        if scorer not in self.target_scorers:
-            self.target_scorers.append(scorer)
-        MotorCortexEffector.register_target_scorer(scorer)
+        """Register a per-instance external or domain-specific target candidate scorer."""
+        if scorer not in self.working_memory.target_scorers:
+            self.working_memory.target_scorers.append(scorer)
 
     def unregister_target_scorer(self, scorer: Any) -> None:
-        """Unregister an external target candidate scorer."""
-        if scorer in self.target_scorers:
-            self.target_scorers.remove(scorer)
-        MotorCortexEffector.unregister_target_scorer(scorer)
+        """Unregister a per-instance external target candidate scorer."""
+        if scorer in self.working_memory.target_scorers:
+            self.working_memory.target_scorers.remove(scorer)
 
     def attach_kernel_services(
         self,

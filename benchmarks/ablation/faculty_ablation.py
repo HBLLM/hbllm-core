@@ -37,6 +37,19 @@ BENCH_ENVS = [
     ("minigrid_doorkey", "benchmarks.envs.external_benchmarks.MiniGridDoorKeyBenchmarkEnv", 80),
 ]
 
+WIDENED_BENCH_ENVS = [
+    ("partial_obs_dev", "benchmarks.envs.widened_dev_envs.PartialObsMazeEnv", 140),
+    ("stochastic_wind_dev", "benchmarks.envs.widened_dev_envs.StochasticWindNavEnv", 120),
+    ("other_agents_dev", "benchmarks.envs.widened_dev_envs.MultiAgentCorridorEnv", 120),
+    ("long_horizon_dev", "benchmarks.envs.widened_dev_envs.LongHorizonQuestEnv", 220),
+    (
+        "continuous_multi_step_dev",
+        "benchmarks.envs.widened_dev_envs.ContinuousMultiWaypointEnv",
+        120,
+    ),
+    ("language_goal_dev", "benchmarks.envs.widened_dev_envs.LanguageGoalSelectEnv", 80),
+]
+
 CORE_OWNERS = {
     "perception",
     "assimilator",
@@ -1009,10 +1022,12 @@ def _aggregate_dev_results(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _run_dev_ablation(args: argparse.Namespace, inv: dict[str, str], mp_ctx: Any) -> None:
-    """Run screening and per-faculty leave-one-out ablation on R1 benchmarks/suites/dev.yaml."""
+    """Run screening and per-faculty leave-one-out ablation on R1 dev/widened suites."""
     import yaml
 
-    manifest = yaml.safe_load(Path("benchmarks/suites/dev.yaml").read_text(encoding="utf-8"))
+    suite_name = str(getattr(args, "suite", "dev") or "dev")
+    manifest_path = Path(f"benchmarks/suites/{suite_name}.yaml")
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     tasks_def = manifest["tasks"]
     dev_slots = [
         (t["id"], t["family"], t["env_class"], int(s), int(t.get("max_budget", 100)))
@@ -1021,7 +1036,7 @@ def _run_dev_ablation(args: argparse.Namespace, inv: dict[str, str], mp_ctx: Any
     ]
     n_slots = len(dev_slots)
 
-    screen_path = Path(args.screen_report or "reports/ablation/screen_dev.json")
+    screen_path = Path(args.screen_report or f"reports/ablation/screen_{suite_name}.json")
     if args.phase == "ablate" and screen_path.exists():
         prior = json.loads(screen_path.read_text(encoding="utf-8"))
         calls = prior["calls"]
@@ -1127,7 +1142,7 @@ def _run_dev_ablation(args: argparse.Namespace, inv: dict[str, str], mp_ctx: Any
     )
     base_xs = _agg_xs(xs_grouped["__baseline__"]) if xs_grouped.get("__baseline__") else None
     report: dict[str, Any] = {
-        "suite": "dev",
+        "suite": suite_name,
         "n_trials": n_slots,
         "wall_seconds": round(dt_abl, 1),
         "baseline": base_agg,
@@ -1213,14 +1228,14 @@ def _run_dev_ablation(args: argparse.Namespace, inv: dict[str, str], mp_ctx: Any
         print(f"  [{decision:12s}] {name:28s} {why} (Δp50={d_p50:+.1f}ms)")
 
     ts = time.strftime("%Y%m%d_%H%M%S")
-    out_path = Path(f"reports/ablation/{ts}_r1_dev.json")
+    out_path = Path(f"reports/ablation/{ts}_r1_{suite_name}.json")
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(f"R1 dev ablation report: {out_path}")
+    print(f"R1 {suite_name} ablation report: {out_path}")
 
 
 def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description="Faculty ablation harness on procedural environments")
-    ap.add_argument("--suite", choices=["legacy", "dev"], default="legacy")
+    ap.add_argument("--suite", choices=["legacy", "dev", "widened_dev"], default="legacy")
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1])
     ap.add_argument("--steps", type=int, default=100)
     ap.add_argument("--episodes", type=int, default=3)
@@ -1243,7 +1258,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     mp_ctx = mp.get_context("spawn")
-    if args.suite == "dev":
+    if args.suite in ("dev", "widened_dev"):
         _run_dev_ablation(args, inv, mp_ctx)
         return
 

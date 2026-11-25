@@ -791,11 +791,23 @@ class TieredWorkspace:
                 from_tier,
                 to_tier,
             )
-            dest_ws.commit_operations(
+            comp = dest_ws.commit_operations(
                 [TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=node_id)],
                 author=f"{author}:compensate",
                 grant=getattr(self, "_system_grant", None),
             )
+            if not comp.is_committed:
+                logger.error(
+                    "TieredWorkspace.demote compensation failed for node %s (%s -> %s): %s",
+                    node_id,
+                    from_tier,
+                    to_tier,
+                    comp.status,
+                )
+                raise RuntimeError(
+                    f"TieredWorkspace.demote compensation failed for node {node_id} "
+                    f"({from_tier} -> {to_tier}): {comp.status}"
+                )
             return False
 
         logger.info("Demoted node %s from %s to %s", node_id, from_tier, to_tier)

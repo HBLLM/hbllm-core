@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -1107,3 +1108,79 @@ class ReadingCurriculumIngestor:
 
         stats.elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
         return stats
+
+    @staticmethod
+    def _normalize_triple(subj: str, rel: str, obj: str) -> tuple[str, str, str]:
+        return (
+            re.sub(r"\s+", "_", subj.strip().lower()),
+            re.sub(r"\s+", "_", rel.strip().lower()),
+            re.sub(r"\s+", "_", obj.strip().lower()),
+        )
+
+    def evaluate_extraction_recall(
+        self, annotated_samples: Sequence[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Compute precision, recall, and F1 against annotated ground-truth triples.
+
+        Each item in ``annotated_samples`` maps ``"text"`` to prose and ``"expected"``
+        to a sequence of ``(subject, relation, object)`` tuples or dicts.
+        """
+        total_expected = 0
+        total_extracted = 0
+        total_matched = 0
+        per_sample: list[dict[str, Any]] = []
+
+        for idx, sample in enumerate(annotated_samples):
+            text = str(sample.get("text", ""))
+            raw_expected = sample.get("expected") or ()
+            expected_set: set[tuple[str, str, str]] = set()
+            for item in raw_expected:
+                if isinstance(item, dict):
+                    s = str(item.get("subject", ""))
+                    r = str(item.get("relation", ""))
+                    o = str(item.get("object", item.get("obj", "")))
+                else:
+                    s, r, o = str(item[0]), str(item[1]), str(item[2])
+                expected_set.add(self._normalize_triple(s, r, o))
+
+            extracted_props = extract_propositions_from_text(
+                text, source_file=str(sample.get("id", f"sample_{idx}"))
+            )
+            extracted_set = {
+                self._normalize_triple(p.subject, p.relation, p.obj) for p in extracted_props
+            }
+
+            matched_set = expected_set & extracted_set
+            n_exp = len(expected_set)
+            n_ext = len(extracted_set)
+            n_match = len(matched_set)
+            total_expected += n_exp
+            total_extracted += n_ext
+            total_matched += n_match
+
+            s_prec = n_match / max(1, n_ext)
+            s_rec = n_match / max(1, n_exp)
+            per_sample.append(
+                {
+                    "id": sample.get("id", f"sample_{idx}"),
+                    "expected": n_exp,
+                    "extracted": n_ext,
+                    "matched": n_match,
+                    "precision": round(s_prec, 4),
+                    "recall": round(s_rec, 4),
+                    "missed": sorted(expected_set - extracted_set),
+                }
+            )
+
+        precision = total_matched / max(1, total_extracted)
+        recall = total_matched / max(1, total_expected)
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        return {
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "matched": total_matched,
+            "expected_count": total_expected,
+            "extracted_count": total_extracted,
+            "per_sample": per_sample,
+        }
