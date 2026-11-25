@@ -120,53 +120,57 @@ async def test_uplink_node_tool_routing(bus):
         await node.on_stop()
 
 
-def test_sync_endpoints():
+def test_sync_endpoints(monkeypatch: pytest.MonkeyPatch):
     """Test the memory sync endpoints in the Core API."""
-    import os
-
-    os.environ["HBLLM_JWT_SECRET"] = "test_secret_key_for_jwt_testing_32ch"
+    monkeypatch.setenv("HBLLM_JWT_SECRET", "test_secret_key_for_jwt_testing_32ch")
 
     client = TestClient(core_app)
 
-    # Need a mock brain in _state for the endpoints
+    # Need a mock brain in _state for the endpoints (restore afterward to avoid cross-test leakage)
     from hbllm.serving.api import _state
 
     mock_brain = type("MockBrain", (), {"bus": AsyncMock()})()
+    prev_brain = _state.get("brain")
     _state["brain"] = mock_brain
+    try:
+        # Create a valid JWT token to bypass auth middleware
+        import jwt
 
-    # Create a valid JWT token to bypass auth middleware
-    import jwt
+        # We dynamically extract the actual secret key used by JWTAuthMiddleware
+        secret_key: str | bytes = "test_secret_key_for_jwt_testing_32ch"
+        for middleware in core_app.user_middleware:
+            if middleware.cls.__name__ == "JWTAuthMiddleware":
+                val = middleware.kwargs.get("secret_key")
+                if isinstance(val, (str, bytes)) and val:
+                    secret_key = val
 
-    # We dynamically extract the actual secret key used by JWTAuthMiddleware
-    secret_key: str | bytes = "test_secret_key_for_jwt_testing_32ch"
-    for middleware in core_app.user_middleware:
-        if middleware.cls.__name__ == "JWTAuthMiddleware":
-            val = middleware.kwargs.get("secret_key")
-            if isinstance(val, (str, bytes)) and val:
-                secret_key = val
+        token = jwt.encode(
+            {"tenant_id": "tenant1", "user_id": "user1", "device_id": "device1"},
+            secret_key,
+            algorithm="HS256",
+        )
+        headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": "tenant1"}
 
-    token = jwt.encode(
-        {"tenant_id": "tenant1", "user_id": "user1", "device_id": "device1"},
-        secret_key,
-        algorithm="HS256",
-    )
-    headers = {"Authorization": f"Bearer {token}", "X-Tenant-ID": "tenant1"}
+        # Test Episodic Sync
+        resp = client.post(
+            "/v1/sync/episodic",
+            json={"memories": [{"content": "Hello", "role": "user"}]},
+            headers=headers,
+        )
 
-    # Test Episodic Sync
-    resp = client.post(
-        "/v1/sync/episodic",
-        json={"memories": [{"content": "Hello", "role": "user"}]},
-        headers=headers,
-    )
+        assert resp.status_code == 200
+        assert resp.json()["synced"] == 1
 
-    assert resp.status_code == 200
-    assert resp.json()["synced"] == 1
-
-    # Test Semantic Sync
-    resp = client.post(
-        "/v1/sync/semantic",
-        json={"knowledge_items": [{"fact": "The sky is blue"}]},
-        headers=headers,
-    )
-    assert resp.status_code == 200
-    assert resp.json()["synced"] == 1
+        # Test Semantic Sync
+        resp = client.post(
+            "/v1/sync/semantic",
+            json={"knowledge_items": [{"fact": "The sky is blue"}]},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["synced"] == 1
+    finally:
+        if prev_brain is None:
+            _state.pop("brain", None)
+        else:
+            _state["brain"] = prev_brain

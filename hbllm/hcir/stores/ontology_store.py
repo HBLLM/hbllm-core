@@ -945,6 +945,33 @@ class LexicalOntologyStore:
             "db_path": str(self.db_path),
         }
 
+    def iter_external_sqlite_rows(
+        self,
+        db_path: Path | str,
+        *,
+        table: str,
+        columns: tuple[str, ...],
+    ) -> list[tuple[Any, ...]]:
+        """Read rows from an external SQLite file via ``ATTACH DATABASE`` within this store."""
+        ident_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+        if not ident_re.fullmatch(table):
+            raise ValueError(f"Invalid SQLite table name: {table!r}")
+        if not columns or not all(ident_re.fullmatch(c) for c in columns):
+            raise ValueError(f"Invalid SQLite column list: {columns!r}")
+
+        if self._conn.in_transaction:
+            self._conn.commit()
+        col_sql = ", ".join(columns)
+        self._conn.execute("ATTACH DATABASE ? AS ext_dict", (str(db_path),))
+        try:
+            return list(
+                self._conn.execute(f"SELECT {col_sql} FROM ext_dict.{table}").fetchall()  # nosec B608
+            )
+        finally:
+            if self._conn.in_transaction:
+                self._conn.commit()
+            self._conn.execute("DETACH DATABASE ext_dict")
+
     def optimize(self, *, vacuum: bool = False) -> None:
         """Checkpoint WAL, refresh SQLite query-planner statistics, and optionally compact."""
         self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")

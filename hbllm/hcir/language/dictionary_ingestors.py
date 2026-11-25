@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import tempfile
 import time
 import xml.etree.ElementTree as ET  # nosec B405
@@ -803,23 +802,23 @@ def _ingest_powertamil_and_rprabhu(tamil_dir: Path, store: Any) -> list[Ingestio
             os.close(fd)
             try:
                 Path(tmp_path).write_bytes(zf.read("powertamil-dictionary-master/PTTamil.db"))
-                conn = sqlite3.connect(tmp_path)
-                try:
-                    for word, meanings in conn.execute("SELECT word, meanings FROM dictionary"):
-                        w = str(word or "").strip()
-                        m = str(meanings or "").strip()[:240]
-                        if w and " " not in w and m:
-                            records.append(
-                                LexicalOntologyRecord(
-                                    lemma=w,
-                                    pos="noun",
-                                    language="ta",
-                                    definition=m,
-                                    domain="monolingual",
-                                )
+                for word, meanings in store.iter_external_sqlite_rows(
+                    tmp_path,
+                    table="dictionary",
+                    columns=("word", "meanings"),
+                ):
+                    w = str(word or "").strip()
+                    m = str(meanings or "").strip()[:240]
+                    if w and " " not in w and m:
+                        records.append(
+                            LexicalOntologyRecord(
+                                lemma=w,
+                                pos="noun",
+                                language="ta",
+                                definition=m,
+                                domain="monolingual",
                             )
-                finally:
-                    conn.close()
+                        )
             finally:
                 try:
                     os.unlink(tmp_path)
