@@ -125,7 +125,9 @@ nav:
       - ADR 002 (Operational & Governance): adr/0002-operational-architecture-and-governance.md
       - ADR 003 (Epistemic Runtime — Historical): adr/0003-epistemic-runtime.md
       - ADR 004 (Pure-HCIR Cognitive OS): adr/0004-pure-hcir-cognitive-os.md
+      - ADR 005 (Homoiconic Symbolic VM): adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md
       - HCIR Cognitive OS Kernel: architecture/hcir-kernel-os.md
+      - Homoiconic VM Migration Plan: architecture/homoiconic-vm-migration-plan.md
       - Cortical World Model: architecture/cortical-world-model.md
       - Symbol Grounding (SGE): architecture/grounding.md
       - Language & Reading: architecture/language-and-reading.md

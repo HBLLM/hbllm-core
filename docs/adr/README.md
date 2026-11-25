@@ -9,7 +9,8 @@ This directory contains records of key architectural decisions made for the **HB
 | [0001](0001-hbllm-core-architecture.md) | HBLLM Core Master Cognitive System Architecture | **Accepted (Historical)** | 2026-07-17 |
 | [0002](0002-operational-architecture-and-governance.md) | Long-Term Operational Architecture, Tripartite Executive & Digital Twin | **Implemented** | 2026-07-17 |
 | [0003](0003-epistemic-runtime.md) | Domain-Neutral Epistemic Runtime for Autonomous Discovery | **Superseded by ADR 004** | 2026-08-08 |
-| [0004](0004-pure-hcir-cognitive-os.md) | Pure-HCIR Cognitive OS & LLM-Free Core Consolidation | **Implemented (Current)** | 2026-11-23 |
+| [0004](0004-pure-hcir-cognitive-os.md) | Pure-HCIR Cognitive OS & LLM-Free Core Consolidation | **Implemented (Baseline for ADR 005)** | 2026-11-23 |
+| [0005](0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) | Homoiconic Symbolic VM & Experience-First Cognition (Phase 3 Target) | **Accepted (Active Migration)** | 2026-11-25 |
 
 ## ADR Guidelines
 
