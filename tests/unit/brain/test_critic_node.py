@@ -79,7 +79,7 @@ async def test_critic_active_halting_and_backtracking(critic_env):
     await bus.publish("workspace.update", query)
 
     # 2. Wait for the pipeline to settle cleanly under xdist CPU load.
-    deadline = asyncio.get_running_loop().time() + 5.0
+    deadline = asyncio.get_running_loop().time() + 15.0
     while len(intuition.evals_received) < 2 and asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(0.01)
 
