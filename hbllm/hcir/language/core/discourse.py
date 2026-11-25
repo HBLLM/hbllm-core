@@ -192,6 +192,7 @@ class ExpositoryProseProcessor:
             source_file=source_label,
             include_extended=True,
             parser=parser,
+            ontology_store=ontology_store,
         )
         if not props:
             return ExpositoryIngestionSummary()

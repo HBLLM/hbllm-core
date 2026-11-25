@@ -334,9 +334,22 @@ class EnglishSyntaxParser:
                     )
 
         if verb_tok.pos == EnglishPOS.VERB:
-            # Standard SVO: "The robot pushed the box to the table", "Florbs live in caves"
+            # Standard or ditransitive SVO:
+            # "Alice gave Bob the brass key", "The robot pushed the box to the table", "Florbs live in caves"
             obj_np, next_idx = self.parse_noun_phrase(tokens, idx)
             idx = next_idx if obj_np else idx
+
+            indirect_np: NounPhrase | None = None
+            if (
+                obj_np is not None
+                and idx < len(tokens)
+                and tokens[idx].pos in (EnglishPOS.DET, EnglishPOS.ADJ, EnglishPOS.NOUN)
+            ):
+                second_np, next_idx2 = self.parse_noun_phrase(tokens, idx)
+                if second_np is not None:
+                    indirect_np = obj_np
+                    obj_np = second_np
+                    idx = next_idx2
 
             # Coordinated direct object NPs ("converts sunlight and water into glucose")
             if (
@@ -379,6 +392,7 @@ class EnglishSyntaxParser:
             vp = VerbPhrase(
                 head_verb=verb_tok,
                 direct_object=obj_np,
+                indirect_object=indirect_np,
                 prepositional_phrases=pps,
                 infinitive_verb=inf_verb,
             )

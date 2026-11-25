@@ -208,7 +208,7 @@ class MemoryCapabilityExecutor:
                     statement=claim,
                     confidence=confidence,
                 )
-                resolver = BeliefConflictResolver()
+                resolver = BeliefConflictResolver(ontology_store=self._ontology_store)
                 rev_report = resolver.evaluate_belief(probe_belief, p_graph)
                 if rev_report.has_conflicts:
                     contradiction_count = len(rev_report.conflicts)

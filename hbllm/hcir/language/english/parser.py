@@ -306,11 +306,28 @@ class EnglishParser:
         self,
         frame: SemanticFrame,
         pps: list[Any],
+        *,
+        verb_lemma: str = "",
     ) -> None:
-        """Attach prepositional phrases to LOCATION / INSTRUMENT roles with prep metadata."""
+        """Attach prepositional phrases using VerbNet/PropBank thematic roles when known."""
         if not pps:
             return
         instrument_preps = {"through", "with", "by", "via", "using"}
+        source_preps = {"from", "out"}
+        spatial_motion_verbs = {"move", "push", "put", "roll", "place", "drop"}
+
+        verb_roles: set[str] = set()
+        if verb_lemma:
+            for entry in self._lexicon.lookup(verb_lemma):
+                for r in entry.properties.get("thematic_roles", []) or ():
+                    verb_roles.add(str(r).strip().lower())
+            if not verb_roles:
+                store = getattr(self._lexicon, "_ontology_store", None)
+                if store is not None:
+                    for stored in store.lookup(verb_lemma, language="en"):
+                        for r in getattr(stored, "thematic_roles", ()) or ():
+                            verb_roles.add(str(r).strip().lower())
+
         for pp in pps:
             ref = self._np_to_reference(pp.noun_phrase)
             if ref is None:
@@ -326,6 +343,15 @@ class EnglishParser:
             if prep_lem in instrument_preps:
                 if frame.get_role(ThematicRole.INSTRUMENT) is None:
                     frame.set_role(ThematicRole.INSTRUMENT, enriched)
+            elif prep_lem in source_preps and frame.get_role(ThematicRole.SOURCE) is None:
+                frame.set_role(ThematicRole.SOURCE, enriched)
+            elif (
+                prep_lem in {"to", "for"}
+                and (verb_roles & {"recipient", "beneficiary"})
+                and verb_lemma not in spatial_motion_verbs
+                and frame.get_role(ThematicRole.RECIPIENT) is None
+            ):
+                frame.set_role(ThematicRole.RECIPIENT, enriched)
             else:
                 if frame.get_role(ThematicRole.LOCATION) is None:
                     frame.set_role(ThematicRole.LOCATION, enriched)
@@ -836,6 +862,11 @@ class EnglishParser:
                     verb_pred = verb_lemma
 
                 obj_ref = self._np_to_reference(ast.verb_phrase.direct_object)
+                rec_ref = (
+                    self._np_to_reference(ast.verb_phrase.indirect_object)
+                    if ast.verb_phrase.indirect_object is not None
+                    else None
+                )
                 if obj_ref is not None and ast.verb_phrase.infinitive_verb is not None:
                     obj_ref = EntityReference(
                         concept_name=obj_ref.concept_name,
@@ -855,9 +886,15 @@ class EnglishParser:
                 )
                 if subject_ref:
                     frame.set_role(ThematicRole.AGENT, subject_ref)
+                if rec_ref:
+                    frame.set_role(ThematicRole.RECIPIENT, rec_ref)
                 if obj_ref:
                     frame.set_role(ThematicRole.PATIENT, obj_ref)
-                self._attach_pps(frame, ast.verb_phrase.prepositional_phrases)
+                self._attach_pps(
+                    frame,
+                    ast.verb_phrase.prepositional_phrases,
+                    verb_lemma=verb_lemma,
+                )
                 return frame
 
         # Fallback error

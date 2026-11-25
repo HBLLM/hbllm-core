@@ -88,12 +88,17 @@ class UniversalLanguageParser:
         if cmd_frame is not None:
             return cmd_frame
 
-        # 5. Spatial Assertion Detection (Prepositional or Postpositional)
+        # 5. Expository Causal/Dependency Assertions (SOV expository markers)
+        exp_frame = self._try_parse_expository_assertion(tokens, meta)
+        if exp_frame is not None:
+            return exp_frame
+
+        # 6. Spatial Assertion Detection (Prepositional or Postpositional)
         spatial_frame = self._try_parse_spatial_assertion(tokens, meta)
         if spatial_frame is not None:
             return spatial_frame
 
-        # 6. Copular Definition Assertion (NP + BE + NP -> is_a)
+        # 7. Copular Definition Assertion (NP + BE + NP -> is_a)
         def_frame = self._try_parse_copular_assertion(tokens, meta)
         if def_frame is not None:
             return def_frame
@@ -358,11 +363,75 @@ class UniversalLanguageParser:
         frame.set_role(ThematicRole.LOCATION, loc_ref)
         return frame
 
+    def _try_parse_expository_assertion(
+        self, tokens: list[str], meta: LanguageMetadata
+    ) -> SemanticFrame | None:
+        if "?" in tokens or self.profile.typology.word_order != "SOV":
+            return None
+        clean_tokens = [t for t in tokens if t not in ("?", ".", "!", ",")]
+        if len(clean_tokens) < 3:
+            return None
+
+        markers = self.profile.closed_class.expository_markers
+        rel_map = {
+            "cause": "causes",
+            "require": "requires",
+            "enable": "enables",
+        }
+        candidates: list[tuple[int, str, str]] = []
+        for cue_key, pred in rel_map.items():
+            for phrase in markers.get(cue_key, ()):
+                phrase_parts = phrase.strip().lower().split()
+                if phrase_parts:
+                    candidates.append((len(phrase_parts), " ".join(phrase_parts), pred))
+        candidates.sort(key=lambda item: item[0], reverse=True)
+
+        matched_len = 0
+        matched_pred = ""
+        for m_len, m_phrase, pred in candidates:
+            if len(clean_tokens) - m_len >= 2:
+                tail = " ".join(t.lower() for t in clean_tokens[-m_len:])
+                if tail == m_phrase:
+                    matched_len = m_len
+                    matched_pred = pred
+                    break
+
+        if not matched_pred:
+            return None
+
+        rem = clean_tokens[:-matched_len]
+        split_idx = 1
+        for i in range(1, len(rem) - 1):
+            if rem[i] in ("යනු", "என்பது"):
+                split_idx = i
+                lhs = rem[:split_idx]
+                rhs = rem[split_idx + 1 :]
+                break
+        else:
+            lhs = rem[:1]
+            rhs = rem[1:]
+
+        theme_ref = self._extract_entity_ref(lhs)
+        pat_ref = self._extract_entity_ref(rhs)
+        if theme_ref is None or pat_ref is None:
+            return None
+
+        frame = SemanticFrame(
+            frame_type=FrameType.ASSERTION,
+            predicate=matched_pred,
+            metadata=meta,
+        )
+        frame.set_role(ThematicRole.THEME, theme_ref)
+        frame.set_role(ThematicRole.PATIENT, pat_ref)
+        return frame
+
     def _try_parse_copular_assertion(
         self, tokens: list[str], meta: LanguageMetadata
     ) -> SemanticFrame | None:
+        if "?" in tokens:
+            return None
         clean_tokens = [t for t in tokens if t not in ("?", ".", "!", ",")]
-        copulas = set(self.profile.closed_class.copula_forms)
+        copulas = {c.lower() for c in self.profile.closed_class.copula_forms}
 
         cop_idx = -1
         for i, tok in enumerate(clean_tokens):
@@ -370,11 +439,29 @@ class UniversalLanguageParser:
                 cop_idx = i
                 break
 
-        if cop_idx <= 0:
+        if cop_idx > 0:
+            lhs = clean_tokens[:cop_idx]
+            rhs = clean_tokens[cop_idx + 1 :]
+        elif (
+            self.profile.typology.word_order == "SOV"
+            and len(clean_tokens) >= 3
+            and clean_tokens[-1].lower() in copulas
+        ):
+            body = clean_tokens[:-1]
+            topic_idx = -1
+            for i in range(1, len(body) - 1):
+                if body[i] in ("යනු", "என்பது"):
+                    topic_idx = i
+                    break
+            if topic_idx > 0:
+                lhs = body[:topic_idx]
+                rhs = body[topic_idx + 1 :]
+            else:
+                lhs = body[:1]
+                rhs = body[1:]
+        else:
             return None
 
-        lhs = clean_tokens[:cop_idx]
-        rhs = clean_tokens[cop_idx + 1 :]
         theme_ref = self._extract_entity_ref(lhs)
         attr_ref = self._extract_entity_ref(rhs)
         if theme_ref is None or attr_ref is None:
