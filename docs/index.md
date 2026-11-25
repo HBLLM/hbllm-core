@@ -119,9 +119,7 @@ hbllm diagnostics
 from hbllm.hcir.world.percept import EmbodiedObservation
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-system = build_cognitive_system(
-    CognitiveSystemConfig(world_id="demo", memory_dir=None)
-)
+system = build_cognitive_system(CognitiveSystemConfig(world_id="demo", memory_dir=None))
 
 system.process_dialogue("Water boils at 100 degrees Celsius.")
 turn = system.process_dialogue("At what temperature does water boil?")

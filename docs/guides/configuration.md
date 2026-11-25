@@ -25,7 +25,7 @@ config = CognitiveSystemConfig(
     memory_dir=Path("./data/worlds/prod_world"),
     enable_grounding=True,
     perception_mode="handcrafted",  # "handcrafted" | "snn" | "learned"
-    enable_brain_llm=False,         # Keep False for Pure-HCIR
+    enable_brain_llm=False,  # Keep False for Pure-HCIR
     enable_autonomous_curiosity=False,
     max_events_per_store=2000,
 )

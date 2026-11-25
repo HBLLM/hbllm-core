@@ -39,9 +39,7 @@ action, decision_meta = system.engine.step(obs)
 print(f"Chosen action={action}, meta={decision_meta}")
 
 # Signal procedural boundary transitions cleanly
-system.engine.on_boundary(
-    EpisodeBoundary(kind=EpisodeBoundaryKind.NEW_LEVEL, context_id="level_2")
-)
+system.engine.on_boundary(EpisodeBoundary(kind=EpisodeBoundaryKind.NEW_LEVEL, context_id="level_2"))
 ```
 
 ### Key Methods

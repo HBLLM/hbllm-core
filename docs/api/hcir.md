@@ -104,7 +104,9 @@ from hbllm.hcir.workspace_tiers import TieredWorkspace, WorkspaceTier
 workspace = TieredWorkspace()
 
 # Promote a verified node between tiers
-workspace.promote(node_id="concept-101", from_tier=WorkspaceTier.WORKING, to_tier=WorkspaceTier.PERSISTENT)
+workspace.promote(
+    node_id="concept-101", from_tier=WorkspaceTier.WORKING, to_tier=WorkspaceTier.PERSISTENT
+)
 
 # Enforce per-tier/world node budgets and run memory hygiene
 workspace.enforce_node_budgets(max_nodes_per_world=5000)

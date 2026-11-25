@@ -112,9 +112,7 @@ from hbllm.hcir.snn.neuromodulation import NeuromodulationEngine
 
 async def main() -> None:
     comprehension = ComprehensionStream()
-    state = await comprehension.process_chunk(
-        "Urgent: verify database integrity immediately."
-    )
+    state = await comprehension.process_chunk("Urgent: verify database integrity immediately.")
     print(f"Understanding state: {state}")
 
     neuro = NeuromodulationEngine()

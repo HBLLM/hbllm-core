@@ -32,7 +32,9 @@ system.process_dialogue("Gravity pulls objects toward the Earth.")
 # 2. Query knowledge with calibrated epistemic realization
 reply = system.process_dialogue("What does gravity do?")
 print(reply.response_text)
-print(f"Confidence: {reply.epistemic_state.confidence:.2f}, Known: {reply.epistemic_state.is_known}")
+print(
+    f"Confidence: {reply.epistemic_state.confidence:.2f}, Known: {reply.epistemic_state.is_known}"
+)
 ```
 
 ---
@@ -117,9 +119,7 @@ props = extract_propositions_from_text(
     "Photosynthesis converts light into chemical energy.",
     source_file="biology.md",
 )
-nodes_added, edges_added, hypernyms = commit_propositions(
-    props, workspace=system.workspace
-)
+nodes_added, edges_added, hypernyms = commit_propositions(props, workspace=system.workspace)
 
 store = LexicalOntologyStore(":memory:")
 print(store.stats())
