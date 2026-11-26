@@ -150,7 +150,7 @@ class FrontopolarSubgoal:
             )
         )
 
-        capability_name = f"navigation.{self.subgoal_type.value.lower()}"
+        capability_name = f"motor.navigate_{self.subgoal_type.value.lower()}"
         instructions.append(
             Instruction(
                 opcode=Opcode.EXECUTE,

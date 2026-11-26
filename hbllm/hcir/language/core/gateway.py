@@ -63,16 +63,23 @@ class HCIRGateway:
 
     def _commit_node(self, node: EvidenceNode | GoalNode) -> None:
         from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+        from hbllm.hcir.types import Scope
+
+        tenant_id = getattr(self._workspace, "tenant_id", None) or "default"
+        node_to_commit = node
+        if getattr(getattr(node, "scope", None), "tenant_id", "default") != tenant_id:
+            node_to_commit = node.model_copy(update={"scope": Scope(tenant_id=tenant_id)})
 
         self._workspace.commit_operations(
             [
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=node.id,
-                    node_data=node.model_dump(),
+                    node_id=node_to_commit.id,
+                    node_data=node_to_commit.model_dump(),
                 )
             ],
             author="hcir_language_gateway",
+            tenant_id=tenant_id,
         )
 
     # ── Assertion: Language as Evidence ───────────────────────────────
@@ -156,6 +163,7 @@ class HCIRGateway:
                         )
                     ],
                     author="hcir_language_gateway",
+                    tenant_id=getattr(self._workspace, "tenant_id", None) or "default",
                 )
 
         # Create spatial edge if both subject and object are grounded entities
@@ -187,6 +195,7 @@ class HCIRGateway:
                             )
                         ],
                         author="hcir_language_gateway",
+                        tenant_id=getattr(self._workspace, "tenant_id", None) or "default",
                     )
                     logger.debug(
                         "HCIRGateway: Created %s edge %s → %s",

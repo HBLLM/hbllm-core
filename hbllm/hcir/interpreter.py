@@ -58,7 +58,7 @@ class SyscallAllowlist:
         "causal_analysis content_generation content_modification planning simulation skill_extraction world_prediction".split()
     )
 
-    def __init__(self, *, strict: bool = False, extra_allowed: set[str] | None = None) -> None:
+    def __init__(self, *, strict: bool = True, extra_allowed: set[str] | None = None) -> None:
         self.strict = strict
         self.extra_allowed = set(extra_allowed or ())
 
@@ -123,6 +123,7 @@ async def sys_assert(
     """ASSERT: inject a node or edge into the workspace."""
     node_data, edge_data = ins.params.get("node_data"), ins.params.get("edge_data")
     author = str(ins.params.get("author", "interpreter"))
+    eff_tenant = getattr(workspace, "tenant_id", None) or "default"
     if node_data:
         node_id = node_data.get("id")
         op = (
@@ -132,6 +133,7 @@ async def sys_assert(
         )
         tx = HCIRTransaction(
             author=author,
+            tenant_id=eff_tenant,
             operations=[TransactionOperation(op=op, node_id=node_id, node_data=node_data)],
         )
         result = services.transaction_manager.commit(tx)
@@ -141,6 +143,7 @@ async def sys_assert(
         edge_id = edge_data.get("id")
         tx = HCIRTransaction(
             author=author,
+            tenant_id=eff_tenant,
             operations=[
                 TransactionOperation(
                     op=TransactionOp.ADD_EDGE, edge_id=edge_id, edge_data=edge_data
@@ -164,8 +167,13 @@ async def sys_retract(
         ops.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=edge_id))
     if not ops:
         return {"error": "RETRACT requires 'node_id' or 'edge_id'"}
+    eff_tenant = getattr(workspace, "tenant_id", None) or "default"
     result = services.transaction_manager.commit(
-        HCIRTransaction(author=str(ins.params.get("author", "interpreter")), operations=ops)
+        HCIRTransaction(
+            author=str(ins.params.get("author", "interpreter")),
+            tenant_id=eff_tenant,
+            operations=ops,
+        )
     )
     return {"committed": result.is_committed, "tx_id": result.id}
 
@@ -200,9 +208,9 @@ async def sys_execute(
 ) -> dict[str, Any]:
     """EXECUTE: dispatch a capability through CapabilityResolver gated by SyscallAllowlist."""
     capability, exec_params = str(ins.params.get("capability", "")), ins.params.get("params", {})
-    policy = allowlist or SyscallAllowlist(strict=False)
+    policy = allowlist or SyscallAllowlist(strict=True)
     verdict = policy.classify(capability)
-    if verdict == "rejected" and policy.strict:
+    if verdict != "allowed" and policy.strict:
         return {
             "error": f"Capability '{capability}' rejected by SyscallAllowlist",
             "blocked_by_allowlist": True,
@@ -490,7 +498,7 @@ class HCIRInterpreter:
         self._dispatcher = dispatcher or SyscallDispatcher()
         self._max_call_depth = max_call_depth
         self._max_fuel = max_fuel
-        self._allowlist = syscall_allowlist or SyscallAllowlist(strict=False)
+        self._allowlist = syscall_allowlist or SyscallAllowlist(strict=True)
         self._branch_tx_managers: dict[int, TransactionManager] = {}
 
     def _target_context(

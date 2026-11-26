@@ -8,7 +8,6 @@ authorization, workspace path confinement, and subprocess kill-on-timeout.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -16,6 +15,15 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from hbllm.hcir.kernel.capability_sandboxing import (
+    CapabilityPermissions,
+    CapabilityResourceLimits,
+    CapabilitySandboxManager,
+    IsolationMode,
+    SandboxedCapabilityPolicy,
+    TrustLevel,
+)
+from hbllm.hcir.kernel.subprocess_sandbox import run_sandboxed_command
 from hbllm.network.messages import Message, MessageType
 from hbllm.plugin.sdk import HBLLMPlugin, subscribe
 
@@ -56,6 +64,26 @@ class CompilerVerification(HBLLMPlugin):
         self.commands = DEFAULT_COMMANDS.copy()
         self.permission_engine = permission_engine
         self.timeout_seconds = timeout_seconds
+        self._sandbox_manager = CapabilitySandboxManager()
+        self._sandbox_manager.register_policy(
+            SandboxedCapabilityPolicy(
+                capability_name="workspace_compile_verify",
+                provider_id=self.node_id,
+                trust_level=TrustLevel.VERIFIED,
+                isolation_mode=IsolationMode.SUBPROCESS,
+                permissions=CapabilityPermissions(
+                    allow_filesystem=True,
+                    allow_network=False,
+                    allow_subprocess=True,
+                    allow_db_write=False,
+                ),
+                resource_limits=CapabilityResourceLimits(
+                    max_cpu_seconds=max(1.0, float(timeout_seconds)),
+                    timeout_seconds=max(1.0, float(timeout_seconds)),
+                ),
+                required_permissions={"subprocess", "filesystem"},
+            )
+        )
 
         if config_path and os.path.exists(config_path):
             try:
@@ -132,28 +160,34 @@ class CompilerVerification(HBLLMPlugin):
             for tok in tokens
         ]
 
-        logger.info("CompilerVerification running argv: %s", argv)
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self.workspace_dir,
+        if not (
+            self._sandbox_manager.check_permission(
+                "workspace_compile_verify", self.node_id, "subprocess"
             )
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    proc.communicate(), timeout=self.timeout_seconds
-                )
-            except (TimeoutError, asyncio.TimeoutError):
-                proc.kill()
-                await proc.wait()
+            and self._sandbox_manager.check_permission(
+                "workspace_compile_verify", self.node_id, "filesystem"
+            )
+        ):
+            return message.create_error(
+                f"CompilerVerification denied by CapabilitySandboxManager for '{self.node_id}'."
+            )
+
+        logger.info("CompilerVerification running argv via kernel sandbox: %s", argv)
+        try:
+            sb_result = await run_sandboxed_command(
+                argv,
+                cwd=self.workspace_dir,
+                timeout=self.timeout_seconds,
+                allow_network=False,
+            )
+            if sb_result.timed_out:
                 return message.create_error(
                     f"Verification timed out after {self.timeout_seconds:.1f}s"
                 )
 
-            exit_code = proc.returncode if proc.returncode is not None else -1
-            out_str = stdout.decode("utf-8", errors="replace").strip()
-            err_str = stderr.decode("utf-8", errors="replace").strip()
+            exit_code = sb_result.exit_code
+            out_str = sb_result.stdout
+            err_str = sb_result.stderr
 
             status = "SUCCESS" if exit_code == 0 else "FAILURE"
             output_msg = out_str or err_str

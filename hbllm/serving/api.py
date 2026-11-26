@@ -1448,13 +1448,57 @@ async def receive_federated_envelope(request: FederatedEnvelopeRequest) -> dict[
     return result
 
 
+async def _try_pure_hcir_chat(
+    tenant_id: str,
+    text: str,
+    *,
+    session_id: str = "default_session",
+) -> tuple[str, float] | None:
+    """Attempt a deterministic Pure-HCIR turn via the per-tenant `CognitiveSystemRegistry`."""
+    from starlette.concurrency import run_in_threadpool
+
+    from hbllm.serving.cognitive_registry import get_cognitive_registry
+
+    registry = _state.get("cognitive_registry") or get_cognitive_registry()
+    _state.setdefault("cognitive_registry", registry)
+    try:
+        override_system = _state.get("cognitive_system")
+        if override_system is not None:
+            hcir_result = await run_in_threadpool(override_system.process_dialogue, text)
+            hcir_ok = bool(getattr(hcir_result, "is_success", False))
+            hcir_text = str(getattr(hcir_result, "response_text", "") or "")
+            if hcir_ok and hcir_text:
+                registry.record_session_turn(tenant_id, session_id, "user", text)
+                registry.record_session_turn(tenant_id, session_id, "assistant", hcir_text)
+        else:
+            hcir_result = await registry.process_dialogue(tenant_id, text, session_id=session_id)
+            hcir_ok = bool(getattr(hcir_result, "is_success", False))
+            hcir_text = str(getattr(hcir_result, "response_text", "") or "")
+        if hcir_ok and hcir_text:
+            conf = float(getattr(hcir_result, "confidence", 1.0) or 1.0)
+            return hcir_text, conf
+        logger.debug(
+            "HCIR fallback to brain pipeline: %s — %s",
+            getattr(hcir_result, "error_type", type(hcir_result).__name__),
+            text[:80],
+        )
+    except Exception:
+        fallbacks = registry.record_fallback()
+        logger.warning(
+            "Pure-HCIR fast path failed (fallbacks=%d); falling back to brain pipeline",
+            fallbacks,
+            exc_info=True,
+        )
+    return None
+
+
 @app.post("/v1/chat", response_model=ChatResponse)
 async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
     """
     Send a message through the HBLLM system.
 
-    Automatically routes to the full brain pipeline or external LLM provider
-    based on system mode. Use 'provider' field to force a specific provider.
+    Routes Pure-HCIR dialogue first (zero LLM) when no explicit external provider is forced;
+    falls back to the brain pipeline or external provider when HCIR cannot resolve the turn.
     """
     request.tenant_id = require_authenticated_tenant(api_req)
     request.user_id = getattr(api_req.state, "user_id", None) or request.tenant_id
@@ -1464,6 +1508,28 @@ async def chat(api_req: Request, request: ChatRequest) -> ChatResponse | Any:
     # Explicit provider override always uses provider path
     if request.provider:
         return await _chat_via_provider(request)
+
+    hcir_hit = await _try_pure_hcir_chat(
+        request.tenant_id, request.text, session_id=request.session_id
+    )
+    if hcir_hit is not None:
+        resp_text, conf = hcir_hit
+        return ChatResponse(
+            tenant_id=request.tenant_id,
+            user_id=request.user_id,
+            device_id=request.device_id,
+            session_id=request.session_id,
+            correlation_id=str(uuid.uuid4()),
+            response_text=resp_text,
+            source_node="pure-hcir",
+            confidence=conf,
+            provider_used="pure-hcir",
+            usage={
+                "prompt_tokens": len(request.text.split()),
+                "completion_tokens": len(resp_text.split()),
+                "total_tokens": 0,
+            },
+        )
 
     # Route based on mode
     if mode == "full" and _state.get("brain"):
@@ -2473,12 +2539,37 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
     request.tenant_id = require_authenticated_tenant(api_req)
     request.user_id = getattr(api_req.state, "user_id", None) or request.tenant_id
     request.device_id = getattr(api_req.state, "device_id", None) or "unknown"
+    correlation_id = str(uuid.uuid4())
+
+    hcir_hit = await _try_pure_hcir_chat(
+        request.tenant_id, request.text, session_id=request.session_id
+    )
+    if hcir_hit is not None:
+        hcir_text, _ = hcir_hit
+
+        async def hcir_event_generator() -> Any:
+            import json as _json
+
+            tokens = hcir_text.split(" ")
+            for idx, tok in enumerate(tokens):
+                piece = tok if idx == 0 else " " + tok
+                yield f"data: {_json.dumps({'token': piece, 'done': False})}\n\n"
+            yield f"data: {_json.dumps({'token': '', 'done': True, 'correlation_id': correlation_id, 'source_node': 'pure-hcir'})}\n\n"
+
+        return StreamingResponse(
+            hcir_event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-HBLLM-Engine": "pure-hcir",
+            },
+        )
+
     brain = _state.get("brain")
     bus = getattr(brain, "bus", None)
     if not bus:
         raise HTTPException(status_code=503, detail="Brain pipeline not initialized")
-
-    correlation_id = str(uuid.uuid4())
 
     token_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -2597,73 +2688,67 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
     session_id = str(uuid.uuid4())
     correlation_id = str(uuid.uuid4())
 
-    # ── Pure-HCIR fast path (non-streaming only) ─────────────────────
-    if not request.stream:
-        last_user_msg = next(
-            (m.content for m in reversed(request.messages) if m.role == "user"),
-            None,
-        )
-        if last_user_msg:
-            from starlette.concurrency import run_in_threadpool
+    # ── Pure-HCIR fast path (non-streaming & streaming) ──────────────
+    last_user_msg = next(
+        (m.content for m in reversed(request.messages) if m.role == "user"),
+        None,
+    )
+    if last_user_msg:
+        hcir_hit = await _try_pure_hcir_chat(tenant_id, last_user_msg, session_id=session_id)
+        if hcir_hit is not None:
+            hcir_text, _ = hcir_hit
+            logger.info(
+                "HCIR autonomy: success for tenant=%s input=%s",
+                tenant_id,
+                last_user_msg[:80],
+            )
+            if not request.stream:
+                from fastapi.responses import JSONResponse
 
-            from hbllm.serving.cognitive_registry import get_cognitive_registry
-
-            registry = _state.get("cognitive_registry") or get_cognitive_registry()
-            _state.setdefault("cognitive_registry", registry)
-            try:
-                override_system = _state.get("cognitive_system")
-                if override_system is not None:
-                    hcir_result = await run_in_threadpool(
-                        override_system.process_dialogue,
-                        last_user_msg,
-                    )
-                else:
-                    hcir_result = await registry.process_dialogue(tenant_id, last_user_msg)
-                hcir_ok = bool(getattr(hcir_result, "is_success", False))
-                hcir_text = str(getattr(hcir_result, "response_text", "") or "")
-                if hcir_ok and hcir_text:
-                    logger.info(
-                        "HCIR autonomy: success for tenant=%s input=%s",
-                        tenant_id,
-                        last_user_msg[:80],
-                    )
-                    return JSONResponse(
-                        content={
-                            "id": f"chatcmpl-{correlation_id}",
-                            "object": "chat.completion",
-                            "created": int(time.time()),
-                            "model": "hbllm-pure-hcir",
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "message": {
-                                        "role": "assistant",
-                                        "content": hcir_text,
-                                    },
-                                    "finish_reason": "stop",
-                                }
-                            ],
-                            "usage": {
-                                "prompt_tokens": len(last_user_msg.split()),
-                                "completion_tokens": len(hcir_text.split()),
-                                "total_tokens": 0,
-                            },
+                return JSONResponse(
+                    content={
+                        "id": f"chatcmpl-{correlation_id}",
+                        "object": "chat.completion",
+                        "created": int(time.time()),
+                        "model": "hbllm-pure-hcir",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": hcir_text,
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": len(last_user_msg.split()),
+                            "completion_tokens": len(hcir_text.split()),
+                            "total_tokens": 0,
                         },
-                        headers={"X-HBLLM-Engine": "pure-hcir"},
-                    )
-                else:
-                    logger.debug(
-                        "HCIR fallback to brain pipeline: %s — %s",
-                        getattr(hcir_result, "error_type", type(hcir_result).__name__),
-                        last_user_msg[:80],
-                    )
-            except Exception:
-                fallbacks = registry.record_fallback()
-                logger.warning(
-                    "Pure-HCIR fast path failed (fallbacks=%d); falling back to brain pipeline",
-                    fallbacks,
-                    exc_info=True,
+                    },
+                    headers={"X-HBLLM-Engine": "pure-hcir"},
                 )
+
+            async def hcir_completion_stream() -> Any:
+                import json as _json
+
+                yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': 'hbllm-pure-hcir', 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
+                for idx, tok in enumerate(hcir_text.split(" ")):
+                    piece = tok if idx == 0 else " " + tok
+                    yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': 'hbllm-pure-hcir', 'choices': [{'index': 0, 'delta': {'content': piece}, 'finish_reason': None}]})}\n\n"
+                yield f"data: {_json.dumps({'id': f'chatcmpl-{correlation_id}', 'object': 'chat.completion.chunk', 'created': int(time.time()), 'model': 'hbllm-pure-hcir', 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                hcir_completion_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                    "X-HBLLM-Engine": "pure-hcir",
+                },
+            )
 
     # ── Brain pipeline path (existing) ───────────────────────────────
     # Flatten the messages list into a single prompt for HBLLM
@@ -2856,13 +2941,6 @@ async def chat_websocket(ws: WebSocket) -> None:
     await ws.accept()
     import json as _json
 
-    brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
-    if not bus:
-        await ws.send_json({"error": "Brain pipeline not initialized"})
-        await ws.close(code=1011)
-        return
-
     try:
         async with TenantContext(tenant_id, user_id=user_id, device_id=device_id):
             while True:
@@ -2882,6 +2960,30 @@ async def chat_websocket(ws: WebSocket) -> None:
                     continue
 
                 correlation_id = str(uuid.uuid4())
+                hcir_hit = await _try_pure_hcir_chat(tenant_id, text, session_id=session_id)
+                if hcir_hit is not None:
+                    response_text, _ = hcir_hit
+                    tokens = response_text.split(" ")
+                    for i, token in enumerate(tokens):
+                        piece = token if i == 0 else " " + token
+                        await ws.send_json({"token": piece, "done": False})
+                    await ws.send_json(
+                        {
+                            "token": "",
+                            "done": True,
+                            "correlation_id": correlation_id,
+                            "engine": "pure-hcir",
+                        }
+                    )
+                    continue
+
+                brain = _state.get("brain")
+                bus = getattr(brain, "bus", None)
+                if not bus:
+                    await ws.send_json({"error": "Brain pipeline not initialized"})
+                    await ws.close(code=1011)
+                    return
+
                 response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
 
                 async def output_handler(msg: Message) -> None:

@@ -19,7 +19,9 @@ import subprocess  # nosec B404
 import sys
 import tempfile
 import textwrap
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -198,3 +200,110 @@ async def run_sandboxed_python(
             killed_by_limit=killed,
             exit_code=exit_code,
         )
+
+
+_CMD_EXEC_SHIM = textwrap.dedent("""\
+    import json as _sb_json
+    import os as _sb_os
+    import resource as _sb_res
+    import sys as _sb_sys
+
+    _cfg = _sb_json.loads(_sb_sys.argv[1])
+    _limits = [
+        (_sb_res.RLIMIT_CPU, (_cfg["cpu"], _cfg["cpu"])),
+        (_sb_res.RLIMIT_FSIZE, (_cfg["fsize"], _cfg["fsize"])),
+    ]
+    if _sb_sys.platform != "darwin":
+        _mem = _cfg["mem"] * 1024 * 1024
+        _limits.append((_sb_res.RLIMIT_AS, (_mem, _mem)))
+    for _rt, (_soft, _hard) in _limits:
+        try:
+            _sb_res.setrlimit(_rt, (_soft, _hard))
+        except (ValueError, OSError):
+            pass
+    _exe = _sb_sys.argv[2]
+    _argv = _sb_sys.argv[3:]
+    _sb_os.execv(_exe, _argv)  # nosec B606
+""")
+
+
+async def run_sandboxed_command(
+    argv: Sequence[str],
+    *,
+    cwd: str | Path,
+    timeout: float = 30.0,
+    max_memory_mb: int = 512,
+    max_cpu_seconds: int = 30,
+    max_file_bytes: int = 32 * 1024 * 1024,
+    allow_network: bool = False,
+    allowed_env_keys: tuple[str, ...] = ("PATH", "LANG", "LC_ALL"),
+) -> SandboxResult:
+    """Execute an allowlisted OS command inside Tier-2 subprocess isolation (RLIMIT + unshare)."""
+    if not argv:
+        return SandboxResult(success=False, stdout="", stderr="Empty argv", exit_code=-1)
+
+    cwd_path = Path(cwd).resolve()
+    clean_env = {k: os.environ[k] for k in allowed_env_keys if k in os.environ}
+    raw_exe = argv[0]
+    if "/" in raw_exe:
+        cand = Path(raw_exe) if Path(raw_exe).is_absolute() else (cwd_path / raw_exe).resolve()
+        if not cand.exists():
+            raise FileNotFoundError(f"Executable not found: {raw_exe}")
+        resolved_exe = str(cand)
+    else:
+        found = shutil.which(raw_exe, path=clean_env.get("PATH"))
+        if not found:
+            raise FileNotFoundError(f"Executable not found in PATH: {raw_exe}")
+        resolved_exe = found
+
+    limit_cfg = json.dumps(
+        {
+            "cpu": int(max_cpu_seconds),
+            "fsize": int(max_file_bytes),
+            "mem": int(max_memory_mb),
+        }
+    )
+    cmd = [sys.executable, "-I", "-c", _CMD_EXEC_SHIM, limit_cfg, resolved_exe, *argv]
+    if not allow_network and _HAS_UNSHARE:
+        cmd = ["unshare", "--user", "--net", "--"] + cmd
+
+    proc = await asyncio.create_subprocess_exec(  # nosec B603
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(cwd_path),
+        env=clean_env,
+        start_new_session=True,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except (TimeoutError, asyncio.TimeoutError):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        await proc.wait()
+        return SandboxResult(
+            success=False,
+            stdout="",
+            stderr=f"Execution timed out after {timeout}s",
+            timed_out=True,
+            killed_by_limit=True,
+            exit_code=-9,
+        )
+
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    exit_code = proc.returncode if proc.returncode is not None else -1
+    killed = exit_code in (-signal.SIGKILL, -signal.SIGXCPU, 137, 152)
+    return SandboxResult(
+        success=exit_code == 0,
+        stdout=stdout.strip(),
+        stderr=stderr.strip(),
+        timed_out=False,
+        killed_by_limit=killed,
+        exit_code=exit_code,
+    )

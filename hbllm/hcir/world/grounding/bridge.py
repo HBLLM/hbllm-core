@@ -1051,26 +1051,16 @@ class CorticalGroundingBridge:
         """Ground a natural-language mission or rule hint against active concepts and scene grid."""
         import numpy as np
 
-        from hbllm.hcir.compiler import HCIRCompiler
+        from hbllm.hcir.compiler import HCIRCompiler, IntentType
 
         clean = instruction.strip()
         if not clean:
             return self.state.dialogue_role_priors
 
         self.process_dialogue(clean)
-        compiler = HCIRCompiler(concept_store=self.concept_store)
-        lower = clean.lower()
-        goal_verbs = (
-            "go ",
-            "reach ",
-            "navigate ",
-            "move ",
-            "find ",
-            "touch ",
-            "select ",
-            "collect ",
-        )
-        is_goal_cmd = lower.startswith(goal_verbs) or any(f" {v}" in lower for v in goal_verbs)
+        compiler = HCIRCompiler(concept_store=self.concept_store, workspace=self.workspace)
+        parsed_ast = compiler.parse_utterance(clean)
+        is_goal_cmd = parsed_ast.intent == IntentType.ACT
         target_feat = compiler._resolve_feature_for_label(clean, theory) if is_goal_cmd else None
 
         if isinstance(target_feat, int):

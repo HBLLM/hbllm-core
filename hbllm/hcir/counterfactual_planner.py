@@ -361,7 +361,7 @@ class CounterfactualPlanner:
                     Instruction(
                         opcode=Opcode.EXECUTE,
                         params={
-                            "capability": "world_prediction",
+                            "capability": "world.predict",
                             "params": {"action": action.intent, "branch": branch_name},
                         },
                     ),
@@ -543,7 +543,7 @@ class CounterfactualPlanner:
                         Instruction(
                             opcode=Opcode.EXECUTE,
                             params={
-                                "capability": "world_prediction",
+                                "capability": "world.predict",
                                 "params": {"action": action.intent, "branch": child_branch},
                             },
                         ),

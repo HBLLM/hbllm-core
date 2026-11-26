@@ -683,6 +683,7 @@ class HCIRWorkspaceState:
         if ops:
             tx = HCIRTransaction(
                 author=author,
+                tenant_id=self._tenant_id or "default",
                 operations=ops,
                 metadata={"merge_branch": branch_name},
             )

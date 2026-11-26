@@ -323,13 +323,16 @@ class GroundingResolver:
         introduce new entity hypotheses into the world model.
         """
         from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+        from hbllm.hcir.types import Scope
 
+        tenant_id = getattr(self._workspace, "tenant_id", None) or "default"
         concept_name = ref.concept_name or "entity"
         entity = PhysicalEntityNode(
             entity_type=concept_name,
             entity_name=concept_name,
             name=concept_name,
             properties=dict(ref.properties) if ref.properties else {},
+            scope=Scope(tenant_id=tenant_id),
             tags=["language_introduced", concept_name],
         )
 
@@ -343,6 +346,7 @@ class GroundingResolver:
                 )
             ],
             author="grounding_resolver",
+            tenant_id=tenant_id,
         )
 
         logger.info(
