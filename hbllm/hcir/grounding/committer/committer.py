@@ -303,18 +303,20 @@ class HCIRCommitter:
             )
 
         # 2. Attach validated exemplars via INSTANCE_OF edges
+        ws = self._tx_manager.workspace
         for exemplar_id in concept.exemplar_entity_ids:
             # Ensure exemplar entity node exists
-            exemplar_node = PhysicalEntityNode(
-                id=exemplar_id, entity_name=exemplar_id, scope=eff_scope
-            )
-            operations.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_NODE,
-                    node_id=exemplar_id,
-                    node_data=exemplar_node.model_dump(),
+            if ws is None or not ws.graph.has_node(exemplar_id):
+                exemplar_node = PhysicalEntityNode(
+                    id=exemplar_id, entity_name=exemplar_id, scope=eff_scope
                 )
-            )
+                operations.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=exemplar_id,
+                        node_data=exemplar_node.model_dump(),
+                    )
+                )
 
             inst_edge_id = f"edge_inst_{hashlib.blake2b(f'{exemplar_id}:{concept_id}'.encode(), digest_size=8).hexdigest()}"
             inst_edge = HCIREdge(
@@ -417,34 +419,57 @@ class HCIRCommitter:
 
         eff_scope = self._effective_scope(scope)
         tenant_id = eff_scope.tenant_id
-        operations: list[TransactionOperation] = list(adaptive_ops)
+        ws = self._tx_manager.workspace
+        node_ops: list[TransactionOperation] = []
+        edge_ops: list[TransactionOperation] = []
         entity_memberships: dict[str, dict[str, dict[str, object]]] = {}
+        relation_assertions: list[FuzzyAssertion] = []
 
         for fa in assertions:
             if fa.target_ref is None:
                 entity_memberships.setdefault(fa.subject_ref, {})[fa.semantics] = fa.model_dump()
-                continue
+            else:
+                relation_assertions.append(fa)
 
-            subj_node = PhysicalEntityNode(
-                id=fa.subject_ref, entity_name=fa.subject_ref, scope=eff_scope
+        seen_entity_upserts: set[str] = set()
+        for subj_id, memb_map in entity_memberships.items():
+            seen_entity_upserts.add(subj_id)
+            merged_props: dict[str, object] = {"fuzzy_memberships": dict(memb_map)}
+            if ws is not None:
+                existing_node = ws.graph.get_node(subj_id)
+                if isinstance(existing_node, PhysicalEntityNode):
+                    merged_props = dict(existing_node.properties)
+                    prev_fm = merged_props.get("fuzzy_memberships")
+                    combined_fm = dict(prev_fm) if isinstance(prev_fm, Mapping) else {}
+                    combined_fm.update(memb_map)
+                    merged_props["fuzzy_memberships"] = combined_fm
+            ent_node = PhysicalEntityNode(
+                id=subj_id,
+                entity_name=subj_id,
+                scope=eff_scope,
+                properties=merged_props,
             )
-            obj_node = PhysicalEntityNode(
-                id=fa.target_ref, entity_name=fa.target_ref, scope=eff_scope
-            )
-            operations.append(
+            node_ops.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=subj_node.id,
-                    node_data=subj_node.model_dump(),
+                    node_id=ent_node.id,
+                    node_data=ent_node.model_dump(),
                 )
             )
-            operations.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_NODE,
-                    node_id=obj_node.id,
-                    node_data=obj_node.model_dump(),
-                )
-            )
+
+        for fa in relation_assertions:
+            assert fa.target_ref is not None
+            for nid in (fa.subject_ref, fa.target_ref):
+                if nid not in seen_entity_upserts and (ws is None or not ws.graph.has_node(nid)):
+                    seen_entity_upserts.add(nid)
+                    ent = PhysicalEntityNode(id=nid, entity_name=nid, scope=eff_scope)
+                    node_ops.append(
+                        TransactionOperation(
+                            op=TransactionOp.UPSERT_NODE,
+                            node_id=ent.id,
+                            node_data=ent.model_dump(),
+                        )
+                    )
 
             pred_name = fa.semantics.removeprefix("relation:")
             edge_type = self._map_predicate_to_edge_type(pred_name)
@@ -479,7 +504,7 @@ class HCIRCommitter:
                 properties=edge_props,
                 weight=float(fa.degree),
             )
-            operations.append(
+            edge_ops.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_EDGE,
                     edge_id=rel_edge.id,
@@ -487,20 +512,7 @@ class HCIRCommitter:
                 )
             )
 
-        for subj_id, memb_map in entity_memberships.items():
-            ent_node = PhysicalEntityNode(
-                id=subj_id,
-                entity_name=subj_id,
-                scope=eff_scope,
-                properties={"fuzzy_memberships": memb_map},
-            )
-            operations.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_NODE,
-                    node_id=ent_node.id,
-                    node_data=ent_node.model_dump(),
-                )
-            )
+        operations: list[TransactionOperation] = list(adaptive_ops) + node_ops + edge_ops
 
         if not operations:
             return []

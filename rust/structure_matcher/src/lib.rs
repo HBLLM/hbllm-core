@@ -6,16 +6,18 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::matcher::{
-    match_relational_schema as rust_match, Pattern, PatternEdge, TargetEdge, TargetGraph,
+    match_relational_schema_with_profile as rust_match_with_profile, Pattern, PatternEdge,
+    TargetEdge, TargetGraph,
 };
 
 #[pyfunction]
-#[pyo3(signature = (pattern_dict, target_dict, min_systematicity=None))]
+#[pyo3(signature = (pattern_dict, target_dict, min_systematicity=None, profile_id=None))]
 pub fn match_relational_schema<'py>(
     py: Python<'py>,
     pattern_dict: &Bound<'py, PyDict>,
     target_dict: &Bound<'py, PyDict>,
     min_systematicity: Option<f64>,
+    profile_id: Option<&str>,
 ) -> PyResult<Bound<'py, PyList>> {
     // 1. Extract pattern
     let py_vars: Bound<'_, PyList> = pattern_dict
@@ -51,11 +53,16 @@ pub fn match_relational_schema<'py>(
             .map(|v| v.extract())
             .transpose()?
             .unwrap_or_default();
+        let min_degree: Option<f64> = e_dict
+            .get_item("min_degree")?
+            .map(|v| v.extract())
+            .transpose()?;
 
         edges.push(PatternEdge {
             rel_type,
             source_var,
             target_var,
+            min_degree,
         });
     }
 
@@ -99,11 +106,17 @@ pub fn match_relational_schema<'py>(
             .map(|v| v.extract())
             .transpose()?
             .unwrap_or_default();
+        let degree: f64 = te_dict
+            .get_item("degree")?
+            .map(|v| v.extract())
+            .transpose()?
+            .unwrap_or(1.0);
 
         target_edges.push(TargetEdge {
             rel_type,
             source,
             target,
+            degree,
         });
     }
 
@@ -113,7 +126,12 @@ pub fn match_relational_schema<'py>(
     };
 
     // 3. Match
-    let alignments = rust_match(&pattern, &target, min_systematicity.unwrap_or(0.3));
+    let alignments = rust_match_with_profile(
+        &pattern,
+        &target,
+        min_systematicity.unwrap_or(0.3),
+        profile_id.unwrap_or("product"),
+    );
 
     // 4. Return ranked candidate alignments
     let py_results = PyList::empty(py);
@@ -125,6 +143,10 @@ pub fn match_relational_schema<'py>(
         dict.set_item("total_relations_count", a.total_relations_count)?;
         dict.set_item("surface_overlap_score", a.surface_overlap_score)?;
         dict.set_item("structural_consistency", a.structural_consistency)?;
+        dict.set_item("structure_valid", a.structure_valid)?;
+        dict.set_item("binding_valid", a.binding_valid)?;
+        dict.set_item("semantic_degree", a.semantic_degree)?;
+        dict.set_item("profile_id", a.profile_id)?;
         py_results.append(dict)?;
     }
 

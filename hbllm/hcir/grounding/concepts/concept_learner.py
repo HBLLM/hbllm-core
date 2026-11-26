@@ -767,6 +767,7 @@ class ConceptLearner:
         """Infer graded role priors from both working concepts and graph GroundedConceptNodes."""
         features_dict = self._embedding_to_dict(feature)
         role_scores: dict[str, float] = {}
+        store_cids: set[str] = set()
 
         for concept in self._store.get_all_concepts():
             if (
@@ -774,6 +775,7 @@ class ConceptLearner:
                 or concept.is_composite
             ):
                 continue
+            store_cids.add(concept.concept_ref.id)
             roles = [
                 aff.removeprefix("role:") for aff in concept.affordances if aff.startswith("role:")
             ]
@@ -794,6 +796,8 @@ class ConceptLearner:
             from hbllm.hcir.nodes import HCIRNodeType
 
             for gnode in graph.nodes_by_type(HCIRNodeType.GROUNDED_CONCEPT):
+                if gnode.id in store_cids:
+                    continue
                 props = getattr(gnode, "properties", None) or {}
                 raw_roles = list(getattr(gnode, "behavioral_regularities", ()) or ())
                 roles = [

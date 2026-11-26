@@ -481,9 +481,9 @@ class CorticalGroundingBridge:
                     )
                     f_key = f"{fa.subject_ref}:{fa.semantics}:{fa.target_ref}"
                     prev_fa = self.state.committed_fuzzy_assertions.get(f_key)
-                    if (
+                    if (fa.degree >= 0.25 or prev_fa is not None) and (
                         prev_fa is None
-                        or abs(float(fa.degree) - prev_fa[0]) >= 0.05
+                        or abs(float(fa.degree) - prev_fa[0]) >= 0.10
                         or fa.model_version != prev_fa[1]
                     ):
                         fuzzy_assertions_to_commit.append(fa)
@@ -620,9 +620,9 @@ class CorticalGroundingBridge:
                         for fa in multi.assertions:
                             f_key = f"{fa.subject_ref}:{fa.semantics}:*"
                             prev_fa = self.state.committed_fuzzy_assertions.get(f_key)
-                            if (
+                            if (fa.degree >= 0.25 or prev_fa is not None) and (
                                 prev_fa is None
-                                or abs(float(fa.degree) - prev_fa[0]) >= 0.05
+                                or abs(float(fa.degree) - prev_fa[0]) >= 0.10
                                 or fa.model_version != prev_fa[1]
                             ):
                                 fuzzy_assertions_to_commit.append(fa)
@@ -823,10 +823,6 @@ class CorticalGroundingBridge:
                 if (feat, r_name) in seen_pairs:
                     continue
                 seen_pairs.add((feat, r_name))
-                existing_c = self.concept_store.get_concept(cid) if cid else None
-                already_had_role = (
-                    existing_c is not None and f"role:{r_name}" in existing_c.affordances
-                )
                 refreshed_fv = fv
                 pair_key = (feat, r_name)
                 if (
@@ -853,6 +849,12 @@ class CorticalGroundingBridge:
                                     timestamp=fv.timestamp,
                                 )
                                 break
+                role_tag = f"role:{r_name}"
+                prior_role_cids = {
+                    c.concept_ref.id
+                    for c in self.concept_store.get_all_concepts()
+                    if role_tag in c.affordances
+                }
                 target_promoted_c = None
                 pure_concept = self.concept_learner.bind_role_pure(
                     cid,
@@ -862,7 +864,7 @@ class CorticalGroundingBridge:
                     confidence=1.0,
                 )
                 if pure_concept is not None:
-                    if not already_had_role or pure_concept.concept_ref.id != cid:
+                    if pure_concept.concept_ref.id not in prior_role_cids:
                         newly_bound = True
                     self.state.last_feature_concept_ids[feat] = pure_concept.concept_ref.id
                     cid = pure_concept.concept_ref.id
@@ -874,7 +876,7 @@ class CorticalGroundingBridge:
                         str(entity_id), r_name
                     )
                     if bound_concept is not None:
-                        if not already_had_role:
+                        if bound_concept.concept_ref.id not in prior_role_cids:
                             newly_bound = True
                         role_to_concept_id[r_name] = bound_concept.concept_ref.id
                         bound += 1
@@ -884,46 +886,47 @@ class CorticalGroundingBridge:
                     self.enable_fuzzy_grounding
                     and target_promoted_c is not None
                     and target_promoted_c.feature_distributions
-                    and (
-                        not already_had_role
-                        or target_promoted_c.concept_ref.id not in self.state.promoted_concept_ids
-                        or not self.workspace.graph.has_node(target_promoted_c.concept_ref.id)
-                    )
                 ):
-                    q = target_promoted_c.grounding_quality
-                    if q.predictive_utility < 0.85 or q.interaction_support < 0.85:
-                        target_promoted_c.update_grounding_quality(
-                            GroundingQuality(
-                                perceptual_stability=q.perceptual_stability,
-                                temporal_persistence=q.temporal_persistence,
-                                relational_consistency=q.relational_consistency,
-                                cross_modal_support=q.cross_modal_support,
-                                predictive_utility=max(q.predictive_utility, 0.85),
-                                interaction_support=max(q.interaction_support, 0.85),
-                                boundary_stability=q.boundary_stability,
-                                measurements=dict(q.measurements),
-                            )
-                        )
                     tcid = target_promoted_c.concept_ref.id
-                    prop = self.concept_store.lifecycle_manager.create_promotion_proposal(
-                        concept=target_promoted_c,
-                        proposal_id=f"prop_{tcid}_{uuid.uuid4().hex[:6]}",
-                        rationale=f"Empirical causal role:{r_name} grounded",
-                    )
-                    try:
-                        eff_scope = Scope(tenant_id=self.workspace.tenant_id or "default")
-                        tx = self.committer.commit_concept_promotion(
-                            prop, target_promoted_c, scope=eff_scope
+                    promo_key = f"{tcid}:{role_tag}"
+                    if (
+                        promo_key not in self.state.promoted_concept_ids
+                        or not self.workspace.graph.has_node(tcid)
+                    ):
+                        q = target_promoted_c.grounding_quality
+                        if q.predictive_utility < 0.85 or q.interaction_support < 0.85:
+                            target_promoted_c.update_grounding_quality(
+                                GroundingQuality(
+                                    perceptual_stability=q.perceptual_stability,
+                                    temporal_persistence=q.temporal_persistence,
+                                    relational_consistency=q.relational_consistency,
+                                    cross_modal_support=q.cross_modal_support,
+                                    predictive_utility=max(q.predictive_utility, 0.85),
+                                    interaction_support=max(q.interaction_support, 0.85),
+                                    boundary_stability=q.boundary_stability,
+                                    measurements=dict(q.measurements),
+                                )
+                            )
+                        prop = self.concept_store.lifecycle_manager.create_promotion_proposal(
+                            concept=target_promoted_c,
+                            proposal_id=f"prop_{tcid}_{uuid.uuid4().hex[:6]}",
+                            rationale=f"Empirical causal role:{r_name} grounded",
                         )
-                        if tx.is_committed:
-                            self.state.promoted_concept_ids.add(tcid)
-                    except Exception as exc:
-                        logger.debug(
-                            "Failed to promote causal role concept %s (%s): %s",
-                            tcid,
-                            r_name,
-                            exc,
-                        )
+                        try:
+                            eff_scope = Scope(tenant_id=self.workspace.tenant_id or "default")
+                            tx = self.committer.commit_concept_promotion(
+                                prop, target_promoted_c, scope=eff_scope
+                            )
+                            if tx.is_committed:
+                                self.state.promoted_concept_ids.add(tcid)
+                                self.state.promoted_concept_ids.add(promo_key)
+                        except Exception as exc:
+                            logger.debug(
+                                "Failed to promote causal role concept %s (%s): %s",
+                                tcid,
+                                r_name,
+                                exc,
+                            )
         if "cargo" in role_to_concept_id and "receptacle" in role_to_concept_id:
             self.concept_learner.induce_composite_concept(
                 parts={

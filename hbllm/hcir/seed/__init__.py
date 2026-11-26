@@ -12,6 +12,7 @@ from hbllm.hcir.seed.loader import (
     hydrate_core_priors,
     load_constructions_spec,
     load_core_priors_spec,
+    load_seeded_composition_policy,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "hydrate_core_priors",
     "load_constructions_spec",
     "load_core_priors_spec",
+    "load_seeded_composition_policy",
 ]

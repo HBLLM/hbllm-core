@@ -27,6 +27,7 @@ import logging
 import time
 from typing import Any
 
+from hbllm.hcir.fuzzy import FuzzyProfileId, get_fuzzy_profile
 from hbllm.hcir.graph import (
     BeliefNode,
     FactNode,
@@ -58,7 +59,7 @@ class _Rule:
     Represents: IF all antecedents hold THEN consequent holds.
     """
 
-    __slots__ = ("antecedents", "consequent", "confidence", "source_id")
+    __slots__ = ("antecedents", "consequent", "confidence", "semantic_degree", "source_id")
 
     def __init__(
         self,
@@ -66,15 +67,17 @@ class _Rule:
         consequent: str,
         confidence: float,
         source_id: str,
+        semantic_degree: float = 1.0,
     ) -> None:
         self.antecedents = antecedents
         self.consequent = consequent
         self.confidence = confidence
+        self.semantic_degree = max(0.0, min(1.0, float(semantic_degree)))
         self.source_id = source_id
 
     def __repr__(self) -> str:
         ants = " ∧ ".join(sorted(self.antecedents))
-        return f"({ants}) → {self.consequent} [{self.confidence:.2f}]"
+        return f"({ants}) → {self.consequent} [conf={self.confidence:.2f}, deg={self.semantic_degree:.2f}]"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -92,6 +95,15 @@ class DeductionOperator:
     The operator NEVER mutates HCIR.  All conclusions are returned
     as proposed TransactionOperations.
     """
+
+    def __init__(
+        self,
+        *,
+        enable_fuzzy: bool = False,
+        profile_id: str | FuzzyProfileId = FuzzyProfileId.LUKASIEWICZ,
+    ) -> None:
+        self._enable_fuzzy = bool(enable_fuzzy)
+        self._profile_id = FuzzyProfileId(profile_id)
 
     @property
     def operator_id(self) -> str:
@@ -168,7 +180,9 @@ class DeductionOperator:
         view = context.graph_view
 
         # ── Extract rules and facts ──────────────────────────────────
-        rules, known_facts, source_map = self._extract_knowledge(view)
+        rules, known_facts, source_map, fact_degrees, fact_confs = self._extract_knowledge(
+            view, enable_fuzzy=self._enable_fuzzy
+        )
 
         if not rules and not known_facts:
             return CognitiveResult(
@@ -187,6 +201,9 @@ class DeductionOperator:
             known_facts,
             source_map,
             max_iterations=context.budget.operator_depth,
+            fact_degrees=fact_degrees,
+            fact_confs=fact_confs,
+            profile_id=self._profile_id,
         )
 
         if not new_conclusions:
@@ -206,12 +223,16 @@ class DeductionOperator:
         provenance_chains: list[ProvenanceChain] = []
         evidence_refs: list[str] = []
 
-        for conclusion, (conf, chain) in new_conclusions.items():
-            # Propose adding a new belief node
+        for conclusion, (conf, deg, chain) in new_conclusions.items():
+            # Propose adding a new belief node preserving fuzzy semantic degree separately
             new_belief = BeliefNode(
                 claim=conclusion,
                 belief_type="factual",
                 evidence_sources=list(chain),
+                properties={
+                    "semantic_degree": round(float(deg), 4),
+                    "profile_id": self._profile_id.value,
+                },
                 provenance=Provenance(
                     created_by=self.operator_id,
                     source_type="inferred",
@@ -248,9 +269,10 @@ class DeductionOperator:
             conclusions={
                 "derived_count": len(new_conclusions),
                 "derived_claims": list(new_conclusions.keys()),
+                "derived_degrees": {k: round(v[1], 4) for k, v in new_conclusions.items()},
             },
             confidence=min(
-                (conf for conf, _ in new_conclusions.values()),
+                (conf for conf, _, _ in new_conclusions.values()),
                 default=0.5,
             ),
             evidence_refs=evidence_refs,
@@ -270,21 +292,15 @@ class DeductionOperator:
     @staticmethod
     def _extract_knowledge(
         view: Any,  # FrozenGraphView
-    ) -> tuple[list[_Rule], set[str], dict[str, str]]:
-        """Extract rules and facts from the frozen view.
-
-        Rules are extracted from beliefs containing conditional keywords
-        ("if", "all", "every", "when", "implies", "→").
-
-        Facts are extracted from FactNodes and high-confidence BeliefNodes.
-
-        Returns:
-            (rules, known_facts, source_map)
-            source_map: claim_text → node_id for provenance tracking.
-        """
+        *,
+        enable_fuzzy: bool = False,
+    ) -> tuple[list[_Rule], set[str], dict[str, str], dict[str, float], dict[str, float]]:
+        """Extract rules and facts from the frozen view."""
         rules: list[_Rule] = []
         known_facts: set[str] = set()
         source_map: dict[str, str] = {}
+        fact_degrees: dict[str, float] = {}
+        fact_confs: dict[str, float] = {}
 
         # Conditional keywords that suggest a rule
         _CONDITIONAL_KEYWORDS = frozenset(
@@ -306,38 +322,39 @@ class DeductionOperator:
                 continue
             claim = node.claim.strip().lower()
             source_map[claim] = node.id
+            props = node.properties if isinstance(node.properties, dict) else {}
+            has_sem_deg = isinstance(props.get("semantic_degree"), (int, float))
+            sem_deg = max(0.0, min(1.0, float(props.get("semantic_degree", 1.0))))
+            conf = float(node.uncertainty.confidence)
 
             # Check if this looks like a rule
             is_rule = any(kw in claim for kw in _CONDITIONAL_KEYWORDS)
 
             if is_rule:
-                rule = DeductionOperator._parse_rule(claim, node)
+                rule = DeductionOperator._parse_rule(claim, node, semantic_degree=sem_deg)
                 if rule is not None:
                     rules.append(rule)
-            elif node.uncertainty.confidence >= 0.6:
+            elif ((enable_fuzzy or has_sem_deg) and sem_deg > 0.0 and conf >= 0.3) or conf >= 0.6:
                 known_facts.add(claim)
+                fact_degrees[claim] = sem_deg
+                fact_confs[claim] = conf
 
         for node in view.nodes_by_type(HCIRNodeType.FACT):
             if not isinstance(node, FactNode):
                 continue
             claim = node.claim.strip().lower()
+            props = node.properties if isinstance(node.properties, dict) else {}
+            sem_deg = max(0.0, min(1.0, float(props.get("semantic_degree", 1.0))))
             known_facts.add(claim)
+            fact_degrees[claim] = sem_deg
+            fact_confs[claim] = float(getattr(node, "confidence", 1.0) or 1.0)
             source_map[claim] = node.id
 
-        return rules, known_facts, source_map
+        return rules, known_facts, source_map, fact_degrees, fact_confs
 
     @staticmethod
-    def _parse_rule(claim: str, node: BeliefNode) -> _Rule | None:
-        """Attempt to parse a natural-language conditional into a Rule.
-
-        Handles patterns like:
-            "if X then Y"
-            "all X are Y"
-            "X implies Y"
-
-        This is deliberately simple — a more sophisticated parser
-        would be added in A16 (language runtime).
-        """
+    def _parse_rule(claim: str, node: BeliefNode, *, semantic_degree: float = 1.0) -> _Rule | None:
+        """Attempt to parse a natural-language conditional into a Rule."""
         # Try "if ... then ..."
         for sep_pair in [
             ("if ", " then "),
@@ -358,6 +375,7 @@ class DeductionOperator:
                                 consequent=consequent,
                                 confidence=node.uncertainty.confidence,
                                 source_id=node.id,
+                                semantic_degree=semantic_degree,
                             )
 
         # Try "all X are Y"
@@ -369,6 +387,7 @@ class DeductionOperator:
                     consequent=parts[1].strip(),
                     confidence=node.uncertainty.confidence,
                     source_id=node.id,
+                    semantic_degree=semantic_degree,
                 )
 
         # Try "X implies Y"
@@ -381,6 +400,7 @@ class DeductionOperator:
                         consequent=parts[1].strip(),
                         confidence=node.uncertainty.confidence,
                         source_id=node.id,
+                        semantic_degree=semantic_degree,
                     )
 
         return None
@@ -391,28 +411,35 @@ class DeductionOperator:
         known_facts: set[str],
         source_map: dict[str, str],
         max_iterations: int = 20,
-    ) -> tuple[dict[str, tuple[float, list[str]]], dict[str, list[str]]]:
-        """Forward chaining to derive new conclusions.
-
-        Iteratively applies rules whose antecedents are satisfied until
-        no new facts are derivable or max_iterations is reached.
-
-        Returns:
-            new_conclusions: {claim: (confidence, [source_ids])}
-            derivation_chains: {claim: [step descriptions]}
-        """
+        *,
+        fact_degrees: dict[str, float] | None = None,
+        fact_confs: dict[str, float] | None = None,
+        profile_id: str | FuzzyProfileId = FuzzyProfileId.LUKASIEWICZ,
+    ) -> tuple[dict[str, tuple[float, float, list[str]]], dict[str, list[str]]]:
+        """Forward chaining to derive new conclusions with graded residuated modus ponens."""
+        prof = get_fuzzy_profile(profile_id)
+        f_degs = dict(fact_degrees or {})
+        f_confs = dict(fact_confs or {})
         working_set = set(known_facts)
-        new_conclusions: dict[str, tuple[float, list[str]]] = {}
+        new_conclusions: dict[str, tuple[float, float, list[str]]] = {}
         derivation_chains: dict[str, list[str]] = {}
 
         for iteration in range(max_iterations):
             newly_derived: set[str] = set()
 
             for rule in rules:
-                # Check if all antecedents are satisfied
                 if rule.antecedents.issubset(working_set):
                     if rule.consequent not in working_set:
+                        ant_deg = prof.t_norm_many(f_degs.get(a, 1.0) for a in rule.antecedents)
+                        cons_deg = prof.t_norm(rule.semantic_degree, ant_deg)
+                        if cons_deg <= 0.0:
+                            continue
+                        cons_conf = min(
+                            [rule.confidence, *(f_confs.get(a, 1.0) for a in rule.antecedents)]
+                        )
                         newly_derived.add(rule.consequent)
+                        f_degs[rule.consequent] = cons_deg
+                        f_confs[rule.consequent] = cons_conf
 
                         # Collect provenance
                         sources = [rule.source_id]
@@ -421,7 +448,8 @@ class DeductionOperator:
                                 sources.append(source_map[ant])
 
                         new_conclusions[rule.consequent] = (
-                            rule.confidence,
+                            cons_conf,
+                            cons_deg,
                             sources,
                         )
                         derivation_chains[rule.consequent] = [f"iteration {iteration}: {rule}"]
@@ -430,7 +458,6 @@ class DeductionOperator:
                 break  # Fixpoint reached
 
             working_set.update(newly_derived)
-            # Update source map for newly derived facts
             for fact in newly_derived:
                 if fact not in source_map:
                     source_map[fact] = f"derived:iter_{iteration}"

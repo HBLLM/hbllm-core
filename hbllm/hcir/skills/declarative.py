@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.capabilities.math_capabilities import compute_symmetry_score, compute_topology_cuts
+from hbllm.hcir.fuzzy import FuzzyExpr, FuzzyProfileId, get_fuzzy_profile
 from hbllm.hcir.graph import NodeLifecycle, SkillNode
 from hbllm.hcir.primitives import EntityComponent, Grid, detect_background_color, segment_entities
 from hbllm.hcir.skills.base import BaseHierarchicalSkill
@@ -233,6 +234,12 @@ class SymbolicExpr(BaseModel):
             return bool(ctx.metadata) and ctx.metadata.get(str(a["key"])) == a.get("expected_value")
         if op == "causal_do":
             return _eval_causal_do(a, ctx)
+        if op == "fuzzy_expr":
+            f_expr = FuzzyExpr.model_validate(a["expr"])
+            bmap = ctx.metadata if hasattr(ctx, "metadata") and ctx.metadata else {}
+            prof = str(a.get("profile_id", FuzzyProfileId.PRODUCT.value))
+            alpha = float(a.get("alpha", 0.5))
+            return float(f_expr.evaluate(bmap, profile=prof)) >= alpha
         if self.op == "predictive_confidence":
             if not ctx.metadata:
                 return True
@@ -244,6 +251,137 @@ class SymbolicExpr(BaseModel):
                 conf is None or float(conf) >= float(a.get("min_confidence", 0.5))
             )
         raise ValueError(f"Unknown SymbolicExpr op: {self.op!r}")
+
+    def evaluate_degree(
+        self,
+        ctx: SkillEvaluationContext | Any,
+        *,
+        profile_id: str | FuzzyProfileId = FuzzyProfileId.PRODUCT,
+    ) -> float:
+        """Evaluate graded satisfaction degree in [0.0, 1.0] under a coherent `FuzzyLogicProfile`."""
+        prof = get_fuzzy_profile(profile_id)
+        op, a, ch = self.op, self.args, self.children
+        if op == "all_of":
+            if not ch:
+                return 1.0
+            return prof.t_norm_many(c.evaluate_degree(ctx, profile_id=prof.profile_id) for c in ch)
+        if op == "any_of":
+            if not ch:
+                return 0.0
+            return prof.t_conorm_many(
+                c.evaluate_degree(ctx, profile_id=prof.profile_id) for c in ch
+            )
+        if op == "not":
+            sub = ch[0].evaluate_degree(ctx, profile_id=prof.profile_id) if ch else 1.0
+            return prof.negate(sub)
+        if op == "fuzzy_expr":
+            f_expr = FuzzyExpr.model_validate(a["expr"])
+            bmap = ctx.metadata if hasattr(ctx, "metadata") and ctx.metadata else {}
+            expr_prof = a.get("profile_id", prof.profile_id)
+            return float(f_expr.evaluate(bmap, profile=expr_prof))
+        if op == "symmetry":
+            kw = {k: a[k] for k in _SYM_KEYS if k in a}
+            res = compute_symmetry_score(ctx.grid, bg_color=ctx.background_color, **kw)
+            dev = float(res.get("min_deviation", float("inf")))
+            if not np.isfinite(dev):
+                return 0.0
+            max_dev = max(1e-6, float(a.get("max_deviation", 2.0)))
+            if dev <= max_dev * 0.5:
+                return 1.0
+            if dev <= max_dev:
+                # Linearly maps [0.5 * max_dev, max_dev] -> [1.0, 0.5]
+                return max(0.5, 1.0 - 0.5 * ((dev - max_dev * 0.5) / (max_dev * 0.5)))
+            hi = max_dev * 2.5
+            if dev >= hi:
+                return 0.0
+            return max(0.0, 0.5 * (1.0 - (dev - max_dev) / (hi - max_dev)))
+        if op == "predictive_confidence":
+            if not ctx.metadata:
+                return 1.0
+            max_fe = max(1e-6, float(a.get("max_free_energy", 1.0)))
+            min_conf = float(a.get("min_confidence", 0.5))
+            fe = ctx.metadata.get("total_free_energy")
+            conf = ctx.metadata.get("calibrated_confidence")
+            fe_deg = (
+                1.0
+                if fe is None or float(fe) <= max_fe
+                else max(0.0, 1.0 - (float(fe) - max_fe) / max_fe)
+            )
+            c_deg = (
+                1.0
+                if conf is None or float(conf) >= min_conf
+                else (max(0.0, float(conf) / min_conf) if min_conf > 0.0 else 1.0)
+            )
+            return prof.t_norm(fe_deg, c_deg)
+        if op == "grid_dim":
+            if self.evaluate(ctx):
+                return 1.0
+            exact = a.get("exact_shape")
+            if exact is not None:
+                dh = abs(ctx.height - int(exact[0])) / max(1, int(exact[0]))
+                dw = abs(ctx.width - int(exact[1])) / max(1, int(exact[1]))
+                return max(0.0, 1.0 - max(dh, dw))
+            h_deg = 1.0
+            if a.get("min_height") is not None and ctx.height < int(a["min_height"]):
+                h_deg = min(h_deg, max(0.0, ctx.height / max(1, int(a["min_height"]))))
+            if a.get("max_height") is not None and ctx.height > int(a["max_height"]):
+                mxh = max(1, int(a["max_height"]))
+                h_deg = min(h_deg, max(0.0, 1.0 - (ctx.height - mxh) / mxh))
+            w_deg = 1.0
+            if a.get("min_width") is not None and ctx.width < int(a["min_width"]):
+                w_deg = min(w_deg, max(0.0, ctx.width / max(1, int(a["min_width"]))))
+            if a.get("max_width") is not None and ctx.width > int(a["max_width"]):
+                mxw = max(1, int(a["max_width"]))
+                w_deg = min(w_deg, max(0.0, 1.0 - (ctx.width - mxw) / mxw))
+            return prof.t_norm(h_deg, w_deg)
+        if op == "cut_set":
+            cuts = compute_topology_cuts(ctx.grid, bg_color=ctx.background_color)
+            parts = int(cuts["partition_count"])
+            req = max(1, int(a.get("min_partitions", 2)))
+            return 1.0 if parts >= req else max(0.0, parts / req)
+        if op in ("entity_bbox", "entity_count"):
+            if self.evaluate(ctx):
+                return 1.0
+            ents = ctx.get_entities(connectivity=int(a.get("connectivity", 4)))
+            color, is_frame = a.get("color"), a.get("is_frame")
+            min_cnt = max(1, int(a.get("min_count", 1)))
+            cand_scores: list[float] = []
+            for e in ents:
+                if (color is not None and e.color != color) or (
+                    is_frame is not None and e.is_frame != is_frame
+                ):
+                    continue
+                s = 1.0
+                for attr_val, mn_k, mx_k in (
+                    (e.width, "min_width", "max_width"),
+                    (e.height, "min_height", "max_height"),
+                    (e.area, "min_area", "max_area"),
+                ):
+                    if a.get(mn_k) is not None and attr_val < float(a[mn_k]):
+                        s = min(s, max(0.0, float(attr_val) / max(1.0, float(a[mn_k]))))
+                    if a.get(mx_k) is not None and attr_val > float(a[mx_k]):
+                        mxv = max(1.0, float(a[mx_k]))
+                        s = min(s, max(0.0, 1.0 - (float(attr_val) - mxv) / mxv))
+                if s > 0.0:
+                    cand_scores.append(s)
+            if not cand_scores:
+                return 0.0
+            cand_scores.sort(reverse=True)
+            top = cand_scores[:min_cnt]
+            count_ratio = min(1.0, len(cand_scores) / min_cnt)
+            return prof.t_norm(top[-1], count_ratio)
+        if op == "causal_do" and str(a.get("operator", "==")) in (">", "<"):
+            if self.evaluate(ctx):
+                return 1.0
+            if not ctx.metadata or (val := ctx.metadata.get(str(a["variable"]))) is None:
+                return 0.0
+            exp = a.get("expected_value")
+            if exp is None:
+                return 0.0
+            scale = max(1.0, abs(float(exp)))
+            gap = abs(float(val) - float(exp))
+            return max(0.0, 1.0 - gap / scale)
+        return 1.0 if self.evaluate(ctx) else 0.0
 
 
 class SymbolicPredicate(ABC):
@@ -261,6 +399,18 @@ class SymbolicPredicate(ABC):
 
     def to_dict(self) -> dict[str, Any]:
         return self.to_expr().to_dict()
+
+    def evaluate_degree(
+        self,
+        ctx: SkillEvaluationContext | Any,
+        *,
+        profile_id: str | FuzzyProfileId = FuzzyProfileId.PRODUCT,
+    ) -> float:
+        """Evaluate graded fit in [0.0, 1.0] without mutating crisp `evaluate()`."""
+        try:
+            return self.to_expr().evaluate_degree(ctx, profile_id=profile_id)
+        except NotImplementedError:
+            return 1.0 if self.evaluate(ctx) else 0.0
 
     @staticmethod
     def from_dict(data: Mapping[str, Any]) -> ExprPredicate:
@@ -584,6 +734,26 @@ class DeclarativeNeuroSymbolicSkill(BaseHierarchicalSkill):
         except (KeyError, TypeError, ValueError) as exc:
             logger.debug("Declarative skill '%s' evaluation error: %s", self.skill_name, exc)
             return False
+
+    def evaluate_degree(
+        self,
+        grid: np.ndarray,
+        available_actions: list[int],
+        metadata: dict[str, Any] | None = None,
+        *,
+        profile_id: str | FuzzyProfileId = FuzzyProfileId.PRODUCT,
+    ) -> float:
+        """Evaluate graded precondition fit in [0.0, 1.0] for soft skill ranking."""
+        ctx = SkillEvaluationContext(
+            grid=grid,
+            available_actions=available_actions,
+            metadata={**self.get_metadata(), **(metadata or {})},
+        )
+        try:
+            return float(self.signature.evaluate_degree(ctx, profile_id=profile_id))
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.debug("Declarative skill '%s' degree evaluation error: %s", self.skill_name, exc)
+            return 0.0
 
     def compile_to_instruction_stream(
         self, grid: np.ndarray, available_actions: list[int], metadata: dict[str, Any] | None = None

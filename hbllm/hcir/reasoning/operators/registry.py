@@ -299,7 +299,7 @@ class OperatorRegistry:
         return max(0.0, min(1.0, base))
 
 
-def create_default_operator_registry() -> OperatorRegistry:
+def create_default_operator_registry(*, enable_fuzzy_reasoning: bool = False) -> OperatorRegistry:
     """Create and return an OperatorRegistry pre-loaded with standard reasoning operators."""
     from hbllm.hcir.reasoning.operators.abduction import AbductionOperator
     from hbllm.hcir.reasoning.operators.active_inference import ActiveInferenceOperator
@@ -317,10 +317,10 @@ def create_default_operator_registry() -> OperatorRegistry:
     from hbllm.hcir.reasoning.operators.temporal import TemporalOperator
 
     registry = OperatorRegistry()
-    registry.register(DeductionOperator())
+    registry.register(DeductionOperator(enable_fuzzy=enable_fuzzy_reasoning))
     registry.register(InductionOperator())
     registry.register(AbductionOperator())
-    registry.register(SpatialOperator())
+    registry.register(SpatialOperator(enable_fuzzy=enable_fuzzy_reasoning))
     registry.register(TemporalOperator())
     registry.register(CausalOperator())
     registry.register(AnalogyOperator())

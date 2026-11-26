@@ -32,7 +32,12 @@ from hbllm.hcir.transactions import (
     TransactionOp,
     TransactionOperation,
 )
-from hbllm.hcir.unification import unify_dicts, unify_pattern
+from hbllm.hcir.unification import (
+    has_fuzzy_constraints,
+    unify_dicts,
+    unify_pattern,
+    unify_pattern_graded,
+)
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
@@ -363,6 +368,18 @@ async def sys_rollback(
     return out
 
 
+def _has_fuzzy_unify(pattern: Any, params: Mapping[str, Any], default_fuzzy: bool = False) -> bool:
+    if "fuzzy" in params:
+        return bool(params["fuzzy"])
+    if (
+        default_fuzzy
+        or params.get("profile_id") is not None
+        or params.get("min_degree") is not None
+    ):
+        return True
+    return isinstance(pattern, Mapping) and has_fuzzy_constraints(pattern)
+
+
 async def sys_unify(
     ins: Instruction, workspace: HCIRWorkspaceState, services: KernelServices
 ) -> dict[str, Any]:
@@ -371,7 +388,37 @@ async def sys_unify(
     if pattern is None:
         return {"error": "UNIFY requires 'pattern'"}
     target = workspace.graph if ins.params.get("source") is None else ins.params.get("source")
-    matches = unify_pattern(target, pattern, limit=int(ins.params.get("limit", 32)))
+    limit = int(ins.params.get("limit", 32))
+    default_fuzzy = bool(services.extensions.get("enable_fuzzy_reasoning", False))
+    if _has_fuzzy_unify(pattern, ins.params, default_fuzzy=default_fuzzy):
+        profile_id = str(ins.params.get("profile_id", "product"))
+        min_degree = float(ins.params.get("min_degree", 0.0))
+        graded = unify_pattern_graded(
+            target,
+            pattern,
+            profile_id=profile_id,
+            min_degree=min_degree,
+            limit=limit,
+        )
+        matches = [
+            {
+                **m.bindings,
+                "__semantic_degree__": m.semantic_degree,
+                "__profile_id__": m.profile_id.value,
+            }
+            for m in graded
+        ]
+        top_deg = graded[0].semantic_degree if graded else 0.0
+        return {
+            "matched": bool(matches),
+            "matches": matches,
+            "count": len(matches),
+            "bindings": matches[0] if matches else {},
+            "semantic_degree": top_deg,
+            "profile_id": profile_id,
+            "graded_matches": [m.model_dump() for m in graded],
+        }
+    matches = unify_pattern(target, pattern, limit=limit)
     return {
         "matched": bool(matches),
         "matches": matches,
@@ -448,6 +495,11 @@ def _eval_branch_condition(params: Mapping[str, Any], frame: CallFrame, last_res
             num = probe.get("confidence", probe.get("uncertainty", {}).get("confidence"))
         elif cond == "if_surprise_gt":
             num = probe.get("surprise", probe.get("prediction_error"))
+        elif cond in ("if_degree_gte", "if_degree_lt"):
+            num = probe.get(
+                "degree",
+                probe.get("semantic_degree", probe.get("__semantic_degree__")),
+            )
     threshold = float(params.get("threshold", params.get("value", 0.0)))
     if num is None or isinstance(num, bool):
         return False
@@ -462,6 +514,8 @@ def _eval_branch_condition(params: Mapping[str, Any], frame: CallFrame, last_res
         "if_gt": fval > threshold,
         "if_surprise_gt": fval > threshold,
         "if_gte": fval >= threshold,
+        "if_degree_gte": fval >= threshold,
+        "if_degree_lt": fval < threshold,
     }
     return ops.get(cond, False)
 
@@ -492,6 +546,7 @@ class HCIRInterpreter:
         max_call_depth: int = 16,
         max_fuel: int = 1024,
         syscall_allowlist: SyscallAllowlist | None = None,
+        enable_fuzzy_reasoning: bool | None = None,
     ) -> None:
         self._workspace = workspace
         self._services = services
@@ -499,6 +554,11 @@ class HCIRInterpreter:
         self._max_call_depth = max_call_depth
         self._max_fuel = max_fuel
         self._allowlist = syscall_allowlist or SyscallAllowlist(strict=True)
+        self._enable_fuzzy_reasoning = (
+            bool(services.extensions.get("enable_fuzzy_reasoning", False))
+            if enable_fuzzy_reasoning is None
+            else bool(enable_fuzzy_reasoning)
+        )
         self._branch_tx_managers: dict[int, TransactionManager] = {}
 
     def _target_context(
@@ -583,7 +643,10 @@ class HCIRInterpreter:
             return None, {}
         goal_pattern = params.get("goal_pattern")
         if isinstance(goal_pattern, Mapping):
-            ranked: list[tuple[tuple[float, int, str], Any, dict[str, Any]]] = []
+            use_fuzzy = bool(params.get("fuzzy", self._enable_fuzzy_reasoning))
+            profile_id = str(params.get("profile_id", "product"))
+            min_deg = float(params.get("min_degree", 0.01))
+            ranked: list[tuple[tuple[float, float, int, str], Any, dict[str, Any]]] = []
             for node in self._iter_executable_nodes(workspaces):
                 post = getattr(node, "postcondition_pattern", None)
                 if not isinstance(post, Mapping):
@@ -591,21 +654,61 @@ class HCIRInterpreter:
                 goal_b = unify_dicts(post, goal_pattern, registers=frame.registers)
                 if goal_b is None:
                     continue
+                sem_deg = 1.0
                 if isinstance(pre := getattr(node, "precondition_pattern", None), Mapping):
                     if pre and not (
                         set(pre.keys()) <= {"symbolic_expr", "capabilities", "signature"}
                     ):
-                        pre_matches = unify_pattern(
-                            active_ws.graph,
-                            pre,
-                            initial_bindings=goal_b,
-                            registers=frame.registers,
-                            limit=1,
+                        if use_fuzzy or has_fuzzy_constraints(pre):
+                            pre_graded = unify_pattern_graded(
+                                active_ws.graph,
+                                pre,
+                                initial_bindings=goal_b,
+                                registers=frame.registers,
+                                profile_id=profile_id,
+                                min_degree=min_deg,
+                                limit=1,
+                            )
+                            if not pre_graded:
+                                continue
+                            sem_deg = float(pre_graded[0].semantic_degree)
+                            goal_b = pre_graded[0].bindings
+                        else:
+                            pre_matches = unify_pattern(
+                                active_ws.graph,
+                                pre,
+                                initial_bindings=goal_b,
+                                registers=frame.registers,
+                                limit=1,
+                            )
+                            if not pre_matches:
+                                continue
+                            goal_b = pre_matches[0]
+                    elif (
+                        use_fuzzy
+                        and "symbolic_expr" in pre
+                        and (eval_ctx := params.get("eval_context")) is not None
+                    ):
+                        from hbllm.hcir.skills.declarative import SymbolicExpr
+
+                        expr_deg = SymbolicExpr.from_dict(pre["symbolic_expr"]).evaluate_degree(
+                            eval_ctx, profile_id=profile_id
                         )
-                        if not pre_matches:
+                        if expr_deg < min_deg:
                             continue
-                        goal_b = pre_matches[0]
-                ranked.append((self._skill_rank_key(node), node, goal_b))
+                        sem_deg = expr_deg
+                if use_fuzzy and "symbolic_expr" not in (
+                    getattr(node, "precondition_pattern", None) or {}
+                ):
+                    node_props = getattr(node, "properties", None)
+                    if isinstance(node_props, Mapping) and isinstance(
+                        node_props.get("semantic_degree"), (int, float)
+                    ):
+                        sem_deg = min(
+                            sem_deg,
+                            max(0.0, min(1.0, float(node_props["semantic_degree"]))),
+                        )
+                ranked.append(((-sem_deg, *self._skill_rank_key(node)), node, goal_b))
             if ranked:
                 ranked.sort(key=lambda item: item[0])
                 return ranked[0][1], ranked[0][2]
@@ -720,26 +823,68 @@ class HCIRInterpreter:
                             if eff_ins.params.get("source") is None
                             else eff_ins.params.get("source")
                         )
-                        matches = unify_pattern(
-                            target,
+                        limit = int(eff_ins.params.get("limit", 32))
+                        use_fuzzy = _has_fuzzy_unify(
                             pattern,
-                            initial_bindings=frame.bindings,
-                            registers=frame.registers,
-                            limit=int(eff_ins.params.get("limit", 32)),
+                            eff_ins.params,
+                            default_fuzzy=self._enable_fuzzy_reasoning,
                         )
+                        graded_list = None
+                        if use_fuzzy:
+                            profile_id = str(eff_ins.params.get("profile_id", "product"))
+                            min_degree = float(eff_ins.params.get("min_degree", 0.0))
+                            graded_list = unify_pattern_graded(
+                                target,
+                                pattern,
+                                initial_bindings=frame.bindings,
+                                registers=frame.registers,
+                                profile_id=profile_id,
+                                min_degree=min_degree,
+                                limit=limit,
+                            )
+                            matches = [
+                                {
+                                    **m.bindings,
+                                    "__semantic_degree__": m.semantic_degree,
+                                    "__profile_id__": m.profile_id.value,
+                                }
+                                for m in graded_list
+                            ]
+                        else:
+                            matches = unify_pattern(
+                                target,
+                                pattern,
+                                initial_bindings=frame.bindings,
+                                registers=frame.registers,
+                                limit=limit,
+                            )
                         first = matches[0] if matches else {}
+                        top_deg = (
+                            graded_list[0].semantic_degree
+                            if graded_list
+                            else (float(first.get("__semantic_degree__", 0.0)) if first else 0.0)
+                        )
                         if matches:
                             frame.bindings.update(
                                 {bk: bv for bk, bv in first.items() if bk.startswith("?")}
                             )
                             if "bind" in eff_ins.params:
                                 bspec = eff_ins.params["bind"]
+                                bind_map = (
+                                    first
+                                    if not isinstance(bspec, Mapping)
+                                    else {
+                                        **first,
+                                        "semantic_degree": top_deg,
+                                        "degree": top_deg,
+                                    }
+                                )
                                 _bind_output(
                                     frame,
                                     bspec,
                                     first.get("__primary_id__", first)
                                     if isinstance(bspec, str)
-                                    else first,
+                                    else bind_map,
                                 )
                         elif (
                             isinstance(eff_ins.params.get("bind"), str)
@@ -757,6 +902,11 @@ class HCIRInterpreter:
                             "count": len(matches),
                             "bindings": first,
                         }
+                        if use_fuzzy:
+                            result["semantic_degree"] = top_deg
+                            result["profile_id"] = str(eff_ins.params.get("profile_id", "product"))
+                            if graded_list is not None:
+                                result["graded_matches"] = [m.model_dump() for m in graded_list]
                     frame.pc += 1
                 elif eff_ins.opcode == Opcode.BRANCH:
                     taken, tlabel, tpc = (

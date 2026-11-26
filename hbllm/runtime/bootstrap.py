@@ -246,12 +246,15 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
     from hbllm.hcir.snn.neuromodulation import NeuromodulationEngine
 
-    reasoning_rt = UnifiedReasoningRuntime(create_default_operator_registry())
+    reasoning_rt = UnifiedReasoningRuntime(
+        create_default_operator_registry(enable_fuzzy_reasoning=cfg.enable_fuzzy_reasoning)
+    )
     neuromod = NeuromodulationEngine()
     lex_acq = LexiconAcquisitionLoop(workspace.graph)
     services.reasoning_runtime = reasoning_rt
     services.neuromodulation = neuromod
     services.lexicon_acquisition = lex_acq
+    services.extensions["enable_fuzzy_reasoning"] = bool(cfg.enable_fuzzy_reasoning)
     services.extensions["reasoning_runtime"] = reasoning_rt
     services.extensions["neuromodulation"] = neuromod
     services.extensions["lexicon_acquisition"] = lex_acq

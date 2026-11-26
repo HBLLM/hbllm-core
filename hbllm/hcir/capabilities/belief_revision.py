@@ -14,7 +14,19 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.hcir.graph import BeliefNode, CognitiveGraph, HCIREdge, HCIREdgeType, HCIRNodeType
+from hbllm.hcir.fuzzy import (
+    BipolarEvidenceState,
+    BipolarObservation,
+    aggregate_bipolar_evidence,
+)
+from hbllm.hcir.graph import (
+    BeliefNode,
+    CognitiveGraph,
+    EvidenceNode,
+    HCIREdge,
+    HCIREdgeType,
+    HCIRNodeType,
+)
 from hbllm.hcir.reasoning.contradiction_utils import detect_structural_contradiction
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 
@@ -75,6 +87,7 @@ class BeliefConflict:
     explanation: str
     conflict_confidence: float
     resolution: str  # "superseded_existing" | "contested" | "rejected_lower_confidence"
+    bipolar_evidence: dict[str, Any] | None = None
 
 
 @dataclass
@@ -85,6 +98,7 @@ class BeliefRevisionReport:
     operations: list[TransactionOperation] = field(default_factory=list)
     adjusted_confidence: float = 0.80
     contested: bool = False
+    bipolar_state: BipolarEvidenceState | None = None
 
     @property
     def has_conflicts(self) -> bool:
@@ -108,6 +122,58 @@ class BeliefConflictResolver:
     ) -> None:
         self._supersede_margin = supersede_margin
         self._ontology_store = ontology_store
+
+    @staticmethod
+    def _build_bipolar_observations(
+        belief: BeliefNode,
+        polarity: str,
+        graph: CognitiveGraph,
+        fallback_conf: float,
+    ) -> tuple[list[BipolarObservation], bool]:
+        """Extract correlation-tagged `BipolarObservation`s from a BeliefNode's evidence provenance."""
+        ev_ids = list(getattr(belief, "evidence_sources", ()) or ())
+        obs_list: list[BipolarObservation] = []
+        has_provenance = False
+        for ev_id in ev_ids:
+            ev_node = graph.get_node(str(ev_id))
+            if isinstance(ev_node, EvidenceNode):
+                has_provenance = True
+                props = ev_node.properties if isinstance(ev_node.properties, dict) else {}
+                strength = max(
+                    0.0,
+                    min(
+                        1.0,
+                        float(props.get("strength", ev_node.confidence or fallback_conf)),
+                    ),
+                )
+                src_w = max(0.0, min(1.0, float(props.get("source_weight", 1.0))))
+                dep_grp = str(props.get("dependency_group", f"ev:{ev_node.id}"))
+                chan_id = str(props.get("source_channel_id", ev_node.source_uri or "default"))
+                epoch = int(props.get("tracklet_epoch", 0))
+                obs_list.append(
+                    BipolarObservation(
+                        evidence_id=ev_node.id,
+                        polarity="support" if polarity == "support" else "refute",
+                        strength=strength,
+                        source_weight=src_w,
+                        dependency_group=dep_grp,
+                        source_channel_id=chan_id,
+                        tracklet_epoch=epoch,
+                    )
+                )
+        if not obs_list:
+            props = belief.properties if isinstance(belief.properties, dict) else {}
+            obs_list.append(
+                BipolarObservation(
+                    evidence_id=f"{polarity}_{belief.id}",
+                    polarity="support" if polarity == "support" else "refute",
+                    strength=max(0.0, min(1.0, fallback_conf)),
+                    dependency_group=str(props.get("dependency_group", f"belief:{belief.id}")),
+                    source_channel_id=str(props.get("source_channel_id", "belief_node")),
+                    tracklet_epoch=int(props.get("tracklet_epoch", 0)),
+                )
+            )
+        return obs_list, has_provenance
 
     def evaluate_belief(
         self,
@@ -135,6 +201,11 @@ class BeliefConflictResolver:
             return report
 
         existing_edges = getattr(graph, "edges", {})
+        all_support_obs, new_has_prov = self._build_bipolar_observations(
+            new_belief, "support", graph, new_conf
+        )
+        all_refute_obs: list[BipolarObservation] = []
+        any_prov = new_has_prov
 
         for node in graph.nodes_by_type(HCIRNodeType.BELIEF):
             if not isinstance(node, BeliefNode):
@@ -169,12 +240,34 @@ class BeliefConflictResolver:
                 continue
 
             existing_conf = float(node.confidence if node.confidence is not None else 0.75)
-            if new_conf > existing_conf + self._supersede_margin:
+            refute_obs, ex_has_prov = self._build_bipolar_observations(
+                node, "refute", graph, existing_conf
+            )
+            any_prov = any_prov or ex_has_prov
+            all_refute_obs.extend(refute_obs)
+            bipolar = aggregate_bipolar_evidence([*all_support_obs, *refute_obs])
+            bipolar_dict = bipolar.model_dump()
+
+            use_cluster_supersede = (new_has_prov or ex_has_prov) and (
+                bipolar.independent_support_clusters > 1
+                or bipolar.independent_refute_clusters > 1
+                or len(all_support_obs) > 1
+                or len(refute_obs) > 1
+            )
+            if use_cluster_supersede:
+                should_supersede = bipolar.support_share > bipolar.refutation_share + (
+                    self._supersede_margin * 0.5
+                )
+            else:
+                should_supersede = new_conf > existing_conf + self._supersede_margin
+
+            if should_supersede:
                 resolution = "superseded_existing"
                 revised_existing_conf = max(0.05, round(existing_conf * 0.5, 4))
                 updated_props: dict[str, Any] = dict(node.properties)
                 updated_props["superseded_by"] = new_belief.id
                 updated_props["contested"] = True
+                updated_props["bipolar_evidence"] = bipolar_dict
                 revised_existing = node.model_copy(
                     update={
                         "confidence": revised_existing_conf,
@@ -197,6 +290,7 @@ class BeliefConflictResolver:
                 updated_props = dict(node.properties)
                 updated_props["contested"] = True
                 updated_props["contested_by"] = new_belief.id
+                updated_props["bipolar_evidence"] = bipolar_dict
                 revised_existing = node.model_copy(
                     update={
                         "confidence": max(0.10, round(existing_conf * 0.85, 4)),
@@ -222,6 +316,7 @@ class BeliefConflictResolver:
                     properties={
                         "explanation": explanation,
                         "resolution": resolution,
+                        "bipolar_evidence": bipolar_dict,
                     },
                 )
                 report.operations.append(
@@ -240,6 +335,7 @@ class BeliefConflictResolver:
                     explanation=explanation,
                     conflict_confidence=conflict_conf,
                     resolution=resolution,
+                    bipolar_evidence=bipolar_dict,
                 )
             )
             logger.info(
@@ -249,5 +345,8 @@ class BeliefConflictResolver:
                 node.statement[:60],
                 explanation,
             )
+
+        if report.conflicts or any_prov:
+            report.bipolar_state = aggregate_bipolar_evidence([*all_support_obs, *all_refute_obs])
 
         return report

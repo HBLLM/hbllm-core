@@ -6,11 +6,17 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+fn default_degree() -> f64 {
+    1.0
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PatternEdge {
     pub rel_type: String,
     pub source_var: String,
     pub target_var: String,
+    #[serde(default)]
+    pub min_degree: Option<f64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -25,6 +31,8 @@ pub struct TargetEdge {
     pub rel_type: String,
     pub source: String,
     pub target: String,
+    #[serde(default = "default_degree")]
+    pub degree: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -41,6 +49,20 @@ pub struct CandidateAlignment {
     pub total_relations_count: usize,
     pub surface_overlap_score: f64,
     pub structural_consistency: bool,
+    pub structure_valid: bool,
+    pub binding_valid: bool,
+    pub semantic_degree: f64,
+    pub profile_id: String,
+}
+
+fn combine_degree(profile_id: &str, acc: f64, deg: f64) -> f64 {
+    let a = acc.clamp(0.0, 1.0);
+    let b = deg.clamp(0.0, 1.0);
+    match profile_id {
+        "godel" => a.min(b),
+        "lukasiewicz" => (a + b - 1.0).max(0.0),
+        _ => a * b,
+    }
 }
 
 /// Finds all valid 1-to-1 variable-to-entity mappings and ranks them by systematicity.
@@ -49,21 +71,50 @@ pub fn match_relational_schema(
     target: &TargetGraph,
     min_systematicity: f64,
 ) -> Vec<CandidateAlignment> {
+    match_relational_schema_with_profile(pattern, target, min_systematicity, "product")
+}
+
+/// Finds all valid 1-to-1 variable-to-entity mappings and scores graded semantic fit under `profile_id`.
+pub fn match_relational_schema_with_profile(
+    pattern: &Pattern,
+    target: &TargetGraph,
+    min_systematicity: f64,
+    profile_id: &str,
+) -> Vec<CandidateAlignment> {
     if pattern.variables.is_empty() || pattern.edges.is_empty() || target.nodes.is_empty() {
         return Vec::new();
     }
 
-    // Build target edge lookup: (rel_type, source, target) -> bool
-    let mut target_edges_set: HashSet<(String, String, String)> = HashSet::new();
+    // Build target edge lookup: (rel_type, source, target) -> max degree
+    let mut target_edges_map: HashMap<(String, String, String), f64> = HashMap::new();
     for e in &target.edges {
-        target_edges_set.insert((e.rel_type.clone(), e.source.clone(), e.target.clone()));
+        let deg = if e.degree.is_finite() {
+            e.degree.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        target_edges_map
+            .entry((e.rel_type.clone(), e.source.clone(), e.target.clone()))
+            .and_modify(|cur| {
+                if deg > *cur {
+                    *cur = deg;
+                }
+            })
+            .or_insert(deg);
     }
+
+    let eff_profile = match profile_id.trim().to_ascii_lowercase().as_str() {
+        "godel" => "godel",
+        "lukasiewicz" => "lukasiewicz",
+        _ => "product",
+    };
 
     let ctx = MatchContext {
         pattern,
         target,
-        target_edges_set: &target_edges_set,
+        target_edges_map: &target_edges_map,
         min_systematicity,
+        profile_id: eff_profile,
     };
 
     let mut candidate_alignments = Vec::new();
@@ -78,11 +129,16 @@ pub fn match_relational_schema(
         &mut candidate_alignments,
     );
 
-    // Sort ranked candidate alignments descending by systematicity score
+    // Sort ranked candidate alignments descending by systematicity score, then semantic_degree
     candidate_alignments.sort_by(|a, b| {
         b.systematicity_score
             .partial_cmp(&a.systematicity_score)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                b.semantic_degree
+                    .partial_cmp(&a.semantic_degree)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     });
 
     candidate_alignments
@@ -91,8 +147,9 @@ pub fn match_relational_schema(
 struct MatchContext<'a> {
     pattern: &'a Pattern,
     target: &'a TargetGraph,
-    target_edges_set: &'a HashSet<(String, String, String)>,
+    target_edges_map: &'a HashMap<(String, String, String), f64>,
     min_systematicity: f64,
+    profile_id: &'a str,
 }
 
 fn backtrack_match(
@@ -103,21 +160,26 @@ fn backtrack_match(
     results: &mut Vec<CandidateAlignment>,
 ) {
     if var_idx == ctx.pattern.variables.len() {
-        // Complete assignment — evaluate systematicity
+        // Complete assignment — evaluate systematicity and graded semantic degree
         let mut matched_count = 0usize;
         let total_count = ctx.pattern.edges.len();
+        let mut sem_degree = 1.0_f64;
 
         for pe in &ctx.pattern.edges {
             if let (Some(src_node), Some(tgt_node)) = (
                 current_mapping.get(&pe.source_var),
                 current_mapping.get(&pe.target_var),
             ) {
-                if ctx.target_edges_set.contains(&(
+                if let Some(&edge_deg) = ctx.target_edges_map.get(&(
                     pe.rel_type.clone(),
                     src_node.clone(),
                     tgt_node.clone(),
                 )) {
-                    matched_count += 1;
+                    let min_req = pe.min_degree.unwrap_or(0.0);
+                    if edge_deg >= min_req {
+                        matched_count += 1;
+                        sem_degree = combine_degree(ctx.profile_id, sem_degree, edge_deg);
+                    }
                 }
             }
         }
@@ -129,13 +191,22 @@ fn backtrack_match(
         };
 
         if systematicity >= ctx.min_systematicity && matched_count > 0 {
+            let is_complete = matched_count == total_count;
             results.push(CandidateAlignment {
                 mapping: current_mapping.clone(),
                 systematicity_score: systematicity,
                 matched_relations_count: matched_count,
                 total_relations_count: total_count,
                 surface_overlap_score: 0.0,
-                structural_consistency: matched_count == total_count,
+                structural_consistency: is_complete,
+                structure_valid: is_complete,
+                binding_valid: true,
+                semantic_degree: if is_complete {
+                    sem_degree
+                } else {
+                    sem_degree * systematicity
+                },
+                profile_id: ctx.profile_id.to_string(),
             });
         }
         return;
@@ -178,11 +249,13 @@ mod tests {
                     rel_type: "CENTRAL_TO".to_string(),
                     source_var: "X".to_string(),
                     target_var: "Y".to_string(),
+                    min_degree: None,
                 },
                 PatternEdge {
                     rel_type: "ATTRACTS".to_string(),
                     source_var: "X".to_string(),
                     target_var: "Y".to_string(),
+                    min_degree: None,
                 },
             ],
             surface_distractors: vec!["hot".to_string(), "yellow".to_string()],
@@ -200,16 +273,19 @@ mod tests {
                     rel_type: "CENTRAL_TO".to_string(),
                     source: "nucleus".to_string(),
                     target: "electron".to_string(),
+                    degree: 1.0,
                 },
                 TargetEdge {
                     rel_type: "ATTRACTS".to_string(),
                     source: "nucleus".to_string(),
                     target: "electron".to_string(),
+                    degree: 1.0,
                 },
                 TargetEdge {
                     rel_type: "CENTRAL_TO".to_string(),
                     source: "wall".to_string(),
                     target: "electron".to_string(),
+                    degree: 1.0,
                 },
             ],
         };
@@ -243,6 +319,7 @@ mod tests {
                 rel_type: "LINKS".to_string(),
                 source_var: "X".to_string(),
                 target_var: "Y".to_string(),
+                min_degree: None,
             }],
             surface_distractors: vec![],
         };
@@ -262,11 +339,13 @@ mod tests {
                     rel_type: "R1".to_string(),
                     source_var: "X".to_string(),
                     target_var: "Y".to_string(),
+                    min_degree: None,
                 },
                 PatternEdge {
                     rel_type: "R2".to_string(),
                     source_var: "X".to_string(),
                     target_var: "Y".to_string(),
+                    min_degree: None,
                 },
             ],
             surface_distractors: vec![],
@@ -277,6 +356,7 @@ mod tests {
                 rel_type: "R1".to_string(),
                 source: "n1".to_string(),
                 target: "n2".to_string(),
+                degree: 1.0,
             }],
         };
         assert_eq!(match_relational_schema(&pattern, &target, 0.4).len(), 1);
@@ -292,11 +372,13 @@ mod tests {
                     rel_type: "NEXT".to_string(),
                     source_var: "A".to_string(),
                     target_var: "B".to_string(),
+                    min_degree: None,
                 },
                 PatternEdge {
                     rel_type: "NEXT".to_string(),
                     source_var: "B".to_string(),
                     target_var: "C".to_string(),
+                    min_degree: None,
                 },
             ],
             surface_distractors: vec!["ignored".to_string()],
@@ -308,11 +390,13 @@ mod tests {
                     rel_type: "NEXT".to_string(),
                     source: "n1".to_string(),
                     target: "n2".to_string(),
+                    degree: 1.0,
                 },
                 TargetEdge {
                     rel_type: "NEXT".to_string(),
                     source: "n2".to_string(),
                     target: "n3".to_string(),
+                    degree: 1.0,
                 },
             ],
         };
@@ -331,6 +415,7 @@ mod tests {
                 rel_type: "REQUIRES".to_string(),
                 source_var: "X".to_string(),
                 target_var: "Y".to_string(),
+                min_degree: None,
             }],
             surface_distractors: vec![],
         };
@@ -340,8 +425,46 @@ mod tests {
                 rel_type: "BLOCKS".to_string(),
                 source: "x".to_string(),
                 target: "y".to_string(),
+                degree: 1.0,
             }],
         };
         assert!(match_relational_schema(&pattern, &target, 0.1).is_empty());
+    }
+
+    #[test]
+    fn test_graded_semantic_degree_ranking_and_profiles() {
+        let pattern = Pattern {
+            variables: vec!["X".to_string(), "Y".to_string()],
+            edges: vec![PatternEdge {
+                rel_type: "NEAR".to_string(),
+                source_var: "X".to_string(),
+                target_var: "Y".to_string(),
+                min_degree: Some(0.4),
+            }],
+            surface_distractors: vec![],
+        };
+        let target = TargetGraph {
+            nodes: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+            edges: vec![
+                TargetEdge {
+                    rel_type: "NEAR".to_string(),
+                    source: "a".to_string(),
+                    target: "b".to_string(),
+                    degree: 0.45,
+                },
+                TargetEdge {
+                    rel_type: "NEAR".to_string(),
+                    source: "a".to_string(),
+                    target: "c".to_string(),
+                    degree: 0.92,
+                },
+            ],
+        };
+        let alignments = match_relational_schema_with_profile(&pattern, &target, 1.0, "godel");
+        assert_eq!(alignments.len(), 2);
+        assert_eq!(alignments[0].mapping.get("Y").unwrap(), "c");
+        assert!((alignments[0].semantic_degree - 0.92).abs() < 1e-9);
+        assert!(alignments[0].structure_valid && alignments[0].binding_valid);
+        assert_eq!(alignments[0].profile_id, "godel");
     }
 }
