@@ -151,6 +151,10 @@ async with tx_mgr.begin_transaction(author="api_demo") as tx:
 
 ---
 
-## HCIR Bytecode ISA (`hbllm.hcir.bytecode`)
+## HCIR Bytecode ISA v2 (`hbllm.hcir.bytecode`, `hbllm.hcir.interpreter`)
 
-8 primitive opcodes (`ASSERT`, `RETRACT`, `QUERY`, `EXECUTE`, `WAIT`, `FORK`, `MERGE`, `ROLLBACK`) assembled into deterministic `InstructionStream`s with `compute_hash()` and `semantic_hash()`.
+The **12-opcode ISA v2 Register-Unification VM** executes deterministic, fuel-bounded `InstructionStream`s (with canonical `compute_hash()` and `semantic_hash()`) over a register file (`$r0`..`$r7`, `RegisterFile`), bounded `CallStack` (`max_depth=16`), and `GraphPattern` unification (`hbllm.hcir.unification`):
+
+- **Transactional & Execution Opcodes (8):** `ASSERT`, `RETRACT`, `QUERY`, `EXECUTE`, `WAIT`, `FORK`, `MERGE`, `ROLLBACK` — supporting dynamic `$rN`/`?var` resolution and tenant-scoped `HCIRTransaction` commits.
+- **Unification & Control Opcodes (4):** `UNIFY` (pattern-match into `$r0`..`$r7`), `BRANCH` (conditional jump), `CALL` (invoke a homoiconic `SkillNode`/`ProcedureNode` by ID or postcondition unification), and `RETURN` (yield register bindings).
+- **Strict Syscall Enforcement:** `SyscallAllowlist` and `HCIRInterpreter` default to `strict=True`, restricting `Opcode.EXECUTE` strictly to allowlisted Layer-0 hardware/ALU/sandbox capabilities and rejecting unallowlisted high-level Python escapes.

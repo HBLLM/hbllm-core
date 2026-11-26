@@ -19,6 +19,10 @@ python -m hbllm.serving.api
 
 ## Endpoints
 
+### Pure-HCIR Per-Tenant Routing (`CognitiveSystemRegistry`)
+
+`CognitiveSystemRegistry` (`hbllm.serving.cognitive_registry`) maintains isolated per-tenant `CognitiveSystem` instances built via `build_cognitive_system()`, recording bounded per-session conversation turns (`record_session_turn`, `get_session_turns`) and exposing learned tenant rules (`list_tenant_rules`). All primary chat and memory endpoints (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions` with `stream=False` or `stream=True`, `/v1/chat/ws`, `GET /v1/memory/{session_id}`, and `GET /v1/rules`) execute Pure-HCIR first (`X-HBLLM-Engine: pure-hcir`) before falling back to an optional legacy brain/provider pipeline.
+
 ### `POST /v1/chat/completions`
 
 OpenAI-compatible chat completions endpoint:
@@ -218,6 +222,7 @@ async def my_endpoint(brain=Depends(get_brain)):
 | Module | File | Purpose |
 |---|---|---|
 | REST API | `serving/api.py` | FastAPI app, core endpoints, middleware registration |
+| Cognitive Registry | `serving/cognitive_registry.py` | Per-tenant `CognitiveSystem` cache, session turn tracking, tenant rule listing |
 | Route: Health | `serving/routes/health.py` | Health probes, routing stats |
 | Route: Memory | `serving/routes/memory.py` | Memory, sync, feedback, knowledge |
 | Route: Notifications | `serving/routes/notifications.py` | REST + SSE notification streaming |

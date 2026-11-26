@@ -40,9 +40,9 @@ The Logical Policy Sandbox operates inside the HCIR kernel (`hbllm.hcir.kernel.c
 3. **Dynamic Parameter & AST Inference**:
    - Inferred via `infer_capability_permissions()`, matching parameter tokens (e.g. `filepath`, `url`, `cmd`, `sql`) against capability requests to prevent permission bypass via generic wrappers.
 
-### Tier 2: Physical Process Isolation Sandbox (`SandboxedExecutor`)
+### Tier 2: Physical Process Isolation Sandbox (`SandboxedExecutor` & `run_sandboxed_command`)
 
-The Physical Isolation Sandbox (`hbllm.hcir.kernel.capability_sandboxing.SandboxedExecutor`) operates at the operating system process boundary. Any capability running with `IsolationMode.SUBPROCESS` (such as `execution.sandbox_run`) or executing untrusted Python code is dispatched through this layer with immediate parent write-end pipe closure so EOF signals cleanly without hangs:
+The Physical Isolation Sandbox (`hbllm.hcir.kernel.capability_sandboxing.SandboxedExecutor` and `hbllm.hcir.kernel.subprocess_sandbox.run_sandboxed_command`) operates at the operating system process boundary. Any capability running with `IsolationMode.SUBPROCESS` (such as `execution.sandbox_run`), untrusted Python code, or external command/toolchain plugin (`plugins/hbllm_terminal`, `plugins/compiler-verification`) is routed through Tier-1 `PermissionEngine` + `CapabilitySandboxManager` and Tier-2 OS isolation with immediate parent write-end pipe closure and `os.killpg` process-group timeout cleanup:
 
 1. **AST Pre-Validation**:
    - Parses the abstract syntax tree before execution.

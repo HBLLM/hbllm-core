@@ -50,9 +50,14 @@ description: "The Human-Cognitive Intermediate Representation (HCIR) serves as t
 
 ## Key Subsystems
 
-### 1. Tiered Workspace
+### 1. Tiered Workspace & ISA v2 Homoiconic VM
 
-The workspace organizes cognitive state into four tiers with different lifetimes:
+The workspace organizes cognitive state into four tenant-isolated tiers with different lifetimes, executing learned symbolic programs on the **12-opcode ISA v2 Register-Unification VM** (`hbllm.hcir.bytecode`, `hbllm.hcir.interpreter`, `hbllm.hcir.registers`, `hbllm.hcir.unification`):
+
+- **Working-Memory Registers & Call Stack:** Bounded register file (`$r0`..`$r7`) and `CallStack` (`max_depth=16`, cycle detection, instruction fuel limits).
+- **12 Canonical Opcodes:** 8 v1 transactional primitives (`ASSERT`, `RETRACT`, `QUERY`, `EXECUTE`, `WAIT`, `FORK`, `MERGE`, `ROLLBACK` with dynamic `$rN`/`?var` resolution and tenant-scoped `sys_assert`/`sys_retract`) plus 4 symbolic composition opcodes (`UNIFY`, `BRANCH`, `CALL`, `RETURN`).
+- **Strict Hardware `EXECUTE` Boundary:** `SyscallAllowlist(strict=True)` and `HCIRInterpreter(..., strict=True)` permit only irreducible hardware/math/sandbox capabilities (`motor.*`, `sensor.*`, `math.*`, `world.predict`, `tool.sandboxed.*`, `web.sandboxed.*`, `memory.*`), blocking legacy high-level cognitive escape names.
+- **Protected System Priors:** `TieredWorkspace` (`apply_exponential_decay`, `prune_interfering_memories`) and `HCIRWorkspaceState.consolidate_node_budget()` explicitly preserve `SecurityLevel.SYSTEM` / `"core_prior"` seed nodes (`prior_skill_count_entities`) and enforce tenant-scoped compaction summaries.
 
 ```mermaid
 graph LR

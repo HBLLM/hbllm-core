@@ -5,7 +5,7 @@ description: "Architectural decision elevating HBLLM Core from hardcoded Python 
 
 # ADR 005: Homoiconic Symbolic VM & Experience-First Cognition
 
-- **Status**: Accepted (Target Architecture — Phase 3)
+- **Status**: Implemented (Verified on `eval-phase3-final`, 2026-11-26 — Baseline for [ADR 006](0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md))
 - **Deciders**: HBLLM Core Architecture Team
 - **Date**: 2026-11-25
 - **Technical Area**: HCIR ISA v2, Language Construction Grammar, Skill Consolidation, Cortical World Model (`hbllm/hcir/`)
@@ -122,11 +122,22 @@ flowchart TB
 
 ---
 
+## Measured Verification (`eval-phase3-final`, 2026-11-26)
+
+Executed on sealed Held-Out v2 (`benchmarks/suites/heldout.yaml`, commit `072b4cb1`, `n = 120` unseen trials, see `reports/heldout/LEDGER.md`):
+
+- **Zero-Shot Solve Rate:** **0.9417** (`113 / 120`, Wilson 95% CI `[0.8845, 0.9715]`, generality `0.8359`) — up from Phase 2 (`eval-phase2-r10`, `0.9250` / `111 / 120`).
+- **Safety & Transfer:** Exploration deaths halved from `4` to **`2`** (`1.67%`); Cross-Seed Transfer **0.9035** (`CI [0.8354, 0.9453]`, `28,330` skills recorded; `widened_dev` transfer **0.9474**, `CI [0.8899, 0.9757]`); Same-Layout Replay **1.0000** (`generality = 0.8979`); **0 LLM tokens**.
+- **Substrate & Hygiene:** Fixed `32×32` kernel profiling (`hbllm bench profile`) meets `Decisional Cycle p95 = 0.182ms` and `CPU E2E p95 = 14.58ms <= 45ms` (`bench heldout` variable-grid mean latency `p50 = 25.72ms / p95 = 85.06ms`); `0` `__path__.append` shims; permanent AST and ISA v2 gates enforced by `tests/unit/architecture/test_homoiconic_invariants.py`.
+
+---
+
 ## References
 
 - [Homoiconic VM Migration Plan (M0–M6)](../architecture/homoiconic-vm-migration-plan.md)
+- [ADR 006: Fuzzy Symbolic Cognition & Adaptive Semantics](0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md)
 - [Core Knowledge & Innate Priors Declaration](../architecture/priors.md)
 - [HCIR Cognitive OS Kernel](../architecture/hcir-kernel-os.md)
 - [Language & Reading Comprehension](../architecture/language-and-reading.md)
-- [2026-11-24 Full Project Audit](../../reports/audit/2026-11-24_full_project_audit.md)
+- Audit baseline (`2026-11-24`): `reports/audit/2026-11-24_full_project_audit.md`
 

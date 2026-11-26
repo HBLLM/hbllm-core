@@ -52,7 +52,8 @@ All memory is stored as typed HCIR graph nodes in the persistent workspace tier.
 |-----------|-------|----------|------------|
 | `EPISODE` | `EpisodeNode` | `EpisodicMemory` (SQLite) | `summary`, `outcome`, `reward` |
 | `CONCEPT` | `ConceptNode` | `SemanticMemory` (vectors) | `label`, `definition`, `domain` |
-| `SKILL` | `SkillNode` | `ProceduralMemory` (SQLite) | `skill_name`, `description`, `success_rate` |
+| `SKILL` | `SkillNode` | `ProceduralMemory` (SQLite) | `skill_name`, `parameters`, `precondition_pattern`, `postcondition_pattern`, `bytecode_stream` (`ISA v2`), `alpha_success`, `beta_failure` |
+| `CONSTRUCTION` | `ConstructionNode` | Hardcoded regex/verb tables | `language`, `syntactic_template`, `slot_constraints`, `compiled_hcir_template` |
 | `VALUE` | `ValueNode` | `ValueMemory` (SQLite) | `dimension`, `weight` |
 | `BELIEF` | `BeliefNode` | `KnowledgeGraph` (JSON) | `claim`, `belief_type`, `evidence_sources` |
 
@@ -110,7 +111,7 @@ Nodes flow upward through tiers based on salience and consolidation:
 Working (transient) → Brain (session) → Persistent (permanent) → Meta (self-reflection)
 ```
 
-The `TieredWorkspace` provides `promote()`, `promote_batch()`, `demote()`, `archive_brain()`, `enforce_node_budgets()`, `compact_event_stores()`, and `run_memory_hygiene_cycle()`. Combined with `SQLiteEventStore` bounded compaction and `ExecutiveRuntime` offline consolidation, active memory stays bounded without losing proven lifelong beliefs.
+The `TieredWorkspace` provides `promote()`, `promote_batch()`, `demote()`, `archive_brain()`, `enforce_node_budgets()`, `compact_event_stores()`, and `run_memory_hygiene_cycle()`. Combined with `SQLiteEventStore` bounded compaction, `ExecutiveRuntime` + `LibraryLearner` Wake–Sleep anti-unification, and `SecurityLevel.SYSTEM` / `"core_prior"` protection in `apply_exponential_decay()`, `prune_interfering_memories()`, and `consolidate_node_budget()`, active memory stays bounded and tenant-scoped without evicting innate core priors or proven lifelong beliefs.
 
 ---
 

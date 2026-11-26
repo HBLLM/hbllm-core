@@ -4,9 +4,9 @@
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
 > [!WARNING]
-> **Active Phase: Phase 3 — Homoiconic Symbolic VM & Experience-First Cognition (`M0`–`M6`, starting 2026-11-25).**
-> - **Target Architecture ([ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) & [Migration Plan](docs/architecture/homoiconic-vm-migration-plan.md)):** *"Code = CPU/ALU & Constitutional Kernel; Graph = Symbolic Mind."* Python and Rust implement strictly the deterministic Layer-0 substrate (register-unification VM, sensory/SNN encoders, math/topology/Bellman/Bayesian ALUs, sandboxed I/O, constitutional transactions). All concepts, grammar constructions, causal laws, reasoning strategies, and skills live as **homoiconic symbolic programs in `TieredWorkspace`**, learned and composed from experience.
-> - **Phase 2 Verified Baseline (`eval-phase2-r10` on `a26f09bd`, 2026-11-21, `n=120`, `reports/heldout/LEDGER.md`):** `zero_shot=0.9250` (`111/120`, CI `[0.8636, 0.9600]`, generality `0.8236`, 4 deaths / `3.33%`), `cross_seed transfer=0.9035` (`114` eps, `skills_consolidated=161`), `same_layout_replay=1.0000` (`0` LLM tokens). Pure-HCIR consolidated `reasoning/` (14 operators), `language/` (`en`/`si`/`ta` + Track T4), `snn/`, `capabilities/`, and 17 `world/` subpackages over HCIR-backed `TransitionKnowledgeBase`. Open gaps tracked in `reports/audit/2026-11-24_full_project_audit.md`.
+> **Active Phase: Phase 4 — Fuzzy Symbolic Cognition & Adaptive Semantics (`F0`–`F3`, [ADR 006](docs/adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md) & [Fuzzy Migration Plan](docs/architecture/fuzzy-cognition-migration-plan.md)).**
+> - **Completed Phase 3 Architecture ([ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) & [Migration Plan](docs/architecture/homoiconic-vm-migration-plan.md), `M0`–`M6`):** *"Code = CPU/ALU & Constitutional Kernel; Graph = Symbolic Mind."* Python and Rust implement strictly the deterministic Layer-0 substrate (12-opcode register-unification VM, strict `SyscallAllowlist`, sensory/SNN encoders, math/topology/Bellman/Dirichlet ALUs, two-tier plugin/process sandboxing, constitutional transactions). Concepts, `ConstructionNode` grammar, causal posteriors, and `SkillNode` (`bytecode_stream`) programs live in `TieredWorkspace`, exposed through per-tenant `CognitiveSystemRegistry` and `CognitiveBlackbox`.
+> - **Phase 3 Verified Baseline (`eval-phase3-final` on `072b4cb1`, 2026-11-26, `n=120`, `reports/heldout/LEDGER.md`):** `zero_shot=0.9417` (`113/120`, CI `[0.8845, 0.9715]`, generality `0.8359`, `2` deaths / `1.67%`), `cross_seed transfer=0.9035` (`114` eps, CI `[0.8354, 0.9453]`, `skills_consolidated=28,330`), `same_layout_replay=0.8979` (`6/6` tasks `5/5`, `0` LLM tokens); `widened_dev` (`9fbbf52e`): `zero_shot=0.7750` (`generality=0.7503`), `cross_seed transfer=0.9474`. Open audit history: `reports/audit/2026-11-24_full_project_audit.md`.
 
 ---
 
@@ -242,7 +242,7 @@ HBLLM/core/
 ├── hbllm/
 │   ├── hcir/                        # Pure-HCIR Cognitive OS (0 LLM imports)
 │   │   ├── bytecode.py, interpreter.py, stdlib.py, compiler.py, nodes.py, graph.py
-│   │   ├── workspace_tiers.py, learning_loop.py, kernel/, stores/, adapters/, algorithms/
+│   │   ├── workspace_tiers.py, learning_loop.py, seed/, kernel/, stores/, adapters/, algorithms/
 │   │   ├── skills/                  # Declarative skill ASTs, induction & wake-sleep library learning
 │   │   ├── world/                   # 5-stage CorticalPipeline & 17 subpackages + TransitionKB
 │   │   ├── grounding/               # Symbol Grounding Engine (features, tracking, concepts)
@@ -251,11 +251,14 @@ HBLLM/core/
 │   │   ├── snn/                     # LIF, STDP, STP, WTA, oscillations, perception
 │   │   └── capabilities/            # Curiosity, BeliefConflictResolver, sandboxed executors
 │   ├── runtime/bootstrap.py         # Single composition root (build_cognitive_system)
-│   ├── brain/, native/, network/, security/, serving/
+│   ├── drivers/cognitive_blackbox.py, brain/, native/, network/, security/
+│   └── serving/                     # FastAPI/MCP server + per-tenant CognitiveSystemRegistry
 ├── rust/, plugins/, benchmarks/suites/, graphify-out/, tests/
 └── docs/
     ├── adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md
-    └── architecture/homoiconic-vm-migration-plan.md
+    ├── adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md
+    ├── architecture/homoiconic-vm-migration-plan.md
+    └── architecture/fuzzy-cognition-migration-plan.md
 ```
 
 ---

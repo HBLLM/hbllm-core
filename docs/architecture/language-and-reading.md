@@ -71,8 +71,16 @@ Prevents overclaiming by mapping `CognitiveEpistemicState` (`confidence`, `uncer
 - `PROBABLE` ($\ge 0.70$)
 - `PLAUSIBLE` ($\ge 0.40$)
 - `UNCERTAIN` ($< 0.40$)
-- `CONTRADICTED` (conflicting evidence exceeds/matches support)
+- `CONFLICT` / `CONTRADICTED` (conflicting evidence exceeds/matches support)
 - `INSUFFICIENT_EVIDENCE` (unknown concept or zero support)
+
+### 2.6 Embodied Construction Grammar & 4-Step Unknown-Instruction Resolution
+
+Bidirectional linguistic mappings (`en`, `si`, `ta`) live as homoiconic `ConstructionNode` entries hydrated from `hbllm/hcir/seed/constructions_{en,si,ta}.yaml` (`HCIRCompiler`, `hbllm.hcir.language`) rather than hardcoded Python keyword/verb lists. Transactions in `HCIRGateway` (`core/gateway.py`) and `GroundingResolver` (`core/grounding.py`) inherit `workspace.tenant_id` (`Scope(tenant_id=...)`). When an unseen instruction arrives, the VM executes the **4-Step Unknown-Instruction Resolution** pipeline:
+1. **Partial Unification:** Bind known slots into `$r0..$rk` and isolate the unknown span as an `UnknownNode` `(InputTypes -> GoalConstraint)`.
+2. **Memory & Reading Recall:** `QUERY` `TieredWorkspace` (`Brain` + `Persistent`) for previously ingested definitions or hypernyms (`ReadingCurriculumIngestor`).
+3. **Structural Analogy:** Match existing `SkillNode` `(precondition -> postcondition)` schemas via `hbllm_structure_matcher` / `AnalogyOperator`.
+4. **Active Inquiry & Consolidation:** `FORK` simulation or emit `REQUEST_EVIDENCE`, verify outcomes against `PredictionErrorNode`, and commit the grounded `ConstructionNode` + parameterized `SkillNode`.
 
 ---
 
