@@ -6,7 +6,7 @@ description: "Complete phased migration plan transitioning HBLLM Core from hardc
 # Homoiconic Symbolic VM Migration Plan (`M0`–`M6`)
 
 > **Authority:** [ADR 005: Homoiconic Symbolic VM & Experience-First Cognition](../adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md)  
-> **Baseline Audit:** [`reports/audit/2026-11-24_full_project_audit.md`](../../reports/audit/2026-11-24_full_project_audit.md)  
+> **Baseline Audit:** `reports/audit/2026-11-24_full_project_audit.md`  
 > **Status:** Implemented & Verified (Phases `M0`–`M6` complete; sealed milestone `eval-phase3-final` recorded on `072b4cb1`, 2026-11-26)  
 > **Target Principle:** *Code = CPU/ALU & Constitutional Kernel; Graph = Symbolic Mind.*
 
@@ -189,14 +189,14 @@ flowchart LR
 
 All phases (`M0`–`M6`) are complete on `feat/homoiconic-symbolic-vm` and verified at tag `eval-phase3-final` (commit `072b4cb1`, `2026-11-26`):
 
-| Exit Criterion | Target Baseline | Verified Outcome (`M0`–`M6`) |
-|---|---|---|
-| **Sealed Held-Out v2 Zero-Shot (`n=120`)** | `>= 0.9250` (`111/120`, `4` deaths) | **`0.9417`** (`113/120`, CI `[0.8845, 0.9715]`, generality `0.8359`, **`2` deaths**) |
-| **Held-Out Cross-Seed Transfer (`n=114`)** | `>= 0.9035` | **`0.9035`** (CI `[0.8354, 0.9453]`, `28,330` skills recorded) |
-| **`widened_dev` Transfer & Zero-Shot (`n=120`)** | Preserve dev `>= 0.750` | Zero-shot **`0.7750`** (`generality = 0.7503`), cross-seed transfer **`0.9474`** |
-| **Core Kernel Step Budget (`32×32`)** | `CPU p95 <= 45ms` | `hbllm bench profile`: Decisional `p95 = 0.182ms`, CPU E2E `p95 = 14.58ms` (`bench heldout` variable-grid mean `p50=25.72ms / p95=85.06ms`) |
-| **LLM Tokens & Legacy Packaging Shims** | `0` tokens, `0` shims | **`0` LLM tokens**, **`0` `__path__.append` shims** (`test_m0_substrate_hygiene.py`) |
-| **Architectural Ratchets & Governance** | AST & Serving/Driver Unification | `SyscallAllowlist(strict=True)`, per-tenant `CognitiveSystemRegistry`, thin `CognitiveBlackbox`, `run_sandboxed_command`, `tests/unit/architecture/test_homoiconic_invariants.py` |
+| Exit Criterion                                   | Target Baseline                     | Verified Outcome (`M0`–`M6`)                                                                                                                                                      |
+| ------------------------------------------------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Sealed Held-Out v2 Zero-Shot (`n=120`)**       | `>= 0.9250` (`111/120`, `4` deaths) | **`0.9417`** (`113/120`, CI `[0.8845, 0.9715]`, generality `0.8359`, **`2` deaths**)                                                                                              |
+| **Held-Out Cross-Seed Transfer (`n=114`)**       | `>= 0.9035`                         | **`0.9035`** (CI `[0.8354, 0.9453]`, `28,330` skills recorded)                                                                                                                    |
+| **`widened_dev` Transfer & Zero-Shot (`n=120`)** | Preserve dev `>= 0.750`             | Zero-shot **`0.7750`** (`generality = 0.7503`), cross-seed transfer **`0.9474`**                                                                                                  |
+| **Core Kernel Step Budget (`32×32`)**            | `CPU p95 <= 45ms`                   | `hbllm bench profile`: Decisional `p95 = 0.182ms`, CPU E2E `p95 = 14.58ms` (`bench heldout` variable-grid mean `p50=25.72ms / p95=85.06ms`)                                       |
+| **LLM Tokens & Legacy Packaging Shims**          | `0` tokens, `0` shims               | **`0` LLM tokens**, **`0` `__path__.append` shims** (`test_m0_substrate_hygiene.py`)                                                                                              |
+| **Architectural Ratchets & Governance**          | AST & Serving/Driver Unification    | `SyscallAllowlist(strict=True)`, per-tenant `CognitiveSystemRegistry`, thin `CognitiveBlackbox`, `run_sandboxed_command`, `tests/unit/architecture/test_homoiconic_invariants.py` |
 
 > [!NOTE]
 > Artificial LOC ceilings (`test_loc_budget.py`) were retired in `637c8f22` (`M4`) in favor of semantic and AST invariant ratchets (`test_homoiconic_invariants.py`, `test_m0_substrate_hygiene.py`, `test_structural_debt_ratchet.py`); raw `hbllm/hcir/**` `.py` total stands at `146,399` lines across 11 subpackages. With Phase 3 complete, active evolution moves to [ADR 006: Fuzzy Symbolic Cognition](../adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md) (`F0`–`F3`).

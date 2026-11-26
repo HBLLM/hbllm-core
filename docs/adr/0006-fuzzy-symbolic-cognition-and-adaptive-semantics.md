@@ -31,7 +31,7 @@ While [ADR 005](0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) (
 
 2. **Scale-Blind Crisp Relations & Disconnected SGE Read Path (`hbllm/hcir/grounding/relations/relation_learner.py`, `hbllm/hcir/world/grounding/bridge.py`, Audit `H-3`):**
    - `RelationLearner` defines spatial relations via fixed unnormalized distance intervals (e.g., `NEAR` with `distance_bounds=(0.1, proximity_threshold)`) rather than context- and scale-normalized memberships learned from experience.
-   - `HCIRCommitter` collapses relation satisfaction and epistemic belief into a single `HCIREdge.weight`, and downstream cortical stages largely bypass SGE outputs — yielding `Δ = 0.0000` on dev, widened, and held-out suites (see [2026-11-24 Full Project Audit](../../reports/audit/2026-11-24_full_project_audit.md)).
+   - `HCIRCommitter` collapses relation satisfaction and epistemic belief into a single `HCIREdge.weight`, and downstream cortical stages largely bypass SGE outputs — yielding `Δ = 0.0000` on dev, widened, and held-out suites (see 2026-11-24 Full Project Audit (`reports/audit/2026-11-24_full_project_audit.md`)).
 
 3. **Cliff-Edge Symbolic Unification & Unconstrained Composition (`hbllm/hcir/unification.py`, `hbllm/hcir/skills/declarative.py`, `hbllm/hcir/reasoning/operators/spatial.py`):**
    - `SymbolicExpr.evaluate()` and `unify_pattern()` evaluate attributes and thresholds as discontinuous binary predicates (e.g., `dev <= 2.0` snaps from `True` to `False` at `2.01`).
@@ -291,5 +291,5 @@ To prove causally where improvements originate without confounding grounding cha
 - [ADR 004: Pure-HCIR Cognitive OS](0004-pure-hcir-cognitive-os.md)
 - [Core Knowledge & Innate Priors Declaration](../architecture/priors.md)
 - [Symbol Grounding Architecture (SGE)](../architecture/grounding.md)
-- [2026-11-24 Full Project Audit](../../reports/audit/2026-11-24_full_project_audit.md)
+- 2026-11-24 Full Project Audit: `reports/audit/2026-11-24_full_project_audit.md`
 

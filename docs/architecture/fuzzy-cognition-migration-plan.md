@@ -7,7 +7,7 @@ description: "Phased implementation and 2x2 experimental validation plan for ADR
 
 > **Authority:** [ADR 006: Fuzzy Symbolic Cognition & Adaptive Semantics](../adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md)  
 > **Foundation Baseline:** [ADR 005: Homoiconic Symbolic VM](../adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) (`M0`–`M6`)  
-> **Triggering Finding:** Audit `H-3` in [`reports/audit/2026-11-24_full_project_audit.md`](../../reports/audit/2026-11-24_full_project_audit.md) (`grounding_bridge` `Δ = 0.0000`)
+> **Triggering Finding:** Audit `H-3` in `reports/audit/2026-11-24_full_project_audit.md` (`grounding_bridge` `Δ = 0.0000`)
 
 ---
 
