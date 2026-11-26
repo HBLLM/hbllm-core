@@ -105,7 +105,11 @@ view.state._feedback_assimilated = True
 
 # ✅ CORRECT: Transactional commit via TransactionManager or commit_operations
 workspace.commit_operations(
-    [TransactionOperation(op=TransactionOp.UPSERT_NODE, node_id=new_node.id, node_data=new_node.model_dump())],
+    [
+        TransactionOperation(
+            op=TransactionOp.UPSERT_NODE, node_id=new_node.id, node_data=new_node.model_dump()
+        )
+    ],
     author="memory_adapter",
 )
 ```
@@ -120,15 +124,24 @@ def solve_puzzle(grid, actions):
     if grid[2, 3] == 5:
         return [1, 1, 3]
 
+
 SkillNode(skill_name="unlock", description="opens door")  # Discards executable bytecode!
 
 # ✅ CORRECT: Parameterized homoiconic InstructionStream stored on SkillNode
 stream = InstructionStream(
     author="wake_sleep_learner",
     instructions=[
-        Instruction(opcode=Opcode.UNIFY, params={"pattern": {"role": "tool", "affords": "?target"}, "bind": "$r0"}),
-        Instruction(opcode=Opcode.CALL, params={"goal_pattern": {"intent": "navigate_to", "target": "$r0"}}),
-        Instruction(opcode=Opcode.EXECUTE, params={"capability": "motor.interact", "params": {"target": "$r0"}}),
+        Instruction(
+            opcode=Opcode.UNIFY,
+            params={"pattern": {"role": "tool", "affords": "?target"}, "bind": "$r0"},
+        ),
+        Instruction(
+            opcode=Opcode.CALL, params={"goal_pattern": {"intent": "navigate_to", "target": "$r0"}}
+        ),
+        Instruction(
+            opcode=Opcode.EXECUTE,
+            params={"capability": "motor.interact", "params": {"target": "$r0"}},
+        ),
         Instruction(opcode=Opcode.RETURN, params={"yield": ["$r0"]}),
     ],
 )
@@ -153,7 +166,9 @@ theory.actuator_features.add(hyp.premise_feature)
 
 # ✅ CORRECT: Only verified distal switches belong in actuator_features
 if hyp.hypothesis_type == HypothesisType.REMOTE_MECHANISM:
-    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(hyp.premise_feature):
+    if not theory.is_avatar_feature(hyp.premise_feature) and not theory.is_walkable(
+        hyp.premise_feature
+    ):
         theory.actuator_features.add(hyp.premise_feature)
 ```
 
@@ -179,7 +194,8 @@ result = await loop.run_in_executor(None, lambda: _await_child(proc, parent_conn
 ```python
 # ❌ FORBIDDEN: Hardcoding English verb/rule lists in compiler.py
 for act_word in ("push", "move", "grab", "pull"):
-    if text_lower.startswith(act_word): ...
+    if text_lower.startswith(act_word):
+        ...
 
 # ✅ CORRECT: Graph Construction Unification + 4-Step Unknown Resolution
 # 1. Partial UNIFY binds known slots into $r0..$rk; isolates unknown span as UnknownNode.
