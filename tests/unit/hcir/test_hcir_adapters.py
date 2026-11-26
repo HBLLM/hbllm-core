@@ -2,12 +2,16 @@
 
 from typing import Any, cast
 
-# Import existing cognitive state types
-from hbllm.brain.core.cognitive_state import (
-    CognitiveStateDelta,
-    CognitiveStateSnapshot,
+# Import HCIR cognitive state data types
+from hbllm.hcir.adapters.cognitive_state_adapter import (
+    CognitiveStateAdapter,
 )
-from hbllm.hcir.adapters.cognitive_state_adapter import CognitiveStateAdapter
+from hbllm.hcir.adapters.cognitive_state_adapter import (
+    CognitiveStateDeltaData as CognitiveStateDelta,
+)
+from hbllm.hcir.adapters.cognitive_state_adapter import (
+    CognitiveStateSnapshotData as CognitiveStateSnapshot,
+)
 from hbllm.hcir.adapters.memory_adapter import MemoryAdapter
 from hbllm.hcir.graph import (
     BeliefNode,

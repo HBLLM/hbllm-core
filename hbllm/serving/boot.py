@@ -1,38 +1,16 @@
 """
-Boot Orchestrator — Unified boot sequence for HBLLM Cognitive OS.
+Boot Orchestrator — Unified boot sequence for HBLLM HCIR Cognitive OS.
 
-Wires together the Phase A–C subsystems into a coherent startup:
+Wires together the canonical HCIR runtime and serving infrastructure:
 
     1. Load BrainProfile → determines which subsystems activate
-    2. Create Brain (existing BrainFactory)
-    3. Initialize Gateway + Transports
+    2. Boot CognitiveSystem via `build_cognitive_system()` (TieredWorkspace + ExecutiveRuntime)
+    3. Initialize MessageBus + Gateway
     4. Initialize ServingTaskScheduler
     5. Initialize PermissionEngine
-    6. Initialize IdentityStateManager → restore identity
+    6. Restore persistent identity ConceptNode in TieredWorkspace
     7. Initialize WorkspaceManager
-    8. Start AutonomyCore + ProactiveProcessor (existing daemon logic)
-    9. Register recurring maintenance tasks
-
-The Boot Orchestrator does NOT replace CognitiveDaemon — it provides
-a composable ``boot()`` function that the daemon (or any other
-entry point) can call.
-
-Usage::
-
-    from hbllm.serving.boot import BootOrchestrator, BootConfig
-
-    config = BootConfig(
-        profile_name="full",
-        data_dir="data",
-        serve_http=True,
-    )
-
-    orchestrator = BootOrchestrator(config)
-    context = await orchestrator.boot()
-
-    # context.brain, context.gateway, context.scheduler, etc.
-
-    await orchestrator.shutdown()
+    8. Schedule recurring HCIR consolidation maintenance
 """
 
 from __future__ import annotations
@@ -44,13 +22,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hbllm.brain.autonomy.loop import AutonomyCore
-    from hbllm.brain.core.factory import Brain
-    from hbllm.brain.self_model.identity import IdentityStateManager
     from hbllm.config.brain_profile import BrainProfile
     from hbllm.hcir.kernel.executive_runtime import ExecutiveRuntime
     from hbllm.hcir.kernel.services import KernelServices
+    from hbllm.network.bus import InProcessBus
     from hbllm.network.gateway import Gateway
+    from hbllm.runtime.bootstrap import CognitiveSystem
     from hbllm.security.permission_engine import PermissionEngine
     from hbllm.serving.cognitive_scheduler import ServingTaskScheduler
     from hbllm.workspace.workspace_manager import WorkspaceManager
@@ -58,30 +35,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Boot Config
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 @dataclass
 class BootConfig:
     """Configuration for the boot sequence."""
 
-    # Brain profile
     profile_name: str = "full"  # full | lite | edge | research | robot
-
-    # Paths
     data_dir: str = "data"
     checkpoints_dir: str = "./checkpoints"
-
-    # Model
     provider: str = "openai"
     model_size: str = "medium"
     local: bool = False
     checkpoint_path: str | None = None
     provider_kwargs: dict[str, Any] = field(default_factory=dict)
 
-    # Features
     enable_perception: bool = False
     enable_autonomy: bool = True
     enable_http: bool = False
@@ -91,57 +57,31 @@ class BootConfig:
     enable_identity: bool = True
     enable_workspaces: bool = True
 
-    # HTTP
     host: str = "127.0.0.1"
     port: int = 8420
-
-    # Scheduler
     max_concurrent_llm: int = 3
     scheduler_workers: int = 3
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Boot Context (what boot() returns)
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 @dataclass
 class BootContext:
     """All subsystems created during boot, available for wiring."""
 
-    brain: Brain | None = None
+    cognitive_system: CognitiveSystem | None = None
+    brain: Any | None = None
     profile: BrainProfile | None = None
+    bus: InProcessBus | None = None
     gateway: Gateway | None = None
     scheduler: ServingTaskScheduler | None = None
     permission_engine: PermissionEngine | None = None
-    identity: IdentityStateManager | None = None
     workspace_manager: WorkspaceManager | None = None
-    autonomy: AutonomyCore | None = None
     kernel_services: KernelServices | None = None
     executive_runtime: ExecutiveRuntime | None = None
     boot_time_ms: float = 0.0
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Boot Orchestrator
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class BootOrchestrator:
-    """Unified boot sequence that wires Phase A–C subsystems.
-
-    Composes:
-      - BrainProfile (Phase A) — determines which subsystems activate
-      - Gateway + Transports (Phase A) — transport → bus bridge
-      - ServingTaskScheduler (Phase B) — background task arbitration
-      - PermissionEngine (Phase B) — plugin sandbox enforcement
-      - IdentityStateManager (Phase C) — cross-session continuity
-      - WorkspaceManager (Phase A) — multi-domain isolation
-      - Brain + AutonomyCore (existing) — cognitive core
-
-    The orchestrator does not replace CognitiveDaemon; it provides
-    a composable boot() that the daemon or any entry point can call.
-    """
+    """Unified boot sequence that wires the Pure-HCIR Cognitive OS and serving layers."""
 
     def __init__(self, config: BootConfig | None = None) -> None:
         self._config = config or BootConfig()
@@ -153,17 +93,13 @@ class BootOrchestrator:
         return self._context
 
     async def boot(self) -> BootContext:
-        """Execute the full boot sequence.
-
-        Returns:
-            BootContext with all initialized subsystems.
-        """
+        """Execute the full HCIR boot sequence."""
         start = time.monotonic()
         cfg = self._config
         ctx = self._context
 
         logger.info("═" * 60)
-        logger.info("  HBLLM Cognitive OS — Boot Sequence")
+        logger.info("  HBLLM HCIR Cognitive OS — Boot Sequence")
         logger.info("  Profile: %s", cfg.profile_name)
         logger.info("═" * 60)
 
@@ -184,89 +120,41 @@ class BootOrchestrator:
         if init_tracing():
             logger.info("OpenTelemetry tracing initialized")
 
-        # ── 2. Create Brain ──────────────────────────────────────────
-        from hbllm.brain.core.factory import BrainConfig, BrainFactory
+        # ── 2. Boot HCIR CognitiveSystem & Executive Runtime ─────────
+        from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-        brain_config = BrainConfig(
-            data_dir=cfg.data_dir,
-            inject_awareness=True,
-            inject_perception=cfg.enable_perception,
+        cog_cfg = CognitiveSystemConfig(
+            world_id=cfg.profile_name,
+            memory_dir=Path(cfg.data_dir) / "worlds" / cfg.profile_name,
+            enable_grounding=cfg.enable_perception,
+            enable_autonomous_curiosity=cfg.enable_autonomy and ctx.profile.features.autonomy_core,
         )
+        cog_sys = build_cognitive_system(cog_cfg)
+        ctx.cognitive_system = cog_sys
+        ctx.brain = cog_sys
+        ctx.kernel_services = cog_sys.services
+        ctx.executive_runtime = cog_sys.runtime
 
-        if cfg.local:
-            ctx.brain = await BrainFactory.create_local(
-                checkpoint_path=cfg.checkpoint_path,
-                model_size=cfg.model_size,
-                config=brain_config,
-            )
-        else:
-            ctx.brain = await BrainFactory.create(
-                provider=cfg.provider,
-                config=brain_config,
-                **cfg.provider_kwargs,
-            )
+        if ctx.executive_runtime:
+            await ctx.executive_runtime.start()
 
-        logger.info("Brain created with %d nodes", len(ctx.brain.nodes))
+        logger.info("HCIR CognitiveSystem & ExecutiveRuntime online")
 
-        # ── 2.5 Initialize HCIR Kernel & Executive Runtime ───────────
-        try:
-            from hbllm.hcir.adapters.node_adapter import NodeAdapter
-            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-            from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
-
-            # Route through single canonical composition root
-            cog_cfg = CognitiveSystemConfig(
-                world_id=cfg.profile_name,
-                memory_dir=Path(cfg.data_dir) / "worlds" / cfg.profile_name,
-                enable_grounding=cfg.enable_perception,
-            )
-            cog_sys = build_cognitive_system(cog_cfg)
-            ctx.kernel_services = cog_sys.services
-            ctx.executive_runtime = cog_sys.runtime
-            hcir_ws = cog_sys.workspace
-
-            if ctx.executive_runtime:
-                await ctx.executive_runtime.start()
-
-            # Export brain nodes capabilities to HCIR workspace
-            if hasattr(ctx.brain, "nodes"):
-                node_list = (
-                    ctx.brain.nodes.values()
-                    if isinstance(ctx.brain.nodes, dict)
-                    else ctx.brain.nodes
-                )
-                for node_obj in node_list:
-                    adapter = NodeAdapter(node_obj)
-                    cap_nodes = adapter.export_capabilities(tenant_id="default")
-                    if cap_nodes:
-                        hcir_ws.commit_operations(
-                            [
-                                TransactionOperation(
-                                    op=TransactionOp.UPSERT_NODE,
-                                    node_id=c.id,
-                                    node_data=c.model_dump(),
-                                )
-                                for c in cap_nodes
-                            ],
-                            author="boot:capability_export",
-                        )
-
-            logger.info("HCIR Kernel & Executive Runtime online (Native Cognitive ISA)")
-        except Exception as _ex:
-            logger.warning("HCIR Kernel initialization warning: %s", _ex)
-
-        # ── 3. Initialize Gateway ────────────────────────────────────
+        # ── 3. Initialize Bus & Gateway ──────────────────────────────
         if cfg.enable_gateway:
+            from hbllm.network.bus import InProcessBus
             from hbllm.network.gateway import Gateway, GatewayConfig
 
+            ctx.bus = InProcessBus()
+            await ctx.bus.start()
             gateway_config = GatewayConfig(
                 max_sessions=100 if ctx.profile.features.multi_tenant else 10,
             )
-            ctx.gateway = Gateway(config=gateway_config, bus=ctx.brain.bus)
+            ctx.gateway = Gateway(config=gateway_config, bus=ctx.bus)
             await ctx.gateway.start()
             logger.info("Gateway started (max_sessions=%d)", gateway_config.max_sessions)
 
-        # ── 4. Initialize ServingTaskScheduler ─────────────────────────
+        # ── 4. Initialize ServingTaskScheduler ───────────────────────
         if cfg.enable_scheduler:
             from hbllm.serving.cognitive_scheduler import ServingTaskScheduler
 
@@ -281,7 +169,7 @@ class BootOrchestrator:
                 cfg.max_concurrent_llm,
             )
 
-        # ── 5. Initialize PermissionEngine ───────────────────────────
+        # ── 5. Initialize PermissionEngine ─────────────────────────
         if cfg.enable_permissions:
             from hbllm.security.permission_engine import PermissionEngine
 
@@ -289,21 +177,34 @@ class BootOrchestrator:
             await ctx.permission_engine.init_db()
             logger.info("PermissionEngine initialized (default-deny)")
 
-        # ── 6. Initialize IdentityStateManager ───────────────────────
-        if cfg.enable_identity:
-            from hbllm.brain.self_model.identity import IdentityStateManager
+        # ── 6. Restore HCIR Identity ConceptNode ─────────────────────
+        if cfg.enable_identity and cog_sys.tiered_workspace is not None:
+            from hbllm.hcir.graph import ConceptNode
+            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+            from hbllm.hcir.types import Provenance, Scope
 
-            ctx.identity = IdentityStateManager(data_dir=cfg.data_dir)
-            await ctx.identity.init_db()
-            core_id = await ctx.identity.restore()
-            await ctx.identity.begin_session()
-            logger.info(
-                "Identity restored: %s (session #%d)",
-                core_id.name,
-                core_id.total_sessions,
+            identity_node = ConceptNode(
+                id="core_identity",
+                label="Sentra",
+                definition="HBLLM HCIR Cognitive OS identity anchor",
+                domain="identity",
+                provenance=Provenance(created_by="boot_orchestrator"),
+                scope=Scope(tenant_id="default"),
+                tags=["identity", "system"],
+                properties={"profile": cfg.profile_name, "last_boot_ts": time.time()},
+            )
+            cog_sys.tiered_workspace.persistent.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=identity_node.id,
+                        node_data=identity_node.model_dump(),
+                    )
+                ],
+                author="boot_orchestrator",
             )
 
-        # ── 7. Initialize WorkspaceManager ───────────────────────────
+        # ── 7. Initialize WorkspaceManager ─────────────────────────
         if cfg.enable_workspaces:
             from hbllm.workspace.workspace_manager import WorkspaceManager
 
@@ -311,47 +212,12 @@ class BootOrchestrator:
             await ctx.workspace_manager.init_db()
             logger.info("WorkspaceManager initialized")
 
-        # ── 8. Start AutonomyCore ────────────────────────────────────
-        if cfg.enable_autonomy and ctx.profile.features.autonomy_core:
-            try:
-                if ctx.brain.autonomy_core is not None:
-                    ctx.autonomy = ctx.brain.autonomy_core
-                    logger.info(
-                        "AutonomyCore active — reused configured instance from BrainFactory"
-                    )
-                else:
-                    from hbllm.brain.autonomy.loop import AutonomyCore
-
-                    ctx.autonomy = AutonomyCore()
-                    await ctx.autonomy.start(ctx.brain.bus)
-                    ctx.brain.autonomy_core = ctx.autonomy
-                    logger.info("AutonomyCore started — cognitive heartbeat active")
-            except Exception as e:
-                logger.warning("AutonomyCore failed to start: %s", e)
-
-        # ── 9. Schedule recurring maintenance ────────────────────────
+        # ── 8. Schedule recurring maintenance ────────────────────────
         if ctx.scheduler and ctx.profile.features.memory_consolidation:
             self._schedule_maintenance(ctx)
 
-        # ── Done ─────────────────────────────────────────────────────
         ctx.boot_time_ms = (time.monotonic() - start) * 1000
-
-        logger.info("═" * 60)
-        logger.info("  Cognitive OS ready (%.0fms boot)", ctx.boot_time_ms)
-        logger.info(
-            "  Profile: %s | Gateway: %s | Scheduler: %s",
-            cfg.profile_name,
-            "ON" if ctx.gateway else "OFF",
-            "ON" if ctx.scheduler else "OFF",
-        )
-        logger.info(
-            "  Identity: %s | Workspaces: %s | Permissions: %s",
-            "ON" if ctx.identity else "OFF",
-            "ON" if ctx.workspace_manager else "OFF",
-            "ON" if ctx.permission_engine else "OFF",
-        )
-        logger.info("═" * 60)
-
+        logger.info("  HCIR Cognitive OS ready (%.0fms boot)", ctx.boot_time_ms)
         self._started = True
         return ctx
 
@@ -363,31 +229,18 @@ class BootOrchestrator:
         logger.info("Shutting down Cognitive OS...")
         ctx = self._context
 
-        # Persist identity before shutdown
-        if ctx.identity:
-            await ctx.identity.persist()
-
-        # Stop scheduler
         if ctx.scheduler:
             await ctx.scheduler.stop()
 
-        # Stop gateway
         if ctx.gateway:
             await ctx.gateway.stop()
 
-        # Stop autonomy
-        if ctx.autonomy:
-            await ctx.autonomy.stop()
+        if ctx.bus:
+            await ctx.bus.stop()
 
-        # Stop executive runtime
         if ctx.executive_runtime:
             await ctx.executive_runtime.stop()
 
-        # Shutdown brain
-        if ctx.brain:
-            await ctx.brain.shutdown()
-
-        # Flush tracing spans
         from hbllm.observability.tracing import shutdown_tracing
 
         shutdown_tracing()
@@ -395,41 +248,24 @@ class BootOrchestrator:
         self._started = False
         logger.info("Cognitive OS shutdown complete")
 
-    # ── Maintenance Scheduling ───────────────────────────────────────────
-
     def _schedule_maintenance(self, ctx: BootContext) -> None:
-        """Register recurring maintenance tasks."""
+        """Register recurring HCIR memory consolidation tasks."""
         if not ctx.scheduler:
             return
 
         from hbllm.serving.cognitive_scheduler import TaskPriority
 
-        # Memory consolidation every 5 minutes
-        if hasattr(ctx.brain, "memory_consolidator"):
+        if ctx.cognitive_system is not None:
 
             async def _consolidate() -> None:
-                if ctx.brain.memory_consolidator:
-                    await ctx.brain.memory_consolidator.consolidate()
+                if ctx.cognitive_system is not None:
+                    ctx.cognitive_system.tiered_workspace.consolidate_node_budget()
 
             ctx.scheduler.schedule_recurring(
-                lambda: _consolidate(),
+                _consolidate,
                 interval_s=300,
-                name="memory-consolidation",
+                name="hcir-memory-consolidation",
                 priority=TaskPriority.MAINTENANCE,
             )
 
-        # Identity persistence every 2 minutes
-        if ctx.identity:
-
-            async def _persist_identity() -> None:
-                if ctx.identity:
-                    await ctx.identity.persist()
-
-            ctx.scheduler.schedule_recurring(
-                lambda: _persist_identity(),
-                interval_s=120,
-                name="identity-persist",
-                priority=TaskPriority.IDLE,
-            )
-
-        logger.info("Recurring maintenance tasks scheduled")
+        logger.info("Recurring HCIR maintenance tasks scheduled")

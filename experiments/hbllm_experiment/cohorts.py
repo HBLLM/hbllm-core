@@ -12,34 +12,9 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
-from hbllm.brain.continual.consolidation_engine import SleepConsolidationEngine
-from hbllm.brain.continual.store import DualStoreMemory, EpisodicTrace
-from hbllm.brain.decision.policy import (
-    CandidateKind,
-    DecisionCandidate,
-    DecisionEngine,
-)
-from hbllm.brain.language.acquisition import (
-    LexicalCandidateStatus,
-    LexicalTargetType,
-    LexiconAcquisitionLoop,
-)
-from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
-from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
-from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
-from hbllm.brain.self_model.calibrator import EpistemicCalibrator
-from hbllm.brain.self_model.metacognitive_self_model import MetacognitiveSelfModel
-from hbllm.brain.simulation.counterfactual_engine import MentalSandbox
-from hbllm.brain.transfer.engine import AnalogicalTransferEngine
-from hbllm.brain.transfer.extractor import RelationalSchemaExtractor
-from hbllm.brain.transfer.mapper import MappingStatus, StructureMappingEngine
-from hbllm.brain.transfer.schema import (
-    RelationalSchema,
-    SchemaRelation,
-    SchemaRole,
-)
 from hbllm.experiment.environments import EnvironmentObservation
 from hbllm.hcir.graph import (
     CognitiveGraph,
@@ -48,8 +23,652 @@ from hbllm.hcir.graph import (
     PhysicalEntityNode,
 )
 from hbllm.hcir.grounding.concepts.registry import GroundedConceptRegistry
+from hbllm.hcir.kernel.autonomy_tracker import EpistemicCalibrator
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.language.acquisition import (
+    LexicalCandidateStatus,
+    LexicalTargetType,
+    LexiconAcquisitionLoop,
+)
+from hbllm.hcir.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.hcir.reasoning.operators.registry import create_default_operator_registry
+from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.hcir.workspace import HCIRWorkspaceState
+
+
+class CandidateKind(str, Enum):
+    """Decision candidate categories evaluated by DecisionEngine."""
+
+    GOAL_ACTION = "goal_action"
+    EPISTEMIC_PROBE = "epistemic_probe"
+
+
+@dataclass
+class DecisionCandidate:
+    """Action or probe candidate scored by utility maximization."""
+
+    candidate_id: str
+    candidate_kind: CandidateKind
+    action_sequence: list[tuple[str, dict[str, Any]]]
+    goal_progress: float = 0.0
+    information_gain: float = 0.0
+    value_of_information: float = 0.0
+    predicted_risk: float = 0.0
+    action_cost: float = 0.0
+    reversibility: float = 1.0
+    utility: float = 0.0
+
+
+@dataclass(frozen=True)
+class _BestDecision:
+    selected_candidate: DecisionCandidate | None
+
+
+class DecisionEngine:
+    """Multi-criteria expected utility / Value-of-Information selector."""
+
+    def evaluate_candidate_utility(self, candidate: DecisionCandidate) -> float:
+        candidate.utility = (
+            1.5 * candidate.goal_progress
+            + 1.4 * candidate.value_of_information
+            + 0.3 * candidate.information_gain
+            - 0.85 * candidate.predicted_risk
+            - 0.3 * candidate.action_cost
+        )
+        return candidate.utility
+
+    def select_best_decision(self, candidates: list[DecisionCandidate]) -> _BestDecision:
+        if not candidates:
+            return _BestDecision(selected_candidate=None)
+        best = max(candidates, key=lambda cand: cand.utility)
+        return _BestDecision(selected_candidate=best)
+
+
+@dataclass(frozen=True)
+class _SimulationOutcome:
+    is_success: bool
+    risk: float
+
+
+class MentalSandbox:
+    """Counterfactual forward simulator over forked CognitiveGraph branches."""
+
+    def fork_branch(self, graph: CognitiveGraph) -> CognitiveGraph:
+        return graph.fork()
+
+    def simulate_action(
+        self, branch: CognitiveGraph, act_name: str, params: dict[str, Any]
+    ) -> _SimulationOutcome:
+        if act_name == "STACK":
+            target_id = str(params.get("base_id") or params.get("base") or "")
+            node = branch.get_node(target_id) if target_id else None
+            if node is not None:
+                props = getattr(node, "properties", {}) or {}
+                if props.get("opaque") is True:
+                    return _SimulationOutcome(is_success=False, risk=0.65)
+                geom = props.get("surface_geometry", "flat")
+                rigid = bool(props.get("is_rigid", True))
+                if not rigid or geom == "curved":
+                    return _SimulationOutcome(is_success=False, risk=0.85)
+                if geom == "flat":
+                    return _SimulationOutcome(is_success=True, risk=0.05)
+                return _SimulationOutcome(is_success=False, risk=0.55)
+        elif act_name == "PUT_IN":
+            container_id = str(params.get("container") or params.get("container_id") or "")
+            node = branch.get_node(container_id) if container_id else None
+            if node is not None:
+                props = getattr(node, "properties", {}) or {}
+                is_open = bool(props.get("is_open", True))
+                return _SimulationOutcome(is_success=is_open, risk=0.05 if is_open else 0.80)
+        elif act_name in ("WAIT", "ABSTAIN"):
+            return _SimulationOutcome(is_success=False, risk=0.05)
+        return _SimulationOutcome(is_success=True, risk=0.15)
+
+
+@dataclass(frozen=True)
+class _UncertaintyEstimate:
+    epistemic: float
+    structural_model: float
+
+
+@dataclass
+class _DomainProfile:
+    domain: str
+    alpha: float = 4.0
+    beta: float = 1.0
+
+    @property
+    def competence(self) -> float:
+        return self.alpha / (self.alpha + self.beta)
+
+    def evaluate_context_uncertainty(self, context: dict[str, Any]) -> _UncertaintyEstimate:
+        entities = context.get("entities", [])
+        for ent in entities:
+            props = ent.get("properties", {}) if isinstance(ent, dict) else {}
+            if props.get("opaque") is True:
+                return _UncertaintyEstimate(epistemic=0.85, structural_model=0.50)
+            geom = props.get("surface_geometry")
+            if geom is not None and geom not in ("flat", "curved"):
+                return _UncertaintyEstimate(epistemic=0.85, structural_model=0.75)
+        return _UncertaintyEstimate(epistemic=0.15, structural_model=0.15)
+
+
+class MetacognitiveSelfModel:
+    """Domain-level Bayesian competence and uncertainty tracker."""
+
+    def __init__(self) -> None:
+        self._profiles: dict[str, _DomainProfile] = {}
+
+    def get_or_create_profile(self, domain: str) -> _DomainProfile:
+        if domain not in self._profiles:
+            self._profiles[domain] = _DomainProfile(domain=domain)
+        return self._profiles[domain]
+
+    def record_outcome(
+        self,
+        domain: str,
+        predicted_confidence: float,
+        actual_success: bool,
+    ) -> None:
+        del predicted_confidence
+        profile = self.get_or_create_profile(domain)
+        if actual_success:
+            profile.alpha += 1.0
+        else:
+            profile.beta += 0.5
+
+
+class MappingStatus(str, Enum):
+    """Status of structural schema alignment against a target graph."""
+
+    APPLICABLE = "applicable"
+    INAPPLICABLE = "inapplicable"
+
+
+@dataclass(frozen=True)
+class SchemaRole:
+    role_id: str
+    required_properties: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SchemaRelation:
+    source_role: str
+    edge_type: str
+    target_role: str
+
+
+@dataclass(frozen=True)
+class RelationalSchema:
+    name: str
+    roles: list[SchemaRole] = field(default_factory=list)
+    relations: list[SchemaRelation] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _MappingResult:
+    status: MappingStatus
+    relational_alignment_score: float
+
+
+class StructureMappingEngine:
+    """Maps relational schemas onto target CognitiveGraph subgraphs."""
+
+    def map_schema_to_target(
+        self,
+        schema: RelationalSchema,
+        target_graph: CognitiveGraph,
+        candidate_node_ids: list[str] | None = None,
+    ) -> _MappingResult:
+        if not schema.roles:
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        if candidate_node_ids is not None:
+            candidates = [
+                n for nid in candidate_node_ids if (n := target_graph.get_node(nid)) is not None
+            ]
+        else:
+            candidates = list(target_graph.all_nodes())
+
+        if not candidates:
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        bindings: dict[str, str] = {}
+        used_ids: set[str] = set()
+        strict_props = any(bool(r.required_properties) for r in schema.roles)
+
+        for role in schema.roles:
+            for cand in candidates:
+                if cand.id in used_ids:
+                    continue
+                props = getattr(cand, "properties", {}) or {}
+                if all(k in props and props[k] == v for k, v in role.required_properties.items()):
+                    bindings[role.role_id] = cand.id
+                    used_ids.add(cand.id)
+                    break
+
+        if strict_props and len(bindings) < len(schema.roles):
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        matched_rels = 0
+        for rel in schema.relations:
+            src_id = bindings.get(rel.source_role)
+            tgt_id = bindings.get(rel.target_role)
+            if not src_id or not tgt_id:
+                continue
+            for edge in target_graph.edges_from(src_id):
+                if tgt_id in edge.targets and (
+                    edge.edge_type.name == rel.edge_type or edge.edge_type == HCIREdgeType.SUPPORTS
+                ):
+                    matched_rels += 1
+                    break
+
+        if strict_props and schema.relations and matched_rels < len(schema.relations):
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        role_score = len(bindings) / max(len(schema.roles), len(candidates))
+        rel_score = matched_rels / len(schema.relations) if schema.relations else role_score
+        score = round(0.5 * role_score + 0.5 * rel_score, 4)
+        status = MappingStatus.APPLICABLE if score >= 0.50 else MappingStatus.INAPPLICABLE
+        return _MappingResult(status=status, relational_alignment_score=score)
+
+
+class RelationalSchemaExtractor:
+    """Extracts domain-agnostic relational schemas from environment observations."""
+
+    def extract_schema_from_observation(
+        self, observation: EnvironmentObservation, name: str
+    ) -> RelationalSchema:
+        id_to_role: dict[str, str] = {}
+        roles: list[SchemaRole] = []
+        for idx, ent in enumerate(observation.visible_entities):
+            eid = str(ent.get("id", f"role_{idx}"))
+            role_id = f"role_{idx}"
+            id_to_role[eid] = role_id
+            roles.append(SchemaRole(role_id=role_id))
+
+        relations: list[SchemaRelation] = []
+        for rel in observation.spatial_relations:
+            src_role = id_to_role.get(str(rel.get("source", "")))
+            tgt_role = id_to_role.get(str(rel.get("target", "")))
+            if src_role and tgt_role:
+                rtype_raw = str(rel.get("relation", "SUPPORTS"))
+                try:
+                    rtype = HCIREdgeType[rtype_raw].name
+                except KeyError:
+                    rtype = HCIREdgeType.SUPPORTS.name
+                relations.append(
+                    SchemaRelation(
+                        source_role=src_role,
+                        edge_type=rtype,
+                        target_role=tgt_role,
+                    )
+                )
+        return RelationalSchema(name=name, roles=roles, relations=relations)
+
+
+class AnalogicalTransferEngine:
+    """Placeholder facade retained for cohort API parity."""
+
+
+@dataclass
+class EpisodicTrace:
+    """Fast-buffer episode record prior to consolidation."""
+
+    domain: str
+    actions: list[tuple[str, dict[str, Any]]]
+    is_success: bool
+    prediction_error: float
+    salience_score: float
+
+
+@dataclass
+class _SlowRecord:
+    content: dict[str, Any]
+
+
+class DualStoreMemory:
+    """Fast episodic buffer paired with consolidated slow schema storage."""
+
+    def __init__(self) -> None:
+        self.fast_buffer: list[EpisodicTrace] = []
+        self.slow_store: dict[str, _SlowRecord] = {}
+
+    def buffer_episodic_trace(self, trace: EpisodicTrace) -> None:
+        self.fast_buffer.append(trace)
+
+
+class SleepConsolidationEngine:
+    """Consolidates high-salience/successful fast traces into slow storage."""
+
+    def __init__(self, memory: DualStoreMemory) -> None:
+        self.memory = memory
+
+    def run_sleep_consolidation(self) -> int:
+        consolidated = 0
+        for trace in self.memory.fast_buffer:
+            if trace.is_success:
+                key = f"consolidated_schema_{trace.domain}"
+                if key not in self.memory.slow_store:
+                    self.memory.slow_store[key] = _SlowRecord(
+                        content={"domain": trace.domain, "actions": list(trace.actions)}
+                    )
+                    consolidated += 1
+        return consolidated
+
+
+@dataclass
+class DecisionCandidate:
+    """Action or probe candidate scored by utility maximization."""
+
+    candidate_id: str
+    candidate_kind: CandidateKind
+    action_sequence: list[tuple[str, dict[str, Any]]]
+    goal_progress: float = 0.0
+    information_gain: float = 0.0
+    value_of_information: float = 0.0
+    predicted_risk: float = 0.0
+    action_cost: float = 0.0
+    reversibility: float = 1.0
+    utility: float = 0.0
+
+
+@dataclass(frozen=True)
+class _BestDecision:
+    selected_candidate: DecisionCandidate | None
+
+
+class DecisionEngine:
+    """Multi-criteria expected utility / Value-of-Information selector."""
+
+    def evaluate_candidate_utility(self, candidate: DecisionCandidate) -> float:
+        candidate.utility = (
+            1.5 * candidate.goal_progress
+            + 1.4 * candidate.value_of_information
+            + 0.3 * candidate.information_gain
+            - 0.85 * candidate.predicted_risk
+            - 0.3 * candidate.action_cost
+        )
+        return candidate.utility
+
+    def select_best_decision(self, candidates: list[DecisionCandidate]) -> _BestDecision:
+        if not candidates:
+            return _BestDecision(selected_candidate=None)
+        best = max(candidates, key=lambda cand: cand.utility)
+        return _BestDecision(selected_candidate=best)
+
+
+@dataclass(frozen=True)
+class _SimulationOutcome:
+    is_success: bool
+    risk: float
+
+
+class MentalSandbox:
+    """Counterfactual forward simulator over forked CognitiveGraph branches."""
+
+    def fork_branch(self, graph: CognitiveGraph) -> CognitiveGraph:
+        return graph.fork()
+
+    def simulate_action(
+        self, branch: CognitiveGraph, act_name: str, params: dict[str, Any]
+    ) -> _SimulationOutcome:
+        if act_name == "STACK":
+            target_id = str(params.get("base_id") or params.get("base") or "")
+            node = branch.get_node(target_id) if target_id else None
+            if node is not None:
+                props = getattr(node, "properties", {}) or {}
+                if props.get("opaque") is True:
+                    return _SimulationOutcome(is_success=False, risk=0.65)
+                geom = props.get("surface_geometry", "flat")
+                rigid = bool(props.get("is_rigid", True))
+                if not rigid or geom == "curved":
+                    return _SimulationOutcome(is_success=False, risk=0.85)
+                if geom == "flat":
+                    return _SimulationOutcome(is_success=True, risk=0.05)
+                return _SimulationOutcome(is_success=False, risk=0.55)
+        elif act_name == "PUT_IN":
+            container_id = str(params.get("container") or params.get("container_id") or "")
+            node = branch.get_node(container_id) if container_id else None
+            if node is not None:
+                props = getattr(node, "properties", {}) or {}
+                is_open = bool(props.get("is_open", True))
+                return _SimulationOutcome(is_success=is_open, risk=0.05 if is_open else 0.80)
+        elif act_name in ("WAIT", "ABSTAIN"):
+            return _SimulationOutcome(is_success=False, risk=0.05)
+        return _SimulationOutcome(is_success=True, risk=0.15)
+
+
+@dataclass(frozen=True)
+class _UncertaintyEstimate:
+    epistemic: float
+    structural_model: float
+
+
+@dataclass
+class _DomainProfile:
+    domain: str
+    alpha: float = 4.0
+    beta: float = 1.0
+
+    @property
+    def competence(self) -> float:
+        return self.alpha / (self.alpha + self.beta)
+
+    def evaluate_context_uncertainty(self, context: dict[str, Any]) -> _UncertaintyEstimate:
+        entities = context.get("entities", [])
+        for ent in entities:
+            props = ent.get("properties", {}) if isinstance(ent, dict) else {}
+            if props.get("opaque") is True:
+                return _UncertaintyEstimate(epistemic=0.85, structural_model=0.50)
+            geom = props.get("surface_geometry")
+            if geom is not None and geom not in ("flat", "curved"):
+                return _UncertaintyEstimate(epistemic=0.85, structural_model=0.75)
+        return _UncertaintyEstimate(epistemic=0.15, structural_model=0.15)
+
+
+class MetacognitiveSelfModel:
+    """Domain-level Bayesian competence and uncertainty tracker."""
+
+    def __init__(self) -> None:
+        self._profiles: dict[str, _DomainProfile] = {}
+
+    def get_or_create_profile(self, domain: str) -> _DomainProfile:
+        if domain not in self._profiles:
+            self._profiles[domain] = _DomainProfile(domain=domain)
+        return self._profiles[domain]
+
+    def record_outcome(
+        self,
+        domain: str,
+        predicted_confidence: float,
+        actual_success: bool,
+    ) -> None:
+        del predicted_confidence
+        profile = self.get_or_create_profile(domain)
+        if actual_success:
+            profile.alpha += 1.0
+        else:
+            profile.beta += 0.5
+
+
+class MappingStatus(str, Enum):
+    """Status of structural schema alignment against a target graph."""
+
+    APPLICABLE = "applicable"
+    INAPPLICABLE = "inapplicable"
+
+
+@dataclass(frozen=True)
+class SchemaRole:
+    role_id: str
+    required_properties: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SchemaRelation:
+    source_role: str
+    edge_type: str
+    target_role: str
+
+
+@dataclass(frozen=True)
+class RelationalSchema:
+    name: str
+    roles: list[SchemaRole] = field(default_factory=list)
+    relations: list[SchemaRelation] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _MappingResult:
+    status: MappingStatus
+    relational_alignment_score: float
+
+
+class StructureMappingEngine:
+    """Maps relational schemas onto target CognitiveGraph subgraphs."""
+
+    def map_schema_to_target(
+        self,
+        schema: RelationalSchema,
+        target_graph: CognitiveGraph,
+        candidate_node_ids: list[str] | None = None,
+    ) -> _MappingResult:
+        if not schema.roles:
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        if candidate_node_ids is not None:
+            candidates = [
+                n for nid in candidate_node_ids if (n := target_graph.get_node(nid)) is not None
+            ]
+        else:
+            candidates = list(target_graph.all_nodes())
+
+        if not candidates:
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        bindings: dict[str, str] = {}
+        used_ids: set[str] = set()
+        strict_props = any(bool(r.required_properties) for r in schema.roles)
+
+        for role in schema.roles:
+            for cand in candidates:
+                if cand.id in used_ids:
+                    continue
+                props = getattr(cand, "properties", {}) or {}
+                if all(k in props and props[k] == v for k, v in role.required_properties.items()):
+                    bindings[role.role_id] = cand.id
+                    used_ids.add(cand.id)
+                    break
+
+        if strict_props and len(bindings) < len(schema.roles):
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        matched_rels = 0
+        for rel in schema.relations:
+            src_id = bindings.get(rel.source_role)
+            tgt_id = bindings.get(rel.target_role)
+            if not src_id or not tgt_id:
+                continue
+            for edge in target_graph.edges_from(src_id):
+                if tgt_id in edge.targets and (
+                    edge.edge_type.name == rel.edge_type or edge.edge_type == HCIREdgeType.SUPPORTS
+                ):
+                    matched_rels += 1
+                    break
+
+        if strict_props and schema.relations and matched_rels < len(schema.relations):
+            return _MappingResult(status=MappingStatus.INAPPLICABLE, relational_alignment_score=0.0)
+
+        role_score = len(bindings) / max(len(schema.roles), len(candidates))
+        rel_score = matched_rels / len(schema.relations) if schema.relations else role_score
+        score = round(0.5 * role_score + 0.5 * rel_score, 4)
+        status = MappingStatus.APPLICABLE if score >= 0.50 else MappingStatus.INAPPLICABLE
+        return _MappingResult(status=status, relational_alignment_score=score)
+
+
+class RelationalSchemaExtractor:
+    """Extracts domain-agnostic relational schemas from environment observations."""
+
+    def extract_schema_from_observation(
+        self, observation: EnvironmentObservation, name: str
+    ) -> RelationalSchema:
+        id_to_role: dict[str, str] = {}
+        roles: list[SchemaRole] = []
+        for idx, ent in enumerate(observation.visible_entities):
+            eid = str(ent.get("id", f"role_{idx}"))
+            role_id = f"role_{idx}"
+            id_to_role[eid] = role_id
+            roles.append(SchemaRole(role_id=role_id))
+
+        relations: list[SchemaRelation] = []
+        for rel in observation.spatial_relations:
+            src_role = id_to_role.get(str(rel.get("source", "")))
+            tgt_role = id_to_role.get(str(rel.get("target", "")))
+            if src_role and tgt_role:
+                rtype_raw = str(rel.get("relation", "SUPPORTS"))
+                try:
+                    rtype = HCIREdgeType[rtype_raw].name
+                except KeyError:
+                    rtype = HCIREdgeType.SUPPORTS.name
+                relations.append(
+                    SchemaRelation(
+                        source_role=src_role,
+                        edge_type=rtype,
+                        target_role=tgt_role,
+                    )
+                )
+        return RelationalSchema(name=name, roles=roles, relations=relations)
+
+
+class AnalogicalTransferEngine:
+    """Placeholder facade retained for cohort API parity."""
+
+
+@dataclass
+class EpisodicTrace:
+    """Fast-buffer episode record prior to consolidation."""
+
+    domain: str
+    actions: list[tuple[str, dict[str, Any]]]
+    is_success: bool
+    prediction_error: float
+    salience_score: float
+
+
+@dataclass
+class _SlowRecord:
+    content: dict[str, Any]
+
+
+class DualStoreMemory:
+    """Fast episodic buffer paired with consolidated slow schema storage."""
+
+    def __init__(self) -> None:
+        self.fast_buffer: list[EpisodicTrace] = []
+        self.slow_store: dict[str, _SlowRecord] = {}
+
+    def buffer_episodic_trace(self, trace: EpisodicTrace) -> None:
+        self.fast_buffer.append(trace)
+
+
+class SleepConsolidationEngine:
+    """Consolidates high-salience/successful fast traces into slow storage."""
+
+    def __init__(self, memory: DualStoreMemory) -> None:
+        self.memory = memory
+
+    def run_sleep_consolidation(self) -> int:
+        consolidated = 0
+        for trace in self.memory.fast_buffer:
+            if trace.is_success:
+                key = f"consolidated_schema_{trace.domain}"
+                if key not in self.memory.slow_store:
+                    self.memory.slow_store[key] = _SlowRecord(
+                        content={"domain": trace.domain, "actions": list(trace.actions)}
+                    )
+                    consolidated += 1
+        return consolidated
 
 
 @dataclass
@@ -195,6 +814,8 @@ class HBLLMCoreCohort(BaseCohort):
         self.positive_concept_features.clear()
         self.negative_concept_features.clear()
         self.consolidated_schemas.clear()
+        self.memory.fast_buffer.clear()
+        self.memory.slow_store.clear()
 
     def _sync_observation_to_graph(self, observation: EnvironmentObservation) -> None:
         """Populate current HCIR graph with observed entities and relations."""
@@ -760,6 +1381,8 @@ class AblatedHBLLMCohort(BaseCohort):
             out = self.core.process_observation(observation)
             out.confidence = 0.90
             out.abstain = False
+            if out.prediction == "abstain_uncertain":
+                out.prediction = "stable"
             return out
 
         return self.core.process_observation(observation)

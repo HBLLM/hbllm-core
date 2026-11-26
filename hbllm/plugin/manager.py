@@ -618,9 +618,9 @@ class PluginManager:
 
                 # Build the skill and store it
                 if hasattr(skill_registry, "_store"):
-                    from hbllm.brain.skills.skill_registry import Skill
+                    from hbllm.hcir.skills.skill_store import HCIRSkillRecord
 
-                    skill = Skill(
+                    skill = HCIRSkillRecord(
                         skill_id=skill_id,
                         name=skill_def["name"],
                         description=skill_def.get("description", ""),
@@ -672,7 +672,7 @@ class PluginManager:
 
         for policy_def in loaded.bundle.assets.policies:
             try:
-                from hbllm.brain.governance.policy_engine import (
+                from hbllm.hcir.kernel.governance.policies.policy_engine import (
                     Policy,
                     PolicyAction,
                     PolicyCondition,

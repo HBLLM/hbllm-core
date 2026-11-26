@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. KV Prefix Cache
 # ═══════════════════════════════════════════════════════════════════════════
@@ -68,8 +66,8 @@ class TestKVWarmup:
 # 2. Izhikevich Neurons + BaseNeuron
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.snn.lif import LIFConfig, LIFNeuron, SpikeEvent
-from hbllm.brain.snn.neurons import (
+from hbllm.hcir.snn.lif import LIFConfig, LIFNeuron, SpikeEvent
+from hbllm.hcir.snn.neurons import (
     BaseNeuron,
     IzhikevichConfig,
     IzhikevichNeuron,
@@ -132,7 +130,7 @@ class TestBaseNeuronHierarchy:
 # 3. Short-Term Plasticity (STP)
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.snn.stp import STPConfig, STPManager
+from hbllm.hcir.snn.stp import STPConfig, STPManager
 
 
 class TestSTP:
@@ -201,7 +199,7 @@ class TestSTP:
 # 4. Winner-Take-All (WTA)
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.snn.wta import HierarchicalWTA, WinnerTakeAll, WTAConfig
+from hbllm.hcir.snn.wta import HierarchicalWTA, WinnerTakeAll, WTAConfig
 
 
 class TestWTA:
@@ -271,7 +269,7 @@ class TestWTA:
 # 5. Neuromodulation (global, 6 modulators)
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.emotion.neuromodulation import NeuromodulationEngine, NeuromodulatorState
+from hbllm.hcir.snn.neuromodulation import NeuromodulationEngine, NeuromodulatorState
 
 
 class TestNeuromodulation:
@@ -330,7 +328,7 @@ class TestNeuromodulation:
 
     def test_backward_compat_import_from_snn(self) -> None:
         """Old import path still works via snn/__init__.py re-export."""
-        from hbllm.brain.snn import NeuromodulationEngine as SnnEngine
+        from hbllm.hcir.snn import NeuromodulationEngine as SnnEngine
 
         assert SnnEngine is NeuromodulationEngine
 
@@ -343,281 +341,3 @@ class TestNeuromodulation:
         assert 0.0 <= engine.get_exploration_rate() <= 1.0
         assert 0.0 <= engine.get_reasoning_persistence() <= 2.0
         assert 0.0 <= engine.get_consolidation_aggressiveness() <= 2.0
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 6. Immutable CognitiveState
-# ═══════════════════════════════════════════════════════════════════════════
-
-from hbllm.brain.core.cognitive_state import (
-    CognitiveStateDelta,
-    CognitiveStateReducer,
-    CognitiveStateSnapshot,
-)
-
-
-class TestCognitiveState:
-    """Test immutable cognitive state with delta/reducer."""
-
-    def test_immutable(self) -> None:
-        """CognitiveStateSnapshot is frozen."""
-        state = CognitiveStateSnapshot()
-        with pytest.raises(AttributeError):
-            state.confidence = 0.9  # type: ignore
-
-    def test_delta_apply(self) -> None:
-        """Delta + reducer produces new versioned state."""
-        reducer = CognitiveStateReducer()
-        state = CognitiveStateSnapshot()
-        assert state.version == 0
-
-        delta = CognitiveStateDelta(
-            source_node="critic",
-            changes={"confidence": 0.8, "uncertainty": 0.2},
-            reason="Test",
-        )
-        new_state = reducer.apply(state, delta)
-
-        assert new_state.version == 1
-        assert new_state.confidence == 0.8
-        assert new_state.uncertainty == 0.2
-        # Unchanged fields preserved
-        assert new_state.novelty == 0.5
-
-    def test_history_replayable(self) -> None:
-        """State history is maintained for replay."""
-        reducer = CognitiveStateReducer()
-        state = CognitiveStateSnapshot()
-
-        for i in range(5):
-            delta = CognitiveStateDelta(
-                source_node=f"node_{i}",
-                changes={"confidence": 0.1 * (i + 1)},
-            )
-            state = reducer.apply(state, delta)
-
-        history = reducer.get_history(last_n=5)
-        assert len(history) == 5
-        assert history[0].version == 0  # Original
-
-    def test_rollback(self) -> None:
-        """Can roll back to previous version."""
-        reducer = CognitiveStateReducer()
-        state = CognitiveStateSnapshot()
-
-        state = reducer.apply(
-            state, CognitiveStateDelta(source_node="a", changes={"confidence": 0.9})
-        )
-        state = reducer.apply(
-            state, CognitiveStateDelta(source_node="b", changes={"confidence": 0.1})
-        )
-
-        rolled_back = reducer.rollback(to_version=0)
-        assert rolled_back is not None
-        assert rolled_back.confidence == 0.5  # Original
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 7. Cognitive Event-Driven Scheduler
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-from hbllm.brain.control.competition_engine import CompetitionEngine
-from hbllm.brain.control.event_queue import CognitiveEventQueue
-from hbllm.brain.core.cognitive_event import CognitiveEvent, CognitiveEventType
-from hbllm.brain.self_model.saliency_evaluator import SaliencyEvaluator
-
-
-class TestCognitiveEvent:
-    """Test cognitive event types and construction."""
-
-    def test_event_creation(self) -> None:
-        """CognitiveEvent constructs with correct defaults."""
-        event = CognitiveEvent(
-            type=CognitiveEventType.USER_SPOKE,
-            source_node="perception",
-        )
-        assert event.priority == 0.5
-        assert event.snn_saliency == 0.0
-        assert event.tenant_id == "default"
-
-    def test_effective_priority(self) -> None:
-        """effective_priority = max(priority, snn_saliency)."""
-        event = CognitiveEvent(
-            type=CognitiveEventType.USER_SPOKE,
-            source_node="test",
-            priority=0.3,
-        )
-        scored = event.with_saliency(0.8)
-        assert scored.effective_priority == 0.8
-
-    def test_with_saliency_immutable(self) -> None:
-        """with_saliency returns a new event, original unchanged."""
-        event = CognitiveEvent(
-            type=CognitiveEventType.GOAL_ADDED,
-            source_node="test",
-        )
-        scored = event.with_saliency(0.9)
-        assert event.snn_saliency == 0.0
-        assert scored.snn_saliency == 0.9
-
-
-class TestEventQueue:
-    """Test the cognitive event queue."""
-
-    @pytest.fixture
-    def queue(self) -> CognitiveEventQueue:
-        return CognitiveEventQueue(max_size=100)
-
-    @pytest.mark.asyncio
-    async def test_submit_and_drain(self, queue: CognitiveEventQueue) -> None:
-        """Events are submitted and drained in priority order."""
-        ts = time.time()
-        events = [
-            CognitiveEvent(
-                type=CognitiveEventType.IDLE_DETECTED, source_node="a", priority=0.2, timestamp=ts
-            ),
-            CognitiveEvent(
-                type=CognitiveEventType.USER_SPOKE, source_node="b", priority=0.9, timestamp=ts
-            ),
-            CognitiveEvent(
-                type=CognitiveEventType.GOAL_ADDED, source_node="c", priority=0.5, timestamp=ts
-            ),
-        ]
-        for e in events:
-            await queue.submit(e)
-
-        assert await queue.size() == 3
-        batch = await queue.drain(max_batch=10)
-        assert len(batch) == 3
-        # Highest priority first
-        assert batch[0].priority == 0.9
-
-    @pytest.mark.asyncio
-    async def test_overflow_drops(self) -> None:
-        """Events beyond max_size are dropped."""
-        small_queue = CognitiveEventQueue(max_size=2)
-        for i in range(5):
-            await small_queue.submit(
-                CognitiveEvent(
-                    type=CognitiveEventType.MEMORY_UPDATED,
-                    source_node="test",
-                    priority=0.1 * i,
-                )
-            )
-        assert await small_queue.size() == 2
-        assert small_queue.stats()["total_dropped"] == 3
-
-
-class TestSaliencyEvaluator:
-    """Test SNN-based saliency scoring."""
-
-    @pytest.mark.asyncio
-    async def test_user_spoke_high_saliency(self) -> None:
-        """USER_SPOKE events get high saliency."""
-        evaluator = SaliencyEvaluator()
-        events = [
-            CognitiveEvent(
-                type=CognitiveEventType.USER_SPOKE, source_node="a", timestamp=time.time()
-            ),
-            CognitiveEvent(
-                type=CognitiveEventType.IDLE_DETECTED, source_node="b", timestamp=time.time()
-            ),
-        ]
-        scored = await evaluator.evaluate(events)
-        # USER_SPOKE should score higher than IDLE
-        assert scored[0].type == CognitiveEventType.USER_SPOKE
-        assert scored[0].snn_saliency > scored[1].snn_saliency
-
-    @pytest.mark.asyncio
-    async def test_neuromod_modulation(self) -> None:
-        """Neuromodulation affects saliency scores."""
-        neuromod = NeuromodulationEngine()
-        evaluator = SaliencyEvaluator(neuromod=neuromod)
-
-        event = CognitiveEvent(
-            type=CognitiveEventType.ATTENTION_SPIKE,
-            source_node="test",
-            timestamp=time.time(),
-        )
-
-        # Baseline
-        scored_baseline = await evaluator.evaluate([event])
-
-        # High alertness → higher saliency
-        neuromod.state.norepinephrine = 1.0
-        neuromod.state.last_update = time.time()
-        scored_alert = await evaluator.evaluate([event])
-
-        assert scored_alert[0].snn_saliency >= scored_baseline[0].snn_saliency
-
-
-class TestCompetitionEngine:
-    """Test WTA-based event competition."""
-
-    @pytest.mark.asyncio
-    async def test_competition_selects_top_events(self) -> None:
-        """Competition reduces event count via WTA."""
-        engine = CompetitionEngine(
-            local_k_winners=2,
-            executive_k_winners=3,
-            soft_wta=True,
-        )
-        ts = time.time()
-        events = [
-            CognitiveEvent(
-                type=CognitiveEventType.USER_SPOKE, source_node="a", priority=0.9, timestamp=ts
-            ).with_saliency(0.9),
-            CognitiveEvent(
-                type=CognitiveEventType.MEMORY_UPDATED, source_node="b", priority=0.3, timestamp=ts
-            ).with_saliency(0.3),
-            CognitiveEvent(
-                type=CognitiveEventType.MEMORY_CONFLICT, source_node="c", priority=0.7, timestamp=ts
-            ).with_saliency(0.7),
-            CognitiveEvent(
-                type=CognitiveEventType.IDLE_DETECTED, source_node="d", priority=0.1, timestamp=ts
-            ).with_saliency(0.1),
-            CognitiveEvent(
-                type=CognitiveEventType.GOAL_ADDED, source_node="e", priority=0.6, timestamp=ts
-            ).with_saliency(0.6),
-        ]
-        winners = await engine.compete(events)
-        # Should have fewer or equal winners than input
-        assert len(winners) <= len(events)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 8. LayerProjection + STP Integration
-# ═══════════════════════════════════════════════════════════════════════════
-
-from hbllm.brain.snn.network import LayerProjection
-
-
-class TestLayerProjectionSTP:
-    """Test STP integration in LayerProjection."""
-
-    def test_projection_without_stp(self) -> None:
-        """Projection works normally without STP (backward compat)."""
-        proj = LayerProjection("src", "tgt", 2, 2)
-        ts = time.time()
-        spikes = [
-            SpikeEvent(fired=True, strength=1.0, timestamp=ts),
-            SpikeEvent(fired=False, strength=0.0, timestamp=ts),
-        ]
-        currents = proj.project(spikes, ts)
-        assert len(currents) == 2
-        assert currents[0] > 0  # Spike propagated
-
-    def test_projection_with_stp(self) -> None:
-        """Projection with STP modulates weights."""
-        stp = STPManager(STPConfig(mode="facilitation"), source_size=2, target_size=2)
-        proj = LayerProjection("src", "tgt", 2, 2, stp_manager=stp)
-        ts = time.time()
-        spikes = [
-            SpikeEvent(fired=True, strength=1.0, timestamp=ts),
-            SpikeEvent(fired=False, strength=0.0, timestamp=ts),
-        ]
-        currents = proj.project(spikes, ts)
-        assert len(currents) == 2
-        # STP is active — currents may differ from unmodulated
-        assert all(isinstance(c, float) for c in currents)

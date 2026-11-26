@@ -25,7 +25,7 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and homoiconic neu
    Reasoning operators and cortical stages receive immutable snapshots (`FrozenGraphView` / `CognitiveContext`) and return pure result structures (`CognitiveResult` / `StageResult.operations`).
 
 3. **Zero LLM Dependency & Latency Budget in Cognitive Core:**
-   > The core runtime (`hbllm.hcir` — `world`, `grounding`, `reasoning`, `language`, `snn`, `capabilities`, `kernel` — and `hbllm.brain.reasoning`) is **100% LLM-independent**.
+   > The core runtime (`hbllm.hcir` — `world`, `grounding`, `reasoning`, `language`, `snn`, `capabilities`, `kernel`) is **100% LLM-independent**.
    Constraint solving, unification, planning, and spatial transforms run deterministically with zero external LLM calls (Rust kernels `< 0.2ms` per op; target `32×32` step budget `CPU p95 <= 45ms`). Offline-trained deterministic `FeatureExtractor` encoders (`snn`, `learned`) are permitted.
 
 4. **Constitutional Governance:**
@@ -40,7 +40,7 @@ HBLLM is a **human-brain-inspired, event-sourced Cognitive OS and homoiconic neu
 
 7. **General Intelligence Invariant (Task-Agnostic Core Directive):**
    > *"The core is general intelligence, never a single-task solver."*
-   `hbllm.hcir`, `hbllm.brain`, and `hbllm.runtime` must remain strictly domain-agnostic and task-agnostic. Never add dedicated puzzle/ARC-AGI solvers, game mechanics, or benchmark shortcuts inside `core/hbllm/`. Only the Spelke/active-inference innate priors cataloged in [`docs/architecture/priors.md`](docs/architecture/priors.md) are permitted in core; everything else must be learned in-environment. Single-task adapters belong strictly in `benchmarks/` or `plugins/`.
+   `hbllm.hcir` and `hbllm.runtime` must remain strictly domain-agnostic and task-agnostic. Never add dedicated puzzle/ARC-AGI solvers, game mechanics, or benchmark shortcuts inside `core/hbllm/`. Only the Spelke/active-inference innate priors cataloged in [`docs/architecture/priors.md`](docs/architecture/priors.md) are permitted in core; everything else must be learned in-environment. Single-task adapters belong strictly in `benchmarks/` or `plugins/`.
 
 8. **Internal Memory Governance Invariant (No Ad-Hoc Attribute Sprawl):**
    > *"Never attach ad-hoc tracking attributes or monkey-patched state to engine instances."*
@@ -210,7 +210,7 @@ for act_word in ("push", "move", "grab", "pull"):
 
 1. **No Single-Task Solvers or Game Hacks in Core:** Never insert task-specific heuristics or ARC-AGI solvers into `core/hbllm/`.
 2. **No Direct SQLite / DB Queries:** Never call `sqlite3.connect` / `aiosqlite.connect` outside `stores/`, `persistence/`, or `security/`. Route through `HCIRMemoryBackend` / `TieredWorkspace`.
-3. **No External LLM Imports in Core:** Never import `openai`, `anthropic`, `litellm`, `transformers`, `plugins.llm_scaffold`, or `hbllm.serving.provider` inside `hbllm/hcir/**` or `hbllm/brain/reasoning/`.
+3. **No External LLM Imports in Core:** Never import `openai`, `anthropic`, `litellm`, `transformers`, `plugins.llm_scaffold`, or `hbllm.serving.provider` inside `hbllm/hcir/**`.
 4. **No Bypassing `ConstitutionalVerifier`:** Never commit unvalidated state or instantiate production `TransactionManager(..., verification_stages=[])`.
 5. **No Monkey-Patching / Band-Aid Fixes:** Always upgrade toward [ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) and the [Migration Plan](docs/architecture/homoiconic-vm-migration-plan.md).
 6. **No Ad-Hoc Engine Attributes:** Never add `_last_*` or `_feedback_assimilated` fields on `AutonomousEpistemicEngine` or `view.state` (Rule 1.8).
@@ -251,7 +251,7 @@ HBLLM/core/
 │   │   ├── snn/                     # LIF, STDP, STP, WTA, oscillations, perception
 │   │   └── capabilities/            # Curiosity, BeliefConflictResolver, sandboxed executors
 │   ├── runtime/bootstrap.py         # Single composition root (build_cognitive_system)
-│   ├── drivers/cognitive_blackbox.py, brain/, native/, network/, security/
+│   ├── drivers/cognitive_blackbox.py, runtime/, native/, network/, security/
 │   └── serving/                     # FastAPI/MCP server + per-tenant CognitiveSystemRegistry
 ├── rust/, plugins/, benchmarks/suites/, graphify-out/, tests/
 └── docs/

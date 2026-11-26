@@ -9,11 +9,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hbllm.brain.snn.perception.audio_ensemble import (
+from hbllm.hcir.snn.perception.audio_ensemble import (
     AudioPerceptionEnsemble,
 )
-from hbllm.brain.snn.perception.audio_signals import AudioSignals, extract_audio_signals
-from hbllm.brain.snn.perception.gate import (
+from hbllm.hcir.snn.perception.audio_signals import AudioSignals, extract_audio_signals
+from hbllm.hcir.snn.perception.gate import (
     PerceptionEventType,
     PerceptionProcessingLevel,
 )

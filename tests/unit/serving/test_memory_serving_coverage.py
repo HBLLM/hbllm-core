@@ -286,25 +286,6 @@ class TestActionsNodes:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# brain/autonomy (loop.py, task_graph.py)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestBrainAutonomyDeep:
-    def test_loop_import(self):
-        from hbllm.brain.autonomy import loop
-
-        exports = [x for x in dir(loop) if not x.startswith("_") and x[0].isupper()]
-        assert len(exports) > 0
-
-    def test_task_graph_import(self):
-        from hbllm.brain.autonomy import task_graph
-
-        exports = [x for x in dir(task_graph) if not x.startswith("_") and x[0].isupper()]
-        assert len(exports) > 0
-
-
-# ═══════════════════════════════════════════════════════════════════════
 # benchmarks/runner.py
 # ═══════════════════════════════════════════════════════════════════════
 

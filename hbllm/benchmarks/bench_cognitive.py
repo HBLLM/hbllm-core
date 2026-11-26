@@ -12,7 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import statistics
 import time
@@ -53,7 +52,7 @@ class CognitiveBenchmark:
     async def _bench_comprehension_ensemble(self, report: BenchmarkReport) -> None:
         """Benchmark the 5-channel SNN ensemble step() latency."""
         try:
-            from hbllm.brain.snn.comprehension import ComprehensionEnsemble
+            from hbllm.hcir.snn.comprehension import ComprehensionEnsemble
 
             ensemble = ComprehensionEnsemble(domain="general")
 
@@ -109,7 +108,7 @@ class CognitiveBenchmark:
     async def _bench_comprehension_stream(self, report: BenchmarkReport) -> None:
         """Benchmark full ComprehensionStream.comprehend() latency."""
         try:
-            from hbllm.brain.snn.comprehension import (
+            from hbllm.hcir.snn.comprehension import (
                 ComprehensionEnsemble,
                 ComprehensionStream,
                 LexicalBuffer,
@@ -173,44 +172,32 @@ class CognitiveBenchmark:
             )
 
     async def _bench_thought_planner(self, report: BenchmarkReport) -> None:
-        """Benchmark ThoughtPlanner symbolic outline generation."""
+        """Benchmark MultilingualLanguageRuntime instruction grounding latency."""
         try:
-            from hbllm.brain.snn.comprehension.models import UnderstandingState
-            from hbllm.brain.snn.expression import ThoughtPlanner
+            from hbllm.hcir.graph import CognitiveGraph
+            from hbllm.hcir.language.runtime import MultilingualLanguageRuntime
 
-            planner = ThoughtPlanner(
-                base_token_budget=512,
-                constraint_expansion=True,
-                min_salience_for_goal=0.3,
-            )
-
-            # Create a mock UnderstandingState
-            state = UnderstandingState(
-                concepts=[],
-                domain_activations={"coding": 0.8, "general": 0.2},
-                salience_map=[0.9, 0.85, 0.7],
-            )
-
+            lang_runtime = MultilingualLanguageRuntime(graph=CognitiveGraph())
             latencies = []
-            for _ in range(100):
+            for _ in range(50):
                 t0 = time.perf_counter()
-                goals = planner.plan(state)
+                turn = lang_runtime.process_utterance("Move toward the green door")
                 latencies.append((time.perf_counter() - t0) * 1000)
 
             report.add(
                 BenchmarkResult(
-                    name="ThoughtPlanner.plan() avg",
+                    name="MultilingualLanguageRuntime.process_utterance() avg",
                     metric="planner_avg",
                     value=statistics.mean(latencies),
                     unit="ms",
-                    metadata={"goals_generated": len(goals), "trials": 100},
+                    metadata={"parsed": bool(turn.is_success), "trials": 50},
                 )
             )
         except Exception as e:
-            logger.warning("ThoughtPlanner benchmark skipped: %s", e)
+            logger.warning("MultilingualLanguageRuntime benchmark skipped: %s", e)
             report.add(
                 BenchmarkResult(
-                    name="ThoughtPlanner (skipped)",
+                    name="MultilingualLanguageRuntime (skipped)",
                     metric="planner_avg",
                     value=0,
                     unit="ms",
@@ -219,100 +206,34 @@ class CognitiveBenchmark:
             )
 
     async def _bench_expression_tiers(self, report: BenchmarkReport) -> None:
-        """Compare token counts across expression rendering tiers."""
+        """Benchmark HCIRInterpreter bytecode execution latency."""
         try:
-            from hbllm.brain.snn.expression import (
-                ExpressionStream,
-                RewardEvaluator,
-                ThoughtController,
-                ThoughtPlanner,
+            from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
+            from hbllm.hcir.interpreter import HCIRInterpreter
+            from hbllm.hcir.kernel.services import KernelServices
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            ws = HCIRWorkspaceState()
+            services = KernelServices.create_default(workspace=ws)
+            interp = HCIRInterpreter(services=services, workspace=ws)
+            stream = InstructionStream(
+                author="bench",
+                instructions=[
+                    Instruction(opcode=Opcode.QUERY, params={"node_type": "concept"}),
+                    Instruction(opcode=Opcode.RETURN, params={"yield": ["$r0"]}),
+                ],
             )
-
-            planner = ThoughtPlanner(base_token_budget=512)
-            controller = ThoughtController(readiness_threshold=0.6)
-            evaluator = RewardEvaluator(min_acceptable_reward=0.4)
-
-            # Mock LLM to measure planning overhead only
-            call_count = 0
-
-            async def mock_llm(prompt: str) -> str:
-                nonlocal call_count
-                call_count += 1
-                return f"This is a mock response for the prompt about {prompt[:30]}."
-
-            stream = ExpressionStream(
-                planner=planner,
-                controller=controller,
-                evaluator=evaluator,
-                llm_generate=mock_llm,
-                max_revisions=1,
-                enable_gating=True,
-            )
-
-            # Measure overhead of the expression pipeline (excluding LLM time)
-            latencies = []
-            for _ in range(20):
-                call_count = 0
-                t0 = time.perf_counter()
-                try:
-                    await asyncio.wait_for(
-                        stream.express(
-                            understanding=None,
-                            base_thought="Write a function",
-                            original_query="Write a function",
-                        ),
-                        timeout=2.0,
-                    )
-                except (asyncio.TimeoutError, Exception):
-                    pass
-                latencies.append((time.perf_counter() - t0) * 1000)
-
+            t0 = time.perf_counter()
+            res = await interp.execute(stream)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
             report.add(
                 BenchmarkResult(
-                    name="ExpressionStream.express() overhead",
-                    metric="expression_overhead",
-                    value=statistics.mean(latencies),
+                    name="HCIRInterpreter VM execution",
+                    metric="vm_exec_ms",
+                    value=elapsed_ms,
                     unit="ms",
-                    metadata={"llm_calls": call_count, "trials": 20},
-                )
-            )
-
-            # Report tier token budgets (architectural constants)
-            report.add(
-                BenchmarkResult(
-                    name="Token budget: Broca (v4)",
-                    metric="tokens_broca",
-                    value=80,
-                    unit="tokens",
-                    metadata={"description": "SNN decides content, LLM is grammar-only"},
-                )
-            )
-            report.add(
-                BenchmarkResult(
-                    name="Token budget: Shallow (v3)",
-                    metric="tokens_shallow",
-                    value=300,
-                    unit="tokens",
-                    metadata={"description": "SNN reasons, LLM renders text"},
-                )
-            )
-            report.add(
-                BenchmarkResult(
-                    name="Token budget: Deep (v1-v2)",
-                    metric="tokens_deep",
-                    value=600,
-                    unit="tokens",
-                    metadata={"description": "LLM handles everything"},
+                    metadata={"success": res.success},
                 )
             )
         except Exception as e:
-            logger.warning("ExpressionStream benchmark skipped: %s", e)
-            report.add(
-                BenchmarkResult(
-                    name="ExpressionStream (skipped)",
-                    metric="expression_overhead",
-                    value=0,
-                    unit="ms",
-                    metadata={"error": str(e)},
-                )
-            )
+            logger.warning("HCIRInterpreter benchmark skipped: %s", e)

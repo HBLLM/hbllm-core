@@ -85,3 +85,75 @@ class AutonomyTracker:
             "rejected_lessons": self.rejected_lessons,
             "can_retire_llm": self.can_retire_llm,
         }
+
+
+@dataclass(frozen=True)
+class CalibrationReport:
+    """Empirical confidence calibration metrics over binned predictions."""
+
+    domain: str
+    expected_calibration_error: float
+    brier_score: float
+    overconfidence_count: int
+    underconfidence_count: int
+    sample_count: int
+
+    @property
+    def is_well_calibrated(self) -> bool:
+        return self.expected_calibration_error < 0.05
+
+
+class EpistemicCalibrator:
+    """Computes Expected Calibration Error (ECE) and Brier score across predictions."""
+
+    def __init__(self, num_bins: int = 10) -> None:
+        self.num_bins = max(1, num_bins)
+
+    def evaluate_calibration(
+        self,
+        domain: str,
+        predicted_confidences: list[float],
+        actual_outcomes: list[bool],
+    ) -> CalibrationReport:
+        n = min(len(predicted_confidences), len(actual_outcomes))
+        if n == 0:
+            return CalibrationReport(
+                domain=domain,
+                expected_calibration_error=0.0,
+                brier_score=0.0,
+                overconfidence_count=0,
+                underconfidence_count=0,
+                sample_count=0,
+            )
+
+        pairs = list(zip(predicted_confidences[:n], actual_outcomes[:n]))
+        brier = round(
+            sum((float(p) - (1.0 if a else 0.0)) ** 2 for p, a in pairs) / n,
+            4,
+        )
+
+        ece = 0.0
+        for b in range(self.num_bins):
+            b_min = b / self.num_bins
+            b_max = (b + 1) / self.num_bins
+            if b == self.num_bins - 1:
+                bin_items = [(float(p), a) for p, a in pairs if b_min <= float(p) <= b_max]
+            else:
+                bin_items = [(float(p), a) for p, a in pairs if b_min <= float(p) < b_max]
+            if not bin_items:
+                continue
+            bin_size = len(bin_items)
+            avg_conf = sum(p for p, _ in bin_items) / bin_size
+            avg_acc = sum(1.0 if a else 0.0 for _, a in bin_items) / bin_size
+            ece += (bin_size / n) * abs(avg_acc - avg_conf)
+
+        overconfidence = sum(1 for p, a in pairs if float(p) >= 0.80 and not a)
+        underconfidence = sum(1 for p, a in pairs if float(p) <= 0.20 and a)
+        return CalibrationReport(
+            domain=domain,
+            expected_calibration_error=round(ece, 4),
+            brier_score=brier,
+            overconfidence_count=overconfidence,
+            underconfidence_count=underconfidence,
+            sample_count=n,
+        )

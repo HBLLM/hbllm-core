@@ -8,7 +8,7 @@ import asyncio
 
 import pytest
 
-from hbllm.brain.snn import LIFConfig
+from hbllm.hcir.snn import LIFConfig
 from hbllm.memory.priming import WorkingMemoryPrimer
 from hbllm.memory.semantic import SemanticMemory
 from hbllm.network.metrics import MetricsCollector

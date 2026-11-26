@@ -38,9 +38,11 @@ _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from hbllm.brain.self_model.calibrator import EpistemicCalibrator  # noqa: E402
 from hbllm.hcir.capabilities.web_capabilities import is_safe_url  # noqa: E402
-from hbllm.hcir.kernel.autonomy_tracker import AutonomyTracker  # noqa: E402
+from hbllm.hcir.kernel.autonomy_tracker import (  # noqa: E402
+    AutonomyTracker,
+    EpistemicCalibrator,
+)
 from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system  # noqa: E402
 
 

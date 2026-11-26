@@ -1,86 +1,74 @@
 #!/usr/bin/env python3
 """
-Standalone HBLLM Core Example
-==============================
+Standalone Pure-HCIR Core Example
+=================================
 
-Demonstrates using the HBLLM core library without Sentra. This proves
-the decoupled architecture works independently.
-
-Requires:
-  - OPENAI_API_KEY env var (or replace with another provider)
+Demonstrates using the HBLLM Pure-HCIR cognitive runtime without Sentra.
 
 Usage:
     cd core
-    ./venv/bin/python examples/standalone_brain.py
+    ./.venv/bin/python examples/standalone_brain.py
 """
 
-import asyncio
+from __future__ import annotations
+
 import logging
+import tempfile
+from pathlib import Path
+
+from hbllm.hcir.graph import ConceptNode
+from hbllm.hcir.kernel.transaction_manager import (
+    TransactionManager,
+    TransactionOp,
+    TransactionOperation,
+)
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
 logging.basicConfig(level=logging.INFO, format="%(name)s | %(message)s")
 logger = logging.getLogger("standalone")
 
 
-async def main() -> None:
-    from hbllm.brain.core.factory import BrainConfig, BrainFactory
-
-    # ── Configuration ─────────────────────────────────────────────────
-    # All subsystems are opt-in via inject_* flags.
-    # Defaults are sensible — this config only overrides what's needed.
-    config = BrainConfig(
-        data_dir="/tmp/hbllm_standalone",
-        system_prompt="You are a helpful AI assistant powered by HBLLM core.",
-        inject_knowledge=True,  # Enables KnowledgeBase
-        inject_persistence=True,  # Enables BrainState (SQLite KV)
-        inject_awareness=True,  # Enables CognitiveAwareness (bus monitoring)
-        inject_plugins=True,  # Enables PluginManager
-        inject_evaluation=True,  # Enables EvaluationNode (quality feedback)
-        inject_reflection=True,  # Enables ReflectionNode (batch learning)
-    )
-
-    # ── Create Brain ──────────────────────────────────────────────────
-    # BrainFactory wires everything: nodes, bus, subsystems.
-    brain = await BrainFactory.create(
-        provider="openai/gpt-4o-mini",  # Or "anthropic", "ollama/llama3", etc.
-        config=config,
-    )
-
-    logger.info("Brain created with %d nodes", len(brain.nodes))
-    logger.info("Node types: %s", [type(n).__name__ for n in brain.nodes])
-
-    # ── Subsystem Access ──────────────────────────────────────────────
-    # All subsystems are available as brain attributes.
-    logger.info("KnowledgeBase: %s", brain.knowledge_base)
-    logger.info("BrainState: %s", brain.state)
-    logger.info("Awareness: %s", brain.awareness)
-    logger.info("PluginManager: %s", brain.plugin_manager)
-
-    # ── Use BrainState (KV persistence) ───────────────────────────────
-    if brain.state:
-        brain.state.save("demo_key", "hello from standalone!")
-        value = brain.state.load("demo_key")
-        logger.info("BrainState: saved and loaded '%s'", value)
-
-    # ── Use KnowledgeBase ─────────────────────────────────────────────
-    if brain.knowledge_base:
-        stats = brain.knowledge_base.get_stats()
-        logger.info("KnowledgeBase stats: %s", stats)
-
-    # ── Query the Brain ───────────────────────────────────────────────
-    response = await brain.query("What is HBLLM?")
-    logger.info("Response: %s", response.content[:200])
-
-    # ── Check Awareness ───────────────────────────────────────────────
-    if brain.awareness:
-        snap = brain.awareness.snapshot()
-        logger.info(
-            "Awareness snapshot: queries=%d, sessions=%d", snap.queries_total, snap.active_sessions
+def main() -> None:
+    with tempfile.TemporaryDirectory(prefix="hbllm_standalone_") as tmp_dir:
+        system = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id="standalone_demo",
+                memory_dir=Path(tmp_dir),
+                enable_grounding=False,
+                enable_brain_llm=False,
+                enable_autonomous_curiosity=False,
+            )
         )
+        try:
+            node = ConceptNode(
+                id="concept_hbllm",
+                label="HBLLM",
+                definition="A human-brain-inspired neuro-symbolic Cognitive OS over HCIR.",
+                domain="architecture",
+            )
+            tx = TransactionManager(system.tiered_workspace.persistent)
+            tx.commit_operations(
+                [
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE,
+                        node_id=node.id,
+                        node_data=node.model_dump(),
+                    )
+                ],
+                author="standalone_demo",
+            )
 
-    # ── Shutdown ──────────────────────────────────────────────────────
-    await brain.stop()
-    logger.info("Brain stopped cleanly.")
+            result = system.process_dialogue("Explain HBLLM")
+            logger.info("Response: %s", (result.response_text or "")[:200])
+            logger.info(
+                "Workspace persistent nodes: %d",
+                system.tiered_workspace.persistent.graph.node_count,
+            )
+        finally:
+            ont_store = system.services.extensions.get("ontology_store")
+            if ont_store is not None and hasattr(ont_store, "close"):
+                ont_store.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

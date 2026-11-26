@@ -19,12 +19,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from hbllm.brain.snn.perception.gate import (
+from hbllm.hcir.snn.perception.gate import (
     PerceptionGateDecision,
     PerceptionProcessingLevel,
 )
-from hbllm.brain.snn.perception.visual_ensemble import PerceptionEnsemble
-from hbllm.brain.snn.perception.visual_signals import (
+from hbllm.hcir.snn.perception.visual_ensemble import PerceptionEnsemble
+from hbllm.hcir.snn.perception.visual_signals import (
     VisualSignalExtractor,
     VisualSignals,
 )

@@ -15,15 +15,15 @@ import logging
 from typing import Any
 
 from hbllm.actions import CausalObstacleResolver, TopologicalFrontierNavigator
-from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
-from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
-from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.hcir.graph import (
     ActionNode,
     CognitiveGraph,
     EntityLifecycle,
     PhysicalEntityNode,
 )
+from hbllm.hcir.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.hcir.reasoning.operators.registry import create_default_operator_registry
+from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.perception import EpistemicSpatialGrid
 
 from .types import (

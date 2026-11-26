@@ -23,7 +23,7 @@ from typing import Any
 
 import torch
 
-from hbllm.brain.skills.skill_registry import SkillRegistry
+from hbllm.hcir.skills.skill_store import HCIRSkillStore
 from hbllm.memory.concept_extractor import ConceptExtractor
 from hbllm.model.transformer import HBLLMForCausalLM
 from hbllm.training.knowledge_graph_builder import KnowledgeGraphBuilder
@@ -146,7 +146,7 @@ class CognitiveTrainer:
             self.concept_extractor = None
 
         if cognitive_config.detect_skills:
-            self.skill_registry: SkillRegistry | None = SkillRegistry(
+            self.skill_registry: HCIRSkillStore | None = HCIRSkillStore(
                 data_dir=str(self.output_dir),
             )
         else:

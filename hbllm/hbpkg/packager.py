@@ -385,9 +385,7 @@ class Packager:
         """Register all capability declarations from the manifest."""
         count = 0
         try:
-            from hbllm.brain.planning.semantic_capability_registry import (
-                CapabilityDescriptor,
-            )
+            from hbllm.hcir.kernel.capability_resolver import CapabilityDescriptor
 
             for cap in manifest.capabilities:
                 descriptor = CapabilityDescriptor(

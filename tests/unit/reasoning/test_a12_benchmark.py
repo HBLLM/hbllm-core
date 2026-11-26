@@ -46,29 +46,6 @@ from __future__ import annotations
 
 import time
 
-from hbllm.brain.reasoning.operators.abduction import AbductionOperator
-from hbllm.brain.reasoning.operators.analogy import AnalogyOperator
-from hbllm.brain.reasoning.operators.base import (
-    OperatorTrace,
-    ProblemType,
-    ReasoningOperator,
-    ReasoningProblem,
-    ResultStatus,
-)
-from hbllm.brain.reasoning.operators.causal import CausalOperator
-from hbllm.brain.reasoning.operators.contradiction import ContradictionOperator
-from hbllm.brain.reasoning.operators.counterfactual import CounterfactualOperator
-from hbllm.brain.reasoning.operators.deduction import DeductionOperator
-from hbllm.brain.reasoning.operators.induction import InductionOperator
-from hbllm.brain.reasoning.operators.prediction import PredictionOperator
-from hbllm.brain.reasoning.operators.registry import OperatorRegistry
-from hbllm.brain.reasoning.operators.simulation import SimulationOperator
-from hbllm.brain.reasoning.operators.snn_reasoning import SNNReasoningOperator
-from hbllm.brain.reasoning.operators.spatial import SpatialOperator
-from hbllm.brain.reasoning.operators.temporal import TemporalOperator
-from hbllm.brain.reasoning.unified_runtime import (
-    UnifiedReasoningRuntime,
-)
 from hbllm.hcir.graph import (
     NODE_TYPE_REGISTRY,
     BeliefNode,
@@ -81,6 +58,29 @@ from hbllm.hcir.graph import (
     PhysicalEntityNode,
     PredictionErrorNode,
     PredictionNode,
+)
+from hbllm.hcir.reasoning.operators.abduction import AbductionOperator
+from hbllm.hcir.reasoning.operators.analogy import AnalogyOperator
+from hbllm.hcir.reasoning.operators.base import (
+    OperatorTrace,
+    ProblemType,
+    ReasoningOperator,
+    ReasoningProblem,
+    ResultStatus,
+)
+from hbllm.hcir.reasoning.operators.causal import CausalOperator
+from hbllm.hcir.reasoning.operators.contradiction import ContradictionOperator
+from hbllm.hcir.reasoning.operators.counterfactual import CounterfactualOperator
+from hbllm.hcir.reasoning.operators.deduction import DeductionOperator
+from hbllm.hcir.reasoning.operators.induction import InductionOperator
+from hbllm.hcir.reasoning.operators.prediction import PredictionOperator
+from hbllm.hcir.reasoning.operators.registry import OperatorRegistry
+from hbllm.hcir.reasoning.operators.simulation import SimulationOperator
+from hbllm.hcir.reasoning.operators.snn_reasoning import SNNReasoningOperator
+from hbllm.hcir.reasoning.operators.spatial import SpatialOperator
+from hbllm.hcir.reasoning.operators.temporal import TemporalOperator
+from hbllm.hcir.reasoning.unified_runtime import (
+    UnifiedReasoningRuntime,
 )
 from hbllm.hcir.transactions import TransactionOp
 from hbllm.hcir.types import UncertaintyVector
@@ -742,8 +742,8 @@ class TestZeroLLMCalls:
 
         check_code = """
 import sys
-import hbllm.brain.reasoning.unified_runtime
-import hbllm.brain.reasoning.operators.registry
+import hbllm.hcir.reasoning.unified_runtime
+import hbllm.hcir.reasoning.operators.registry
 
 llm_modules = [
     name

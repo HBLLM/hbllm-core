@@ -11,16 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from hbllm.brain.core.provider_adapter import ProviderLLM
 
-
-class MockLLM(ProviderLLM):
+class MockLLM:
     """
     Deterministic LLM stand-in for unit tests.
 
-    Extends ProviderLLM for type compatibility with brain nodes that
-    declare ``llm: ProviderLLM | None``. Overrides generate/generate_json
-    with keyword-matched deterministic responses.
+    Overrides generate/generate_json with keyword-matched deterministic responses.
     """
 
     def __init__(self, overrides: dict[str, Any] | None = None):

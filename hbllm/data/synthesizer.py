@@ -45,7 +45,7 @@ class DataSynthesizer:
         self._llm: Any = None
 
     def _get_llm(self) -> Any:
-        """Lazily construct LLMInterface from model + tokenizer."""
+        """Lazily construct local generation interface from model + tokenizer."""
         if self._llm is not None:
             return self._llm
 
@@ -53,12 +53,69 @@ class DataSynthesizer:
             return None
 
         try:
-            from hbllm.brain.core.llm_interface import LLMInterface
+            device = next(self.model.parameters()).device
 
-            self._llm = LLMInterface(self.model, self.tokenizer)
+            class _LocalModelGenerator:
+                def __init__(self, model: Any, tokenizer: Any, dev: Any) -> None:
+                    self.model = model
+                    self.tokenizer = tokenizer
+                    self.device = dev
+
+                async def generate(
+                    self,
+                    prompt: str,
+                    max_tokens: int = 256,
+                    temperature: float = 0.7,
+                ) -> str:
+                    import asyncio
+
+                    import torch
+
+                    def _run_sync() -> str:
+                        enc = self.tokenizer.encode(prompt)
+                        if hasattr(enc, "ids"):
+                            enc = enc.ids
+                        input_ids = torch.tensor([enc], dtype=torch.long).to(self.device)
+                        self.model.eval()
+                        past_key_values = None
+                        tokens: list[str] = []
+                        with torch.no_grad():
+                            for _ in range(max_tokens):
+                                model_input = input_ids[:, -1:] if past_key_values else input_ids
+                                outputs = self.model(
+                                    model_input, past_key_values=past_key_values, use_cache=True
+                                )
+                                logits = outputs["logits"][:, -1, :]
+                                past_key_values = outputs.get("past_key_values")
+                                if temperature > 0:
+                                    probs = torch.softmax(logits / temperature, dim=-1)
+                                    next_token = int(torch.multinomial(probs, num_samples=1).item())
+                                else:
+                                    next_token = int(logits.argmax().item())
+                                input_ids = torch.cat(
+                                    [input_ids, torch.tensor([[next_token]], device=self.device)],
+                                    dim=1,
+                                )
+                                if hasattr(self.tokenizer, "decode_to_string"):
+                                    tokens.append(
+                                        str(self.tokenizer.decode_to_string([next_token]))
+                                    )
+                                else:
+                                    tokens.append(
+                                        str(
+                                            self.tokenizer.decode(
+                                                [next_token], skip_special_tokens=True
+                                            )
+                                        )
+                                    )
+                        return "".join(tokens)
+
+                    return await asyncio.to_thread(_run_sync)
+
+            self._llm = _LocalModelGenerator(self.model, self.tokenizer, device)
             return self._llm
         except (ImportError, RuntimeError, AttributeError) as e:
-            logger.warning("Could not initialize LLMInterface: %s", e)
+            logger.warning("Could not initialize local generator: %s", e)
             return None
 
     def generate_dataset(

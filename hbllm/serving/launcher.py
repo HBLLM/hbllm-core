@@ -1,17 +1,7 @@
 """
-Multi-Server Launcher — boots HBLLM nodes from cluster.yaml.
+Multi-Server Launcher — boots HBLLM HCIR Cognitive OS and memory/domain nodes.
 
-Supports two modes:
-  1. Single-server (--server all): boots everything in one process with InProcessBus
-  2. Multi-server (--server <role>): boots only that role's nodes with RedisBus
-
-Usage:
-  # Single-server (local dev / testing)
-  python -m hbllm.serving.launcher --server all
-
-  # Multi-server (production — run on each machine)
-  python -m hbllm.serving.launcher --server gateway --config config/cluster.yaml
-  python -m hbllm.serving.launcher --server domain_math --config config/cluster.yaml
+Supports single-server (--server all, InProcessBus) and multi-server (--server <role>, RedisBus).
 """
 
 from __future__ import annotations
@@ -21,31 +11,81 @@ import asyncio
 import logging
 import signal
 import sys
+from typing import Any
 
 from hbllm.network.bus import InProcessBus, MessageBus
 from hbllm.network.circuit_breaker import CircuitBreakerRegistry
 from hbllm.network.cluster_config import ClusterConfig, load_cluster_config
 from hbllm.network.health import HealthMonitor
 from hbllm.network.load_balancer import LoadBalancer
-from hbllm.network.node import Node
+from hbllm.network.messages import Message, MessageType
+from hbllm.network.node import Node, NodeType
 from hbllm.network.registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
 
 
-# ─── Node Factory ─────────────────────────────────────────────────────────────
-# Maps node ID strings from cluster.yaml to actual Node instances.
+class HCIRCognitiveNode(Node):
+    """Distributed bus node hosting a canonical Pure-HCIR ``CognitiveSystem``."""
+
+    def __init__(self, node_id: str = "hcir") -> None:
+        super().__init__(
+            node_id=node_id,
+            node_type=NodeType.CORE,
+            capabilities=["hcir", "reasoning", "dialogue", "planning"],
+        )
+        self._system: Any = None
+        self._sub_query: Any = None
+        self._sub_workspace: Any = None
+
+    async def on_start(self) -> None:
+        from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+
+        self._system = build_cognitive_system(
+            CognitiveSystemConfig(world_id=f"node_{self.node_id}", memory_dir=None)
+        )
+        if self._system.runtime is not None:
+            await self._system.runtime.start()
+        self._sub_query = await self.bus.subscribe("router.query", self.handle_message)
+        self._sub_workspace = await self.bus.subscribe("workspace.update", self.handle_message)
+
+    async def on_stop(self) -> None:
+        if self._sub_query is not None:
+            await self.bus.unsubscribe(self._sub_query)
+        if self._sub_workspace is not None:
+            await self.bus.unsubscribe(self._sub_workspace)
+        if self._system is not None and getattr(self._system, "runtime", None) is not None:
+            await self._system.runtime.stop()
+
+    async def handle_message(self, message: Message) -> Message | None:
+        if self._system is None:
+            return None
+        text = str(message.payload.get("text", "") or "")
+        if not text:
+            return None
+        result = await asyncio.to_thread(
+            self._system.process_dialogue,
+            text,
+            speaker_id=message.source_node_id or "human",
+        )
+        resp_text = str(getattr(result, "response_text", "") or "")
+        await self.bus.publish(
+            "sensory.output",
+            Message(
+                type=MessageType.EVENT,
+                source_node_id=self.node_id,
+                tenant_id=message.tenant_id,
+                session_id=message.session_id,
+                correlation_id=message.correlation_id,
+                topic="sensory.output",
+                payload={"text": resp_text, "source": f"hcir:{self.node_id}"},
+            ),
+        )
+        return message.create_response({"text": resp_text, "source": f"hcir:{self.node_id}"})
 
 
 def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
-    """
-    Create a Node instance from its ID string.
-
-    Supports:
-      - Standard node IDs (router, workspace, planner, etc.)
-      - Domain modules:  domain:<name> (e.g. domain:math)
-    """
-    # Domain module: domain:<name>
+    """Create a Node instance from its ID string."""
     if node_id.startswith("domain:"):
         domain_name = node_id.split(":", 1)[1]
         from hbllm.modules.base_module import DomainModuleNode
@@ -57,56 +97,37 @@ def _create_node(node_id: str, config: ClusterConfig) -> Node | None:
             tokenizer=None,
         )
 
-    # Standard nodes
-    node_map: dict[str, tuple[str, str]] = {
-        # node_id → (module_path, class_name)
-        "router": ("hbllm.brain.control.router_node", "RouterNode"),
-        "workspace": ("hbllm.brain.planning.workspace_node", "WorkspaceNode"),
-        "planner": ("hbllm.brain.planning.planner_node", "PlannerNode"),
-        "critic": ("hbllm.brain.evaluation.critic_node", "CriticNode"),
-        "decision": ("hbllm.brain.control.decision_node", "DecisionNode"),
-        "meta": ("hbllm.brain.self_model.meta_node", "MetaReasoningNode"),
-        "identity": ("hbllm.brain.social.identity_node", "IdentityNode"),
-        "curiosity": ("hbllm.brain.emotion.curiosity_node", "CuriosityNode"),
-        "collective": ("hbllm.brain.world.collective_node", "CollectiveNode"),
-        "learner": ("hbllm.brain.learning.learner_node", "LearnerNode"),
-        "sleep_cycle": ("hbllm.brain.emotion.sleep_node", "SleepCycleNode"),
-        "world_model": ("hbllm.brain.world.world_model_node", "WorldModelNode"),
-        "memory": ("hbllm.memory.memory_node", "MemoryNode"),
+    if node_id == "memory":
+        from hbllm.memory.memory_node import MemoryNode
+
+        return MemoryNode(node_id=node_id)
+
+    hcir_roles = {
+        "hcir",
+        "router",
+        "workspace",
+        "planner",
+        "critic",
+        "decision",
+        "meta",
+        "identity",
+        "curiosity",
+        "collective",
+        "learner",
+        "sleep_cycle",
+        "world_model",
     }
+    if node_id in hcir_roles:
+        return HCIRCognitiveNode(node_id=node_id)
 
-    if node_id not in node_map:
-        logger.warning("Unknown node ID '%s' — skipping", node_id)
-        return None
-
-    module_path, class_name = node_map[node_id]
-
-    try:
-        import importlib
-
-        module = importlib.import_module(module_path)
-        node_class = getattr(module, class_name)
-        from typing import cast
-
-        return cast(Node, node_class(node_id=node_id))
-    except Exception as e:
-        logger.error("Failed to create node '%s': %s", node_id, e)
-        return None
-
-
-# ─── Server Bootstrap ─────────────────────────────────────────────────────────
+    logger.warning("Unknown node ID '%s' — skipping", node_id)
+    return None
 
 
 class ServerInstance:
-    """
-    A running HBLLM server instance — manages bus, registry, nodes, and lifecycle.
-    """
+    """A running HBLLM server instance — manages bus, registry, nodes, and lifecycle."""
 
-    def __init__(
-        self,
-        server_name: str,
-        config: ClusterConfig,
-    ):
+    def __init__(self, server_name: str, config: ClusterConfig) -> None:
         self.server_name = server_name
         self.config = config
         self.bus: MessageBus | None = None
@@ -126,14 +147,6 @@ class ServerInstance:
 
     async def start(self) -> None:
         """Boot the server: create bus, registry, nodes, and start everything."""
-        logger.info(
-            "Starting HBLLM server '%s' (cluster=%s, mode=%s)",
-            self.server_name,
-            self.config.cluster.name,
-            "single-server" if self.is_single_server else "multi-server",
-        )
-
-        # ── 1. Create bus ──
         if self.is_single_server:
             self.bus = InProcessBus()
         else:
@@ -143,7 +156,6 @@ class ServerInstance:
 
         await self.bus.start()
 
-        # ── 2. Create registry ──
         if self.is_single_server:
             self.registry = ServiceRegistry(
                 health_check_interval=self.config.node_defaults.heartbeat_interval,
@@ -158,7 +170,6 @@ class ServerInstance:
 
         await self.registry.start(self.bus)
 
-        # ── 3. Create load balancer ──
         self.load_balancer = LoadBalancer(
             registry=self.registry,
             circuit_breakers=self.circuit_breakers,
@@ -167,29 +178,12 @@ class ServerInstance:
             latency_weight=self.config.load_balancing.latency_weight,
         )
 
-        # ── 4. Determine which nodes to boot ──
         if self.is_single_server:
-            node_ids = self.config.get_all_nodes()
-            if not node_ids:
-                # No config — boot core nodes for local dev
-                node_ids = [
-                    "router",
-                    "workspace",
-                    "planner",
-                    "critic",
-                    "decision",
-                    "meta",
-                    "memory",
-                    "identity",
-                    "curiosity",
-                    "collective",
-                    "learner",
-                ]
+            node_ids = self.config.get_all_nodes() or ["hcir", "memory"]
         else:
             server_config = self.config.get_server(self.server_name)
             node_ids = server_config.nodes
 
-        # ── 5. Create and start nodes ──
         if self.bus is None:
             raise RuntimeError("MessageBus failed to initialize.")
 
@@ -200,11 +194,9 @@ class ServerInstance:
                     await node.start(self.bus)
                     await self.registry.register(node.get_info())
                     self.nodes.append(node)
-                    logger.info("Started node: %s", node.node_id)
                 except Exception as e:
                     logger.error("Failed to start node '%s': %s", node_id, e)
 
-        # ── 6. Start health monitor ──
         self.health_monitor = HealthMonitor(
             registry=self.registry,
             circuit_breakers=self.circuit_breakers,
@@ -212,42 +204,24 @@ class ServerInstance:
             check_interval=self.config.node_defaults.heartbeat_interval,
         )
         await self.health_monitor.start()
-
         self._running = True
-        logger.info(
-            "Server '%s' started with %d nodes",
-            self.server_name,
-            len(self.nodes),
-        )
 
     async def stop(self) -> None:
         """Gracefully shut down all nodes and infrastructure."""
-        logger.info("Stopping server '%s'...", self.server_name)
         self._running = False
-
-        # Stop health monitor
         if self.health_monitor:
             await self.health_monitor.stop()
-
-        # Stop nodes in reverse order
         for node in reversed(self.nodes):
             try:
                 if self.registry:
                     await self.registry.deregister(node.node_id)
                 await node.stop()
-                logger.info("Stopped node: %s", node.node_id)
             except Exception as e:
                 logger.error("Error stopping node '%s': %s", node.node_id, e)
-
-        # Stop registry
         if self.registry:
             await self.registry.stop()
-
-        # Stop bus
         if self.bus:
             await self.bus.stop()
-
-        logger.info("Server '%s' stopped", self.server_name)
 
     def summary(self) -> str:
         """Return a human-readable summary of this server instance."""
@@ -264,19 +238,14 @@ class ServerInstance:
         return "\n".join(lines)
 
 
-# ─── CLI Entry Point ──────────────────────────────────────────────────────────
-
-
 async def _run_server(server_name: str, config_path: str | None) -> None:
     config = load_cluster_config(config_path)
     server = ServerInstance(server_name, config)
 
-    # Graceful shutdown on SIGTERM/SIGINT
     loop = asyncio.get_running_loop()
     shutdown_event = asyncio.Event()
 
     def _signal_handler() -> None:
-        logger.info("Received shutdown signal")
         shutdown_event.set()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -284,39 +253,22 @@ async def _run_server(server_name: str, config_path: str | None) -> None:
 
     await server.start()
     print(server.summary())
-
-    # Wait until shutdown signal
     await shutdown_event.wait()
     await server.stop()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="HBLLM Multi-Server Launcher",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python -m hbllm.serving.launcher --server all
-  python -m hbllm.serving.launcher --server gateway --config config/cluster.yaml
-  python -m hbllm.serving.launcher --validate --config config/cluster.yaml
-  python -m hbllm.serving.launcher --list-nodes
-        """,
-    )
-    parser.add_argument(
-        "--server", "-s", default=None, help="Server role to boot, or 'all' for single-server"
-    )
-    parser.add_argument("--config", "-c", default=None, help="Path to cluster.yaml")
+    parser = argparse.ArgumentParser(description="HBLLM Multi-Server HCIR Launcher")
+    parser.add_argument("--server", "-s", default=None)
+    parser.add_argument("--config", "-c", default=None)
     parser.add_argument(
         "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
     )
-    parser.add_argument("--validate", action="store_true", help="Validate cluster config and exit")
-    parser.add_argument(
-        "--list-nodes", action="store_true", help="List available node types and exit"
-    )
-    parser.add_argument("--plugins", default=None, help="Path to plugins directory")
+    parser.add_argument("--validate", action="store_true")
+    parser.add_argument("--list-nodes", action="store_true")
+    parser.add_argument("--plugins", default=None)
 
     args = parser.parse_args()
-
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -339,18 +291,7 @@ Examples:
 def _handle_list_nodes() -> None:
     """Print all available node types."""
     node_map = {
-        "router": "RouterNode — LLM intent classification + routing",
-        "workspace": "WorkspaceNode — Global Workspace (blackboard)",
-        "planner": "PlannerNode — Graph-of-Thoughts DAG planner",
-        "critic": "CriticNode — Real-time thought evaluation",
-        "decision": "DecisionNode — Action gatekeeper + output",
-        "meta": "MetaReasoningNode — Strategy selection",
-        "identity": "IdentityNode — Persona + goals per tenant",
-        "curiosity": "CuriosityNode — Knowledge gap detection",
-        "collective": "CollectiveNode — Cross-instance sharing",
-        "learner": "LearnerNode — RLHF / DPO training loop",
-        "sleep_cycle": "SleepCycleNode — Memory consolidation",
-        "world_model": "WorldModelNode — Environment simulation",
+        "hcir": "HCIRCognitiveNode — Canonical Pure-HCIR Cognitive OS runtime",
         "memory": "MemoryNode — Episodic + semantic storage",
         "domain:<name>": "DomainModuleNode — Domain expert (e.g. domain:math)",
     }
@@ -364,40 +305,23 @@ def _handle_validate(config_path: str | None) -> None:
     """Validate cluster config and print report."""
     try:
         config = load_cluster_config(config_path)
-    except FileNotFoundError as e:
-        print(f"✗ Config file not found: {e}")
-        sys.exit(1)
     except Exception as e:
-        print(f"✗ Config parse error: {e}")
+        print(f"✗ Config error: {e}")
         sys.exit(1)
 
     errors = config.validate_topology()
-
-    print(f"╔══ Cluster Validation: {config.cluster.name} ══")
-    print(f"║ Redis:   {config.cluster.redis_url}")
-    print(f"║ Servers: {len(config.servers)}")
-    print(f"║ Nodes:   {len(config.get_all_nodes())}")
-
     all_nodes = config.get_all_nodes()
     import_ok = 0
     for node_id in all_nodes:
-        node = _create_node(node_id, config)
-        if node is not None:
+        if _create_node(node_id, config) is not None:
             import_ok += 1
         else:
             errors.append(f"Cannot import node: {node_id}")
 
-    print(f"║ Imports: {import_ok} ok, {len(all_nodes) - import_ok} failed")
-
+    print(f"Imports: {import_ok} ok, {len(all_nodes) - import_ok} failed")
     if errors:
-        print("║ ✗ ERRORS:")
-        for err in errors:
-            print(f"║   • {err}")
-        print("╚" + "═" * 50)
         sys.exit(1)
-    else:
-        print("║ ✓ Config is valid!")
-        print("╚" + "═" * 50)
+    print("Config is valid!")
 
 
 if __name__ == "__main__":

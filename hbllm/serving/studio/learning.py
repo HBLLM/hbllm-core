@@ -36,13 +36,10 @@ async def studio_learning() -> Any:
     node_map = get_node_map()
     result: dict[str, Any] = {"status": "active"}
 
-    # ── LearnerNode stats ──
-    from hbllm.brain.learning.learner_node import LearnerNode
-
+    # ── Learner / HCIR stats ──
     ln = node_map.get("LearnerNode")
-    if ln and isinstance(ln, LearnerNode):
+    if ln and hasattr(ln, "micro_learning_stats"):
         result["learner"] = ln.micro_learning_stats()
-        # DPO queue on disk
         dpo_queue_depth = 0
         dpo_preview: list[str] = []
         try:
@@ -51,7 +48,6 @@ async def studio_learning() -> Any:
                 with dpo_path.open() as f:
                     queue = json.load(f)
                     dpo_queue_depth = len(queue)
-                    # Preview: first 5 prompt prefixes
                     for entry in queue[:5]:
                         if isinstance(entry, (list, tuple)) and len(entry) > 0:
                             dpo_preview.append(str(entry[0])[:80])
@@ -59,29 +55,24 @@ async def studio_learning() -> Any:
             pass
         result["learner"]["dpo_queue_depth"] = dpo_queue_depth
         result["learner"]["dpo_queue_preview"] = dpo_preview
-        # Micro-learn queue preview
-        micro_queue = ln.get_micro_learn_queue()
+        micro_queue = ln.get_micro_learn_queue() if hasattr(ln, "get_micro_learn_queue") else []
         result["learner"]["micro_queue_preview"] = [
             {"query": item.get("query", "")[:80], "score": item.get("score", 0.0)}
             for item in micro_queue[:5]
         ]
     else:
-        result["learner"] = {"status": "not_found"}
+        result["learner"] = {"status": "hcir_ready"}
 
-    # ── EvaluationNode aggregate ──
-    from hbllm.brain.evaluation.evaluation_node import EvaluationNode
-
+    # ── Evaluation aggregate ──
     ev = node_map.get("EvaluationNode")
-    if ev and isinstance(ev, EvaluationNode):
+    if ev and hasattr(ev, "stats"):
         result["evaluation"] = ev.stats()
     else:
         result["evaluation"] = {"status": "not_found"}
 
-    # ── ReflectionNode insights ──
-    from hbllm.brain.emotion.reflection_node import ReflectionNode
-
+    # ── Reflection insights ──
     rn = node_map.get("ReflectionNode")
-    if rn and isinstance(rn, ReflectionNode):
+    if rn and hasattr(rn, "stats"):
         result["reflection"] = rn.stats()
     else:
         result["reflection"] = {"status": "not_found"}
@@ -176,15 +167,13 @@ async def studio_learning_trigger(request: Request) -> Any:
     await bus.publish("system.evaluation", eval_msg)
 
     # Determine what should happen based on score
-    from hbllm.brain.learning.learner_node import LearnerNode
-
     node_map = get_node_map()
     ln = node_map.get("LearnerNode")
     threshold_info = {}
-    if ln and isinstance(ln, LearnerNode):
+    if ln and hasattr(ln, "micro_learn_threshold"):
         threshold_info = {
             "micro_learn_threshold": ln.micro_learn_threshold,
-            "distillation_threshold": ln.distillation_threshold,
+            "distillation_threshold": getattr(ln, "distillation_threshold", 0.85),
         }
 
     expected_action = "no_action"

@@ -14,14 +14,6 @@ from typing import Any
 
 import pytest
 
-from hbllm.brain.governance.owner_rules import OwnerRuleStore
-from hbllm.brain.governance.policy_engine import (
-    Policy,
-    PolicyAction,
-    PolicyCondition,
-    PolicyEngine,
-    PolicyType,
-)
 from hbllm.hcir.graph import (
     CognitiveCategory,
     HCIRNode,
@@ -30,6 +22,14 @@ from hbllm.hcir.graph import (
 from hbllm.hcir.kernel.cognitive_kernel import CognitiveKernel
 from hbllm.hcir.kernel.governance.constitutional_verifier import ConstitutionalVerifier
 from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
+from hbllm.hcir.kernel.governance.policies.owner_rules import OwnerRuleStore
+from hbllm.hcir.kernel.governance.policies.policy_engine import (
+    Policy,
+    PolicyAction,
+    PolicyCondition,
+    PolicyEngine,
+    PolicyType,
+)
 from hbllm.hcir.transactions import (
     HCIRTransaction,
     TransactionOp,

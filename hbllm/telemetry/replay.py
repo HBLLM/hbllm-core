@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hbllm.brain.core.provenance import ProvenanceMetadata
+from hbllm.telemetry.provenance import ProvenanceMetadata
 
 logger = logging.getLogger(__name__)
 

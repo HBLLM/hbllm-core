@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from hbllm.brain.snn.oscillations import (
+from hbllm.hcir.snn.oscillations import (
     BandConfig,
     OscillationBand,
     OscillationManager,

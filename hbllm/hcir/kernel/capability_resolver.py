@@ -83,6 +83,27 @@ class PerformanceProfile:
 
 
 @dataclass
+class CapabilityDescriptor:
+    """Declarative metadata descriptor for external/plugin capabilities."""
+
+    name: str
+    provider_id: str
+    purpose: str = ""
+    prerequisites: list[str] = field(default_factory=list)
+    estimated_cost: float = 0.0
+    latency_ms: float = 1000.0
+    confidence: float = 0.5
+    required_permissions: list[str] = field(default_factory=list)
+    side_effects: list[str] = field(default_factory=list)
+    domains: list[str] = field(default_factory=list)
+    supported_modalities: list[str] = field(default_factory=lambda: ["text"])
+    version: str = "v1"
+    enabled: bool = True
+    provider: Any = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class CapabilityImplementation:
     """A concrete implementation that satisfies a capability.
 

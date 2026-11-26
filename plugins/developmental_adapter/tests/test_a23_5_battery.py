@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.transfer.mapper import MappingStatus
 from hbllm.hcir.graph import CognitiveGraph, PhysicalEntityNode
-from plugins.developmental_adapter.a20_transfer_bridge import A20RelationalTransferBridge
+from plugins.developmental_adapter.a20_transfer_bridge import (
+    A20RelationalTransferBridge,
+    MappingStatus,
+)
 from plugins.developmental_adapter.cohorts import (
     ActiveDevelopmentalHCIRCohort,
     NeuralLearnerCohort,

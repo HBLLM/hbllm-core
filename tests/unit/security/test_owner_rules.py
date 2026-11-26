@@ -2,8 +2,8 @@
 
 import pytest
 
-from hbllm.brain.governance.owner_rules import OwnerRuleStore, parse_owner_rule
-from hbllm.brain.governance.policy_engine import (
+from hbllm.hcir.kernel.governance.policies.owner_rules import OwnerRuleStore, parse_owner_rule
+from hbllm.hcir.kernel.governance.policies.policy_engine import (
     Policy,
     PolicyAction,
     PolicyCondition,

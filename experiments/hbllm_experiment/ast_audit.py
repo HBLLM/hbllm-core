@@ -143,17 +143,20 @@ class ASTLeakageAuditor:
         root = Path(root_dir)
         reasoning_targets: list[Path] = []
 
-        # 1. Target hbllm/brain cognitive engines
-        brain_dir = root / "hbllm" / "brain"
-        if brain_dir.is_dir():
-            for f in brain_dir.rglob("*.py"):
+        # 1. Target hbllm/hcir/reasoning cognitive engines
+        reasoning_dir = root / "hbllm" / "hcir" / "reasoning"
+        if reasoning_dir.is_dir():
+            for f in reasoning_dir.rglob("*.py"):
                 if "tests" not in f.parts and not f.name.startswith("test_"):
                     reasoning_targets.append(f)
 
         # 2. Target experiment cohorts (e.g. HBLLMCoreCohort)
-        cohorts_file = root / "hbllm" / "experiment" / "cohorts.py"
-        if cohorts_file.is_file():
-            reasoning_targets.append(cohorts_file)
+        for cohorts_file in (
+            root / "hbllm" / "experiment" / "cohorts.py",
+            root / "experiments" / "hbllm_experiment" / "cohorts.py",
+        ):
+            if cohorts_file.is_file():
+                reasoning_targets.append(cohorts_file)
 
         # Audit collected targets
         all_violations: list[str] = []

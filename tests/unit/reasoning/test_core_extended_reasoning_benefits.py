@@ -2,17 +2,6 @@
 
 from __future__ import annotations
 
-from hbllm.brain.reasoning.operators.base import (
-    CognitiveContext,
-    FrozenGraphView,
-    ProblemType,
-    ReasoningProblem,
-    ResultStatus,
-)
-from hbllm.brain.reasoning.operators.causal import CausalOperator
-from hbllm.brain.reasoning.operators.embodied_causal import EmbodiedCausalOperator
-from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
-from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
 from hbllm.hcir.graph import (
     ActionNode,
@@ -24,6 +13,17 @@ from hbllm.hcir.graph import (
     PhysicalEntityNode,
 )
 from hbllm.hcir.kernel.services import KernelServices
+from hbllm.hcir.reasoning.operators.base import (
+    CognitiveContext,
+    FrozenGraphView,
+    ProblemType,
+    ReasoningProblem,
+    ResultStatus,
+)
+from hbllm.hcir.reasoning.operators.causal import CausalOperator
+from hbllm.hcir.reasoning.operators.embodied_causal import EmbodiedCausalOperator
+from hbllm.hcir.reasoning.operators.registry import create_default_operator_registry
+from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.hcir.types import UncertaintyVector
 
 
