@@ -591,16 +591,26 @@ class HCIRGateway:
             # Search outbound edges from entity
             loc_found: str | None = None
             edge_type_found: str = "located_on"
+            best_edge_deg: float | None = None
+            best_edge_post: float = 0.96
 
             for edge in self._graph.edges_from(entity_id):
+                eprops = edge.properties if isinstance(edge.properties, dict) else {}
+                has_deg = isinstance(eprops.get("semantic_degree"), (int, float))
+                edeg = float(eprops["semantic_degree"]) if has_deg else float(edge.weight)
+                epost = (
+                    float(eprops["posterior_belief"])
+                    if isinstance(eprops.get("posterior_belief"), (int, float))
+                    else 0.96
+                )
                 for target_id in edge.targets:
                     target_node = self._graph.get_node(target_id)
                     if isinstance(target_node, PhysicalEntityNode):
-                        loc_found = target_node.entity_type
-                        edge_type_found = edge.edge_type.value
-                        break
-                if loc_found:
-                    break
+                        if best_edge_deg is None or edeg > best_edge_deg:
+                            loc_found = target_node.entity_type
+                            edge_type_found = edge.edge_type.value
+                            best_edge_deg = float(eprops["semantic_degree"]) if has_deg else None
+                            best_edge_post = epost
 
             # Fallback: check properties dictionary
             if not loc_found:
@@ -611,12 +621,13 @@ class HCIRGateway:
                     target_predicate=edge_type_found,
                     target_subject=subject_name,
                     target_object=loc_found,
-                    confidence=0.96,
-                    uncertainty=0.04,
+                    confidence=best_edge_post,
+                    uncertainty=max(0.0, 1.0 - best_edge_post),
                     support_count=5,
                     freshness=freshness_val,
                     is_known=True,
                     raw_belief_value=loc_found,
+                    semantic_degree=best_edge_deg,
                 )
             else:
                 # Check if concepts provide a default location
@@ -709,9 +720,20 @@ class HCIRGateway:
 
             # Check if matching edge exists
             is_connected = False
+            matched_deg: float | None = None
+            matched_post = 0.96
             for edge in self._graph.edges_from(entity_id):
+                eprops = edge.properties if isinstance(edge.properties, dict) else {}
+                has_deg = isinstance(eprops.get("semantic_degree"), (int, float))
+                epost = (
+                    float(eprops["posterior_belief"])
+                    if isinstance(eprops.get("posterior_belief"), (int, float))
+                    else 0.96
+                )
                 if object_id and object_id in edge.targets:
                     is_connected = True
+                    matched_deg = float(eprops["semantic_degree"]) if has_deg else None
+                    matched_post = epost
                     break
                 for target_id in edge.targets:
                     target_node = self._graph.get_node(target_id)
@@ -720,7 +742,11 @@ class HCIRGateway:
                         and target_node.entity_type == expected_object_name
                     ):
                         is_connected = True
+                        matched_deg = float(eprops["semantic_degree"]) if has_deg else None
+                        matched_post = epost
                         break
+                if is_connected:
+                    break
 
             # Also check properties
             if not is_connected and expected_object_name:
@@ -732,11 +758,12 @@ class HCIRGateway:
                     target_predicate=frame.predicate or "located_on",
                     target_subject=subject_name,
                     target_object=expected_object_name,
-                    confidence=0.96,
-                    uncertainty=0.04,
+                    confidence=matched_post,
+                    uncertainty=max(0.0, 1.0 - matched_post),
                     support_count=3,
                     is_known=True,
                     raw_belief_value=True,
+                    semantic_degree=matched_deg,
                 )
             else:
                 return CognitiveEpistemicState(

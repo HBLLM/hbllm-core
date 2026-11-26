@@ -482,10 +482,30 @@ class HCIRCompiler:
         self, cxn: ConstructionNode, ast: SemanticAST, author: str
     ) -> InstructionStream:
         target_ref = self._resolve_target_ref(ast)
+        rules = load_constructions_spec(cxn.language or self._language).get("lexical_rules", {})
+        hedges_map = {str(k).lower(): str(v) for k, v in (rules.get("hedges") or {}).items()}
+        canonical_hedges = {"identity", "very", "extremely", "somewhat", "slightly", "intensify"}
+        slot_hedge = ast.get_slot("hedge")
+        act_l = (ast.action or "").strip().lower()
+        raw_l = (ast.raw_text or ast.subject or "").lower()
+        if slot_hedge:
+            hedge_val = hedges_map.get(str(slot_hedge).lower(), str(slot_hedge).lower())
+        elif act_l in canonical_hedges or act_l in hedges_map:
+            hedge_val = hedges_map.get(act_l, act_l)
+        else:
+            hedge_val = next(
+                (
+                    h_fn
+                    for h_tok, h_fn in sorted(hedges_map.items(), key=lambda kv: -len(kv[0]))
+                    if f" {h_tok} " in f" {raw_l} "
+                ),
+                "identity",
+            )
         bindings: dict[str, Any] = {
             "{subject}": ast.subject,
             "{action}": ast.action or cxn.intent_type,
             "{action_or_subject}": ast.action or ast.subject,
+            "{hedge}": hedge_val,
             "{target_ref}": target_ref,
             "{priority}": ast.priority,
             "{author}": author,
@@ -514,15 +534,28 @@ class HCIRCompiler:
         )
 
     def _select_construction(self, ast: SemanticAST) -> ConstructionNode | None:
-        constructions, act_l = self.get_constructions(), ast.action.lower()
-        for cxn in constructions:
-            if (
-                cxn.intent_type == ast.intent.value
-                and act_l
-                and act_l in [t.lower() for t in cxn.trigger_tokens]
-            ):
-                return cxn
-        return next((c for c in constructions if c.intent_type == ast.intent.value), None)
+        constructions = self.get_constructions()
+        act_l = ast.action.lower()
+        raw_l = (ast.raw_text or ast.subject or "").lower()
+        if act_l:
+            for cxn in constructions:
+                if cxn.intent_type == ast.intent.value and act_l in [
+                    t.lower() for t in cxn.trigger_tokens
+                ]:
+                    return cxn
+        if raw_l and (not act_l or ast.intent == IntentType.QUERY):
+            for cxn in constructions:
+                if cxn.intent_type == ast.intent.value and cxn.trigger_tokens:
+                    if any(t.lower() in raw_l for t in cxn.trigger_tokens):
+                        return cxn
+        return next(
+            (
+                c
+                for c in constructions
+                if c.intent_type == ast.intent.value and not c.trigger_tokens
+            ),
+            None,
+        ) or next((c for c in constructions if c.intent_type == ast.intent.value), None)
 
     def compile(
         self,
@@ -786,11 +819,22 @@ class HCIRCompiler:
         self, ast: SemanticAST, theory: Any, grid: Any | None = None
     ) -> list[Any]:
         """Evaluate compositional spatial expression using `lexical_rules` from construction seed."""
+        import math
+
         import numpy as np
+
+        from hbllm.hcir.fuzzy import apply_hedge, evaluate_membership_kernel
 
         rules = load_constructions_spec(self._language).get("lexical_rules", {})
         articles = list(rules.get("articles", ()))
+        hedges_map = {str(k).lower(): str(v) for k, v in (rules.get("hedges") or {}).items()}
         text = (ast.raw_text or ast.subject).lower()
+        hedge_id = "identity"
+        for h_tok, h_fn in sorted(hedges_map.items(), key=lambda kv: -len(kv[0])):
+            if f" {h_tok} " in f" {text} ":
+                hedge_id = h_fn
+                text = text.replace(f" {h_tok} ", " ").replace(h_tok, "", 1).strip()
+                break
         detected_rel, subj_name, ref_name = None, text, ""
         for phrase, rel in rules.get("spatial_relations", {}).items():
             if phrase in text:
@@ -806,6 +850,28 @@ class HCIRCompiler:
             if sf is not None and rf is not None:
                 sc_list = list(zip(*((grid == sf).nonzero())))
                 rc_list = list(zip(*((grid == rf).nonzero())))
+                if detected_rel == "NEAR":
+                    d_scale = max(
+                        4.0, 0.45 * math.hypot(float(grid.shape[0]), float(grid.shape[1]))
+                    )
+                    ranked: list[tuple[float, tuple[int, int]]] = []
+                    for sr, sc in sc_list:
+                        if not rc_list:
+                            continue
+                        min_d = min(
+                            math.hypot(float(sr - rr), float(sc - rc)) for rr, rc in rc_list
+                        )
+                        raw_deg = evaluate_membership_kernel(
+                            min_d,
+                            "trapezoidal",
+                            {"a": 0.0, "b": 0.0, "c": 1.5, "d": d_scale},
+                        )
+                        h_deg = apply_hedge(raw_deg, hedge_id)
+                        if h_deg >= 0.35:
+                            ranked.append((h_deg, (int(sr), int(sc))))
+                    ranked.sort(key=lambda item: -item[0])
+                    if ranked:
+                        return [cell for _, cell in ranked]
                 matches = [
                     (int(sr), int(sc))
                     for sr, sc in sc_list

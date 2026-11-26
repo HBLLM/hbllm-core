@@ -461,7 +461,7 @@ class CognitivePipeline:
         self._response_creation_times[correlation_id] = time.monotonic()
 
         # Build prompt augmentation metadata so downstream execution nodes
-        # (GenerationNode, BaseModule, FuzzyNode, LogicNode, ApiNode) receive
+        # (GenerationNode, BaseModule, LogicNode, ApiNode) receive
         # cognitive context rather than discarding it.
         metadata: dict[str, Any] = {}
         if context.get("fused_context"):

@@ -134,7 +134,7 @@ class EnglishRealizer:
         original_frame: SemanticFrame | None = None,
     ) -> str:
         """Verbalize a CognitiveEpistemicState into an epistemically calibrated English answer."""
-        level = self._policy.evaluate(epistemic_state)
+        level, deg_hedge = self._policy.evaluate_two_dimensional(epistemic_state)
         subj = epistemic_state.target_subject
         obj = epistemic_state.target_object or ""
         pred = epistemic_state.target_predicate
@@ -150,6 +150,8 @@ class EnglishRealizer:
             prep = "above"
         elif pred in ("near", "located_near", "located_beside"):
             prep = "near"
+        if deg_hedge is not None:
+            prep = f"{deg_hedge} {prep}"
 
         # 0. Specialized identity, causal, and requirement answers
         if pred == "identity" and obj:

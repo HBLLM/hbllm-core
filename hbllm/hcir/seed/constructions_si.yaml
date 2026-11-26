@@ -10,6 +10,24 @@ lexical_rules:
     උඩ: ABOVE
     යට: BELOW
     ඇතුළේ: INSIDE
+    ළඟ: NEAR
+    අසල: NEAR
+  hedges:
+    ඉතා: very
+    අතිශයින්: extremely
+    තරමක්: somewhat
+    ටිකක්: slightly
+  gradable_adjectives:
+    ලොකු: {dimension: size, polarity: high}
+    විශාල: {dimension: size, polarity: high}
+    කුඩා: {dimension: size, polarity: low}
+    ළඟ: {dimension: distance, polarity: low}
+    දුර: {dimension: distance, polarity: high}
+  degree_realization:
+    somewhat: තරමක්
+    slightly: ටිකක්
+    very: ඉතා
+    extremely: අතිශයින්
   causal_connectives:
     - [" අවශ්‍යයි ", "requires"]
     - [" ඇති කරයි ", "causes"]
@@ -81,6 +99,41 @@ constructions:
           capability: skill_extraction
           params:
             subject: "{subject}"
+
+  - id: cxn_si_fuzzy_hedge
+    construction_name: si_fuzzy_hedge_eval
+    language: si
+    intent_type: query
+    syntactic_template: "{subject} තරමක් {hedge}"
+    trigger_tokens: ["තරම", "අංශකය", "නොපැහැදිලි"]
+    semantic_mapping:
+      default_action: evaluate_fuzzy_hedge
+      description_template: "Fuzzy Hedge Query(si): {subject}"
+    compiled_hcir_template:
+      - opcode: EXECUTE
+        cost_estimate: 5
+        params:
+          capability: math.fuzzy.hedge
+          params:
+            degree: "{priority}"
+            hedge: "{hedge}"
+          bind: "$r0"
+      - opcode: BRANCH
+        cost_estimate: 2
+        params:
+          condition: if_degree_gte
+          register: "$r0"
+          threshold: 0.5
+          target_label: fuzzy_high
+      - opcode: RETURN
+        cost_estimate: 1
+        params:
+          yield: ["$r0"]
+      - opcode: RETURN
+        cost_estimate: 1
+        label: fuzzy_high
+        params:
+          yield: ["$r0"]
 
   - id: cxn_si_query
     construction_name: si_query

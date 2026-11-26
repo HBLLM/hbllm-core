@@ -756,7 +756,7 @@ class UniversalLanguageRealizer:
         """Verbalize CognitiveEpistemicState into natural language text."""
         from hbllm.hcir.language.core.epistemic_policy import EpistemicVerbalizationLevel
 
-        level = self.policy.evaluate(epistemic_state)
+        level, deg_hedge = self.policy.evaluate_two_dimensional(epistemic_state)
         subj = epistemic_state.target_subject
         obj = epistemic_state.target_object or ""
         pred = epistemic_state.target_predicate
@@ -769,6 +769,12 @@ class UniversalLanguageRealizer:
         subj_str = self.profile.closed_class.concept_map.get(subj, subj)
         obj_str = self.profile.closed_class.concept_map.get(obj, obj)
         adp_word = self._get_adposition_for_predicate(pred, location=obj_str or obj)
+        if deg_hedge is not None:
+            from hbllm.hcir.seed.loader import load_constructions_spec
+
+            lang_rules = load_constructions_spec(self.profile.iso_code).get("lexical_rules", {})
+            loc_hedge = str((lang_rules.get("degree_realization") or {}).get(deg_hedge, deg_hedge))
+            adp_word = f"{loc_hedge} {adp_word}".strip()
 
         # 0. Discourse explanation / long answers (definition, causes, requires)
         if pred in ("definition", "causes", "requires") and obj:
