@@ -73,6 +73,8 @@ class CognitiveSystemConfig:
     seed_ontology_path: Path | str | None = None
     tenant_id: str | None = None
     enable_grounding: bool = True
+    enable_fuzzy_grounding: bool = False
+    enable_fuzzy_reasoning: bool = False
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
     enable_autonomous_curiosity: bool = False
@@ -233,6 +235,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
             services=services,
             transaction_manager=services.transaction_manager,
             perception_mode=cfg.perception_mode,
+            enable_fuzzy_grounding=cfg.enable_fuzzy_grounding,
         )
         engine.attach_grounding_bridge(bridge)
 

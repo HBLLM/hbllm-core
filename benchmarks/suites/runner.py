@@ -125,6 +125,8 @@ def run_closed_loop_task(
     episodes: int = 5,
     shared_memory: bool = True,
     cross_seed: bool = True,
+    enable_fuzzy_grounding: bool = False,
+    enable_fuzzy_reasoning: bool = False,
 ) -> tuple[bool, int, list[float], list[str], dict[str, Any]]:
     """Execute a task across ALL manifest seeds for zero-shot and cross-seed transfer,
     plus N-episode same-layout replay on the primary seed.
@@ -155,6 +157,8 @@ def run_closed_loop_task(
             world_id=f"bench_{task_id}_{tag}",
             memory_dir=tmp_dir,
             enable_grounding=grounding,
+            enable_fuzzy_grounding=bool(grounding and enable_fuzzy_grounding),
+            enable_fuzzy_reasoning=bool(enable_fuzzy_reasoning),
             perception_mode=perception_mode,
         )
         return build_cognitive_system(config)
@@ -909,6 +913,8 @@ def run_suite(
     episodes_per_task: int = 5,
     shared_memory: bool = True,
     cross_seed: bool = True,
+    enable_fuzzy_grounding: bool = False,
+    enable_fuzzy_reasoning: bool = False,
 ) -> int:
     """Executes the closed-loop benchmark evaluation for the given split."""
     manifest_file = (
@@ -933,6 +939,8 @@ def run_suite(
             "split": split,
             "episodes_per_task": episodes_per_task,
             "shared_memory": shared_memory,
+            "enable_fuzzy_grounding": enable_fuzzy_grounding,
+            "enable_fuzzy_reasoning": enable_fuzzy_reasoning,
         },
     )
 
@@ -972,6 +980,8 @@ def run_suite(
                     episodes=episodes_per_task,
                     shared_memory=shared_memory,
                     cross_seed=cross_seed,
+                    enable_fuzzy_grounding=enable_fuzzy_grounding,
+                    enable_fuzzy_reasoning=enable_fuzzy_reasoning,
                 )
 
             return run_task
@@ -1236,6 +1246,20 @@ def main() -> int:
         default=True,
         help="Skip cross-seed procedural transfer evaluation",
     )
+    parser.add_argument(
+        "--fuzzy-grounding",
+        dest="enable_fuzzy_grounding",
+        action="store_true",
+        default=False,
+        help="Enable ADR 006 fuzzy SGE concept and relation grounding (Experiment B/D)",
+    )
+    parser.add_argument(
+        "--fuzzy-reasoning",
+        dest="enable_fuzzy_reasoning",
+        action="store_true",
+        default=False,
+        help="Enable ADR 006 fuzzy VM and symbolic reasoning (Experiment C/D)",
+    )
     args = parser.parse_args()
 
     return run_suite(
@@ -1247,6 +1271,8 @@ def main() -> int:
         episodes_per_task=args.episodes_per_task,
         shared_memory=args.shared_memory,
         cross_seed=args.cross_seed,
+        enable_fuzzy_grounding=args.enable_fuzzy_grounding,
+        enable_fuzzy_reasoning=args.enable_fuzzy_reasoning,
     )
 
 

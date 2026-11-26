@@ -3,9 +3,16 @@ from __future__ import annotations
 import math
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from hbllm.hcir.fuzzy import (
+    FuzzyAssertion,
+    FuzzyProfileId,
+    MembershipKernelFamily,
+    evaluate_membership_kernel,
+)
 from hbllm.hcir.grounding.concepts.model import GroundedConcept
 from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
 from hbllm.hcir.grounding.contracts.enums import ConceptLifecycle
@@ -26,6 +33,15 @@ class ConceptAssignment:
     distance: float  # Mahalanobis-like distance from concept centroid
     is_new_concept: bool = False
     split_from: str | None = None  # If this concept was just split from another
+
+
+@dataclass(frozen=True)
+class MultiConceptMembership:
+    """Overlapping graded concept memberships emitted in fuzzy SGE mode (ADR 006 Phase F1)."""
+
+    primary_assignment: ConceptAssignment
+    memberships: dict[str, float]
+    assertions: tuple[FuzzyAssertion, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -76,6 +92,7 @@ class ConceptLearner:
         merge_distance_threshold: float = 0.8,
         min_prototypes_for_split: int = 4,
         min_split_gap: float = 2.0,
+        enable_fuzzy: bool = False,
     ) -> None:
         self._store = concept_store
         self._assignment_threshold = assignment_threshold
@@ -83,6 +100,7 @@ class ConceptLearner:
         self._merge_distance_threshold = merge_distance_threshold
         self._min_prototypes_for_split = min_prototypes_for_split
         self._min_split_gap = min_split_gap
+        self._enable_fuzzy = bool(enable_fuzzy)
 
         # Audit trails
         self._split_log: list[ConceptSplitResult] = []
@@ -157,6 +175,183 @@ class ConceptLearner:
                 distance=float("inf"),
                 is_new_concept=True,
             )
+
+    def evaluate_memberships(
+        self,
+        feature: PerceptualFeatureVector,
+        *,
+        ignore_color_labels: bool = False,
+        min_degree: float = 0.05,
+        sigma_scale: float = 1.25,
+        context_ref: str = "sge_concept",
+        snapshot_sequence: int = 0,
+    ) -> list[FuzzyAssertion]:
+        """Compute overlapping graded membership assertions across all active concepts."""
+        features_dict = self._embedding_to_dict(feature)
+        subj = str(feature.feature_metadata.get("entity_id") or feature.feature_id)
+        assertions: list[FuzzyAssertion] = []
+        for concept in self._store.get_all_concepts():
+            if (
+                concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+                or concept.is_composite
+            ):
+                continue
+            deg = concept.compute_fuzzy_membership(
+                features_dict,
+                ignore_color_labels=ignore_color_labels,
+                sigma_scale=sigma_scale,
+            )
+            if deg >= min_degree:
+                assertions.append(
+                    FuzzyAssertion(
+                        subject_ref=subj,
+                        target_ref=None,
+                        semantics=f"concept:{concept.concept_ref.id}",
+                        degree=deg,
+                        profile_id=FuzzyProfileId.PRODUCT,
+                        context_ref=context_ref,
+                        model_id=f"concept_{concept.concept_ref.id}",
+                        model_version=max(1, int(concept.concept_version)),
+                        evidence_refs=(feature.observation_id, feature.feature_id),
+                        snapshot_sequence=snapshot_sequence,
+                    )
+                )
+        assertions.sort(key=lambda a: (-float(a.degree), a.model_id))
+        return assertions
+
+    def learn_fuzzy(
+        self,
+        feature: PerceptualFeatureVector,
+        exemplar_entity_id: str | None = None,
+        *,
+        spawn_alpha: float = 0.45,
+        co_update_alpha: float = 0.70,
+        sigma_scale: float = 1.25,
+        min_degree: float = 0.05,
+        context_ref: str = "sge_concept",
+        snapshot_sequence: int = 0,
+    ) -> MultiConceptMembership:
+        """Assign overlapping graded concept memberships without erasing secondary matches."""
+        features_dict = self._embedding_to_dict(feature)
+        scored: list[tuple[float, GroundedConcept]] = []
+        for concept in self._store.get_all_concepts():
+            if (
+                concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+                or concept.is_composite
+            ):
+                continue
+            deg = concept.compute_fuzzy_membership(
+                features_dict,
+                ignore_color_labels=False,
+                sigma_scale=sigma_scale,
+            )
+            if deg >= min_degree:
+                scored.append((deg, concept))
+        scored.sort(key=lambda item: (-item[0], item[1].concept_ref.id))
+
+        subj = str(
+            exemplar_entity_id or feature.feature_metadata.get("entity_id") or feature.feature_id
+        )
+        assertions = [
+            FuzzyAssertion(
+                subject_ref=subj,
+                target_ref=None,
+                semantics=f"concept:{c.concept_ref.id}",
+                degree=deg,
+                profile_id=FuzzyProfileId.PRODUCT,
+                context_ref=context_ref,
+                model_id=f"concept_{c.concept_ref.id}",
+                model_version=max(1, int(c.concept_version)),
+                evidence_refs=(feature.observation_id, feature.feature_id),
+                snapshot_sequence=snapshot_sequence,
+            )
+            for deg, c in scored
+        ]
+        memberships: dict[str, float] = {
+            c.concept_ref.id: round(float(deg), 4) for deg, c in scored
+        }
+
+        if scored and scored[0][0] >= spawn_alpha:
+            best_deg, best_concept = scored[0]
+            best_roles = self._concept_roles(best_concept)
+            for deg, concept in scored:
+                if deg < co_update_alpha and concept is not best_concept:
+                    continue
+                if concept is not best_concept and self._roles_conflict(
+                    best_roles, self._concept_roles(concept)
+                ):
+                    continue
+                concept.add_prototype(features_dict)
+                if exemplar_entity_id:
+                    concept.add_exemplar(exemplar_entity_id)
+                for label, conf in feature.semantic_labels.items():
+                    concept.add_linguistic_alias(label, confidence=conf)
+                dist_eq = math.sqrt(max(0.0, -2.0 * math.log(max(deg, 1e-6)))) * sigma_scale
+                self._update_quality_from_assignment(concept, dist_eq)
+            self._total_assignments += 1
+            dist_primary = math.sqrt(max(0.0, -2.0 * math.log(max(best_deg, 1e-6)))) * sigma_scale
+            primary = ConceptAssignment(
+                concept_ref=best_concept.concept_ref,
+                distance=dist_primary,
+                is_new_concept=False,
+            )
+            return MultiConceptMembership(
+                primary_assignment=primary,
+                memberships=memberships,
+                assertions=tuple(assertions),
+            )
+
+        # Spawn new emerging concept while retaining partial overlaps with existing concepts
+        concept_ref = GroundedConceptRef(id=_gen_concept_id())
+        new_concept = GroundedConcept(
+            concept_ref=concept_ref,
+            lifecycle_state=ConceptLifecycle.EMERGING,
+            grounding_quality=GroundingQuality.with_untested(
+                perceptual_stability=0.3,
+                temporal_persistence=0.1,
+                relational_consistency=0.0,
+                cross_modal_support=0.0,
+                predictive_utility=0.0,
+                interaction_support=0.0,
+                boundary_stability=0.3,
+                untested_dimensions={
+                    "cross_modal_support",
+                    "interaction_support",
+                    "predictive_utility",
+                },
+            ),
+        )
+        new_concept.add_prototype(features_dict)
+        if exemplar_entity_id:
+            new_concept.add_exemplar(exemplar_entity_id)
+        for label, conf in feature.semantic_labels.items():
+            new_concept.add_linguistic_alias(label, confidence=conf)
+        self._store.register_concept(new_concept)
+        self._total_assignments += 1
+
+        new_assertion = FuzzyAssertion(
+            subject_ref=subj,
+            target_ref=None,
+            semantics=f"concept:{concept_ref.id}",
+            degree=1.0,
+            profile_id=FuzzyProfileId.PRODUCT,
+            context_ref=context_ref,
+            model_id=f"concept_{concept_ref.id}",
+            model_version=1,
+            evidence_refs=(feature.observation_id, feature.feature_id),
+            snapshot_sequence=snapshot_sequence,
+        )
+        memberships[concept_ref.id] = 1.0
+        assertions.insert(0, new_assertion)
+        return MultiConceptMembership(
+            primary_assignment=ConceptAssignment(
+                concept_ref=concept_ref,
+                distance=0.0,
+                is_new_concept=True,
+            ),
+            memberships=memberships,
+            assertions=tuple(assertions),
+        )
 
     def learn_batch(
         self,
@@ -558,6 +753,104 @@ class ConceptLearner:
                     prev = role_scores.get(r, 0.0)
                     if sim > prev:
                         role_scores[r] = round(sim, 4)
+        return role_scores
+
+    def infer_role_priors_fuzzy(
+        self,
+        feature: PerceptualFeatureVector,
+        *,
+        graph: Any | None = None,
+        sigma_scale: float = 0.80,
+        min_degree: float = 0.15,
+        min_std: float = 0.25,
+    ) -> dict[str, float]:
+        """Infer graded role priors from both working concepts and graph GroundedConceptNodes."""
+        features_dict = self._embedding_to_dict(feature)
+        role_scores: dict[str, float] = {}
+
+        for concept in self._store.get_all_concepts():
+            if (
+                concept.lifecycle_state == ConceptLifecycle.MERGED_SPLIT_DEPRECATED
+                or concept.is_composite
+            ):
+                continue
+            roles = [
+                aff.removeprefix("role:") for aff in concept.affordances if aff.startswith("role:")
+            ]
+            if not roles:
+                continue
+            deg = concept.compute_fuzzy_membership(
+                features_dict,
+                ignore_color_labels=True,
+                sigma_scale=sigma_scale,
+                min_std=min_std,
+            )
+            if deg >= min_degree:
+                for role in roles:
+                    if deg > role_scores.get(role, 0.0):
+                        role_scores[role] = round(float(deg), 4)
+
+        if graph is not None:
+            from hbllm.hcir.nodes import HCIRNodeType
+
+            for gnode in graph.nodes_by_type(HCIRNodeType.GROUNDED_CONCEPT):
+                props = getattr(gnode, "properties", None) or {}
+                raw_roles = list(getattr(gnode, "behavioral_regularities", ()) or ())
+                roles = [
+                    r.removeprefix("role:")
+                    for r in raw_roles
+                    if isinstance(r, str) and r.startswith("role:")
+                ]
+                if not roles:
+                    continue
+                dists: Mapping[str, Any] = props.get("feature_distributions") or {}
+                proto: Mapping[str, Any] = getattr(gnode, "feature_prototype", None) or {}
+                sq_sum = 0.0
+                n_num = 0
+                if dists:
+                    for k, mean_var in dists.items():
+                        if k.startswith("label_") or k not in features_dict:
+                            continue
+                        val = features_dict[k]
+                        if (
+                            isinstance(val, (int, float))
+                            and not isinstance(val, bool)
+                            and isinstance(mean_var, (list, tuple))
+                            and len(mean_var) >= 2
+                        ):
+                            mean, var = float(mean_var[0]), float(mean_var[1])
+                            floor = min_std if var > 1e-12 else max(min_std, 0.45)
+                            std = max(math.sqrt(max(0.0, var)), floor)
+                            z = (float(val) - mean) / std
+                            sq_sum += z * z
+                            n_num += 1
+                elif proto:
+                    for k, pval in proto.items():
+                        if k.startswith("label_") or k not in features_dict:
+                            continue
+                        val = features_dict[k]
+                        if (
+                            isinstance(val, (int, float))
+                            and not isinstance(val, bool)
+                            and isinstance(pval, (int, float))
+                            and not isinstance(pval, bool)
+                        ):
+                            z = (float(val) - float(pval)) / min_std
+                            sq_sum += z * z
+                            n_num += 1
+                if n_num == 0:
+                    continue
+                rms_z = math.sqrt(sq_sum / n_num)
+                deg = evaluate_membership_kernel(
+                    rms_z,
+                    MembershipKernelFamily.MAHALANOBIS_RBF,
+                    {"sigma": max(1e-6, float(sigma_scale))},
+                )
+                if deg >= min_degree:
+                    for role in roles:
+                        if deg > role_scores.get(role, 0.0):
+                            role_scores[role] = round(float(deg), 4)
+
         return role_scores
 
     # ------------------------------------------------------------------

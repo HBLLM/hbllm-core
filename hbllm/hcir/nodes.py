@@ -94,6 +94,7 @@ __all__ = [
     "VisualObservationNode",
     # Learning & adaptation nodes
     "AdaptationEventNode",
+    "AdaptiveMembershipNode",
     "GroundedConceptNode",
     "LearnedRuleNode",
     "PredictiveModelNode",
@@ -170,6 +171,7 @@ class HCIRNodeType(StrEnum):
 
     # --- A15: Grounded Concept Formation ---
     GROUNDED_CONCEPT = "grounded_concept"
+    ADAPTIVE_MEMBERSHIP = "adaptive_membership"
 
 
 class HCIREdgeType(StrEnum):
@@ -1055,6 +1057,24 @@ class GroundedConceptNode(HCIRNode):
     prediction_count: int = 0
 
 
+class AdaptiveMembershipNode(HCIRNode):
+    """Versioned, auditable adaptive fuzzy membership model persisted in HCIR (ADR 006)."""
+
+    node_type: HCIRNodeType = HCIRNodeType.ADAPTIVE_MEMBERSHIP
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    model_id: str = ""
+    target_id: str = ""
+    contextual_scope: str = "default"
+    kernel_family: str = "gaussian"
+    reference_scale_kind: str = "raw"
+    learned_parameters: dict[str, float] = Field(default_factory=dict)
+    sample_count: int = 0
+    version: int = 1
+    parent_version: int | None = None
+    parent_hash: str | None = None
+    version_snapshots: dict[str, dict[str, float]] = Field(default_factory=dict)
+
+
 class ValueNode(HCIRNode):
     """A preference or value axiom used in decision ranking."""
 
@@ -1533,4 +1553,5 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     HCIRNodeType.ADAPTATION_EVENT: AdaptationEventNode,
     # --- A15: Grounded Concept Formation ---
     HCIRNodeType.GROUNDED_CONCEPT: GroundedConceptNode,
+    HCIRNodeType.ADAPTIVE_MEMBERSHIP: AdaptiveMembershipNode,
 }

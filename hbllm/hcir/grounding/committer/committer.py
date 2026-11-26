@@ -4,7 +4,9 @@ import hashlib
 import logging
 import time
 import uuid
+from collections.abc import Mapping, Sequence
 
+from hbllm.hcir.fuzzy import FuzzyAssertion
 from hbllm.hcir.graph import HCIREdge
 from hbllm.hcir.grounding.concepts.lifecycle import ConceptPromotionProposal
 from hbllm.hcir.grounding.concepts.model import GroundedConcept
@@ -33,6 +35,7 @@ from hbllm.hcir.transactions import (
     TransactionOperation,
     TransactionStatus,
 )
+from hbllm.hcir.types import Scope
 
 logger = logging.getLogger(__name__)
 
@@ -57,15 +60,25 @@ class HCIRCommitter:
     def transaction_manager(self) -> TransactionManager:
         return self._tx_manager
 
+    def _effective_scope(self, scope: Scope | None = None) -> Scope:
+        """Resolve explicit scope or inherit tenant_id from the workspace."""
+        if scope is not None:
+            return scope
+        ws = self._tx_manager.workspace
+        ws_tid = ws.tenant_id if ws is not None else None
+        return Scope(tenant_id=ws_tid or "default")
+
     def commit_decisions(
         self,
         items: list[tuple[GroundingDecision, GroundingClaim, BeliefState | None]],
         author: str = "SGE_Committer",
+        scope: Scope | None = None,
     ) -> list[HCIRTransaction]:
         """Translates multiple accepted GroundingDecisions and claims into an atomic HCIRTransaction."""
         if not items:
             return []
 
+        eff_scope = self._effective_scope(scope)
         operations: list[TransactionOperation] = []
         seen_ops: set[tuple[TransactionOp, str]] = set()
 
@@ -83,7 +96,7 @@ class HCIRCommitter:
 
             # 1. Ensure subject entity node exists
             subj_id = claim.subject_ref.id
-            subj_node = PhysicalEntityNode(id=subj_id, entity_name=subj_id)
+            subj_node = PhysicalEntityNode(id=subj_id, entity_name=subj_id, scope=eff_scope)
             _add_op(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -99,7 +112,9 @@ class HCIRCommitter:
 
             if isinstance(obj_ref, (GroundedEntityRef, EntityCandidateRef)):
                 target_node_id = obj_ref.id
-                obj_node = PhysicalEntityNode(id=target_node_id, entity_name=target_node_id)
+                obj_node = PhysicalEntityNode(
+                    id=target_node_id, entity_name=target_node_id, scope=eff_scope
+                )
                 _add_op(
                     TransactionOperation(
                         op=TransactionOp.UPSERT_NODE,
@@ -160,6 +175,7 @@ class HCIRCommitter:
                 claim=statement,
                 epistemic_confidence=decision.posterior_belief,
                 evidence_sources=list(decision.supporting_evidence_ids),
+                scope=eff_scope,
             )
             _add_op(
                 TransactionOperation(
@@ -210,6 +226,7 @@ class HCIRCommitter:
             tx = HCIRTransaction(
                 id=tx_id,
                 author=author,
+                tenant_id=eff_scope.tenant_id,
                 operations=batch_ops,
                 metadata={"description": desc},
             )
@@ -225,13 +242,14 @@ class HCIRCommitter:
         claim: GroundingClaim,
         belief: BeliefState | None = None,
         author: str = "SGE_Committer",
+        scope: Scope | None = None,
     ) -> HCIRTransaction:
         """Translates an accepted GroundingDecision and claim into an atomic HCIRTransaction."""
         if decision.outcome != DecisionOutcome.ACCEPT:
             raise ValueError(
                 f"Cannot commit non-accepted decision (outcome={decision.outcome.value})"
             )
-        res = self.commit_decisions([(decision, claim, belief)], author=author)
+        res = self.commit_decisions([(decision, claim, belief)], author=author, scope=scope)
         return res[0]
 
     def commit_concept_promotion(
@@ -239,22 +257,33 @@ class HCIRCommitter:
         proposal: ConceptPromotionProposal,
         concept: GroundedConcept,
         author: str = "SGE_ConceptPromoter",
+        scope: Scope | None = None,
     ) -> HCIRTransaction:
         """Promotes a consolidated concept from Working Store into canonical CognitiveGraph."""
+        eff_scope = self._effective_scope(scope)
         concept_id = proposal.concept_ref.id
         operations: list[TransactionOperation] = []
+        pred_util = max(0.0, min(1.0, float(proposal.quality_summary.predictive_utility)))
 
         # 1. Create GroundedConceptNode
         concept_node = GroundedConceptNode(
             id=concept_id,
             concept_name=concept_id,
+            scope=eff_scope,
             feature_prototype=concept.prototypes[-1] if concept.prototypes else {},
-            behavioral_regularities=list(proposal.affordances),
+            behavioral_regularities=sorted(concept.affordances) or list(proposal.affordances),
             causal_rule_ids=list(concept.predictive_models.keys()),
-            prediction_accuracy=proposal.quality_summary.predictive_utility,
-            confidence=proposal.quality_summary.predictive_utility,
+            prediction_accuracy=pred_util,
+            confidence=pred_util,
             exemplar_count=proposal.exemplar_count,
             tags=["grounded_concept", "sge_promoted"],
+            properties={
+                "feature_distributions": {
+                    k: [float(v[0]), float(v[1])] for k, v in concept.feature_distributions.items()
+                },
+                "concept_version": int(concept.concept_version),
+                "affordances": sorted(concept.affordances),
+            },
         )
         operations.append(
             TransactionOperation(
@@ -263,11 +292,22 @@ class HCIRCommitter:
                 node_data=concept_node.model_dump(),
             )
         )
+        if concept.feature_distributions:
+            amm_node = concept.to_adaptive_membership_model().to_node(scope=eff_scope)
+            operations.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=amm_node.id,
+                    node_data=amm_node.model_dump(),
+                )
+            )
 
         # 2. Attach validated exemplars via INSTANCE_OF edges
         for exemplar_id in concept.exemplar_entity_ids:
             # Ensure exemplar entity node exists
-            exemplar_node = PhysicalEntityNode(id=exemplar_id, entity_name=exemplar_id)
+            exemplar_node = PhysicalEntityNode(
+                id=exemplar_id, entity_name=exemplar_id, scope=eff_scope
+            )
             operations.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
@@ -282,8 +322,8 @@ class HCIRCommitter:
                 edge_type=HCIREdgeType.INSTANCE_OF,
                 sources=[exemplar_id],
                 targets=[concept_id],
-                properties={"utility": proposal.quality_summary.predictive_utility},
-                weight=proposal.quality_summary.predictive_utility,
+                properties={"utility": pred_util},
+                weight=pred_util,
             )
             operations.append(
                 TransactionOperation(
@@ -296,6 +336,7 @@ class HCIRCommitter:
         tx = HCIRTransaction(
             id=proposal.proposal_id,
             author=author,
+            tenant_id=eff_scope.tenant_id,
             operations=operations,
             metadata={
                 "description": f"Promoted grounded concept {concept_id}: {proposal.rationale}"
@@ -314,13 +355,15 @@ class HCIRCommitter:
         self,
         reid_op: EntityReidentificationOp,
         author: str = "SGE_EntityTracker",
+        scope: Scope | None = None,
     ) -> HCIRTransaction:
         """Commits confirmed entity identity equivalence (SAME_AS) into CognitiveGraph."""
+        eff_scope = self._effective_scope(scope)
         cand_id = reid_op.candidate_ref.id
         grounded_id = reid_op.grounded_ref.id
 
-        cand_node = PhysicalEntityNode(id=cand_id, entity_name=cand_id)
-        grounded_node = PhysicalEntityNode(id=grounded_id, entity_name=grounded_id)
+        cand_node = PhysicalEntityNode(id=cand_id, entity_name=cand_id, scope=eff_scope)
+        grounded_node = PhysicalEntityNode(id=grounded_id, entity_name=grounded_id, scope=eff_scope)
         same_as_edge_id = f"edge_same_as_{hashlib.blake2b(f'{cand_id}:{grounded_id}'.encode(), digest_size=8).hexdigest()}"
         same_as_edge = HCIREdge(
             id=same_as_edge_id,
@@ -352,11 +395,137 @@ class HCIRCommitter:
         tx = HCIRTransaction(
             id=reid_op.operation_id,
             author=author,
+            tenant_id=eff_scope.tenant_id,
             operations=operations,
             metadata={"description": f"Confirmed identity: {cand_id} SAME_AS {grounded_id}"},
         )
 
         return self._tx_manager.commit(tx)
+
+    def commit_fuzzy_assertions(
+        self,
+        assertions: Sequence[FuzzyAssertion],
+        *,
+        posterior_by_assertion: Mapping[str, float] | None = None,
+        adaptive_ops: Sequence[TransactionOperation] = (),
+        scope: Scope | None = None,
+        author: str = "SGE_FuzzyCommitter",
+    ) -> list[HCIRTransaction]:
+        """Persist FuzzyAssertions and AdaptiveMembership ops without collapsing epistemic beliefs."""
+        if not assertions and not adaptive_ops:
+            return []
+
+        eff_scope = self._effective_scope(scope)
+        tenant_id = eff_scope.tenant_id
+        operations: list[TransactionOperation] = list(adaptive_ops)
+        entity_memberships: dict[str, dict[str, dict[str, object]]] = {}
+
+        for fa in assertions:
+            if fa.target_ref is None:
+                entity_memberships.setdefault(fa.subject_ref, {})[fa.semantics] = fa.model_dump()
+                continue
+
+            subj_node = PhysicalEntityNode(
+                id=fa.subject_ref, entity_name=fa.subject_ref, scope=eff_scope
+            )
+            obj_node = PhysicalEntityNode(
+                id=fa.target_ref, entity_name=fa.target_ref, scope=eff_scope
+            )
+            operations.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=subj_node.id,
+                    node_data=subj_node.model_dump(),
+                )
+            )
+            operations.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=obj_node.id,
+                    node_data=obj_node.model_dump(),
+                )
+            )
+
+            pred_name = fa.semantics.removeprefix("relation:")
+            edge_type = self._map_predicate_to_edge_type(pred_name)
+            rel_edge_id = (
+                "edge_frel_"
+                + hashlib.blake2b(
+                    f"{fa.subject_ref}:{fa.semantics}:{fa.target_ref}".encode(),
+                    digest_size=8,
+                ).hexdigest()
+            )
+            posterior = (
+                float(posterior_by_assertion[fa.assertion_id])
+                if posterior_by_assertion and fa.assertion_id in posterior_by_assertion
+                else None
+            )
+            edge_props: dict[str, object] = {
+                "predicate": pred_name,
+                "fuzzy_assertion": fa.model_dump(),
+                "semantic_degree": float(fa.degree),
+                "model_id": fa.model_id,
+                "model_version": int(fa.model_version),
+                "profile_id": fa.profile_id.value,
+            }
+            if posterior is not None:
+                edge_props["posterior_belief"] = posterior
+
+            rel_edge = HCIREdge(
+                id=rel_edge_id,
+                edge_type=edge_type,
+                sources=[fa.subject_ref],
+                targets=[fa.target_ref],
+                properties=edge_props,
+                weight=float(fa.degree),
+            )
+            operations.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_EDGE,
+                    edge_id=rel_edge.id,
+                    edge_data=rel_edge.model_dump(),
+                )
+            )
+
+        for subj_id, memb_map in entity_memberships.items():
+            ent_node = PhysicalEntityNode(
+                id=subj_id,
+                entity_name=subj_id,
+                scope=eff_scope,
+                properties={"fuzzy_memberships": memb_map},
+            )
+            operations.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=ent_node.id,
+                    node_data=ent_node.model_dump(),
+                )
+            )
+
+        if not operations:
+            return []
+
+        committed_txs: list[HCIRTransaction] = []
+        max_batch = 200
+        for i in range(0, len(operations), max_batch):
+            batch_ops = operations[i : i + max_batch]
+            tx_id = (
+                "tx_fuzzy_batch_"
+                + hashlib.blake2b(
+                    f"{len(batch_ops)}:{time.time()}:{i}".encode(), digest_size=8
+                ).hexdigest()
+            )
+            tx = HCIRTransaction(
+                id=tx_id,
+                author=author,
+                tenant_id=tenant_id,
+                operations=batch_ops,
+                metadata={
+                    "description": f"Fuzzy grounding assertions batch ({len(assertions)} assertions)"
+                },
+            )
+            committed_txs.append(self._tx_manager.commit(tx))
+        return committed_txs
 
     @staticmethod
     def _map_predicate_to_edge_type(

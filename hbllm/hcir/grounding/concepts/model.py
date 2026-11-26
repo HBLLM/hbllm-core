@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import math
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from hbllm.hcir.fuzzy import (
+    AdaptiveMembershipModel,
+    MembershipKernelFamily,
+    ReferenceScaleKind,
+    evaluate_membership_kernel,
+)
 from hbllm.hcir.grounding.contracts.enums import ConceptLifecycle
 from hbllm.hcir.grounding.contracts.quality import GroundingQuality
 from hbllm.hcir.grounding.contracts.references import GroundedConceptRef
+
+_COLOR_LABELS: frozenset[str] = frozenset(
+    {"black", "blue", "red", "green", "yellow", "grey", "magenta", "orange", "cyan", "brown"}
+)
 
 
 @dataclass
@@ -190,6 +202,82 @@ class GroundedConcept:
         """Attach a relational scene graph representing the structural topology of this concept."""
         self.relational_graph = graph
         self.last_updated_at = time.time()
+
+    def compute_fuzzy_membership(
+        self,
+        features: Mapping[str, Any],
+        *,
+        ignore_color_labels: bool = False,
+        sigma_scale: float = 1.25,
+        min_std: float = 0.20,
+    ) -> float:
+        """Evaluate graded Mahalanobis-RBF membership in [0.0, 1.0] against running feature stats."""
+        if not self.feature_distributions:
+            return 0.0
+
+        if not ignore_color_labels:
+            color_new = {
+                k for k in features if k.startswith("label_") and any(c in k for c in _COLOR_LABELS)
+            }
+            color_concept = {
+                k
+                for k in self.feature_distributions
+                if k.startswith("label_") and any(c in k for c in _COLOR_LABELS)
+            }
+            if color_new and color_concept and not (color_new & color_concept):
+                return 0.0
+
+        shared = set(features.keys()) & set(self.feature_distributions.keys())
+        if not shared:
+            return 0.0
+
+        sq_sum = 0.0
+        numeric_count = 0
+        for k in shared:
+            if ignore_color_labels and k.startswith("label_"):
+                continue
+            val = features[k]
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                mean, var = self.feature_distributions[k]
+                n_obs = self.feature_counts.get(k, 1)
+                floor = min_std if n_obs >= 3 else max(min_std, 0.45)
+                std = max(math.sqrt(var), floor) if var > 1e-12 else floor
+                z = (float(val) - mean) / std
+                sq_sum += z * z
+                numeric_count += 1
+
+        if numeric_count == 0:
+            return 0.0
+        rms_z = math.sqrt(sq_sum / numeric_count)
+        return evaluate_membership_kernel(
+            rms_z,
+            MembershipKernelFamily.MAHALANOBIS_RBF,
+            {"sigma": max(1e-6, float(sigma_scale))},
+        )
+
+    def to_adaptive_membership_model(
+        self,
+        *,
+        contextual_scope: str = "sge_concept",
+        sigma_scale: float = 1.25,
+    ) -> AdaptiveMembershipModel:
+        """Export this concept's fuzzy prototype distribution as a versioned AdaptiveMembershipModel."""
+        params: dict[str, float] = {"sigma": max(1e-6, float(sigma_scale))}
+        for k, (mean, var) in self.feature_distributions.items():
+            params[f"mean:{k}"] = float(mean)
+            params[f"var:{k}"] = float(var)
+        return AdaptiveMembershipModel(
+            model_id=f"concept_{self.concept_ref.id}",
+            target_id=self.concept_ref.id,
+            contextual_scope=contextual_scope,
+            kernel_family=MembershipKernelFamily.MAHALANOBIS_RBF,
+            reference_scale_kind=ReferenceScaleKind.FEATURE_ZSCORE,
+            learned_parameters=params,
+            sample_count=sum(self.feature_counts.values())
+            if self.feature_counts
+            else len(self.prototypes),
+            version=max(1, int(self.concept_version)),
+        )
 
     def to_causal_predicates(self) -> list[Any]:
         """Export compositional, part-whole, and higher-order relations as formal CausalPredicates."""

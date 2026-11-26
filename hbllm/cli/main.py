@@ -230,6 +230,16 @@ def bench_dev(
         "--cross-seed/--no-cross-seed",
         help="Also measure transfer across distinct procedural seeds with one shared engine",
     ),
+    fuzzy_grounding: bool = typer.Option(
+        False,
+        "--fuzzy-grounding/--no-fuzzy-grounding",
+        help="Enable ADR 006 fuzzy SGE concept & relation grounding",
+    ),
+    fuzzy_reasoning: bool = typer.Option(
+        False,
+        "--fuzzy-reasoning/--no-fuzzy-reasoning",
+        help="Enable ADR 006 fuzzy VM & soft reasoning evaluation",
+    ),
 ) -> None:
     """Run the frozen dev evaluation suite."""
     from benchmarks.suites.runner import run_suite
@@ -241,6 +251,8 @@ def bench_dev(
         episodes_per_task=episodes,
         shared_memory=shared_memory,
         cross_seed=cross_seed,
+        enable_fuzzy_grounding=fuzzy_grounding,
+        enable_fuzzy_reasoning=fuzzy_reasoning,
     )
     if code != 0:
         raise typer.Exit(code=code)

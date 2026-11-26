@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -12,6 +12,18 @@ from hbllm.hcir.capabilities.cortical_alus import (
     compute_bellman_risk_backup,
     compute_collision_cone,
     compute_geodesic_field,
+)
+from hbllm.hcir.fuzzy import (
+    BipolarObservation,
+    FuzzyExpr,
+    FuzzyProfileId,
+    RelationCompositionPolicy,
+    aggregate_bipolar_evidence,
+    apply_hedge,
+    evaluate_membership_kernel,
+    evaluate_membership_kernel_batch,
+    get_fuzzy_profile,
+    normalize_by_reference_scale,
 )
 from hbllm.hcir.primitives import detect_background_color, segment_entities
 from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
@@ -25,6 +37,11 @@ MATH_CAPABILITIES: tuple[str, ...] = (
     "math.bellman_risk_backup",
     "math.collision_cone",
     "math.bayesian_posterior_update",
+    "math.fuzzy.membership",
+    "math.fuzzy.eval",
+    "math.fuzzy.compose",
+    "math.fuzzy.hedge",
+    "math.fuzzy.bipolar",
 )
 
 
@@ -139,6 +156,113 @@ def compute_set_cardinality(
     }
 
 
+def compute_fuzzy_membership(
+    value: float | Sequence[float],
+    *,
+    kernel_family: str = "gaussian",
+    parameters: Mapping[str, float] | None = None,
+    reference_scale_kind: str = "raw",
+    scale_context: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
+    """Evaluate a stateless Layer-0 fuzzy membership kernel over scalar or batch inputs."""
+    params_map = {str(k): float(v) for k, v in (parameters or {}).items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        scaled_vals = [
+            normalize_by_reference_scale(float(v), reference_scale_kind, scale_context)
+            for v in value
+        ]
+        degs = evaluate_membership_kernel_batch(scaled_vals, kernel_family, params_map)
+        return {
+            "degrees": [float(d) for d in degs.tolist()],
+            "scaled_values": scaled_vals,
+            "kernel_family": kernel_family,
+            "reference_scale_kind": reference_scale_kind,
+        }
+    scaled = normalize_by_reference_scale(float(value), reference_scale_kind, scale_context)
+    deg = evaluate_membership_kernel(scaled, kernel_family, params_map)
+    return {
+        "degree": float(deg),
+        "scaled_value": float(scaled),
+        "kernel_family": kernel_family,
+        "reference_scale_kind": reference_scale_kind,
+    }
+
+
+def compute_fuzzy_eval(
+    expr: Mapping[str, Any] | FuzzyExpr,
+    *,
+    bindings: Mapping[str, Any] | None = None,
+    profile_id: str = FuzzyProfileId.PRODUCT.value,
+    negation_mode: str = "standard",
+) -> dict[str, Any]:
+    """Evaluate a serialized `FuzzyExpr` AST under a complete `FuzzyLogicProfile`."""
+    ast_expr = expr if isinstance(expr, FuzzyExpr) else FuzzyExpr.model_validate(dict(expr))
+    prof = get_fuzzy_profile(profile_id, negation_mode=negation_mode)
+    deg = ast_expr.evaluate(bindings=bindings, profile=prof)
+    return {
+        "degree": float(deg),
+        "profile_id": prof.profile_id.value,
+        "negation_mode": prof.negation_mode.value,
+    }
+
+
+def compute_fuzzy_compose(
+    first_relation: str,
+    second_relation: str,
+    degree_ab: float,
+    degree_bc: float,
+    *,
+    contextual_scope: str = "default",
+    geometry_context: Mapping[str, Any] | None = None,
+    policy: Mapping[str, Any] | RelationCompositionPolicy | None = None,
+) -> dict[str, Any]:
+    """Compose two graded relations under a declarative `RelationCompositionPolicy`."""
+    if policy is None:
+        comp_policy = RelationCompositionPolicy.default_spatial_policy()
+    elif isinstance(policy, RelationCompositionPolicy):
+        comp_policy = policy
+    else:
+        comp_policy = RelationCompositionPolicy.model_validate(dict(policy))
+    res = comp_policy.compose(
+        first_relation,
+        second_relation,
+        float(degree_ab),
+        float(degree_bc),
+        contextual_scope=contextual_scope,
+        geometry_context=geometry_context,
+    )
+    return res.model_dump()
+
+
+def compute_fuzzy_hedge(degree: float, *, hedge: str = "identity") -> dict[str, Any]:
+    """Apply a monotonic linguistic hedge modifier to a membership degree."""
+    out = apply_hedge(float(degree), hedge)
+    return {"degree": float(out), "hedge": hedge}
+
+
+def compute_fuzzy_bipolar(
+    observations: Sequence[Mapping[str, Any] | BipolarObservation],
+    *,
+    profile_id: str = FuzzyProfileId.LUKASIEWICZ.value,
+    ignorance_prior: float = 2.0,
+    saturation_scale: float = 1.0,
+    half_life_seconds: float | None = None,
+) -> dict[str, Any]:
+    """Compute correlation-normalized bipolar support/refutation, ignorance, and conflict."""
+    parsed = [
+        obs if isinstance(obs, BipolarObservation) else BipolarObservation.model_validate(dict(obs))
+        for obs in observations
+    ]
+    state = aggregate_bipolar_evidence(
+        parsed,
+        profile_id=profile_id,
+        ignorance_prior=float(ignorance_prior),
+        saturation_scale=float(saturation_scale),
+        half_life_seconds=half_life_seconds,
+    )
+    return state.model_dump()
+
+
 class MathCapabilityExecutor:
     """Stateless kernel executor exposing `math.*` Layer-0 ALUs via `Opcode.EXECUTE`."""
 
@@ -216,6 +340,45 @@ class MathCapabilityExecutor:
                 observations=params.get("observations", ()),
                 risk_weight=float(params.get("risk_weight", 50.0)),
             )
+        if cap == "math.fuzzy.membership":
+            raw_val = params["values"] if "values" in params else params.get("value", 0.0)
+            return compute_fuzzy_membership(
+                raw_val,
+                kernel_family=str(params.get("kernel_family", "gaussian")),
+                parameters=params.get("parameters"),
+                reference_scale_kind=str(params.get("reference_scale_kind", "raw")),
+                scale_context=params.get("scale_context"),
+            )
+        if cap == "math.fuzzy.eval":
+            return compute_fuzzy_eval(
+                params["expr"],
+                bindings=params.get("bindings"),
+                profile_id=str(params.get("profile_id", FuzzyProfileId.PRODUCT.value)),
+                negation_mode=str(params.get("negation_mode", "standard")),
+            )
+        if cap == "math.fuzzy.compose":
+            return compute_fuzzy_compose(
+                str(params["first_relation"]),
+                str(params["second_relation"]),
+                float(params.get("degree_ab", 0.0)),
+                float(params.get("degree_bc", 0.0)),
+                contextual_scope=str(params.get("contextual_scope", "default")),
+                geometry_context=params.get("geometry_context"),
+                policy=params.get("policy"),
+            )
+        if cap == "math.fuzzy.hedge":
+            return compute_fuzzy_hedge(
+                float(params.get("degree", 0.0)),
+                hedge=str(params.get("hedge", "identity")),
+            )
+        if cap == "math.fuzzy.bipolar":
+            return compute_fuzzy_bipolar(
+                params.get("observations", ()),
+                profile_id=str(params.get("profile_id", FuzzyProfileId.LUKASIEWICZ.value)),
+                ignorance_prior=float(params.get("ignorance_prior", 2.0)),
+                saturation_scale=float(params.get("saturation_scale", 1.0)),
+                half_life_seconds=params.get("half_life_seconds"),
+            )
         return {"error": f"Unknown math capability: {cap}"}
 
 
@@ -226,6 +389,11 @@ __all__ = [
     "compute_bellman_risk_backup",
     "compute_collision_cone",
     "compute_connected_components",
+    "compute_fuzzy_bipolar",
+    "compute_fuzzy_compose",
+    "compute_fuzzy_eval",
+    "compute_fuzzy_hedge",
+    "compute_fuzzy_membership",
     "compute_geodesic_field",
     "compute_set_cardinality",
     "compute_symmetry_score",

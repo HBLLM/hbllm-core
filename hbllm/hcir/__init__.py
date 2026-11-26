@@ -37,6 +37,7 @@ from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionO
 from hbllm.hcir.types import (
     Confidence,
     CostMetric,
+    MembershipDegree,
     Priority,
     TimeDuration,
     Timestamp,
@@ -53,6 +54,7 @@ __all__ = [
     # --- Cognitive Type System ---
     "Priority",
     "Confidence",
+    "MembershipDegree",
     "CostMetric",
     "TimeDuration",
     "Timestamp",

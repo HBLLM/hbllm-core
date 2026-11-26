@@ -4,9 +4,17 @@ import hashlib
 import math
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from hbllm.hcir.fuzzy import (
+    AdaptiveMembershipModel,
+    FuzzyAssertion,
+    FuzzyProfileId,
+    MembershipKernelFamily,
+    ReferenceScaleKind,
+)
 from hbllm.hcir.grounding.contracts.claims import GroundingClaim
 from hbllm.hcir.grounding.contracts.enums import ClaimOrigin, ModalitySource, Polarity
 from hbllm.hcir.grounding.contracts.evidence import EvidenceRecord
@@ -49,13 +57,17 @@ class RelationLearner:
     to linguistic tokens.
     """
 
-    def __init__(self, proximity_threshold: float = 5.0) -> None:
+    def __init__(self, proximity_threshold: float = 5.0, *, enable_fuzzy: bool = False) -> None:
         self._proximity_threshold = proximity_threshold
+        self._enable_fuzzy = bool(enable_fuzzy)
         self._relations: dict[str, LearnedRelation] = {}
+        self._adaptive_models: dict[tuple[str, str], AdaptiveMembershipModel] = {}
+        self._model_snapshots: dict[str, dict[str, dict[str, float]]] = {}
         self._dyad_histories: dict[tuple[str, str], KinematicDyadHistory] = {}
         self._last_entity_geom: dict[str, tuple[tuple[float, ...], Any]] = {}
         self.last_changed_pairs: set[tuple[str, str]] = set()
         self._seed_canonical_relations()
+        self._seed_adaptive_models()
 
     def reset(self) -> None:
         """Clear episode-local dyad histories and cached entity geometry."""
@@ -101,6 +113,253 @@ class RelationLearner:
             linguistic_aliases={"FOLLOWS": 0.95, "CHASING": 0.8},
             confidence=0.9,
         )
+
+    def _seed_adaptive_models(self) -> None:
+        """Seed dimensionless, context-scoped adaptive relation membership models (ADR 006 §4.4)."""
+        seeds = (
+            AdaptiveMembershipModel(
+                model_id="rel_in_extent",
+                target_id="rel_in",
+                contextual_scope="entity_extent",
+                kernel_family=MembershipKernelFamily.TRAPEZOIDAL,
+                reference_scale_kind=ReferenceScaleKind.RAW,
+                learned_parameters={"a": 0.15, "b": 0.75, "c": 1.0, "d": 1.0},
+            ),
+            AdaptiveMembershipModel(
+                model_id="rel_on_extent",
+                target_id="rel_on",
+                contextual_scope="entity_extent",
+                kernel_family=MembershipKernelFamily.TRAPEZOIDAL,
+                reference_scale_kind=ReferenceScaleKind.RAW,
+                learned_parameters={"a": 0.15, "b": 0.55, "c": 1.0, "d": 1.0},
+            ),
+            AdaptiveMembershipModel(
+                model_id="rel_touching_extent",
+                target_id="rel_touching",
+                contextual_scope="entity_extent",
+                kernel_family=MembershipKernelFamily.TRAPEZOIDAL,
+                reference_scale_kind=ReferenceScaleKind.ENTITY_EXTENT,
+                learned_parameters={"a": 0.0, "b": 0.0, "c": 0.55, "d": 1.10},
+            ),
+            AdaptiveMembershipModel(
+                model_id="rel_near_manipulation",
+                target_id="rel_near",
+                contextual_scope="manipulation",
+                kernel_family=MembershipKernelFamily.TRAPEZOIDAL,
+                reference_scale_kind=ReferenceScaleKind.ENTITY_EXTENT,
+                learned_parameters={"a": 0.0, "b": 0.0, "c": 1.25, "d": 3.50},
+            ),
+            AdaptiveMembershipModel(
+                model_id="rel_near_navigation",
+                target_id="rel_near",
+                contextual_scope="navigation",
+                kernel_family=MembershipKernelFamily.TRAPEZOIDAL,
+                reference_scale_kind=ReferenceScaleKind.NAVIGABLE_DIAMETER,
+                learned_parameters={"a": 0.0, "b": 0.0, "c": 0.12, "d": 0.35},
+            ),
+            AdaptiveMembershipModel(
+                model_id="rel_approaching_ttc",
+                target_id="rel_approaching",
+                contextual_scope="kinematic_closing",
+                kernel_family=MembershipKernelFamily.TRAPEZOIDAL,
+                reference_scale_kind=ReferenceScaleKind.CLOSING_TTC,
+                learned_parameters={"a": 0.0, "b": 0.0, "c": 2.0, "d": 6.0},
+            ),
+        )
+        for m in seeds:
+            self._adaptive_models[(m.target_id, m.contextual_scope)] = m
+            self._model_snapshots[m.model_id] = {str(m.version): dict(m.learned_parameters)}
+
+    def get_adaptive_model(
+        self, relation_id: str, contextual_scope: str = "manipulation"
+    ) -> AdaptiveMembershipModel | None:
+        return self._adaptive_models.get(
+            (relation_id, contextual_scope)
+        ) or self._adaptive_models.get((relation_id, "entity_extent"))
+
+    def evaluate_fuzzy_relations(
+        self,
+        dyad: SpatialDyad,
+        history: KinematicDyadHistory | None = None,
+        *,
+        subject_extent: float = 0.5,
+        object_extent: float = 0.5,
+        navigable_diameter: float = 10.0,
+        contextual_scope: str = "manipulation",
+        min_degree: float = 0.05,
+        snapshot_sequence: int = 0,
+        evidence_refs: tuple[str, ...] = (),
+    ) -> list[FuzzyAssertion]:
+        """Evaluate overlapping graded relation memberships over dimensionless geometry."""
+        scale_ctx = {
+            "subject_extent": max(1e-6, float(subject_extent)),
+            "object_extent": max(1e-6, float(object_extent)),
+            "navigable_diameter": max(1e-6, float(navigable_diameter)),
+            "closing_speed": max(0.0, -history.approaching_rate()) if history is not None else 0.0,
+        }
+        assertions: list[FuzzyAssertion] = []
+
+        # 1. Containment (IN)
+        m_in = self.get_adaptive_model("rel_in", "entity_extent")
+        if m_in is not None and dyad.containment_ratio > 0.0:
+            fa = m_in.emit_assertion(
+                subject_ref=dyad.subject_id,
+                target_ref=dyad.object_id,
+                raw_value=dyad.containment_ratio,
+                semantics="relation:IN",
+                scale_context=scale_ctx,
+                profile_id=FuzzyProfileId.PRODUCT,
+                evidence_refs=evidence_refs,
+                snapshot_sequence=snapshot_sequence,
+            )
+            if fa.degree >= min_degree:
+                assertions.append(fa)
+
+        # 2. Support / Above (ON / ABOVE)
+        m_on = self.get_adaptive_model("rel_on", "entity_extent")
+        if m_on is not None:
+            raw_on = dyad.support_ratio
+            if raw_on <= 0.0 and dyad.dy > 0.0:
+                vert_alignment = max(0.0, 1.0 - abs(dyad.dx) / max(1e-6, dyad.dy + abs(dyad.dx)))
+                raw_on = vert_alignment if dyad.contact else vert_alignment * 0.85
+            if raw_on > 0.0:
+                fa = m_on.emit_assertion(
+                    subject_ref=dyad.subject_id,
+                    target_ref=dyad.object_id,
+                    raw_value=raw_on,
+                    semantics="relation:ABOVE",
+                    scale_context=scale_ctx,
+                    profile_id=FuzzyProfileId.PRODUCT,
+                    evidence_refs=evidence_refs,
+                    snapshot_sequence=snapshot_sequence,
+                )
+                if fa.degree >= min_degree:
+                    assertions.append(fa)
+
+        # 3. Contact (TOUCHING)
+        m_touch = self.get_adaptive_model("rel_touching", "entity_extent")
+        if m_touch is not None:
+            if dyad.contact:
+                fa = FuzzyAssertion(
+                    subject_ref=dyad.subject_id,
+                    target_ref=dyad.object_id,
+                    semantics="relation:TOUCHING",
+                    degree=1.0,
+                    profile_id=FuzzyProfileId.PRODUCT,
+                    context_ref=m_touch.contextual_scope,
+                    model_id=m_touch.model_id,
+                    model_version=m_touch.version,
+                    evidence_refs=evidence_refs,
+                    snapshot_sequence=snapshot_sequence,
+                )
+                assertions.append(fa)
+            else:
+                gap = max(
+                    0.0,
+                    dyad.distance
+                    - 0.5 * (scale_ctx["subject_extent"] + scale_ctx["object_extent"]),
+                )
+                fa = m_touch.emit_assertion(
+                    subject_ref=dyad.subject_id,
+                    target_ref=dyad.object_id,
+                    raw_value=gap,
+                    semantics="relation:TOUCHING",
+                    scale_context=scale_ctx,
+                    profile_id=FuzzyProfileId.PRODUCT,
+                    evidence_refs=evidence_refs,
+                    snapshot_sequence=snapshot_sequence,
+                )
+                if fa.degree >= min_degree:
+                    assertions.append(fa)
+
+        # 4. Context-scaled proximity (NEAR)
+        m_near = self.get_adaptive_model("rel_near", contextual_scope)
+        if m_near is not None:
+            fa = m_near.emit_assertion(
+                subject_ref=dyad.subject_id,
+                target_ref=dyad.object_id,
+                raw_value=dyad.distance,
+                semantics="relation:NEAR",
+                scale_context=scale_ctx,
+                profile_id=FuzzyProfileId.PRODUCT,
+                evidence_refs=evidence_refs,
+                snapshot_sequence=snapshot_sequence,
+            )
+            if fa.degree >= min_degree:
+                assertions.append(fa)
+
+        # 5. Kinematic closing (APPROACHING)
+        m_app = self.get_adaptive_model("rel_approaching", "kinematic_closing")
+        if m_app is not None and scale_ctx["closing_speed"] > 1e-6:
+            fa = m_app.emit_assertion(
+                subject_ref=dyad.subject_id,
+                target_ref=dyad.object_id,
+                raw_value=dyad.distance,
+                semantics="relation:APPROACHING",
+                scale_context=scale_ctx,
+                profile_id=FuzzyProfileId.PRODUCT,
+                evidence_refs=evidence_refs,
+                snapshot_sequence=snapshot_sequence,
+            )
+            if fa.degree >= min_degree:
+                assertions.append(fa)
+
+        assertions.sort(key=lambda a: (-float(a.degree), a.semantics))
+        return assertions
+
+    def adapt_relation_model(
+        self,
+        relation_id: str,
+        contextual_scope: str,
+        observed_normalized_values: Sequence[float],
+        *,
+        learning_rate: float = 0.25,
+        scope: Any = None,
+        trigger_error_ids: Sequence[str] = (),
+    ) -> tuple[AdaptiveMembershipModel, list[Any]]:
+        """Adapt a context-scoped relation membership model into a new immutable version."""
+        model = self._adaptive_models.get((relation_id, contextual_scope))
+        if model is None:
+            raise KeyError(
+                f"No AdaptiveMembershipModel for ({relation_id!r}, {contextual_scope!r})"
+            )
+        vals = [float(v) for v in observed_normalized_values if math.isfinite(float(v))]
+        if not vals:
+            return model, []
+
+        lr = max(0.0, min(1.0, float(learning_rate)))
+        p = dict(model.learned_parameters)
+        obs_mean = sum(vals) / len(vals)
+        obs_max = max(vals)
+
+        if model.kernel_family == MembershipKernelFamily.TRAPEZOIDAL:
+            a, b, c, d = p.get("a", 0.0), p.get("b", 0.0), p.get("c", 1.0), p.get("d", 2.0)
+            new_c = max(b, (1.0 - lr) * c + lr * obs_mean)
+            new_d = max(new_c + 1e-4, (1.0 - lr) * d + lr * max(obs_max, obs_mean * 1.5))
+            new_params = {"a": a, "b": b, "c": new_c, "d": new_d}
+        elif model.kernel_family == MembershipKernelFamily.GAUSSIAN:
+            center = (1.0 - lr) * p.get("center", 0.0) + lr * obs_mean
+            var = sum((v - obs_mean) ** 2 for v in vals) / max(1, len(vals))
+            sigma = max(1e-3, (1.0 - lr) * p.get("sigma", 1.0) + lr * max(0.1, math.sqrt(var)))
+            new_params = {"center": center, "sigma": sigma}
+        else:
+            new_params = dict(p)
+
+        prior_snaps = self._model_snapshots.get(model.model_id, {})
+        next_model, ops = model.evolve(
+            new_params,
+            sample_delta=len(vals),
+            learning_rate=lr,
+            trigger_error_ids=trigger_error_ids,
+            scope=scope,
+            existing_snapshots=prior_snaps,
+            author="relation_learner",
+        )
+        self._adaptive_models[(relation_id, contextual_scope)] = next_model
+        snap = self._model_snapshots.setdefault(model.model_id, {})
+        snap[str(model.version)] = dict(model.learned_parameters)
+        snap[str(next_model.version)] = dict(next_model.learned_parameters)
+        return next_model, ops
 
     def observe_entity_states(
         self,
