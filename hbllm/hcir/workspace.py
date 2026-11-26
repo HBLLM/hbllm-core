@@ -34,7 +34,7 @@ from hbllm.hcir.snapshot import Snapshot, SnapshotManager
 from hbllm.hcir.stores import IEventStore, InMemoryEventStore
 from hbllm.hcir.tier_types import WorkspaceTier
 from hbllm.hcir.transactions import HCIRTransaction, TransactionOp, TransactionOperation
-from hbllm.hcir.types import Attention, BranchMode
+from hbllm.hcir.types import Attention, BranchMode, Scope, SecurityLevel
 
 logger = logging.getLogger(__name__)
 
@@ -435,6 +435,15 @@ class HCIRWorkspaceState:
             props = node.properties or {}
             if props.get("permanent") or props.get("is_axiom") or props.get("locked"):
                 continue
+            scope_obj = getattr(node, "scope", None)
+            sec_level = getattr(scope_obj, "security_level", None)
+            tags = getattr(node, "tags", None) or []
+            if (
+                sec_level == SecurityLevel.SYSTEM
+                or str(sec_level) == SecurityLevel.SYSTEM.value
+                or "core_prior" in tags
+            ):
+                continue
             evictable.append(node)
         if not evictable:
             return []
@@ -464,12 +473,14 @@ class HCIRWorkspaceState:
             }
             if world_id is not None:
                 summary_props["world_id"] = world_id
+            eff_tenant = self._tenant_id or "default"
             summary_node = ConceptNode(
                 id=summary_id,
                 label=f"consolidated_{world_id or self._tier.value}",
                 definition=f"Consolidated {total_consolidated} lower-salience nodes under budget {limit}",
                 domain="cognitive_compaction",
                 properties=summary_props,
+                scope=Scope(tenant_id=eff_tenant),
             )
             ops.append(
                 TransactionOperation(
@@ -478,8 +489,11 @@ class HCIRWorkspaceState:
                     node_data=summary_node.model_dump(),
                 )
             )
+        eff_tenant = self._tenant_id or "default"
         for i in range(0, len(ops), 400):
-            self.commit_operations(ops[i : i + 400], author=author, grant=grant)
+            self.commit_operations(
+                ops[i : i + 400], author=author, grant=grant, tenant_id=eff_tenant
+            )
         return evicted_ids
 
     # ── Snapshot & Branching ─────────────────────────────────────────

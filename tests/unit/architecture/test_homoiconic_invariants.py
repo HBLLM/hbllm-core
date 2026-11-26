@@ -17,6 +17,7 @@ from hbllm.drivers.base import DriverAction, DriverInput, DriverModality
 from hbllm.drivers.cognitive_blackbox import CognitiveBlackbox
 from hbllm.hcir.abi import ExecutionMetrics
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
+from hbllm.hcir.graph import ConceptNode
 from hbllm.hcir.interpreter import SyscallAllowlist, sys_execute
 from hbllm.hcir.kernel.capability_resolver import CapabilityImplementation, ICapabilityExecutor
 from hbllm.hcir.kernel.services import KernelServices
@@ -26,8 +27,10 @@ from hbllm.hcir.receipt import ExecutionReceipt
 from hbllm.hcir.seed.loader import load_core_priors_spec
 from hbllm.hcir.skills.induction import SkillInductionEngine
 from hbllm.hcir.skills.library_learner import anti_unify_streams
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Scope
 from hbllm.hcir.workspace import HCIRWorkspaceState
+from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 from hbllm.serving.api import _state, app
 from hbllm.serving.cognitive_registry import CognitiveSystemRegistry
 
@@ -405,3 +408,49 @@ def test_serving_and_blackbox_unified_over_cognitive_system(
             _state["cognitive_system"] = prev_sys
         if prev_brain is not None:
             _state["brain"] = prev_brain
+
+
+def test_node_budget_consolidation_preserves_system_priors_and_tenant_scope(tmp_path: Path) -> None:
+    """Node budget compaction skips SYSTEM/core_prior nodes and preserves tenant scope."""
+    tenant = "tenant_budget_m6"
+    system = build_cognitive_system(
+        CognitiveSystemConfig(
+            world_id=tenant,
+            tenant_id=tenant,
+            memory_dir=tmp_path / "budget_mem",
+            enable_grounding=False,
+        )
+    )
+    ws = system.tiered_workspace.persistent
+    assert ws.graph.get_node("prior_skill_count_entities") is not None
+
+    prior_ids = [n.id for n in ws.graph.all_nodes()]
+    low_ops: list[TransactionOperation] = []
+    for idx in range(15):
+        node = ConceptNode(
+            id=f"ephemeral_concept_{idx}",
+            label=f"ephemeral_{idx}",
+            definition="Low-salience test concept",
+            domain="test_compaction",
+            properties={"activation_energy": 0.05},
+            scope=Scope(tenant_id=tenant),
+        )
+        low_ops.append(
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=node.id,
+                node_data=node.model_dump(),
+            )
+        )
+    ws.commit_operations(low_ops, author="test_writer", tenant_id=tenant)
+
+    cap = len(prior_ids) + 4
+    evicted = ws.consolidate_node_budget(max_nodes=cap)
+    assert len(evicted) >= 12
+    assert "prior_skill_count_entities" not in evicted
+    assert ws.graph.get_node("prior_skill_count_entities") is not None
+    assert ws.graph.node_count <= cap
+
+    summary_node = ws.graph.get_node(f"consolidated_summary_{ws.tier.value}")
+    assert summary_node is not None
+    assert summary_node.scope.tenant_id == tenant
