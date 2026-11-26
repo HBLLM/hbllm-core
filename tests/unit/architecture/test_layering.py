@@ -1,13 +1,11 @@
 """Architectural layering invariants test.
 
 Enforces strict one-way dependency boundaries across HBLLM layers:
-1. HCIR Kernel must not import from Brain (hcir.kernel ↛ brain).
-2. HCIR World must not import from Brain (hcir.world ↛ brain).
-3. HCIR Grounding must not import from Brain (hcir.grounding ↛ brain).
-4. Entire HCIR subsystem must not import from Brain (hcir ↛ brain).
-5. Core cognitive OS must not import from external Plugins (core ↛ plugins).
-6. Governance policies canonical location in HCIR with backward-compatible re-exports.
-7. Domain-agnostic lifecycle boundaries and context identification.
+1. Legacy ``hbllm.brain`` and ``experiments/legacy_brain`` packages are retired.
+2. Zero imports of ``hbllm.brain`` remain across core, plugins, benchmarks, or tests.
+3. Core cognitive OS must not import from external Plugins (core ↛ plugins).
+4. Governance policies canonical location in HCIR.
+5. Domain-agnostic lifecycle boundaries and context identification.
 """
 
 from __future__ import annotations
@@ -48,48 +46,32 @@ def _find_violations(base_dir: Path, forbidden_prefixes: tuple[str, ...]) -> lis
     return violations
 
 
-def test_hcir_kernel_does_not_import_brain() -> None:
-    """Invariant: HCIR Kernel must never depend on the higher-level Brain layer."""
+def test_legacy_brain_directory_retired() -> None:
+    """Invariant: Legacy Gen-1 hbllm/brain and experiments/legacy_brain are completely retired."""
     root = Path(__file__).resolve().parents[3]
-    kernel_dir = root / "hbllm" / "hcir" / "kernel"
-    assert kernel_dir.is_dir()
-
-    violations = _find_violations(kernel_dir, ("hbllm.brain", "brain"))
-    assert not violations, "HCIR Kernel violates architectural layering:\n" + "\n".join(violations)
-
-
-def test_hcir_world_does_not_import_brain() -> None:
-    """Invariant: HCIR World model must never depend on the Brain layer."""
-    root = Path(__file__).resolve().parents[3]
-    world_dir = root / "hbllm" / "hcir" / "world"
-    assert world_dir.is_dir()
-
-    violations = _find_violations(world_dir, ("hbllm.brain", "brain"))
-    assert not violations, "HCIR World violates architectural layering:\n" + "\n".join(violations)
-
-
-def test_hcir_grounding_does_not_import_brain() -> None:
-    """Invariant: HCIR Symbol Grounding Engine must never depend on the Brain layer."""
-    root = Path(__file__).resolve().parents[3]
-    grounding_dir = root / "hbllm" / "hcir" / "grounding"
-    assert grounding_dir.is_dir()
-
-    violations = _find_violations(grounding_dir, ("hbllm.brain", "brain"))
-    assert not violations, "HCIR Grounding violates architectural layering:\n" + "\n".join(
-        violations
+    assert not (root / "hbllm" / "brain").exists(), "hbllm/brain must be retired"
+    assert not (root / "experiments" / "legacy_brain").exists(), (
+        "experiments/legacy_brain must be retired"
     )
 
 
-def test_hcir_subsystem_does_not_import_brain() -> None:
-    """Invariant: Entire HCIR Cognitive OS must never depend on the Brain layer."""
+def test_zero_hbllm_brain_imports_across_codebase() -> None:
+    """Invariant: Zero active code across hbllm, plugins, benchmarks, scripts, experiments, examples, or tests imports hbllm.brain."""
     root = Path(__file__).resolve().parents[3]
-    hcir_dir = root / "hbllm" / "hcir"
-    assert hcir_dir.is_dir()
-
-    violations = _find_violations(hcir_dir, ("hbllm.brain", "brain"))
-    assert not violations, "HCIR subsystem violates architectural layering:\n" + "\n".join(
-        violations
-    )
+    violations: list[str] = []
+    for sub in ("hbllm", "plugins", "benchmarks", "scripts", "experiments", "examples", "tests"):
+        base = root / sub
+        if not base.is_dir():
+            continue
+        for py_file in base.rglob("*.py"):
+            if "__pycache__" in py_file.parts:
+                continue
+            if py_file.name == "test_no_duplicate_faculties.py":
+                continue
+            for imp in _get_imports(py_file):
+                if imp == "hbllm.brain" or imp.startswith("hbllm.brain."):
+                    violations.append(f"{py_file.relative_to(root)}: imports {imp}")
+    assert not violations, "Legacy hbllm.brain imports detected:\n" + "\n".join(violations)
 
 
 def test_core_does_not_import_plugins() -> None:
@@ -105,14 +87,12 @@ def test_core_does_not_import_plugins() -> None:
 
 
 def test_governance_policies_canonical_location() -> None:
-    """Governance policies are canonically defined in HCIR and re-exported by Brain."""
-    from hbllm.brain.governance.owner_rules import OwnerRuleStore as BrainRuleStore
-    from hbllm.brain.governance.policy_engine import PolicyEngine as BrainPolicyEngine
-    from hbllm.hcir.kernel.governance.policies.owner_rules import OwnerRuleStore as HcirRuleStore
-    from hbllm.hcir.kernel.governance.policies.policy_engine import PolicyEngine as HcirPolicyEngine
+    """Governance policies are canonically located inside HCIR Kernel."""
+    from hbllm.hcir.kernel.governance.policies.owner_rules import OwnerRuleStore
+    from hbllm.hcir.kernel.governance.policies.policy_engine import PolicyEngine
 
-    assert HcirPolicyEngine is BrainPolicyEngine
-    assert HcirRuleStore is BrainRuleStore
+    assert OwnerRuleStore is not None
+    assert PolicyEngine is not None
 
 
 def test_vocabulary_domain_agnostic_boundaries() -> None:

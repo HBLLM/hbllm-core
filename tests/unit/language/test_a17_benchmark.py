@@ -6,7 +6,11 @@ evidence, state transitions, contrastive differentiation, and teacher correction
 
 from __future__ import annotations
 
-from hbllm.brain.language.acquisition import (
+from hbllm.hcir.graph import (
+    CognitiveGraph,
+    PhysicalEntityNode,
+)
+from hbllm.hcir.language.acquisition import (
     ContrastiveLearner,
     EvidenceSourceType,
     GroundedLexicon,
@@ -15,10 +19,6 @@ from hbllm.brain.language.acquisition import (
     LexicalTargetType,
     LexiconAcquisitionLoop,
     apply_evidence_to_candidate,
-)
-from hbllm.hcir.graph import (
-    CognitiveGraph,
-    PhysicalEntityNode,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -685,7 +685,7 @@ class TestNovelLanguageExperiment:
 
         check_code = """
 import sys
-import hbllm.brain.language.acquisition
+import hbllm.hcir.language.acquisition
 
 llm_markers = ["openai", "anthropic", "litellm", "langchain", "transformers"]
 loaded = set(sys.modules.keys())

@@ -21,6 +21,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from hbllm.benchmarks.runner import BenchmarkReport, BenchmarkResult
 
@@ -221,20 +222,16 @@ async def profile_throughput() -> BenchmarkReport:
 
 
 async def profile_startup() -> BenchmarkReport:
-    """Time to start/stop each node type."""
-    from hbllm.brain.control.decision_node import DecisionNode
-    from hbllm.brain.control.router_node import RouterNode
-    from hbllm.brain.evaluation.critic_node import CriticNode
-    from hbllm.brain.planning.planner_node import PlannerNode
+    """Time to start/stop core HCIR & memory nodes."""
+    from hbllm.memory.memory_node import MemoryNode
     from hbllm.network.bus import InProcessBus
+    from hbllm.serving.launcher import HCIRCognitiveNode
 
     report = BenchmarkReport(suite="profile_startup")
 
-    node_classes = [
-        ("RouterNode", RouterNode),
-        ("DecisionNode", DecisionNode),
-        ("PlannerNode", PlannerNode),
-        ("CriticNode", CriticNode),
+    node_classes: list[tuple[str, type[Any]]] = [
+        ("HCIRCognitiveNode", HCIRCognitiveNode),
+        ("MemoryNode", MemoryNode),
     ]
 
     bus = InProcessBus()

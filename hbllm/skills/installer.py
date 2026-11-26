@@ -21,10 +21,11 @@ Supports:
 Usage::
 
     from hbllm.skills.installer import SkillInstaller
+    from hbllm.hcir.skills.skill_store import HCIRSkillStore
 
     installer = SkillInstaller(
-        skill_registry=brain.skill_registry,
-        capability_registry=brain.capability_registry,
+        skill_registry=HCIRSkillStore(data_dir="data"),
+        capability_registry=system.services.capability_resolver,
     )
 
     # Install from a file
@@ -169,12 +170,10 @@ class SkillInstaller:
                     source_path=str(path),
                 )
 
-        # 4. Register in SemanticCapabilityRegistry
+        # 4. Register in CapabilityRegistry
         if self._capability_registry:
             try:
-                from hbllm.brain.planning.semantic_capability_registry import (
-                    CapabilityDescriptor,
-                )
+                from hbllm.hcir.kernel.capability_resolver import CapabilityDescriptor
 
                 descriptor = CapabilityDescriptor(
                     name=f"skill.{parsed.name}",

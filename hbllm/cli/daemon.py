@@ -1,7 +1,7 @@
 """CLI manager for running HBLLM as a persistent OS background daemon.
 
 Supports:
-- macOS: launchd agent (`~/Library/LaunchAgents/com.hbllm.brain.plist`)
+- macOS: launchd agent (`~/Library/LaunchAgents/com.hbllm.hcir.plist`)
 - Linux: systemd user service (`~/.config/systemd/user/hbllm.service`)
 - Direct execution: foreground runner
 """
@@ -36,7 +36,7 @@ def install_service(args: argparse.Namespace) -> None:
     print(f"   Log: {log_file}")
 
     if os_name == "Darwin":
-        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.hbllm.brain.plist"
+        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.hbllm.hcir.plist"
         plist_path.parent.mkdir(parents=True, exist_ok=True)
 
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -44,7 +44,7 @@ def install_service(args: argparse.Namespace) -> None:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.hbllm.brain</string>
+    <string>com.hbllm.hcir</string>
     <key>ProgramArguments</key>
     <array>
         <string>{python_exe}</string>
@@ -119,13 +119,14 @@ def uninstall_service(args: argparse.Namespace) -> None:
     os_name = platform.system()
 
     if os_name == "Darwin":
-        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.hbllm.brain.plist"
-        if plist_path.exists():
-            subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
-            plist_path.unlink()
-            print("✅ Unloaded and removed launchd service: com.hbllm.brain")
-        else:
-            print("Service not found at", plist_path)
+        for label in ("com.hbllm.hcir", "com.hbllm.brain"):
+            plist_path = Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+            if plist_path.exists():
+                subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+                plist_path.unlink()
+                print(f"✅ Unloaded and removed launchd service: {label}")
+            elif label == "com.hbllm.hcir":
+                print("Service not found at", plist_path)
     elif os_name == "Linux":
         service_path = Path.home() / ".config" / "systemd" / "user" / "hbllm.service"
         if service_path.exists():
@@ -145,13 +146,17 @@ def status_service(args: argparse.Namespace) -> None:
 
     if os_name == "Darwin":
         res = subprocess.run(["launchctl", "list"], capture_output=True, text=True)
-        if "com.hbllm.brain" in res.stdout:
-            for line in res.stdout.splitlines():
-                if "com.hbllm.brain" in line:
-                    print("🟢 Service is REGISTERED and RUNNING:")
-                    print(f"   {line}")
+        matched = [
+            line
+            for line in res.stdout.splitlines()
+            if "com.hbllm.hcir" in line or "com.hbllm.brain" in line
+        ]
+        if matched:
+            for line in matched:
+                print("🟢 Service is REGISTERED and RUNNING:")
+                print(f"   {line}")
         else:
-            print("🔴 Service 'com.hbllm.brain' is NOT currently active.")
+            print("🔴 Service 'com.hbllm.hcir' is NOT currently active.")
     elif os_name == "Linux":
         res = subprocess.run(
             ["systemctl", "--user", "status", "hbllm.service"], capture_output=True, text=True

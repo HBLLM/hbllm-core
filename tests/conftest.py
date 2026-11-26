@@ -240,15 +240,6 @@ def _mount_archived_experiments_for_tests() -> None:
         "hbllm.perception.providers": exp_root / "legacy_perception" / "providers",
         "hbllm.perception.adapters": exp_root / "legacy_perception" / "adapters",
         "hbllm.experiment": exp_root / "hbllm_experiment",
-        "hbllm.brain.composites": exp_root / "legacy_brain" / "composites",
-        "hbllm.brain.continual": exp_root / "legacy_brain" / "continual",
-        "hbllm.brain.decision": exp_root / "legacy_brain" / "decision",
-        "hbllm.brain.evaluation": exp_root / "legacy_brain" / "evaluation",
-        "hbllm.brain.execution": exp_root / "legacy_brain" / "execution",
-        "hbllm.brain.observability": exp_root / "legacy_brain" / "observability",
-        "hbllm.brain.simulation": exp_root / "legacy_brain" / "simulation",
-        "hbllm.brain.social": exp_root / "legacy_brain" / "social",
-        "hbllm.brain.transfer": exp_root / "legacy_brain" / "transfer",
     }
     for pkg_name, exp_path in mounts.items():
         if not exp_path.is_dir():
@@ -269,22 +260,19 @@ _mount_archived_experiments_for_tests()
 def _isolate_data_dir(tmp_path, monkeypatch):
     """Isolate each test's data directory to prevent SQLite/file pollution.
 
-    Patches the default data_dir field in BrainConfig so every test that
-    creates a BrainConfig without explicit data_dir gets a temp directory.
-    Also redirects common path lookups.
+    Redirects HBLLM_DATA_DIR and ServingConfig/BootConfig defaults to tmp_path.
     """
     try:
         import dataclasses
 
-        from hbllm.brain.core.factory import BrainConfig
+        from hbllm.serving.prompt_context import ServingConfig
 
-        # Patch the dataclass field default for data_dir
-        for f in dataclasses.fields(BrainConfig):
+        for f in dataclasses.fields(ServingConfig):
             if f.name == "data_dir":
                 monkeypatch.setattr(f, "default", str(tmp_path))
                 break
     except Exception:
-        pass  # Not all test modules use BrainConfig
+        pass
 
     # Ensure deterministic working directory for any relative path access
     monkeypatch.setenv("HBLLM_DATA_DIR", str(tmp_path))

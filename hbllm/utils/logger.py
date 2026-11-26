@@ -62,7 +62,7 @@ def setup_logging(
         level: Default log level
         rich_output: Use Rich handler for colorful console output (dev mode)
         json_output: Use JSON structured format (production mode)
-        module_levels: Per-module log levels, e.g. {"hbllm.brain": "DEBUG"}
+        module_levels: Per-module log levels, e.g. {"hbllm.hcir": "DEBUG"}
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
 

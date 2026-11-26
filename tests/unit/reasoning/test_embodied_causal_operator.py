@@ -14,25 +14,25 @@ from __future__ import annotations
 
 from typing import Any
 
-from hbllm.brain.reasoning.operators.base import (
-    CognitiveContext,
-    FrozenGraphView,
-    ProblemType,
-    ReasoningProblem,
-    ResultStatus,
-)
-from hbllm.brain.reasoning.operators.embodied_causal import (
-    EmbodiedCausalOperator,
-    parse_condition,
-)
-from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
-from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.hcir.graph import (
     ActionNode,
     CognitiveGraph,
     GoalNode,
     PhysicalEntityNode,
 )
+from hbllm.hcir.reasoning.operators.base import (
+    CognitiveContext,
+    FrozenGraphView,
+    ProblemType,
+    ReasoningProblem,
+    ResultStatus,
+)
+from hbllm.hcir.reasoning.operators.embodied_causal import (
+    EmbodiedCausalOperator,
+    parse_condition,
+)
+from hbllm.hcir.reasoning.operators.registry import create_default_operator_registry
+from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
 
 
 def test_parse_condition_syntax() -> None:

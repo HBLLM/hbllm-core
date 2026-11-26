@@ -14,10 +14,6 @@ from typing import Any
 
 import pytest
 
-from hbllm.brain.language.core.bridge import LanguageCapabilityBridge
-from hbllm.brain.language.english.parser import EnglishParser
-from hbllm.brain.language.sinhala.parser import SinhalaParser
-from hbllm.brain.language.tamil.parser import TamilParser
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
@@ -40,6 +36,10 @@ from hbllm.hcir.kernel.capability_sandboxing import (
 from hbllm.hcir.kernel.governance.governance_engine import (
     GovernanceEngine,
 )
+from hbllm.hcir.language.core.bridge import LanguageCapabilityBridge
+from hbllm.hcir.language.english.parser import EnglishParser
+from hbllm.hcir.language.sinhala.parser import SinhalaParser
+from hbllm.hcir.language.tamil.parser import TamilParser
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Mock Hardware Capability Executors

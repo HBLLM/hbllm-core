@@ -10,7 +10,6 @@ Verifies:
 
 from __future__ import annotations
 
-from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.experiment.cohorts import HBLLMCoreCohort
 from hbllm.experiment.environments import EnvironmentObservation
 from hbllm.hcir.graph import (
@@ -19,6 +18,7 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     PhysicalEntityNode,
 )
+from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
 
 
 def test_cohort_equips_unified_reasoning_runtime() -> None:

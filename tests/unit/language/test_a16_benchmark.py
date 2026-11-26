@@ -17,20 +17,6 @@
 
 from __future__ import annotations
 
-from hbllm.brain.language.core.epistemic_policy import (
-    CognitiveEpistemicState,
-)
-from hbllm.brain.language.core.semantic_frame import (
-    FrameType,
-    LanguageErrorType,
-    ThematicRole,
-)
-from hbllm.brain.language.english.morphology import EnglishMorphology
-from hbllm.brain.language.english.parser import EnglishParser
-from hbllm.brain.language.english.realizer import EnglishRealizer
-from hbllm.brain.language.english.syntax import ConstructionType, EnglishSyntaxParser
-from hbllm.brain.language.runtime import MultilingualLanguageRuntime
-from hbllm.brain.language.sinhala.parser import SinhalaParser
 from hbllm.hcir.graph import (
     CognitiveGraph,
     GroundedConceptNode,
@@ -39,6 +25,20 @@ from hbllm.hcir.graph import (
     HCIRNodeType,
     PhysicalEntityNode,
 )
+from hbllm.hcir.language.core.epistemic_policy import (
+    CognitiveEpistemicState,
+)
+from hbllm.hcir.language.core.semantic_frame import (
+    FrameType,
+    LanguageErrorType,
+    ThematicRole,
+)
+from hbllm.hcir.language.english.morphology import EnglishMorphology
+from hbllm.hcir.language.english.parser import EnglishParser
+from hbllm.hcir.language.english.realizer import EnglishRealizer
+from hbllm.hcir.language.english.syntax import ConstructionType, EnglishSyntaxParser
+from hbllm.hcir.language.runtime import MultilingualLanguageRuntime
+from hbllm.hcir.language.sinhala.parser import SinhalaParser
 
 
 def _setup_world(graph: CognitiveGraph) -> tuple[PhysicalEntityNode, PhysicalEntityNode]:
@@ -428,21 +428,21 @@ class TestZeroLLM:
 
         check_code = """
 import sys
-import hbllm.brain.language.core.epistemic_policy
-import hbllm.brain.language.core.gateway
-import hbllm.brain.language.core.grounding
-import hbllm.brain.language.core.protocol
-import hbllm.brain.language.core.reference
-import hbllm.brain.language.core.semantic_frame
-import hbllm.brain.language.english.lexicon
-import hbllm.brain.language.english.morphology
-import hbllm.brain.language.english.parser
-import hbllm.brain.language.english.realizer
-import hbllm.brain.language.english.syntax
-import hbllm.brain.language.runtime
-import hbllm.brain.language.sinhala.lexicon
-import hbllm.brain.language.sinhala.parser
-import hbllm.brain.language.sinhala.realizer
+import hbllm.hcir.language.core.epistemic_policy
+import hbllm.hcir.language.core.gateway
+import hbllm.hcir.language.core.grounding
+import hbllm.hcir.language.core.protocol
+import hbllm.hcir.language.core.reference
+import hbllm.hcir.language.core.semantic_frame
+import hbllm.hcir.language.english.lexicon
+import hbllm.hcir.language.english.morphology
+import hbllm.hcir.language.english.parser
+import hbllm.hcir.language.english.realizer
+import hbllm.hcir.language.english.syntax
+import hbllm.hcir.language.runtime
+import hbllm.hcir.language.sinhala.lexicon
+import hbllm.hcir.language.sinhala.parser
+import hbllm.hcir.language.sinhala.realizer
 
 llm_markers = [
     "openai",

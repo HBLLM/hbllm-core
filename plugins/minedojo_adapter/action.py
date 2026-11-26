@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import logging
 
-from hbllm.brain.reasoning.operators.base import ProblemType, ReasoningProblem
-from hbllm.brain.reasoning.operators.registry import create_default_operator_registry
-from hbllm.brain.reasoning.unified_runtime import UnifiedReasoningRuntime
 from hbllm.hcir.graph import ActionNode, CognitiveGraph
+from hbllm.hcir.reasoning.operators.base import ProblemType, ReasoningProblem
+from hbllm.hcir.reasoning.operators.registry import create_default_operator_registry
+from hbllm.hcir.reasoning.unified_runtime import UnifiedReasoningRuntime
 
 from .perception import MineDojoPerceptionAdapter
 from .types import (

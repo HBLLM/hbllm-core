@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import time
 
-from hbllm.brain.snn.neurons import SpikeEvent
-from hbllm.brain.snn.perception.gate import (
+from hbllm.hcir.snn.neurons import SpikeEvent
+from hbllm.hcir.snn.perception.gate import (
     PerceptionEventType,
     PerceptionGateDecision,
     PerceptionProcessingLevel,

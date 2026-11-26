@@ -54,18 +54,23 @@ async def _run_agent(
     tenant_id: str = "default",
 ) -> None:
     """Boot the cognitive brain and run an interactive or one-shot loop."""
+    from pathlib import Path
+
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
 
-    from hbllm.brain.core.factory import BrainConfig, BrainFactory
+    from hbllm.network.bus import InProcessBus
+    from hbllm.network.plugin_manager import PluginManager
+    from hbllm.network.registry import ServiceRegistry
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
     console = Console()
 
     console.print(
         Panel(
-            f"[bold green]Initializing Sovereign Developer Agent[/]\n"
-            f"🤖 LLM Backend: [bold cyan]{model}[/]\n"
+            f"[bold green]Initializing Sovereign HCIR Developer Agent[/]\n"
+            f"🤖 Fallback Model: [bold cyan]{model}[/]\n"
             f"🛡️ Safety Approval: [bold {'yellow' if require_approval else 'red'}]"
             f"{'ENABLED' if require_approval else 'DISABLED'}[/]\n"
             f"📂 Workspace: [bold blue]{os.getcwd()}[/]",
@@ -74,104 +79,73 @@ async def _run_agent(
         )
     )
 
-    config = BrainConfig(
-        data_dir=data_dir,
-        system_prompt=(
-            "You are a sovereign developer agent capable of writing, compiling, testing, "
-            "debugging, and committing code in the local workspace. Use your tools (shell execution, "
-            "git operations, LSP queries, and compiler checks) to solve the user's tasks.\n\n"
-            "### Active Workspace Scoping\n"
-            f"- Active Codebase Root: {os.getcwd()}\n"
-            f"- Local Project Databases (.hbllm/): {data_dir}\n"
-            f"- Tenant Context: {tenant_id}\n"
-            "All localized episodic logs, session graphs, and vector database indices are stored "
-            "in the local project path, while your global identity context remains cleanly bound."
-        ),
-        inject_knowledge=True,
-        inject_persistence=True,
-        inject_awareness=True,
-        inject_plugins=True,
-        inject_evaluation=True,
-        inject_reflection=True,
-        inject_shell=True,
-        require_shell_approval=require_approval,
-    )
+    bus = InProcessBus()
+    await bus.start()
+    registry = ServiceRegistry()
 
-    with console.status("[bold yellow]Booting cognitive brain & scanning plugins...[/]"):
-        brain = await BrainFactory.create(provider=model, config=config)
-        await _listen_to_thoughts(brain.bus, console)
+    with console.status("[bold yellow]Booting HCIR CognitiveSystem & scanning plugins...[/]"):
+        cog_sys = build_cognitive_system(
+            CognitiveSystemConfig(
+                world_id="dev_agent",
+                memory_dir=Path(data_dir) / "hcir",
+                tenant_id=tenant_id,
+                enable_autonomous_curiosity=True,
+            )
+        )
+        if cog_sys.runtime is not None:
+            await cog_sys.runtime.start()
+        plugin_dir = Path(__file__).resolve().parent.parent.parent / "plugins"
+        pm = PluginManager(plugin_dirs=[plugin_dir], bus=bus, registry=registry, brain=cog_sys)
+        pm.discover()
+        await pm.load_all()
+        await _listen_to_thoughts(bus, console)
 
-    # Show loaded plugins
     plugins_table = Table(title="🔌 Active Developer Plugins", border_style="cyan")
     plugins_table.add_column("Plugin Name", style="bold green")
     plugins_table.add_column("Namespace", style="dim yellow")
     plugins_table.add_column("Version", style="dim")
 
-    if brain.plugin_manager and brain.plugin_manager.bundles:
-        for name, bundle in brain.plugin_manager.bundles.items():
+    if pm.bundles:
+        for name, bundle in pm.bundles.items():
             plugins_table.add_row(name, bundle.namespace, bundle.bundle.manifest.version)
         console.print(plugins_table)
     else:
-        console.print("[yellow]⚠️ No developer plugins active. Standard reasoning only.[/]")
+        console.print("[yellow]⚠️ No developer plugins active. Pure-HCIR reasoning only.[/]")
 
-    # ── Workspace Codebase Indexing / Onboarding ────────────────────
-    if brain.knowledge_base and not no_index:
-        workspace_path = os.path.abspath(os.getcwd())
-        existing_source = None
-        for source_info in brain.knowledge_base.list_sources():
-            if os.path.abspath(source_info["path"]) == workspace_path:
-                existing_source = source_info
-                break
+    provider = None
+    try:
+        from hbllm.serving.provider import get_provider
 
-        should_index = index or (not existing_source)
+        provider = get_provider(model)
+    except Exception:
+        provider = None
 
-        if should_index:
-            if existing_source:
-                console.print(
-                    f"[bold yellow]🔄 Updating workspace index: [blue]{workspace_path}[/]...[/]"
-                )
-                source_id = existing_source["source_id"]
-            else:
-                console.print(
-                    f"[bold yellow]🔍 First-time run: Indexing workspace [blue]{workspace_path}[/]...[/]"
-                )
-                try:
-                    source = brain.knowledge_base.add_source(workspace_path, source_type="folder")
-                    source_id = source.source_id
-                except Exception as e:
-                    console.print(f"[red]⚠️ Failed to register workspace: {e}[/]")
-                    source_id = None
-
-            if source_id:
-                with console.status("[bold yellow]Ingesting and indexing codebase...[/]"):
-                    try:
-                        num_chunks = await asyncio.to_thread(
-                            brain.knowledge_base.ingest_source, source_id
-                        )
-                        console.print(
-                            f"[bold green]✅ Codebase indexed: Ingested {num_chunks} chunks successfully![/]"
-                        )
-                    except Exception as e:
-                        console.print(f"[red]⚠️ Failed to index codebase: {e}[/]")
-        else:
-            total_chunks = existing_source.get("chunk_count", 0) if existing_source else 0
-            console.print(
-                f"[dim]ℹ️ Workspace codebase already indexed ({total_chunks} chunks). "
-                f"Use --index to force re-indexing.[/]"
+    async def _execute_query(prompt_text: str) -> str:
+        turn_result = await asyncio.to_thread(
+            cog_sys.process_dialogue, prompt_text, speaker_id="developer"
+        )
+        resp_text = str(getattr(turn_result, "response_text", "") or "")
+        if bool(getattr(turn_result, "is_success", False)) and resp_text:
+            return resp_text
+        if provider is not None:
+            llm_resp = await provider.generate(
+                messages=[{"role": "user", "content": prompt_text}],
+                max_tokens=1024,
             )
+            return str(getattr(llm_resp, "content", "") or str(llm_resp))
+        return resp_text or "[HCIR] Instruction parsed; no action output returned."
 
-    # ── One-shot mode ────────────────────────────────────────────────
     if task:
         console.print(f"\n[bold yellow]🚀 Running task: {task}[/]\n")
-        result = await brain.process(text=task, tenant_id=tenant_id, session_id="oneshot")
-        console.print(Panel(result.text, border_style="green", title="Output"))
-        await brain.shutdown()
+        output = await _execute_query(task)
+        console.print(Panel(output, border_style="green", title="Output"))
+        if cog_sys.runtime is not None:
+            await cog_sys.runtime.stop()
+        await bus.stop()
         return
 
-    # ── Interactive REPL ─────────────────────────────────────────────
     console.print("\n[bold green]Ready! Type your instruction or 'exit'/'quit' to leave.[/]\n")
 
-    session_id = "repl_session"
     while True:
         try:
             user_input = input("hbllm> ").strip()
@@ -181,31 +155,23 @@ async def _run_agent(
                 break
 
             console.print("\n[bold yellow]🚀 Sending task to agent...[/]")
-            _start_time = asyncio.get_event_loop().time()
-
-            result = await brain.process(
-                text=user_input, tenant_id=tenant_id, session_id=session_id
-            )
-            _duration = asyncio.get_event_loop().time() - _start_time
+            _start_time = asyncio.get_running_loop().time()
+            output = await _execute_query(user_input)
+            _duration = asyncio.get_running_loop().time() - _start_time
 
             console.print("\n[bold green]✨ Response from Agent:[/]")
-            console.print(Panel(result.text, border_style="green", title="Output"))
-
-            usage = brain.usage
-            if usage:
-                console.print(
-                    f"[dim]Tokens used: {usage.get('total_tokens', 0)} | "
-                    f"Latency: {_duration:.2f}s[/]"
-                )
-            console.print()
+            console.print(Panel(output, border_style="green", title="Output"))
+            console.print(f"[dim]Latency: {_duration:.2f}s[/]\n")
 
         except KeyboardInterrupt:
             console.print("\n[yellow]⚠️ Task aborted by user. Ready for next query.[/]\n")
         except Exception as e:
             console.print(f"\n[bold red]❌ Error executing task: {e}[/]\n")
 
-    console.print("[bold yellow]Stopping agent nodes and saving state...[/]")
-    await brain.shutdown()
+    console.print("[bold yellow]Stopping HCIR agent and saving state...[/]")
+    if cog_sys.runtime is not None:
+        await cog_sys.runtime.stop()
+    await bus.stop()
     console.print("[bold green]Goodbye![/]")
 
 

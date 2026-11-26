@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import pytest
 
-from hbllm.brain.language.core.bridge import LanguageCapabilityBridge
-from hbllm.brain.language.core.epistemic_policy import (
+from hbllm.hcir.graph import CognitiveGraph
+from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
+from hbllm.hcir.language.core.bridge import LanguageCapabilityBridge
+from hbllm.hcir.language.core.epistemic_policy import (
     CognitiveEpistemicState,
     EpistemicRealizationPolicy,
 )
-from hbllm.brain.language.core.semantic_frame import FrameType, ThematicRole
-from hbllm.brain.language.runtime import MultilingualLanguageRuntime
-from hbllm.brain.language.sinhala.parser import SinhalaParser
-from hbllm.brain.language.tamil.lexicon import TamilLexicon, TamilPOS
-from hbllm.brain.language.tamil.parser import TamilParser
-from hbllm.brain.language.tamil.realizer import TamilRealizer
-from hbllm.hcir.graph import CognitiveGraph
-from hbllm.hcir.kernel.governance.governance_engine import GovernanceEngine
+from hbllm.hcir.language.core.semantic_frame import FrameType, ThematicRole
+from hbllm.hcir.language.runtime import MultilingualLanguageRuntime
+from hbllm.hcir.language.sinhala.parser import SinhalaParser
+from hbllm.hcir.language.tamil.lexicon import TamilLexicon, TamilPOS
+from hbllm.hcir.language.tamil.parser import TamilParser
+from hbllm.hcir.language.tamil.realizer import TamilRealizer
 
 
 class TestTamilLanguageEngine:

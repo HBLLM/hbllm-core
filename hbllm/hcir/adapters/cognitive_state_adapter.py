@@ -15,6 +15,7 @@ Direction:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from hbllm.hcir.graph import (
@@ -46,6 +47,34 @@ class CognitiveStateDelta(Protocol):
 
     source_node: str
     changes: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class CognitiveStateSnapshotData:
+    """Concrete immutable cognitive state snapshot for HCIR state adapters."""
+
+    confidence: float = 0.5
+    uncertainty: float = 0.5
+    relevance: float = 0.5
+    novelty: float = 0.5
+    motivation: float = 0.5
+    valence: float = 0.5
+    arousal: float = 0.5
+    intention_strength: float = 0.5
+    fatigue: float = 0.0
+    curiosity: float = 0.5
+    stress: float = 0.0
+    focus_target: str | None = None
+    version: int = 1
+
+
+@dataclass(frozen=True)
+class CognitiveStateDeltaData:
+    """Concrete cognitive state delta payload for HCIR state transitions."""
+
+    source_node: str
+    changes: dict[str, Any] = field(default_factory=dict)
+    reason: str = ""
 
 
 # Stable ID prefix for cognitive state observation nodes

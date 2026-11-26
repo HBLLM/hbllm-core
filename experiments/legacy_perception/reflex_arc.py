@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Any
 
-from hbllm.brain.snn import LIFConfig, SpikeEvent, SpikingAccumulator
+from hbllm.hcir.snn import LIFConfig, SpikeEvent, SpikingAccumulator
 from hbllm.perception.event_log import EventLog
 from hbllm.perception.reality_bus import (
     EventOrigin,

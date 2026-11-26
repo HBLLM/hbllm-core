@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from hbllm.brain.reasoning.operators.base import (
+from hbllm.hcir.graph import CognitiveGraph, GoalNode, PhysicalEntityNode, PredictionNode
+from hbllm.hcir.reasoning.operators.base import (
     CognitiveContext,
     FrozenGraphView,
     ProblemType,
     ReasoningProblem,
 )
-from hbllm.brain.reasoning.operators.contradiction import ContradictionOperator
-from hbllm.hcir.graph import CognitiveGraph, GoalNode, PhysicalEntityNode, PredictionNode
+from hbllm.hcir.reasoning.operators.contradiction import ContradictionOperator
 
 
 def test_contradiction_operator_detects_physical_deadlock() -> None:

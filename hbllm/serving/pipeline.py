@@ -17,7 +17,37 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from hbllm.brain.core.result import PipelineResult
+
+@dataclass
+class PipelineResult:
+    """Result of a cognitive pipeline execution."""
+
+    text: str
+    correlation_id: str
+    source_node: str = "hcir"
+    confidence: float = 0.0
+    tenant_id: str = "default"
+    session_id: str = "default"
+    latency_ms: float = 0.0
+    stages_completed: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    error: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "text": self.text,
+            "correlation_id": self.correlation_id,
+            "source_node": self.source_node,
+            "confidence": self.confidence,
+            "tenant_id": self.tenant_id,
+            "session_id": self.session_id,
+            "latency_ms": self.latency_ms,
+            "stages_completed": self.stages_completed,
+            "metadata": self.metadata,
+            "error": self.error,
+        }
+
+
 from hbllm.network.bus import MessageBus, Subscription
 from hbllm.network.messages import Message, MessageType
 from hbllm.network.registry import ServiceRegistry
@@ -506,6 +536,23 @@ class CognitivePipeline:
         "format",
     }
 
+    @staticmethod
+    def _is_web_search_query(text: str) -> bool:
+        """Detect live external information cues without legacy router imports."""
+        lower = text.lower()
+        return any(
+            cue in lower
+            for cue in (
+                "search the web",
+                "search online",
+                "look up",
+                "latest news",
+                "current weather",
+                "stock price",
+                "today's",
+            )
+        )
+
     def _classify_complexity(self, text: str) -> str:
         """
         Heuristic check to see if a query is trivial enough to skip the full pipeline.
@@ -513,14 +560,8 @@ class CognitivePipeline:
         if not text:
             return "trivial"
 
-        # If it needs web search, it's complex
-        try:
-            from hbllm.brain.control.router_node import RouterNode
-
-            if RouterNode._is_web_search_query(text):
-                return "complex"
-        except ImportError:
-            pass
+        if self._is_web_search_query(text):
+            return "complex"
 
         # Any explicit question mark → complex
         if "?" in text:

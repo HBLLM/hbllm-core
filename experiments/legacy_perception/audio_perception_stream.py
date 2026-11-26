@@ -23,9 +23,9 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.brain.snn.perception.audio_ensemble import AudioPerceptionEnsemble
-from hbllm.brain.snn.perception.audio_signals import extract_audio_signals
-from hbllm.brain.snn.perception.gate import PerceptionGateDecision
+from hbllm.hcir.snn.perception.audio_ensemble import AudioPerceptionEnsemble
+from hbllm.hcir.snn.perception.audio_signals import extract_audio_signals
+from hbllm.hcir.snn.perception.gate import PerceptionGateDecision
 from hbllm.perception.audio_perception_runtime import AudioPerceptionRuntime
 from hbllm.perception.providers.audio_evidence import AudioAssessment
 

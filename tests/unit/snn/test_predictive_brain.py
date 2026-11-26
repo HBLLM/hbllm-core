@@ -15,7 +15,7 @@ import pytest
 # ═══════════════════════════════════════════════════════════════════════════
 # Markov Predictor Tests
 # ═══════════════════════════════════════════════════════════════════════════
-from hbllm.brain.reasoning.prediction import (
+from hbllm.hcir.reasoning.prediction import (
     CognitivePredictors,
     MarkovPredictor,
 )
@@ -147,8 +147,8 @@ class TestCognitivePredictors:
 # Dendritic Neuron Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.snn.dendrite import DendriticConfig, DendriticNeuron
-from hbllm.brain.snn.neurons import BaseNeuron, SpikeEvent
+from hbllm.hcir.snn.dendrite import DendriticConfig, DendriticNeuron
+from hbllm.hcir.snn.neurons import BaseNeuron, SpikeEvent
 
 
 class TestDendriticNeuron:
@@ -235,7 +235,7 @@ class TestDendriticNeuron:
 # Population Coding Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
-from hbllm.brain.snn.population import (
+from hbllm.hcir.snn.population import (
     CognitiveStateEncoder,
     PopulationConfig,
     PopulationEncoder,

@@ -32,9 +32,9 @@ class HealthResponse:
 
 @router.get("/health")
 async def health_check() -> Any:
-    """Check server health and node count."""
-    brain = _state.get("brain")
-    node_count = len(brain.nodes) if brain else 0
+    """Check server health and cognitive runtime status."""
+    brain = _state.get("brain") or _state.get("cognitive_system")
+    node_count = len(brain.nodes) if brain and hasattr(brain, "nodes") else (1 if brain else 0)
     mode = _state.get("mode", "unknown")
     return {
         "status": "healthy",
@@ -52,12 +52,11 @@ async def health_live() -> dict[str, str]:
 
 @router.get("/health/ready")
 async def health_ready() -> Any:
-    """Kubernetes readiness probe — checks brain, bus, and provider availability."""
+    """Kubernetes readiness probe — checks HCIR cognitive system, bus, and provider availability."""
     checks: dict[str, Any] = {}
     overall_ready = True
 
-    # Brain check
-    brain = _state.get("brain")
+    brain = _state.get("brain") or _state.get("cognitive_system")
     if brain:
         checks["brain"] = "ok"
     elif _state.get("mode") == "provider":
@@ -66,11 +65,9 @@ async def health_ready() -> Any:
         checks["brain"] = "not_initialized"
         overall_ready = False
 
-    # Bus check
     bus = _state.get("bus")
     checks["bus"] = "ok" if bus else "not_initialized"
 
-    # Provider check
     provider = _state.get("provider")
     if not provider and brain:
         provider = getattr(brain, "provider", None)
@@ -87,18 +84,19 @@ async def health_ready() -> Any:
 async def metrics() -> Any:
     """Return real-time MessageBus performance metrics."""
     brain = _state.get("brain")
-    if not brain or not hasattr(brain.bus, "metrics"):
+    bus = getattr(brain, "bus", None) if brain else _state.get("bus")
+    if not bus or not hasattr(bus, "metrics"):
         return {"error": "Bus not initialized or metrics unavailable"}
-    return brain.bus.metrics.snapshot()
+    return bus.metrics.snapshot()
 
 
 @router.get("/routing/stats")
 async def routing_stats() -> Any:
-    """Return Dual LLM Router statistics (local vs external usage)."""
-    brain = _state.get("brain")
+    """Return routing statistics."""
+    brain = _state.get("brain") or _state.get("cognitive_system")
     if not brain:
-        return {"error": "Brain not initialized"}
+        return {"error": "Cognitive runtime not initialized"}
     dual_router = getattr(brain, "dual_router", None)
     if dual_router is None:
-        return {"status": "single_model", "message": "No dual router configured"}
+        return {"status": "hcir_native", "message": "Pure-HCIR routing active"}
     return dual_router.snapshot()

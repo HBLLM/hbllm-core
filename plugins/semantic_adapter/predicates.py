@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hbllm.brain.reasoning.operators.base import FrozenGraphView
-from hbllm.brain.reasoning.operators.embodied_causal import EmbodiedCausalOperator
+from hbllm.hcir.reasoning.operators.base import FrozenGraphView
+from hbllm.hcir.reasoning.operators.embodied_causal import EmbodiedCausalOperator
 
 logger = logging.getLogger(__name__)
 

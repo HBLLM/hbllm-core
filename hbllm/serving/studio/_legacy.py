@@ -205,63 +205,48 @@ async def studio_stats() -> Any:
     result["nodes"] = node_health
 
     # ── Cognitive metrics ──
-    from hbllm.brain.self_model.cognitive_metrics import CognitiveMetrics
-
     cm = node_map.get("CognitiveMetrics")
-    if cm and isinstance(cm, CognitiveMetrics):
+    if cm and hasattr(cm, "get_dashboard_metrics"):
         result["metrics"] = cm.get_dashboard_metrics()
 
     # ── Self model ──
-    from hbllm.brain.self_model.self_model import SelfModel
-
     sm = node_map.get("SelfModel")
-    if sm and isinstance(sm, SelfModel):
+    if sm and hasattr(sm, "get_metrics"):
         result["self_model"] = sm.get_metrics()
 
     # ── Skill registry ──
-    from hbllm.brain.skills.skill_registry import SkillRegistry
-
     sr = node_map.get("SkillRegistry")
-    if sr and isinstance(sr, SkillRegistry):
+    if sr and hasattr(sr, "stats"):
         result["skills"] = sr.stats()
 
     # ── Goals ──
-    from hbllm.brain.emotion.goal_manager import GoalManager
-
     gm = node_map.get("GoalManager")
-    if gm and isinstance(gm, GoalManager):
+    if gm and hasattr(gm, "stats"):
         result["goals"] = gm.stats()
 
     # ── Evaluation ──
-    from hbllm.brain.evaluation.evaluation_node import EvaluationNode
-
     ev = node_map.get("EvaluationNode")
-    if ev and isinstance(ev, EvaluationNode):
+    if ev and hasattr(ev, "stats"):
         result["evaluation"] = ev.stats()
 
     # ── Attention ──
-    from hbllm.brain.self_model.attention_manager import AttentionManager
-
     am = node_map.get("AttentionManager")
-    if am and isinstance(am, AttentionManager):
+    if am and hasattr(am, "stats"):
         result["attention"] = am.stats()
 
     # ── Load manager ──
-    from hbllm.brain.control.load_manager import LoadManager
-
     lm = node_map.get("LoadManager")
-    if lm and isinstance(lm, LoadManager):
+    if lm and hasattr(lm, "stats"):
         result["load_manager"] = lm.stats()
 
     # ── Collective ──
-    from hbllm.brain.world.collective_node import CollectiveNode
-
     cn = node_map.get("CollectiveNode")
-    if cn and isinstance(cn, CollectiveNode):
+    if cn and hasattr(cn, "stats"):
         collective_stats = cn.stats
+        peers = getattr(cn, "peer_profiles", {})
         result["collective"] = {
-            "instance_id": cn.instance_id,
-            "stats": dict(collective_stats),
+            "instance_id": getattr(cn, "instance_id", "local"),
+            "stats": dict(collective_stats) if isinstance(collective_stats, dict) else {},
             "peers": [
                 {
                     "instance_id": p.instance_id,
@@ -269,25 +254,20 @@ async def studio_stats() -> Any:
                     "load": p.load,
                     "performance": p.performance,
                 }
-                for p in cn.peer_profiles.values()
+                for p in (peers.values() if isinstance(peers, dict) else [])
             ],
             "recent_activity": cn.recent_activity if hasattr(cn, "recent_activity") else [],
         }
 
     # ── Reflection ──
-    from hbllm.brain.emotion.reflection_node import ReflectionNode
-
     rn = node_map.get("ReflectionNode")
-    if rn and isinstance(rn, ReflectionNode):
+    if rn and hasattr(rn, "stats"):
         result["reflection"] = rn.stats()
 
-    # ── Learning (LearnerNode) ──
-    from hbllm.brain.learning.learner_node import LearnerNode
-
+    # ── Learning ──
     ln = node_map.get("LearnerNode")
-    if ln and isinstance(ln, LearnerNode):
+    if ln and hasattr(ln, "micro_learning_stats"):
         learning_stats = ln.micro_learning_stats()
-        # Add DPO queue depth from disk
         dpo_queue_depth = 0
         try:
             dpo_path = pathlib.Path(ln.queue_path)
@@ -300,15 +280,27 @@ async def studio_stats() -> Any:
         result["learning"] = learning_stats
 
     # ── Skill compiler ──
-    from hbllm.brain.skills.skill_compiler_node import SkillCompilerNode
-
     sc = node_map.get("SkillCompilerNode")
-    if sc and isinstance(sc, SkillCompilerNode):
+    if sc and hasattr(sc, "stats"):
         result["skill_compiler"] = sc.stats()
+
+    # ── Native HCIR CognitiveSystem stats ──
+    cog_sys = _state.get("cognitive_system")
+    if cog_sys is not None and hasattr(cog_sys, "tiered_workspace"):
+        from hbllm.runtime.bootstrap import count_consolidated_skills
+
+        tw = cog_sys.tiered_workspace
+        result["hcir"] = {
+            "world_id": cog_sys.config.world_id,
+            "working_nodes": tw.working_state.graph.node_count,
+            "brain_nodes": tw.brain.graph.node_count,
+            "persistent_nodes": tw.persistent.graph.node_count,
+            "consolidated_skills": count_consolidated_skills(cog_sys),
+        }
 
     # ── Bus metrics ──
     brain = _state.get("brain")
-    bus = getattr(brain, "bus", None)
+    bus = _state.get("bus") or getattr(brain, "bus", None)
     if bus and hasattr(bus, "metrics"):
         result["bus_metrics"] = bus.metrics.snapshot()
 

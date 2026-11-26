@@ -755,29 +755,30 @@ def run_export(args: argparse.Namespace) -> None:
 
 
 def run_serve_local(args: argparse.Namespace) -> None:
-    """Start a local brain for interactive use."""
+    """Start a local HCIR CognitiveSystem for interactive use."""
     import asyncio
 
     async def _serve() -> None:
-        from hbllm.brain.core.factory import BrainFactory
+        from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
-        brain = await BrainFactory.create_local(
-            checkpoint_path=args.checkpoint,
-            model_size=args.size,
-            device=args.device,
+        cog_sys = build_cognitive_system(
+            CognitiveSystemConfig(world_id="local_serve", enable_autonomous_curiosity=True)
         )
-        logger.info("Local brain ready! Type queries (Ctrl+C to exit):")
+        if cog_sys.runtime is not None:
+            await cog_sys.runtime.start()
+        logger.info("Local HCIR Cognitive OS ready! Type queries (Ctrl+C to exit):")
         try:
             while True:
                 query = input("\n> ")
                 if not query.strip():
                     continue
-                result = await brain.process(query)
-                print(f"\n{result.text}")
+                turn_result = cog_sys.process_dialogue(query, speaker_id="local_user")
+                print(f"\n{getattr(turn_result, 'response_text', '')}")
         except (KeyboardInterrupt, EOFError):
             pass
         finally:
-            await brain.shutdown()
+            if cog_sys.runtime is not None:
+                await cog_sys.runtime.stop()
 
     asyncio.run(_serve())
 

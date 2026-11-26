@@ -5,9 +5,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hbllm.brain.snn.perception.gate import PerceptionProcessingLevel
-from hbllm.brain.snn.perception.visual_ensemble import PerceptionEnsemble
-from hbllm.brain.snn.perception.visual_signals import VisualSignalExtractor, VisualSignals
+from hbllm.hcir.snn.perception.gate import PerceptionProcessingLevel
+from hbllm.hcir.snn.perception.visual_ensemble import PerceptionEnsemble
+from hbllm.hcir.snn.perception.visual_signals import VisualSignalExtractor, VisualSignals
 from hbllm.perception.visual_perception_stream import (
     VisualPerceptionStream,
 )

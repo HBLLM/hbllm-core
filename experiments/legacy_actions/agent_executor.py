@@ -28,7 +28,6 @@ from hbllm.actions.builtin_tools import (
 )
 from hbllm.actions.complexity import ComplexityDetector
 from hbllm.actions.tool_registry import ToolRegistry, ToolResult
-from hbllm.brain.self_model.confidence_estimator import ConfidenceEstimator
 
 logger = logging.getLogger(__name__)
 
@@ -92,19 +91,42 @@ class AgentResponse:
 
 
 class ConfidenceScorer:
-    """Wrapper around core ConfidenceEstimator for scoring responses."""
+    """Deterministic lexical confidence scorer for legacy agent responses."""
 
-    _estimator = ConfidenceEstimator()
+    _HEDGING_PHRASES = (
+        "i don't know",
+        "i am not sure",
+        "i'm not sure",
+        "uncertain",
+        "cannot verify",
+    )
+    _ERROR_MARKERS = ("error:", "traceback")
 
     @staticmethod
     def score(query: str, response: str, had_context: bool = False) -> dict[str, Any]:
-        report = ConfidenceScorer._estimator.estimate(query=query, response=response)
-        overall = report.overall
+        del query
+        text = response.strip()
+        if not text:
+            return {"overall": 0.1, "flags": ["empty_response"]}
+
+        overall = 0.78
+        flags: list[str] = []
+        lowered = text.lower()
+        if len(text) < 20:
+            overall -= 0.20
+            flags.append("short_response")
+        if any(phrase in lowered for phrase in ConfidenceScorer._HEDGING_PHRASES):
+            overall -= 0.25
+            flags.append("hedging_detected")
+        if any(marker in lowered for marker in ConfidenceScorer._ERROR_MARKERS):
+            overall -= 0.30
+            flags.append("error_output")
         if had_context:
-            overall = min(1.0, overall + 0.1)
+            overall += 0.10
+        overall = max(0.0, min(1.0, overall))
         return {
             "overall": round(overall, 2),
-            "flags": report.flags,
+            "flags": flags,
         }
 
 

@@ -20,7 +20,7 @@ Usage::
         print("Tracing active")
 
     # Create spans in your code
-    tracer = get_tracer("hbllm.brain")
+    tracer = get_tracer("hbllm.hcir")
     with trace_span("process_query", {"tenant_id": "acme"}):
         ...
 """
@@ -175,7 +175,7 @@ def get_tracer(name: str = "hbllm") -> Any:
     otherwise returns a no-op tracer.
 
     Args:
-        name: Tracer name, typically the module path (e.g. ``hbllm.brain``).
+        name: Tracer name, typically the module path (e.g. ``hbllm.hcir``).
 
     Returns:
         A tracer instance (real or no-op).

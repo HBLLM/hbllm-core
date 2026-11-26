@@ -13,7 +13,7 @@ Usage::
     init_tracing()
 
     # Get a tracer for your module
-    tracer = get_tracer("hbllm.brain")
+    tracer = get_tracer("hbllm.hcir")
 """
 
 from hbllm.observability.tracing import get_tracer, init_tracing, trace_span

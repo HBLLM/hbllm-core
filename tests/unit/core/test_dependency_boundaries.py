@@ -3,7 +3,7 @@
 Verifies that:
 1. Core runtime submodules (continual learning, developmental adapter plugins, graph IR)
    do not transitively load heavy server or enterprise database modules.
-2. PEP 562 lazy loading in hbllm.brain and hbllm.memory resolves attributes on demand
+2. PEP 562 lazy loading in hbllm.memory resolves attributes on demand
    without leaking dependencies at package import time.
 3. pyproject.toml maintains clean segregation between core dependencies and optional extras.
 """
@@ -65,11 +65,11 @@ if leaked:
     )
 
 
-def test_continual_store_import_cleanliness() -> None:
-    """Importing hbllm.brain.continual.store must not load heavy server/db modules."""
+def test_hcir_workspace_tiers_import_cleanliness() -> None:
+    """Importing hbllm.hcir.workspace_tiers must not load heavy server/db modules."""
     code = f"""
 import sys
-import hbllm.brain.continual.store
+import hbllm.hcir.workspace_tiers
 
 heavy_targets = {HEAVY_MODULES!r}
 loaded = set(sys.modules.keys())
@@ -83,15 +83,15 @@ if leaked:
 """
     result = _run_in_fresh_subprocess(code)
     assert result.returncode == 0, (
-        f"Continual store leaked heavy dependencies:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        f"HCIR workspace_tiers leaked heavy dependencies:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
 
 
-def test_brain_lazy_loading_and_resolution() -> None:
-    """Importing hbllm.brain must not eagerly load heavy modules, but must resolve exports on demand."""
+def test_hcir_bootstrap_import_cleanliness() -> None:
+    """Importing hbllm.runtime.bootstrap must not load heavy server/db modules."""
     code = f"""
 import sys
-import hbllm.brain as brain
+import hbllm.runtime.bootstrap
 
 heavy_targets = {HEAVY_MODULES!r}
 loaded = set(sys.modules.keys())
@@ -99,30 +99,13 @@ leaked = [
     target for target in heavy_targets
     if any(k == target or k.startswith(target + ".") for k in loaded)
 ]
-assert not leaked, f"Heavy modules loaded on raw brain import: {{leaked}}"
-
-# Verify dir() contains exports
-exports = dir(brain)
-assert "BrainFactory" in exports
-assert "RouterNode" in exports
-assert "GoalManager" in exports
-assert "PolicyEngine" in exports
-
-# Verify on-demand attribute resolution works
-factory = brain.BrainFactory
-assert factory is not None
-assert hasattr(factory, "create")
-
-# Verify non-existent attribute raises AttributeError
-try:
-    _ = brain.NonExistentSymbol
-    raise AssertionError("Expected AttributeError for NonExistentSymbol")
-except AttributeError:
-    pass
+if leaked:
+    print(f"LEAKED: {{leaked}}", file=sys.stderr)
+    sys.exit(1)
 """
     result = _run_in_fresh_subprocess(code)
     assert result.returncode == 0, (
-        f"Brain lazy loading verification failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        f"HCIR runtime bootstrap leaked heavy dependencies:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
 
 

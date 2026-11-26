@@ -17,13 +17,13 @@ import time
 import numpy as np
 import pytest
 
-from hbllm.brain.snn.lif import LIFConfig
-from hbllm.brain.snn.network import (
+from hbllm.hcir.snn.lif import LIFConfig
+from hbllm.hcir.snn.network import (
     LayerProjection,
     NeuronLayer,
     SpikingNetwork,
 )
-from hbllm.brain.snn.reasoning.association import (
+from hbllm.hcir.snn.reasoning.association import (
     AssociationLayer,
 )
 
@@ -131,7 +131,7 @@ class TestLayerProjection:
         assert mat[0][0] == pytest.approx(0.25)  # 1.0 / 4
 
     def test_project_computes_currents(self) -> None:
-        from hbllm.brain.snn.lif import SpikeEvent
+        from hbllm.hcir.snn.lif import SpikeEvent
 
         proj = LayerProjection(
             source_name="a",
@@ -151,8 +151,8 @@ class TestLayerProjection:
         assert currents[1] == pytest.approx(0.0)  # source 1 didn't fire
 
     def test_stdp_updates_weights(self) -> None:
-        from hbllm.brain.snn.lif import SpikeEvent
-        from hbllm.brain.snn.plasticity import STDPRule
+        from hbllm.hcir.snn.lif import SpikeEvent
+        from hbllm.hcir.snn.plasticity import STDPRule
 
         rule = STDPRule(learning_rate=0.1, time_constant=1.0)
         proj = LayerProjection(
@@ -458,7 +458,7 @@ class TestStreamIntegration:
     """Test ComprehensionStream with AssociationLayer wired in."""
 
     def _make_stream(self, with_association: bool = True):
-        from hbllm.brain.snn.comprehension import (
+        from hbllm.hcir.snn.comprehension import (
             ComprehensionEnsemble,
             ComprehensionStream,
             LexicalBuffer,
@@ -503,7 +503,7 @@ class TestStreamIntegration:
 
     @pytest.mark.asyncio
     async def test_understanding_state_has_associations_field(self) -> None:
-        from hbllm.brain.snn.comprehension.models import UnderstandingState
+        from hbllm.hcir.snn.comprehension.models import UnderstandingState
 
         state = UnderstandingState()
         assert hasattr(state, "associations")

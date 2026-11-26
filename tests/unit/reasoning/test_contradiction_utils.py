@@ -1,6 +1,6 @@
 """Unit tests for the consolidated semantic contradiction utility."""
 
-from hbllm.brain.reasoning.contradiction_utils import (
+from hbllm.hcir.reasoning.contradiction_utils import (
     are_antonyms,
     detect_structural_contradiction,
 )

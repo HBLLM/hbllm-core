@@ -1,13 +1,5 @@
 """
-DualLLMRouter Benchmark — measures routing decisions and circuit breaker behavior.
-
-Suites:
-  - Routing decision latency (local vs external)
-  - Circuit breaker state transitions (closed → open → half-open → closed)
-  - Fallback overhead when circuit opens
-
-Usage:
-    Registered as 'dual_router' suite in runner.py
+Routing & CircuitBreaker Benchmark — measures HCIR complexity classification and circuit resilience.
 """
 
 from __future__ import annotations
@@ -16,23 +8,20 @@ import asyncio
 import logging
 import statistics
 import time
-from unittest.mock import AsyncMock, MagicMock
 
 from hbllm.benchmarks.runner import BenchmarkReport, BenchmarkResult
-from hbllm.brain.control.dual_llm_router import TaskTier
 
 logger = logging.getLogger(__name__)
 
 
 class DualRouterBenchmark:
-    """Benchmark the DualLLMRouter and CircuitBreaker patterns."""
+    """Benchmark HCIR/Serving query complexity classification and CircuitBreaker behavior."""
 
     async def run(self) -> BenchmarkReport:
         report = BenchmarkReport(suite="dual_router")
 
         await self._bench_routing_decisions(report)
         await self._bench_circuit_breaker_transitions(report)
-        await self._bench_fallback_overhead(report)
 
         report.comparisons = [
             {
@@ -52,93 +41,62 @@ class DualRouterBenchmark:
         return report
 
     async def _bench_routing_decisions(self, report: BenchmarkReport) -> None:
-        """Benchmark the classify() routing decision latency."""
+        """Benchmark complexity classification latency."""
         try:
-            from hbllm.brain.control.dual_llm_router import DualLLMRouter
+            from hbllm.network.bus import InProcessBus
+            from hbllm.network.registry import ServiceRegistry
+            from hbllm.serving.pipeline import CognitivePipeline
 
-            local_llm = MagicMock()
-            local_llm.generate = AsyncMock(return_value=MagicMock(content="local response"))
-            external_llm = MagicMock()
-            external_llm.generate = AsyncMock(return_value=MagicMock(content="external response"))
-
-            router = DualLLMRouter(local=local_llm, external=external_llm)
-
-            # Test classify() latency
+            pipeline = CognitivePipeline(bus=InProcessBus(), registry=ServiceRegistry())
             queries = [
-                "Hello",  # simple → local
-                "Hi there",  # simple → local
-                "What is the weather?",  # medium → depends
-                "Explain the implications of quantum field theory on string cosmology",  # complex → external
-                "Write a recursive Python function with memoization",  # complex → external
-                "Thank you",  # simple → local
-                "How does photosynthesis work in detail?",  # complex → external
-                "OK",  # simple → local
+                "Hello",
+                "Hi there",
+                "What is the weather?",
+                "Explain the implications of quantum field theory on string cosmology",
+                "Write a recursive Python function with memoization",
+                "Thank you",
+                "How does photosynthesis work in detail?",
+                "OK",
             ]
 
             latencies = []
-            for query in queries * 50:  # 400 iterations
+            for query in queries * 50:
                 t0 = time.perf_counter()
-                router.classify(query)
+                pipeline._classify_complexity(query)
                 latencies.append((time.perf_counter() - t0) * 1000)
 
             report.add(
                 BenchmarkResult(
-                    name="DualLLMRouter.classify() avg",
+                    name="CognitivePipeline._classify_complexity() avg",
                     metric="classify_avg",
                     value=statistics.mean(latencies),
                     unit="ms",
                     metadata={"iterations": len(latencies)},
                 )
             )
+            local_count = sum(1 for q in queries if pipeline._classify_complexity(q) == "trivial")
             report.add(
                 BenchmarkResult(
-                    name="DualLLMRouter.classify() p99",
-                    metric="classify_p99",
-                    value=sorted(latencies)[int(0.99 * len(latencies))],
-                    unit="ms",
-                )
-            )
-
-            # Count routing distribution
-            local_count = sum(1 for q in queries if router.classify(q) == "local")
-            external_count = len(queries) - local_count
-
-            report.add(
-                BenchmarkResult(
-                    name="Routing distribution (local/external)",
+                    name="Fast-path trivial fraction",
                     metric="routing_distribution",
                     value=local_count / len(queries) * 100,
-                    unit="% local",
-                    metadata={"local": local_count, "external": external_count},
+                    unit="% trivial",
                 )
             )
-
         except Exception as e:
-            logger.warning("DualLLMRouter benchmark skipped: %s", e)
-            report.add(
-                BenchmarkResult(
-                    name="DualLLMRouter (skipped)",
-                    metric="classify_avg",
-                    value=0,
-                    unit="ms",
-                    metadata={"error": str(e)},
-                )
-            )
+            logger.warning("Routing benchmark skipped: %s", e)
 
     async def _bench_circuit_breaker_transitions(self, report: BenchmarkReport) -> None:
         """Benchmark circuit breaker state transition speed."""
         try:
-            from hbllm.brain.control.dual_llm_router import CircuitBreaker
+            from hbllm.network.circuit_breaker import CircuitBreaker
 
-            cb = CircuitBreaker(failure_threshold=3, recovery_timeout=0.1)
+            cb = CircuitBreaker(failure_threshold=3, recovery_timeout=0.05)
 
-            # Measure transition: closed → open
             t0 = time.perf_counter()
             for _ in range(3):
                 cb.record_failure()
             closed_to_open = (time.perf_counter() - t0) * 1000
-
-            assert cb.state == "open", f"Expected open, got {cb.state}"
 
             report.add(
                 BenchmarkResult(
@@ -149,10 +107,7 @@ class DualRouterBenchmark:
                 )
             )
 
-            # Wait for recovery timeout
-            await asyncio.sleep(0.15)
-
-            # Measure transition: open → half-open
+            await asyncio.sleep(0.06)
             t0 = time.perf_counter()
             can_try = cb.allow_request()
             open_to_half = (time.perf_counter() - t0) * 1000
@@ -167,7 +122,6 @@ class DualRouterBenchmark:
                 )
             )
 
-            # Measure transition: half-open → closed (success)
             t0 = time.perf_counter()
             cb.record_success()
             half_to_closed = (time.perf_counter() - t0) * 1000
@@ -180,96 +134,5 @@ class DualRouterBenchmark:
                     unit="ms",
                 )
             )
-
-            # Full cycle timing
-            report.add(
-                BenchmarkResult(
-                    name="Circuit breaker full recovery cycle",
-                    metric="cb_full_cycle",
-                    value=closed_to_open + 150 + open_to_half + half_to_closed,
-                    unit="ms",
-                    metadata={"recovery_timeout_ms": 100},
-                )
-            )
-
         except Exception as e:
             logger.warning("CircuitBreaker benchmark skipped: %s", e)
-            report.add(
-                BenchmarkResult(
-                    name="CircuitBreaker (skipped)",
-                    metric="cb_close_to_open",
-                    value=0,
-                    unit="ms",
-                    metadata={"error": str(e)},
-                )
-            )
-
-    async def _bench_fallback_overhead(self, report: BenchmarkReport) -> None:
-        """Measure added latency when circuit is open and we fall back to local."""
-        try:
-            from hbllm.brain.control.dual_llm_router import DualLLMRouter
-
-            local_llm = MagicMock()
-            local_llm.generate = AsyncMock(return_value=MagicMock(content="local fallback"))
-            external_llm = MagicMock()
-            external_llm.generate = AsyncMock(side_effect=ConnectionError("External LLM down"))
-
-            router = DualLLMRouter(
-                local=local_llm,
-                external=external_llm,
-                circuit_failure_threshold=2,
-                circuit_recovery_timeout=60.0,  # Long timeout so circuit stays open
-            )
-
-            # Force circuit open
-            for _ in range(2):
-                try:
-                    await router.generate(
-                        "complex query requiring external", tier=TaskTier.EXTERNAL
-                    )
-                except Exception as e:
-                    logger.debug(
-                        "[BenchDualRouter] Measure fallback latency (circuit open → local): %s", e
-                    )
-            latencies = []
-            for _ in range(100):
-                t0 = time.perf_counter()
-                try:
-                    await router.generate("This should fall back to local", tier=TaskTier.EXTERNAL)
-                except Exception as e:
-                    logger.debug("[BenchDualRouter] non-critical error: %s", e)
-                latencies.append((time.perf_counter() - t0) * 1000)
-
-            report.add(
-                BenchmarkResult(
-                    name="Fallback latency (circuit open → local)",
-                    metric="fallback_latency",
-                    value=statistics.mean(latencies),
-                    unit="ms",
-                    metadata={"trials": 100, "circuit_state": "open"},
-                )
-            )
-
-            # Get snapshot for stats
-            snap = router.snapshot()
-            report.add(
-                BenchmarkResult(
-                    name="Router snapshot generation",
-                    metric="snapshot_time",
-                    value=0,
-                    unit="ms",
-                    metadata=snap,
-                )
-            )
-
-        except Exception as e:
-            logger.warning("Fallback overhead benchmark skipped: %s", e)
-            report.add(
-                BenchmarkResult(
-                    name="Fallback overhead (skipped)",
-                    metric="fallback_latency",
-                    value=0,
-                    unit="ms",
-                    metadata={"error": str(e)},
-                )
-            )

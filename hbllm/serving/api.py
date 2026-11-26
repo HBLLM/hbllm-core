@@ -21,7 +21,7 @@ sanitize_proxy_env()
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hbllm.brain.core.prompt_helper import ChatContext
+    from hbllm.serving.prompt_context import ChatContext
 
 from fastapi import (
     Depends,
@@ -206,29 +206,46 @@ async def _boot_brain(
     bus.add_interceptor(limiter.intercept)
     await bus.start()
 
-    # 2. Delegate cognitive loading to unified factory
-    from hbllm.brain.core.factory import BrainConfig, BrainFactory, _is_slow_cpu
+    # 2. Boot canonical Pure-HCIR CognitiveSystem & default registry
+    from hbllm.hcir.kernel.governance.policies.policy_engine import PolicyEngine
+    from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+    from hbllm.serving.cognitive_registry import get_cognitive_registry
+    from hbllm.serving.prompt_context import ServingConfig
+    from hbllm.serving.provider import get_provider
+    from hbllm.utils.hardware import is_slow_cpu
 
-    is_slow = _is_slow_cpu()
+    is_slow = is_slow_cpu()
     if is_slow:
         logger.info(
-            "Slow CPU-only system detected. Dynamically disabling perception, fuzzy logic, and symbolic logic nodes to save RAM/CPU."
+            "Slow CPU-only system detected. Booting HCIR runtime with lightweight grounding."
         )
 
-    # We use create_local for overarching OSS usage by default
-    config = BrainConfig(
+    config = ServingConfig(
         inject_memory=True,
         inject_identity=True,
         inject_curiosity=True,
-        inject_perception=True,  # Always enable — Kokoro TTS works on CPU
+        inject_perception=True,
         inject_fuzzy_logic=not is_slow,
         inject_symbolic_logic=not is_slow,
     )
 
+    cog_sys = build_cognitive_system(
+        CognitiveSystemConfig(
+            world_id="serving_default",
+            enable_grounding=not is_slow,
+            enable_autonomous_curiosity=True,
+        )
+    )
+    if cog_sys.runtime is not None:
+        await cog_sys.runtime.start()
+
+    cognitive_registry = get_cognitive_registry()
+    _state["cognitive_registry"] = cognitive_registry
+    _state["cognitive_system"] = cog_sys
+
     provider_name = os.getenv("HBLLM_PROVIDER")
     provider_model = os.getenv("HBLLM_PROVIDER_MODEL")
 
-    # Known external provider prefixes — anything else with "/" is a HuggingFace model ID
     _KNOWN_PROVIDERS = {
         "openai",
         "anthropic",
@@ -244,29 +261,23 @@ async def _boot_brain(
     if provider_name:
         is_provider = True
     elif "/" in model_size and not os.path.exists(model_size):
-        # Check if the prefix is a known provider (e.g. "openai/gpt-4o")
-        # vs a HuggingFace model ID (e.g. "Qwen/Qwen2.5-0.5B")
         prefix = model_size.split("/")[0].lower()
         if prefix in _KNOWN_PROVIDERS:
             is_provider = True
         else:
-            # Treat as a HuggingFace model ID → load locally
             is_provider = False
             logger.info("Detected HuggingFace model ID: %s — routing to local loading", model_size)
 
     if is_provider:
-        if "/" in model_size and not provider_name:
-            prov = model_size
-        else:
-            prov = (
+        prov = (
+            model_size
+            if ("/" in model_size and not provider_name)
+            else (
                 f"{provider_name}/{provider_model}"
                 if provider_model
                 else (provider_name or model_size)
             )
-
-        logger.info("Initializing Brain factory with external provider: %s", prov)
-
-        provider_kwargs = {}
+        )
         provider_base_urls = {
             "openai": "OPENAI_BASE_URL",
             "ollama": "OLLAMA_BASE_URL",
@@ -284,9 +295,6 @@ async def _boot_brain(
             or os.getenv("GROQ_BASE_URL")
             or os.getenv("NVIDIA_BASE_URL")
         )
-        if base_url:
-            provider_kwargs["base_url"] = base_url
-
         provider_env_keys = {
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
@@ -297,23 +305,26 @@ async def _boot_brain(
         api_key = os.getenv("HBLLM_PROVIDER_API_KEY") or (
             os.getenv(selected_env_key) if selected_env_key else None
         )
+        provider_kwargs: dict[str, Any] = {}
+        if base_url:
+            provider_kwargs["base_url"] = base_url
         if api_key:
             provider_kwargs["api_key"] = api_key
-
-        brain = await BrainFactory.create(provider=prov, config=config, bus=bus, **provider_kwargs)
-    else:
-        logger.info("Initializing Brain factory with local model: %s", model_size)
-        brain = await BrainFactory.create_local(model_size=model_size, config=config, bus=bus)
+        try:
+            _state["provider"] = get_provider(prov, **provider_kwargs)
+            logger.info("Initialized external LLM provider alongside HCIR: %s", prov)
+        except Exception as exc:
+            logger.warning("Optional provider '%s' unavailable: %s", prov, exc)
 
     # 3. Load External Plugins
     import pathlib
 
     from hbllm.network.plugin_manager import PluginManager
+    from hbllm.network.registry import ServiceRegistry
 
+    registry = ServiceRegistry()
     plugin_dir = pathlib.Path(__file__).resolve().parent.parent.parent / "plugins"
-    pm = PluginManager(
-        plugin_dirs=[plugin_dir], bus=brain.bus, registry=brain.registry, app=app, brain=brain
-    )
+    pm = PluginManager(plugin_dirs=[plugin_dir], bus=bus, registry=registry, app=app, brain=cog_sys)
     pm.discover()
     await pm.load_all()
 
@@ -321,25 +332,22 @@ async def _boot_brain(
     from hbllm.serving.synapse_gateway import SynapseGateway
 
     audit_log = _state.get("audit_log")
-    gateway = SynapseGateway(bus=brain.bus, audit_log=audit_log)
+    gateway = SynapseGateway(bus=bus, audit_log=audit_log)
     await gateway.start()
     _state["synapse_gateway"] = gateway
 
     # 4.1. Start DeviceBridge (cross-device session continuity & presence)
     from hbllm.serving.device_bridge import DeviceBridge
 
-    device_bridge = getattr(brain, "device_bridge", None)
-    if device_bridge is None:
-        device_bridge = DeviceBridge(bus=brain.bus)
-        await device_bridge.start()
-        brain.device_bridge = device_bridge
+    device_bridge = DeviceBridge(bus=bus)
+    await device_bridge.start()
     _state["device_bridge"] = device_bridge
 
     # 5. Start WebRTC Gateway (optional high-bandwidth plane)
     try:
         from hbllm.network.webrtc_gateway import WebRTCGateway
 
-        webrtc_gateway = WebRTCGateway(bus=brain.bus)
+        webrtc_gateway = WebRTCGateway(bus=bus)
         _state["webrtc_gateway"] = webrtc_gateway
         logger.info("WebRTC Gateway initialized for high-bandwidth perception")
     except ImportError:
@@ -349,20 +357,21 @@ async def _boot_brain(
     try:
         from hbllm.network.federation.mailbox import FederatedMailbox
 
-        mailbox = FederatedMailbox(bus=brain.bus, embedder=getattr(brain, "semantic_memory", None))
+        mailbox = FederatedMailbox(bus=bus, embedder=None)
         _state["federated_mailbox"] = mailbox
         logger.info("🔒 Zero-Trust Federated Mailbox initialized successfully.")
     except Exception as e:
         logger.warning("Failed to initialize Federated Mailbox: %s", e)
 
-    _state["brain"] = brain
+    _state["policy_engine"] = PolicyEngine()
     _state["config"] = config
     _state["bus"] = bus
+    _state["service_registry"] = registry
     _state["plugin_manager"] = pm
     _state["bus_type"] = bus_type
-    _state["mode"] = "full"
+    _state["mode"] = "hcir"
 
-    logger.info("Brain pipeline booted via factory.")
+    logger.info("HCIR Cognitive OS serving pipeline booted cleanly.")
 
 
 async def _shutdown_brain() -> None:
@@ -379,8 +388,12 @@ async def _shutdown_brain() -> None:
     if device_bridge:
         await device_bridge.stop()
 
+    cog_sys = _state.get("cognitive_system")
+    if cog_sys is not None and getattr(cog_sys, "runtime", None) is not None:
+        await cog_sys.runtime.stop()
+
     brain = _state.get("brain")
-    if brain:
+    if brain and hasattr(brain, "shutdown"):
         await brain.shutdown()
 
     logger.info("Brain pipeline shutdown complete.")
@@ -479,7 +492,7 @@ async def lifespan(app: FastAPI) -> Any:
         )
         from hbllm_cloud.tenant_manager import TenantManager  # type: ignore[import-not-found]
 
-        from hbllm.brain.governance.policy_engine import PolicyEngine
+        from hbllm.hcir.kernel.governance.policies.policy_engine import PolicyEngine
         from hbllm.serving.security import ApiKeyManager
 
         tm = TenantManager(db_path="data/tenants.db")
@@ -1021,7 +1034,7 @@ async def _prepare_chat_context(
     Returns:
         (filtered_history, ChatContext)
     """
-    from hbllm.brain.core.prompt_helper import ChatContext
+    from hbllm.serving.prompt_context import ChatContext
 
     # 1. Fetch history ONCE
     history: list[dict[str, Any]] = []
@@ -1050,7 +1063,7 @@ async def _prepare_chat_context(
     # 2. Run 4-layer memory recall
     ctx = ChatContext()
     try:
-        from hbllm.brain.core.prompt_helper import get_chat_memories
+        from hbllm.serving.prompt_context import get_chat_memories
 
         ctx = await get_chat_memories(bus, tenant_id, session_id, user_text, filtered_history)
     except Exception as e:
@@ -1144,7 +1157,7 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
     if not system_content:
         if bus:
             try:
-                from hbllm.brain.core.prompt_helper import get_dynamic_system_prompt
+                from hbllm.serving.prompt_context import get_dynamic_system_prompt
 
                 system_content = await get_dynamic_system_prompt(
                     bus, request.tenant_id, "api_server"
@@ -1266,10 +1279,10 @@ async def _chat_via_provider(request: ChatRequest) -> ChatResponse:
 
 
 async def _chat_via_brain(request: ChatRequest) -> ChatResponse:
-    """Handle chat using the full brain pipeline."""
-    from hbllm.brain.core.factory import BrainConfig
+    """Handle chat using the active HCIR CognitiveSystem or optional injected runtime."""
+    from hbllm.serving.prompt_context import ServingConfig
 
-    config = _state.get("config") or BrainConfig()
+    config = _state.get("config") or ServingConfig()
     timeout = config.api_timeout
 
     # Prefer direct Brain.process pipeline execution when brain is available
@@ -2059,77 +2072,52 @@ async def run_benchmarks(api_req: Request, request: dict | None = None) -> Any:
 
 @app.get("/v1/cognitive/telemetry")
 async def get_cognitive_telemetry():
-    """Get active cognitive telemetry: Goal DAGs, decision traces, budget and utility metrics."""
-    import os
-
+    """Get active HCIR cognitive telemetry: Goal nodes, skills, and workspace metrics."""
     try:
-        from hbllm.brain.emotion.goal_manager import GoalManager
-        from hbllm.brain.evaluation.utility_calibrator import UtilityCalibrator
+        from hbllm.hcir.graph import HCIRNodeType
+        from hbllm.runtime.bootstrap import count_consolidated_skills
+        from hbllm.serving.cognitive_registry import get_cognitive_registry
 
-        data_dir = os.environ.get("HBLLM_DATA_DIR", "data")
+        cog_sys = _state.get("cognitive_system")
+        if cog_sys is None:
+            cog_sys = get_cognitive_registry().get_or_create("default")
 
-        # 1. Fetch Goal DAGs
-        goal_manager = GoalManager(data_dir=data_dir)
-        goals = goal_manager.get_active_goals()
-        goals_data = []
-        for g in goals:
-            goals_data.append(
-                {
-                    "goal_id": g.goal_id,
-                    "name": g.name,
-                    "description": g.description,
-                    "goal_type": g.goal_type,
-                    "priority": g.priority.value,
-                    "status": g.status.value,
-                    "progress": g.progress,
-                    "dependencies": g.dependencies,
-                    "block_reason": g.block_reason,
-                    "execution_journal": g.execution_journal,
-                }
-            )
+        goals_data: list[dict[str, Any]] = []
+        traces_data: list[dict[str, Any]] = []
+        if cog_sys is not None and hasattr(cog_sys, "tiered_workspace"):
+            tw = cog_sys.tiered_workspace
+            for ws in (tw.working_state, tw.brain, tw.persistent):
+                for node in ws.graph.nodes_by_type(HCIRNodeType.GOAL):
+                    goals_data.append(
+                        {
+                            "goal_id": node.id,
+                            "name": getattr(node, "goal_name", "") or node.id,
+                            "description": getattr(node, "description", ""),
+                            "goal_type": "hcir",
+                            "priority": getattr(node, "priority", 0.5),
+                            "status": getattr(node, "status", "active"),
+                            "progress": getattr(node, "progress", 0.0),
+                        }
+                    )
 
-        # 2. Fetch Decision/Calibration Traces
-        calibrator = UtilityCalibrator(data_dir=data_dir)
-        traces = calibrator.get_traces(limit=20)
-        traces_data = []
-        for t in traces:
-            traces_data.append(
-                {
-                    "trace_id": t.trace_id,
-                    "decision_point": t.decision_point,
-                    "predicted_utility": t.predicted_utility,
-                    "actual_outcome": t.actual_outcome,
-                    "prediction_error": t.prediction_error,
-                    "timestamp": t.timestamp,
-                    "metadata": t.metadata,
-                }
-            )
-
-        # 3. Active budget defaults (or mock values if no active runs)
         budget_data = {
             "max_tokens": 8192,
             "max_time_ms": 15000.0,
             "max_branches": 20,
-            "tokens_spent": 1284,
-            "branches_spent": 4,
-            "elapsed_time_ms": 4210.0,
+            "tokens_spent": 0,
+            "branches_spent": 0,
+            "elapsed_time_ms": 0.0,
             "is_exhausted": False,
         }
-
-        # 4. Neural cluster/SNN activations (mock potentials for visualization)
-        snn_activations = [
-            {"neuron_id": "n0_perception", "potential": 0.85, "active": True},
-            {"neuron_id": "n1_planner", "potential": 0.92, "active": True},
-            {"neuron_id": "n2_action", "potential": 0.45, "active": False},
-            {"neuron_id": "n3_critic", "potential": 0.61, "active": True},
-        ]
+        skills_count = count_consolidated_skills(cog_sys) if cog_sys is not None else 0
 
         return {
             "goals": goals_data,
             "decision_traces": traces_data,
             "active_budget": budget_data,
-            "snn_activations": snn_activations,
-            "average_error": calibrator.get_average_error(),
+            "consolidated_skills": skills_count,
+            "snn_activations": [],
+            "average_error": 0.0,
         }
     except Exception as e:
         logger.error("Failed to fetch cognitive telemetry: %s", e)
@@ -2632,9 +2620,9 @@ async def chat_stream(api_req: Request, request: ChatRequest) -> StreamingRespon
     )
     await bus.publish("router.query", query_msg)
 
-    from hbllm.brain.core.factory import BrainConfig
+    from hbllm.serving.prompt_context import ServingConfig
 
-    config = _state.get("config") or BrainConfig()
+    config = _state.get("config") or ServingConfig()
     timeout = config.stream_timeout
 
     async def event_generator() -> Any:
@@ -2679,9 +2667,9 @@ async def chat_completions(api_req: Request, request: OpenAICompletionRequest) -
     Routes through Pure-HCIR first (zero LLM); falls back to brain pipeline if HCIR
     parsing fails or is unavailable.
     """
-    from hbllm.brain.core.factory import BrainConfig
+    from hbllm.serving.prompt_context import ServingConfig
 
-    config = _state.get("config") or BrainConfig()
+    config = _state.get("config") or ServingConfig()
     api_timeout = config.api_timeout
     stream_timeout = config.stream_timeout
     tenant_id = require_authenticated_tenant(api_req)
@@ -3026,9 +3014,9 @@ async def chat_websocket(ws: WebSocket) -> None:
                 )
                 await bus.publish("router.query", query_msg)
 
-                from hbllm.brain.core.factory import BrainConfig
+                from hbllm.serving.prompt_context import ServingConfig
 
-                config = _state.get("config") or BrainConfig()
+                config = _state.get("config") or ServingConfig()
                 api_timeout = config.api_timeout
 
                 # Wait for response and stream it

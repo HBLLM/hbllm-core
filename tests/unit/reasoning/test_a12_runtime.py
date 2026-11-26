@@ -19,25 +19,6 @@ import time
 
 import pytest
 
-from hbllm.brain.reasoning.operators.abduction import AbductionOperator
-from hbllm.brain.reasoning.operators.analogy import AnalogyOperator
-from hbllm.brain.reasoning.operators.base import (
-    CognitiveContext,
-    FrozenGraphView,
-    OperatorTrace,
-    ProblemType,
-    ReasoningBudget,
-    ReasoningProblem,
-    ResultStatus,
-)
-from hbllm.brain.reasoning.operators.deduction import DeductionOperator
-from hbllm.brain.reasoning.operators.induction import InductionOperator
-from hbllm.brain.reasoning.operators.registry import OperatorRegistry
-from hbllm.brain.reasoning.operators.spatial import SpatialOperator
-from hbllm.brain.reasoning.operators.temporal import TemporalOperator
-from hbllm.brain.reasoning.unified_runtime import (
-    UnifiedReasoningRuntime,
-)
 from hbllm.hcir.graph import (
     BeliefNode,
     CognitiveGraph,
@@ -47,6 +28,25 @@ from hbllm.hcir.graph import (
     HCIREdgeType,
     PhysicalEntityNode,
     PredictionErrorNode,
+)
+from hbllm.hcir.reasoning.operators.abduction import AbductionOperator
+from hbllm.hcir.reasoning.operators.analogy import AnalogyOperator
+from hbllm.hcir.reasoning.operators.base import (
+    CognitiveContext,
+    FrozenGraphView,
+    OperatorTrace,
+    ProblemType,
+    ReasoningBudget,
+    ReasoningProblem,
+    ResultStatus,
+)
+from hbllm.hcir.reasoning.operators.deduction import DeductionOperator
+from hbllm.hcir.reasoning.operators.induction import InductionOperator
+from hbllm.hcir.reasoning.operators.registry import OperatorRegistry
+from hbllm.hcir.reasoning.operators.spatial import SpatialOperator
+from hbllm.hcir.reasoning.operators.temporal import TemporalOperator
+from hbllm.hcir.reasoning.unified_runtime import (
+    UnifiedReasoningRuntime,
 )
 from hbllm.hcir.types import UncertaintyVector
 
@@ -544,15 +544,15 @@ class TestLLMIndependence:
         import inspect
 
         modules = [
-            "hbllm.brain.reasoning.operators.base",
-            "hbllm.brain.reasoning.operators.registry",
-            "hbllm.brain.reasoning.operators.deduction",
-            "hbllm.brain.reasoning.operators.induction",
-            "hbllm.brain.reasoning.operators.abduction",
-            "hbllm.brain.reasoning.operators.temporal",
-            "hbllm.brain.reasoning.operators.spatial",
-            "hbllm.brain.reasoning.operators.analogy",
-            "hbllm.brain.reasoning.unified_runtime",
+            "hbllm.hcir.reasoning.operators.base",
+            "hbllm.hcir.reasoning.operators.registry",
+            "hbllm.hcir.reasoning.operators.deduction",
+            "hbllm.hcir.reasoning.operators.induction",
+            "hbllm.hcir.reasoning.operators.abduction",
+            "hbllm.hcir.reasoning.operators.temporal",
+            "hbllm.hcir.reasoning.operators.spatial",
+            "hbllm.hcir.reasoning.operators.analogy",
+            "hbllm.hcir.reasoning.unified_runtime",
         ]
 
         llm_indicators = {

@@ -12,7 +12,7 @@ import time
 
 import numpy as np
 
-from hbllm.brain.snn import LIFConfig, SpikingAccumulator
+from hbllm.hcir.snn.lif import LIFConfig, SpikingAccumulator
 
 
 class WorkingMemoryPrimer:
