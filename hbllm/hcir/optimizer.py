@@ -107,6 +107,9 @@ class DeadInstructionEliminationPass(IOptimizerPass):
     def run(self, stream: InstructionStream) -> InstructionStream:
         optimized: list[Instruction] = []
         for ins in stream.instructions:
+            if ins.label is not None:
+                optimized.append(ins)
+                continue
             # Eliminate ASSERT with empty node_data and edge_data
             if (
                 ins.opcode == Opcode.ASSERT
@@ -144,6 +147,10 @@ class QueryMergingPass(IOptimizerPass):
         prev_query: Instruction | None = None
 
         for ins in stream.instructions:
+            if ins.label is not None:
+                prev_query = None
+                optimized.append(ins)
+                continue
             if ins.opcode == Opcode.QUERY:
                 if prev_query is not None and prev_query.params == ins.params:
                     # Duplicate consecutive query — skip
@@ -185,6 +192,9 @@ class TransactionBatchingPass(IOptimizerPass):
         mutating_opcodes = {Opcode.ASSERT, Opcode.RETRACT}
 
         for ins in stream.instructions:
+            if ins.label is not None:
+                batch_id = None
+                current_batch_count = 0
             if ins.opcode in mutating_opcodes:
                 if batch_id is None or current_batch_count >= self._max_batch_size:
                     batch_id = f"batch_{uuid.uuid4().hex[:8]}"
@@ -199,6 +209,7 @@ class TransactionBatchingPass(IOptimizerPass):
                         id=ins.id,
                         opcode=ins.opcode,
                         params=new_params,
+                        label=ins.label,
                         cost_estimate=ins.cost_estimate,
                     )
                 )

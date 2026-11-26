@@ -859,7 +859,23 @@ class AcousticConceptNode(ConceptNode):
     contexts: list[str] = Field(default_factory=list)
 
 
-class SkillNode(HCIRNode):
+class _HomoiconicProgramFields(BaseModel):
+    """Shared optional executable-program fields for ISA v2 homoiconic nodes."""
+
+    parameters: list[dict[str, Any]] = Field(default_factory=list)
+    precondition_pattern: dict[str, Any] | None = None
+    postcondition_pattern: dict[str, Any] | None = None
+    bytecode_stream: dict[str, Any] | None = None
+    alpha_success: float = 1.0
+    beta_failure: float = 1.0
+
+    @property
+    def reliability_mean(self) -> float:
+        """Posterior Beta reliability mean `alpha / (alpha + beta)`."""
+        return self.alpha_success / max(1e-9, self.alpha_success + self.beta_failure)
+
+
+class SkillNode(_HomoiconicProgramFields, HCIRNode):
     """A reusable procedural skill discovered through experience."""
 
     node_type: HCIRNodeType = HCIRNodeType.SKILL
@@ -880,7 +896,7 @@ class SkillNode(HCIRNode):
             self.name = self.skill_name
 
 
-class ProcedureNode(HCIRNode):
+class ProcedureNode(_HomoiconicProgramFields, HCIRNode):
     """A multi-step executable recipe."""
 
     node_type: HCIRNodeType = HCIRNodeType.PROCEDURE
@@ -902,7 +918,7 @@ class ProcedureNode(HCIRNode):
 # ── A14: Prediction-Error-Centered Learning Nodes ────────────────────────
 
 
-class LearnedRuleNode(HCIRNode):
+class LearnedRuleNode(_HomoiconicProgramFields, HCIRNode):
     """An if→then rule extracted from prediction error patterns.
 
     Not merely a parameter update — this is explicit knowledge

@@ -15,8 +15,16 @@ from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.compiler import HCIRCompiler, IntentType, SemanticAST
 from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
 from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode, HCIRNodeType
-from hbllm.hcir.interpreter import HCIRInterpreter
+from hbllm.hcir.interpreter import HCIRInterpreter, SyscallAllowlist
 from hbllm.hcir.optimizer import HCIROptimizer
+from hbllm.hcir.registers import (
+    CallFrame,
+    CallStack,
+    RegisterFile,
+    RegisterRef,
+    SymbolicParam,
+    SymbolicVar,
+)
 from hbllm.hcir.replay_debugger import CognitiveBreakpoint, ReplayDebugger
 from hbllm.hcir.spatial_planner import (
     EntityGraph,
@@ -34,11 +42,12 @@ from hbllm.hcir.types import (
     Timestamp,
     UncertaintyVector,
 )
+from hbllm.hcir.unification import EdgePattern, GraphPattern, NodePattern
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.workspace_tiers import TieredWorkspace
 from hbllm.hcir.world_kernel import WorldKernel
 
-__hcir_version__ = "1.2.0"
+__hcir_version__ = "2.0.0"
 
 __all__ = [
     # --- Cognitive Type System ---
@@ -64,6 +73,16 @@ __all__ = [
     "InstructionStream",
     "Opcode",
     "HCIRInterpreter",
+    "SyscallAllowlist",
+    "CallFrame",
+    "CallStack",
+    "RegisterFile",
+    "RegisterRef",
+    "SymbolicParam",
+    "SymbolicVar",
+    "GraphPattern",
+    "NodePattern",
+    "EdgePattern",
     # --- Compiler & Optimizer ---
     "HCIRCompiler",
     "HCIROptimizer",

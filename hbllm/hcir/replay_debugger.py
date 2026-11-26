@@ -21,7 +21,9 @@ from hbllm.hcir.bytecode import Instruction, InstructionStream
 from hbllm.hcir.interpreter import HCIRInterpreter
 from hbllm.hcir.kernel.services import KernelServices
 from hbllm.hcir.receipt import ExecutionReceipt
+from hbllm.hcir.registers import CallFrame
 from hbllm.hcir.types import BranchMode
+from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,8 @@ class ReplayStepResult:
     snapshot_version: int
     node_count: int
     hit_breakpoints: list[CognitiveBreakpoint] = field(default_factory=list)
+    call_depth: int = 0
+    registers: dict[str, Any] = field(default_factory=dict)
 
 
 class ReplayDebugger:
@@ -78,53 +82,61 @@ class ReplayDebugger:
         branch_name: str = "replay_session",
         stop_on_breakpoint: bool = False,
     ) -> list[ReplayStepResult]:
-        """Replay an instruction stream in an isolated REPLAY workspace branch."""
-        # Fork an isolated replay workspace branch
+        """Replay an instruction stream step-by-step in an isolated REPLAY branch."""
         replay_ws = self._services.workspace.fork(branch_name, mode=BranchMode.REPLAY)
         from hbllm.hcir.kernel.transaction_manager import TransactionManager
 
-        replay_tx_mgr = TransactionManager(replay_ws)
+        stages = list(getattr(self._services.transaction_manager, "_verification_stages", []))
+        replay_tx_mgr = TransactionManager(replay_ws, verification_stages=stages)
         replay_services = KernelServices(
             workspace=replay_ws,
             transaction_manager=replay_tx_mgr,
             capability_resolver=self._services.capability_resolver,
             scheduler=self._services.scheduler,
+            tiered_workspace=self._services.tiered_workspace,
         )
         interpreter = HCIRInterpreter(replay_ws, replay_services)
-
         steps: list[ReplayStepResult] = []
 
-        for i, instruction in enumerate(stream.instructions):
+        def _on_step(
+            step_idx: int,
+            ins: Instruction,
+            res: dict[str, Any],
+            frame: CallFrame,
+            active_ws: HCIRWorkspaceState,
+        ) -> bool | None:
             matched_bps: list[CognitiveBreakpoint] = []
             for bp in self._breakpoints:
-                if bp.matches(instruction):
+                if bp.matches(ins):
                     bp.hit_count += 1
                     matched_bps.append(bp)
 
-            result = await interpreter._dispatcher.dispatch(instruction, replay_ws, replay_services)
             step_res = ReplayStepResult(
-                step_index=i,
-                instruction=instruction,
-                syscall_result=result,
-                snapshot_version=replay_ws.snapshot_manager.current_version,
-                node_count=replay_ws.graph.node_count,
+                step_index=step_idx,
+                instruction=ins,
+                syscall_result=res,
+                snapshot_version=active_ws.snapshot_manager.current_version,
+                node_count=active_ws.graph.node_count,
                 hit_breakpoints=matched_bps,
+                registers=frame.registers.snapshot(),
             )
             steps.append(step_res)
             logger.debug(
                 "Replay step %d (%s) -> version %d (breakpoints=%d)",
-                i,
-                instruction.opcode,
+                step_idx,
+                ins.opcode,
                 step_res.snapshot_version,
                 len(matched_bps),
             )
-
             if stop_on_breakpoint and matched_bps:
-                logger.info("Paused replay on breakpoint at step %d (%s)", i, instruction.opcode)
-                break
+                logger.info("Paused replay on breakpoint at step %d (%s)", step_idx, ins.opcode)
+                return False
+            return True
 
-        # Cleanup replay branch
-        self._services.workspace.drop_branch(branch_name)
+        try:
+            await interpreter.execute(stream, step_hook=_on_step)
+        finally:
+            self._services.workspace.drop_branch(branch_name)
 
         if expected_receipt and expected_receipt.success:
             logger.info(
