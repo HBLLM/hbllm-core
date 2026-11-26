@@ -62,6 +62,17 @@ WORLD_CAPABILITY_ALIASES: dict[str, str] = {
 }
 
 
+MOTOR_CAPABILITIES: tuple[str, ...] = (
+    "motor.navigate",
+    "motor.interact",
+    "motor.activate",
+    "motor.pickup",
+    "motor.drop",
+    "motor.manipulate",
+    "motor.align",
+)
+
+
 class DefaultWorldPredictionExecutor:
     """Default in-memory executor for world_prediction capability in simulation branches."""
 
@@ -71,6 +82,27 @@ class DefaultWorldPredictionExecutor:
 
     async def execute(self, params: dict[str, Any]) -> dict[str, Any]:
         return {"status": "simulated", "predicted": True, **params}
+
+
+class DefaultMotorExecutor:
+    """Governed Layer-0 motor intent dispatcher for symbolic `motor.*` syscalls."""
+
+    def __init__(self, default_capability: str = "motor.interact") -> None:
+        self._default_capability = default_capability
+
+    @property
+    def is_available(self) -> bool:
+        return True
+
+    async def execute(self, params: dict[str, Any]) -> dict[str, Any]:
+        cap = str(params.get("capability", self._default_capability))
+        return {
+            "ok": True,
+            "status": "dispatched",
+            "capability": cap,
+            "target": params.get("target"),
+            **params,
+        }
 
 
 @dataclass
@@ -235,239 +267,145 @@ class KernelServices:
             allow_db_write=False,
         )
 
-        resolver.register(
-            CapabilityImplementation(
-                capability_name="world_prediction",
-                implementation_id="default_world_prediction",
-                executor=DefaultWorldPredictionExecutor(),
-                priority=1,
-                description="Default in-memory forward simulation executor",
-                tags=["safe", "internal"],
-                required_permissions=set(),
+        def _reg(
+            cap: str,
+            executor: Any,
+            *,
+            desc: str | None = None,
+            tags: list[str] | None = None,
+            req: set[str] | None = None,
+            perms: CapabilityPermissions = least_privilege_in_memory,
+            iso: IsolationMode = IsolationMode.IN_PROCESS,
+            prio: int = 5,
+            impl_id: str | None = None,
+        ) -> None:
+            pid = impl_id or f"kernel_{cap}"
+            r_perms = set(req or ())
+            resolver.register(
+                CapabilityImplementation(
+                    capability_name=cap,
+                    implementation_id=pid,
+                    executor=executor,
+                    priority=prio,
+                    description=desc or f"Kernel-governed live {cap} capability",
+                    tags=tags or ["safe", "internal"],
+                    required_permissions=r_perms,
+                )
             )
-        )
-        sandbox_mgr.register_policy(
-            SandboxedCapabilityPolicy(
-                capability_name="world_prediction",
-                provider_id="default_world_prediction",
-                trust_level=TrustLevel.SYSTEM,
-                permissions=least_privilege_in_memory,
+            sandbox_mgr.register_policy(
+                SandboxedCapabilityPolicy(
+                    capability_name=cap,
+                    provider_id=pid,
+                    trust_level=TrustLevel.SYSTEM,
+                    isolation_mode=iso,
+                    permissions=perms,
+                    required_permissions=r_perms,
+                )
             )
-        )
 
+        _reg(
+            "world_prediction",
+            DefaultWorldPredictionExecutor(),
+            desc="Default in-memory forward simulation executor",
+            prio=1,
+            impl_id="default_world_prediction",
+        )
         for w_cap in [*WORLD_CAPABILITIES, *WORLD_CAPABILITY_ALIASES]:
             canonical = WORLD_CAPABILITY_ALIASES.get(w_cap, w_cap)
-            impl_id = f"kernel_{w_cap}"
-            world_exec = WorldKernelCapabilityExecutor(world_k, default_capability=canonical)
-            resolver.register(
-                CapabilityImplementation(
-                    capability_name=w_cap,
-                    implementation_id=impl_id,
-                    executor=world_exec,
-                    priority=5,
-                    description=(
-                        f"Kernel-governed live {canonical} capability"
-                        if canonical == w_cap
-                        else f"Alias of {canonical}"
-                    ),
-                    tags=["safe", "internal"] + (["alias"] if canonical != w_cap else []),
-                    required_permissions=set(),
-                )
+            _reg(
+                w_cap,
+                WorldKernelCapabilityExecutor(world_k, default_capability=canonical),
+                desc=f"Kernel-governed live {canonical} capability"
+                if canonical == w_cap
+                else f"Alias of {canonical}",
+                tags=["safe", "internal"] + (["alias"] if canonical != w_cap else []),
             )
-            sandbox_mgr.register_policy(
-                SandboxedCapabilityPolicy(
-                    capability_name=w_cap,
-                    provider_id=impl_id,
-                    trust_level=TrustLevel.SYSTEM,
-                    permissions=least_privilege_in_memory,
-                )
+        for p_cap in ("planning.generate_candidates", "planning.validate", "planning.expand"):
+            _reg(p_cap, PlanningCapabilityExecutor(workspace=workspace, default_capability=p_cap))
+        for r_cap in ("routing.resolve_route", "execution.sandbox_run"):
+            is_sbx = r_cap == "execution.sandbox_run"
+            _reg(
+                r_cap,
+                RoutingCapabilityExecutor(
+                    resolver=resolver, sandbox_manager=sandbox_mgr, default_capability=r_cap
+                ),
+                req={"subprocess"} if is_sbx else set(),
+                iso=IsolationMode.SUBPROCESS if is_sbx else IsolationMode.IN_PROCESS,
+                perms=(
+                    CapabilityPermissions(
+                        allow_filesystem=False,
+                        allow_network=False,
+                        allow_subprocess=True,
+                        allow_db_write=False,
+                    )
+                    if is_sbx
+                    else least_privilege_in_memory
+                ),
             )
-
-        for p_cap in [
-            "planning.generate_candidates",
-            "planning.validate",
-            "planning.expand",
-        ]:
-            impl_id = f"kernel_{p_cap}"
-            plan_exec = PlanningCapabilityExecutor(workspace=workspace, default_capability=p_cap)
-            resolver.register(
-                CapabilityImplementation(
-                    capability_name=p_cap,
-                    implementation_id=impl_id,
-                    executor=plan_exec,
-                    priority=5,
-                    description=f"Kernel-governed live {p_cap} capability",
-                    tags=["safe", "internal"],
-                    required_permissions=set(),
-                )
-            )
-            sandbox_mgr.register_policy(
-                SandboxedCapabilityPolicy(
-                    capability_name=p_cap,
-                    provider_id=impl_id,
-                    trust_level=TrustLevel.SYSTEM,
-                    permissions=least_privilege_in_memory,
-                )
-            )
-
-        for r_cap in [
-            "routing.resolve_route",
-            "execution.sandbox_run",
-        ]:
-            impl_id = f"kernel_{r_cap}"
-            route_exec = RoutingCapabilityExecutor(
-                resolver=resolver,
-                sandbox_manager=sandbox_mgr,
-                default_capability=r_cap,
-            )
-            is_sandbox_run = r_cap == "execution.sandbox_run"
-            cap_perms = (
-                CapabilityPermissions(
-                    allow_filesystem=False,
-                    allow_network=False,
-                    allow_subprocess=True,
-                    allow_db_write=False,
-                )
-                if is_sandbox_run
-                else least_privilege_in_memory
-            )
-            resolver.register(
-                CapabilityImplementation(
-                    capability_name=r_cap,
-                    implementation_id=impl_id,
-                    executor=route_exec,
-                    priority=5,
-                    description=f"Kernel-governed live {r_cap} capability",
-                    tags=["safe", "internal"],
-                    required_permissions={"subprocess"} if is_sandbox_run else set(),
-                )
-            )
-            sandbox_mgr.register_policy(
-                SandboxedCapabilityPolicy(
-                    capability_name=r_cap,
-                    provider_id=impl_id,
-                    # The sandbox runner itself is kernel-trusted; its *target*
-                    # code still executes via IsolationMode.SUBPROCESS.
-                    trust_level=TrustLevel.SYSTEM,
-                    isolation_mode=IsolationMode.SUBPROCESS
-                    if is_sandbox_run
-                    else IsolationMode.IN_PROCESS,
-                    permissions=cap_perms,
-                    required_permissions={"subprocess"} if is_sandbox_run else set(),
-                )
-            )
-
         for t_cap in TOOL_CAPABILITIES:
-            impl_id = f"kernel_{t_cap}"
-            tool_exec = ToolCapabilityExecutor(default_capability=t_cap)
-            needs_subprocess = t_cap in ("git.status", "shell.exec")
-            tool_perms = CapabilityPermissions(
-                allow_filesystem=True,
-                allow_network=False,
-                allow_subprocess=needs_subprocess,
-                allow_db_write=False,
-            )
-            resolver.register(
-                CapabilityImplementation(
-                    capability_name=t_cap,
-                    implementation_id=impl_id,
-                    executor=tool_exec,
-                    priority=5,
-                    description=f"Kernel-governed sandboxed {t_cap} capability",
-                    tags=["safe", "internal", "tool"],
-                    required_permissions={"filesystem", "subprocess"}
-                    if needs_subprocess
-                    else {"filesystem"},
-                )
-            )
-            sandbox_mgr.register_policy(
-                SandboxedCapabilityPolicy(
-                    capability_name=t_cap,
-                    provider_id=impl_id,
-                    trust_level=TrustLevel.SYSTEM,
-                    isolation_mode=IsolationMode.IN_PROCESS,
-                    permissions=tool_perms,
-                    required_permissions={"filesystem", "subprocess"}
-                    if needs_subprocess
-                    else {"filesystem"},
-                )
+            needs_sub = t_cap in ("git.status", "shell.exec")
+            _reg(
+                t_cap,
+                ToolCapabilityExecutor(default_capability=t_cap),
+                desc=f"Kernel-governed sandboxed {t_cap} capability",
+                tags=["safe", "internal", "tool"],
+                req={"filesystem", "subprocess"} if needs_sub else {"filesystem"},
+                perms=CapabilityPermissions(
+                    allow_filesystem=True,
+                    allow_network=False,
+                    allow_subprocess=needs_sub,
+                    allow_db_write=False,
+                ),
             )
 
-        # ── Memory Capabilities ───────────────────────────────────────
-        ont_store = None
         from hbllm.hcir.language.ontology_store import DEFAULT_ONTOLOGY_DB, LexicalOntologyStore
 
-        if DEFAULT_ONTOLOGY_DB.exists():
-            ont_store = LexicalOntologyStore(DEFAULT_ONTOLOGY_DB)
-
-        for m_cap in MEMORY_CAPABILITIES:
-            impl_id = f"kernel_{m_cap}"
-            mem_exec = MemoryCapabilityExecutor(
-                default_capability=m_cap,
-                tiered_workspace=tiered_workspace,
-                ontology_store=ont_store,
-            )
-            resolver.register(
-                CapabilityImplementation(
-                    capability_name=m_cap,
-                    implementation_id=impl_id,
-                    executor=mem_exec,
-                    priority=5,
-                    description=f"Kernel-governed HCIR-native {m_cap} capability",
-                    tags=["safe", "internal", "memory"],
-                    required_permissions=set(),
-                )
-            )
-            sandbox_mgr.register_policy(
-                SandboxedCapabilityPolicy(
-                    capability_name=m_cap,
-                    provider_id=impl_id,
-                    trust_level=TrustLevel.SYSTEM,
-                    isolation_mode=IsolationMode.IN_PROCESS,
-                    permissions=least_privilege_in_memory,
-                )
-            )
-
-        # ── Web Capabilities ──────────────────────────────────────────
-        from hbllm.hcir.capabilities.web_capabilities import (
-            WEB_CAPABILITIES,
-            WebCapabilityExecutor,
+        ont_store = (
+            LexicalOntologyStore(DEFAULT_ONTOLOGY_DB) if DEFAULT_ONTOLOGY_DB.exists() else None
         )
+        for m_cap in MEMORY_CAPABILITIES:
+            _reg(
+                m_cap,
+                MemoryCapabilityExecutor(
+                    default_capability=m_cap,
+                    tiered_workspace=tiered_workspace,
+                    ontology_store=ont_store,
+                ),
+                desc=f"Kernel-governed HCIR-native {m_cap} capability",
+                tags=["safe", "internal", "memory"],
+            )
+
+        from hbllm.hcir.capabilities.math_capabilities import (
+            MATH_CAPABILITIES,
+            MathCapabilityExecutor,
+        )
+        from hbllm.hcir.capabilities.web_capabilities import WEB_CAPABILITIES, WebCapabilityExecutor
 
         web_perms = CapabilityPermissions(
-            allow_filesystem=False,
-            allow_network=True,
-            allow_subprocess=False,
-            allow_db_write=False,
+            allow_filesystem=False, allow_network=True, allow_subprocess=False, allow_db_write=False
         )
-
         for w_cap in WEB_CAPABILITIES:
-            impl_id = f"kernel_{w_cap}"
-            web_exec = WebCapabilityExecutor(
-                default_capability=w_cap,
-                tiered_workspace=tiered_workspace,
-                ontology_store=ont_store,
+            _reg(
+                w_cap,
+                WebCapabilityExecutor(
+                    default_capability=w_cap,
+                    tiered_workspace=tiered_workspace,
+                    ontology_store=ont_store,
+                ),
+                desc=f"Kernel-governed sandboxed {w_cap} capability",
+                tags=["safe", "internal", "web"],
+                req={"network"},
+                perms=web_perms,
             )
-            resolver.register(
-                CapabilityImplementation(
-                    capability_name=w_cap,
-                    implementation_id=impl_id,
-                    executor=web_exec,
-                    priority=5,
-                    description=f"Kernel-governed sandboxed {w_cap} capability",
-                    tags=["safe", "internal", "web"],
-                    required_permissions={"network"},
-                )
-            )
-            sandbox_mgr.register_policy(
-                SandboxedCapabilityPolicy(
-                    capability_name=w_cap,
-                    provider_id=impl_id,
-                    trust_level=TrustLevel.SYSTEM,
-                    isolation_mode=IsolationMode.IN_PROCESS,
-                    permissions=web_perms,
-                    required_permissions={"network"},
-                )
+        for sys_cap, sys_exec in [
+            *[(c, MathCapabilityExecutor(default_capability=c)) for c in MATH_CAPABILITIES],
+            *[(c, DefaultMotorExecutor(default_capability=c)) for c in MOTOR_CAPABILITIES],
+        ]:
+            _reg(
+                sys_cap,
+                sys_exec,
+                desc=f"Kernel-governed Layer-0 {sys_cap} syscall",
+                tags=["safe", "internal", "layer0"],
             )
 
         return cls(

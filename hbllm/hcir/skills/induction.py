@@ -1,9 +1,4 @@
-"""Skill Induction Engine — Automated Declarative Neuro-Symbolic Skill Acquisition.
-
-Analyzes committed transaction traces from TransactionManager to synthesize
-declarative, reusable DeclarativeNeuroSymbolicSkill programs with composable
-SymbolicPredicate signatures and SubgoalSequence programs.
-"""
+"""Skill Induction Engine — Automated Declarative Neuro-Symbolic Skill Acquisition."""
 
 from __future__ import annotations
 
@@ -11,6 +6,7 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
+from hbllm.hcir.graph import SkillNode
 from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
@@ -37,102 +33,61 @@ class SkillInductionEngine:
         skill_name: str = "induced_skill",
         description: str = "",
     ) -> DeclarativeNeuroSymbolicSkill | None:
-        """Induce a DeclarativeNeuroSymbolicSkill from committed transaction sequences.
-
-        Scans operations for action intents, navigation subgoals, and environmental
-        affordances, extracting the minimal common predicate signature and
-        the canonical subgoal execution sequence.
-        """
+        """Induce a DeclarativeNeuroSymbolicSkill from committed transaction sequences."""
         if not transactions:
             return None
 
-        action_intents: list[str] = []
         action_ids: set[int] = set()
         subgoals: list[SymbolicSubgoal] = []
-        target_roles: list[str] = []
-
         for tx in transactions:
             for op in tx.operations:
+                if op.op not in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
+                    continue
                 data = op.node_data or {}
-                # 1. Capture action nodes or action proposals
-                if op.op in (TransactionOp.ADD_NODE, TransactionOp.UPSERT_NODE):
-                    role = data.get("role") or data.get("target_role")
-                    intent_str = (
-                        data.get("action_intent")
-                        or data.get("intent")
-                        or data.get("event_kind", "")
+                role = data.get("role") or data.get("target_role")
+                intent_l = str(
+                    data.get("action_intent") or data.get("intent") or data.get("event_kind", "")
+                ).lower()
+                act_id = data.get("action_id") or data.get("action")
+                if isinstance(act_id, int) or (isinstance(act_id, str) and act_id.isdigit()):
+                    action_ids.add(int(act_id))
+                if "navigate" in intent_l or "move" in intent_l:
+                    sg = SymbolicSubgoal(
+                        intent=SpatialActionIntent.NAVIGATE,
+                        target_query={"role": str(role) if role else "target"},
                     )
-                    act_id = data.get("action_id") or data.get("action")
+                elif any(k in intent_l for k in ("interact", "push", "toggle")):
+                    sg = SymbolicSubgoal(
+                        intent=SpatialActionIntent.INTERACT,
+                        target_query={"role": str(role) if role else "interactable"},
+                    )
+                elif "goal" in intent_l:
+                    sg = SymbolicSubgoal(
+                        intent=SpatialActionIntent.ACTUATE, target_query={"role": "goal"}
+                    )
+                else:
+                    continue
+                if not subgoals or (
+                    subgoals[-1].intent != sg.intent or subgoals[-1].target_query != sg.target_query
+                ):
+                    subgoals.append(sg)
 
-                    if isinstance(act_id, int):
-                        action_ids.add(act_id)
-                    elif isinstance(act_id, str) and act_id.isdigit():
-                        action_ids.add(int(act_id))
-
-                    if role:
-                        target_roles.append(str(role))
-
-                    if "navigate" in intent_str.lower() or "move" in intent_str.lower():
-                        action_intents.append("navigate")
-                        subgoals.append(
-                            SymbolicSubgoal(
-                                intent=SpatialActionIntent.NAVIGATE,
-                                target_query={"role": str(role) if role else "target"},
-                            )
-                        )
-                    elif (
-                        "interact" in intent_str.lower()
-                        or "push" in intent_str.lower()
-                        or "toggle" in intent_str.lower()
-                    ):
-                        action_intents.append("interact")
-                        subgoals.append(
-                            SymbolicSubgoal(
-                                intent=SpatialActionIntent.INTERACT,
-                                target_query={"role": str(role) if role else "interactable"},
-                            )
-                        )
-                    elif "goal" in intent_str.lower():
-                        action_intents.append("reach_goal")
-                        subgoals.append(
-                            SymbolicSubgoal(
-                                intent=SpatialActionIntent.ACTUATE,
-                                target_query={"role": "goal"},
-                            )
-                        )
-
-        # Build composable signature predicates
-        predicates: list[SymbolicPredicate] = []
-        if action_ids:
-            predicates.append(ActionAffordancePredicate(required=action_ids))
-
-        signature: SymbolicPredicate = AllOf(*predicates) if predicates else AllOf()
-
-        # Deduplicate consecutive identical subgoals while preserving sequence
-        deduped_subgoals: list[SymbolicSubgoal] = []
-        for sg in subgoals:
-            if not deduped_subgoals or (
-                deduped_subgoals[-1].intent != sg.intent
-                or deduped_subgoals[-1].target_query != sg.target_query
-            ):
-                deduped_subgoals.append(sg)
-
-        program = SubgoalSequence(*deduped_subgoals) if deduped_subgoals else None
-
+        signature: SymbolicPredicate = (
+            AllOf(ActionAffordancePredicate(required=action_ids)) if action_ids else AllOf()
+        )
         skill = DeclarativeNeuroSymbolicSkill()
         skill.skill_name = skill_name
         skill.description = description or (
-            f"Induced skill '{skill_name}' with {len(deduped_subgoals)} subgoals "
+            f"Induced skill '{skill_name}' with {len(subgoals)} subgoals "
             f"from {len(transactions)} transaction traces"
         )
         skill.signature = signature
-        skill.program = program
-
+        skill.program = SubgoalSequence(*subgoals) if subgoals else None
         logger.info(
             "SkillInductionEngine synthesized '%s': signature=%s, program_len=%d",
             skill_name,
             signature,
-            len(deduped_subgoals),
+            len(subgoals),
         )
         return skill
 
@@ -144,21 +99,41 @@ class SkillInductionEngine:
     ) -> DeclarativeNeuroSymbolicSkill:
         """Directly induce a skill from an observed action sequence and context metadata."""
         meta = metadata or {}
-        required_actions = set(actions)
-        signature = ActionAffordancePredicate(required=required_actions)
-
-        subgoals = []
-        for act in actions:
-            subgoals.append(
-                SymbolicSubgoal(
-                    intent=SpatialActionIntent.NAVIGATE,
-                    target_query={"action": act, **meta},
-                )
-            )
-
         skill = DeclarativeNeuroSymbolicSkill()
         skill.skill_name = skill_name
         skill.description = f"Trajectory skill for action sequence of length {len(actions)}"
-        skill.signature = signature
-        skill.program = SubgoalSequence(*subgoals)
+        skill.signature = ActionAffordancePredicate(required=set(actions))
+        skill.program = SubgoalSequence(
+            *[
+                SymbolicSubgoal(
+                    intent=SpatialActionIntent.NAVIGATE, target_query={"action": act, **meta}
+                )
+                for act in actions
+            ]
+        )
         return skill
+
+    def induce_skill_node_from_transactions(
+        self,
+        transactions: Sequence[HCIRTransaction],
+        skill_name: str = "induced_skill",
+        description: str = "",
+        tenant_id: str = "default",
+    ) -> SkillNode | None:
+        """Induce a parameterized homoiconic `SkillNode` directly from transaction traces."""
+        skill = self.induce_from_transactions(
+            transactions, skill_name=skill_name, description=description
+        )
+        return None if skill is None else skill.to_skill_node(tenant_id=tenant_id)
+
+    def induce_skill_node_from_trajectory(
+        self,
+        actions: Sequence[int],
+        metadata: dict[str, Any] | None = None,
+        skill_name: str = "induced_trajectory_skill",
+        tenant_id: str = "default",
+    ) -> SkillNode:
+        """Induce a parameterized homoiconic `SkillNode` from an action trajectory."""
+        return self.induce_from_trajectory(
+            actions, metadata=metadata, skill_name=skill_name
+        ).to_skill_node(tenant_id=tenant_id)

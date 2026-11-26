@@ -8,8 +8,8 @@
 
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![Rust](https://img.shields.io/badge/Rust-13%20Crates-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-599%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
-  [![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-92.5%25%20Zero--Shot%20(0%20LLM%20Tokens)-cyan.svg)](#verified-benchmarks)
+  [![Tests](https://img.shields.io/badge/Tests-623%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
+  [![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-94.2%25%20Zero--Shot%20(0%20LLM%20Tokens)-cyan.svg)](#verified-benchmarks)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
 
@@ -17,10 +17,11 @@
 
 > [!NOTE]
 > **Quick Links:**
-> - 📐 **[Architecture Overview](docs/architecture/overview.md)** — Pure-HCIR Cognitive OS, 8 invariants, and single composition root (`build_cognitive_system`)
-> - 🌍 **[Cortical World Model](docs/architecture/cortical-world-model.md)** — 5-stage `CorticalPipeline`, 17 world subpackages, and `TransitionKnowledgeBase`
-> - 🗣️ **[Language & Reading](docs/architecture/language-and-reading.md)** — 100% LLM-free multilingual parser/realizer (`en`, `si`, `ta`) and Track T4 reading comprehension
-> - 🛡️ **[Security & Sandboxing](docs/security.md)** — `ConstitutionalVerifier`, two-tier capability sandboxing, JWT auth, and multi-tenant isolation
+> - 📐 **[Architecture Overview](docs/architecture/overview.md)** — Pure-HCIR Cognitive OS, 9 invariants, Homoiconic Symbolic VM (ISA v2, 12 opcodes), and single composition root (`build_cognitive_system`)
+> - 🧠 **[ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) & [ADR 006](docs/adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md)** — Implemented Phase 3 Homoiconic VM (`M0`–`M6`) and Phase 4 Fuzzy Symbolic Cognition (`F0`–`F3` target)
+> - 🌍 **[Cortical World Model](docs/architecture/cortical-world-model.md)** — 5-stage `CorticalPipeline`, 17 world subpackages, Dirichlet/Beta posteriors (`TransitionKnowledgeBase`), and stateless Layer-0 ALUs
+> - 🗣️ **[Language & Reading](docs/architecture/language-and-reading.md)** — 100% LLM-free multilingual parser/realizer (`en`, `si`, `ta`), `ConstructionNode` grammar, 4-step unknown-instruction resolution, and Track T4 reading
+> - 🛡️ **[Security & Sandboxing](docs/security.md)** — `ConstitutionalVerifier`, two-tier capability/process sandboxing (`run_sandboxed_command`), JWT auth, and multi-tenant isolation
 > - ⚡ **[Benchmarks & Held-Out v2](docs/api/benchmarks.md)** — Frozen suites (`dev`, `novelty`, `widened_dev`, `heldout`), `eval-*` gate, and native simulators
 
 ---
@@ -65,37 +66,37 @@ Instead of relying on an autoregressive transformer as the primary brain, **HBLL
 
 | Subsystem | Role | Package | Docs |
 |---|---|---|---|
-| **HCIR Cognitive OS Kernel** | 8-opcode ISA, `TieredWorkspace`, `TransactionManager`, `ConstitutionalVerifier`, `ExecutiveRuntime` | `hbllm.hcir` / `hbllm.hcir.kernel` | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
+| **HCIR Cognitive OS Kernel** | 12-opcode ISA v2 VM (`$r0..$r7`, `CallStack`, `SyscallAllowlist(strict=True)`), `TieredWorkspace`, `TransactionManager`, `ConstitutionalVerifier`, `ExecutiveRuntime` | `hbllm.hcir` / `hbllm.hcir.kernel` | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
 | **Cortical World Model** | 5-stage active inference (`Perception → Assimilation → Simulation → Deliberation → Motor`), `TransitionKnowledgeBase` | `hbllm.hcir.world` | [Cortical World Model](docs/architecture/cortical-world-model.md) |
 | **Symbol Grounding Engine** | Perceptual feature extraction (`handcrafted`, `snn`, `learned`), bipartite tracking, concept induction | `hbllm.hcir.grounding` | [Grounding](docs/architecture/grounding.md) |
-| **Language & Reading** | Non-LLM multilingual parser/realizer (`en`, `si`, `ta`), `HCIRGateway`, `ReadingCurriculumIngestor` | `hbllm.hcir.language` | [Language & Reading](docs/architecture/language-and-reading.md) |
+| **Language & Reading** | Non-LLM multilingual runtime (`en`, `si`, `ta`), `ConstructionNode` embodied construction grammar, 4-step unknown-instruction resolution, `HCIRGateway`, `ReadingCurriculumIngestor` | `hbllm.hcir.language` | [Language & Reading](docs/architecture/language-and-reading.md) |
 | **Composable Reasoning** | 14 immutable-snapshot operators (`Deduction`, `Abduction`, `Causal`, `Spatial`, `Analogy`, `EmbodiedCausal`, …) | `hbllm.hcir.reasoning` | [Execution Runtime](docs/architecture/cognitive-execution-runtime.md) |
 | **Neuromorphic SNN** | LIF neurons, STDP, STP, WTA, cortical oscillations, `NeuromodulationEngine`, SNN perception | `hbllm.hcir.snn` | [SNN Engine](docs/architecture/snn-cognitive-engine.md) |
-| **Capabilities & Curiosity** | `CommandDispatcher`, `ConceptExplainer`, `EpistemicCuriosityController`, `BeliefConflictResolver`, sandboxed tools | `hbllm.hcir.capabilities` | [Capabilities](docs/architecture/capabilities-and-curiosity.md) |
-| **Declarative Skills** | Composable `SymbolicPredicate` signatures & `SubgoalSequence` bytecode compilation | `hbllm.hcir.skills` | [World Model API](docs/api/world-model.md) |
-| **Security & Serving** | FastAPI REST + MCP server, fail-closed `JWTAuthMiddleware`, `TenantGuard`, `AuditTrail`, `PIIRedactor` | `hbllm.serving` / `hbllm.security` | [Security](docs/security.md) |
+| **Capabilities & Curiosity** | `CommandDispatcher`, `ConceptExplainer`, `EpistemicCuriosityController`, `BeliefConflictResolver`, stateless `math.*` ALUs, sandboxed tools | `hbllm.hcir.capabilities` | [Capabilities](docs/architecture/capabilities-and-curiosity.md) |
+| **Homoiconic Skills & Seed** | Parameterized `SkillNode` (`bytecode_stream`), serializable `SymbolicExpr` ASTs, Wake–Sleep anti-unification (`LibraryLearner`), innate `.hcir` seed (`hbllm.hcir.seed`) | `hbllm.hcir.skills` | [World Model API](docs/api/world-model.md) |
+| **Security & Serving** | FastAPI REST + MCP server, per-tenant `CognitiveSystemRegistry` Pure-HCIR routing, `CognitiveBlackbox` driver, fail-closed `JWTAuthMiddleware`, two-tier subprocess sandboxing (`run_sandboxed_command`) | `hbllm.serving` / `hbllm.drivers` / `hbllm.security` | [Security](docs/security.md) |
 | **Native Rust Substrate** | 13 Rust crates (`hbllm_hcir_graph`, `hbllm_simulation_engine`, `hbllm_structure_matcher`, `hbllm_compute`, …) | `rust/` / `hbllm.native` | [Rust Kernels](docs/api/rust-kernels.md) |
 
 ---
 
 ## Verified Benchmarks
 
-### Sealed Held-Out v2 (`eval-phase2-r10`, 2026-11-21)
+### Sealed Held-Out v2 (`eval-phase3-final`, 2026-11-26)
 
-Executed under the anti-tamper `eval-*` git tag gate on `benchmarks/suites/heldout.yaml` (`n = 120` unseen trials across 5 regimes, commit `a26f09bd`, ledger in `reports/heldout/LEDGER.md`):
+Executed under the anti-tamper `eval-*` git tag gate on `benchmarks/suites/heldout.yaml` (`n = 120` unseen trials across 5 regimes, commit `072b4cb1`, ledger in `reports/heldout/LEDGER.md`):
 
 | Metric | Measured Result | Wilson 95% CI | Notes |
 |---|---|---|---|
-| **Zero-Shot Solve Rate** | **0.9250** (`111 / 120`) | `[0.8636, 0.9600]` | Generality `0.8236`, 4 exploration deaths (`3.33%`), **0 LLM tokens** |
-| **Cross-Seed Transfer** | **0.9035** (`114` episodes) | `[0.8354, 0.9453]` | `skills_consolidated = 161` across distinct procedural seeds |
-| **Same-Layout Replay** | **1.0000** | — | Generality `0.9021`, `mean_steps_to_stable_policy = 0.0` |
+| **Zero-Shot Solve Rate** | **0.9417** (`113 / 120`) | `[0.8845, 0.9715]` | Generality `0.8359`, `2` exploration deaths (`1.67%`, down from `4` in `eval-phase2-r10`), **0 LLM tokens** |
+| **Cross-Seed Transfer** | **0.9035** (`114` episodes) | `[0.8354, 0.9453]` | `skills_consolidated = 28,330` across distinct procedural seeds (`widened_dev`: **0.9474**, CI `[0.8899, 0.9757]`) |
+| **Same-Layout Replay** | **1.0000** (`6/6` tasks `5/5`) | — | Generality `0.8979`, `mean_steps_to_stable_policy = 0.0` |
 
-**Per-Family Breakdown (`eval-phase2-r10`):**
-- `continuous`: **100.0%** zero-shot (`100.0%` cross-seed transfer)
+**Per-Family Breakdown (`eval-phase3-final`):**
 - `symbolic`: **100.0%** zero-shot (`100.0%` cross-seed transfer)
-- `grid`: **95.0%** zero-shot (`97.37%` cross-seed transfer)
-- `stochastic_dynamic`: **85.0%** zero-shot (`78.95%` cross-seed transfer)
-- `partial_observability`: **80.0%** zero-shot (`68.42%` cross-seed transfer)
+- `grid`: **97.5%** zero-shot (`100.0%` cross-seed transfer)
+- `continuous`: **95.0%** zero-shot (`100.0%` cross-seed transfer)
+- `stochastic_dynamic`: **95.0%** zero-shot (`89.47%` cross-seed transfer)
+- `partial_observability`: **80.0%** zero-shot (`52.63%` cross-seed transfer)
 
 > For native simulator benchmarks (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack`, `ai2thor`, `safety_gymnasium`, `alfworld`, `arc_agi`), see **[Benchmarks & Profiling](docs/api/benchmarks.md)**.
 
@@ -168,12 +169,12 @@ hbllm plugin list                   # List installed plugins in plugins/
 
 | Metric | Value |
 |---|---|
-| Core source modules (`hbllm/`) | **988** Python files |
-| HCIR Cognitive OS (`hbllm/hcir/`) | **413** Python files across **11** subpackages (budget `<= 150,000` LOC) |
-| Cortical World Model (`hbllm/hcir/world/`) | **149** Python files across **17** domain subpackages |
-| Reasoning operators (`hbllm/hcir/reasoning/`) | **14** default composable operators (0 LLM dependencies) |
+| Core source modules (`hbllm/`) | **1,062** Python files (`0` `__path__.append` shims) |
+| HCIR Cognitive OS (`hbllm/hcir/`) | **422** Python files across **11** subpackages (`hbllm.hcir.seed` included) |
+| Cortical World Model (`hbllm/hcir/world/`) | **148** Python files across **17** domain subpackages |
+| Reasoning operators (`hbllm/hcir/reasoning/`) | **14** default composable operators (`0` LLM dependencies) |
 | Workspace tiers | **4** (`Working`, `Brain`, `Persistent`, `Meta`) |
-| Test suites | **599** core test files (`tests/`) + **70** plugin test files (`plugins/`) |
+| Test suites | **623** core test files (`tests/`) + **70** plugin test files (`plugins/`) |
 | Rust crates (`rust/`) | **13** PyO3 native acceleration crates |
 
 ---
@@ -182,8 +183,8 @@ hbllm plugin list                   # List installed plugins in plugins/
 
 | Section | Contents |
 |---|---|
-| **[Architecture](docs/architecture/overview.md)** | [Overview](docs/architecture/overview.md), [Entry Points](docs/architecture/entry-points.md), [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md), [Cortical World Model](docs/architecture/cortical-world-model.md), [Symbol Grounding](docs/architecture/grounding.md), [Language & Reading](docs/architecture/language-and-reading.md), [Reasoning Runtime](docs/architecture/cognitive-execution-runtime.md), [SNN Engine](docs/architecture/snn-cognitive-engine.md), [Capabilities & Curiosity](docs/architecture/capabilities-and-curiosity.md), [Memory Systems](docs/architecture/memory-systems.md), [Graph Substrate](docs/architecture/graph_substrate.md), [Sandboxing](docs/architecture/sandboxing.md), [Innate Priors](docs/architecture/priors.md) |
-| **[ADRs](docs/adr/README.md)** | [ADR 001](docs/adr/0001-hbllm-core-architecture.md), [ADR 002](docs/adr/0002-operational-architecture-and-governance.md), [ADR 003](docs/adr/0003-epistemic-runtime.md), [ADR 004 (Pure-HCIR)](docs/adr/0004-pure-hcir-cognitive-os.md) |
+| **[Architecture](docs/architecture/overview.md)** | [Overview](docs/architecture/overview.md), [Entry Points](docs/architecture/entry-points.md), [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md), [Homoiconic VM Plan](docs/architecture/homoiconic-vm-migration-plan.md), [Fuzzy Cognition Plan](docs/architecture/fuzzy-cognition-migration-plan.md), [Cortical World Model](docs/architecture/cortical-world-model.md), [Symbol Grounding](docs/architecture/grounding.md), [Language & Reading](docs/architecture/language-and-reading.md), [Reasoning Runtime](docs/architecture/cognitive-execution-runtime.md), [SNN Engine](docs/architecture/snn-cognitive-engine.md), [Capabilities & Curiosity](docs/architecture/capabilities-and-curiosity.md), [Memory Systems](docs/architecture/memory-systems.md), [Graph Substrate](docs/architecture/graph_substrate.md), [Sandboxing](docs/architecture/sandboxing.md), [Innate Priors](docs/architecture/priors.md) |
+| **[ADRs](docs/adr/README.md)** | [ADR 001](docs/adr/0001-hbllm-core-architecture.md), [ADR 002](docs/adr/0002-operational-architecture-and-governance.md), [ADR 003](docs/adr/0003-epistemic-runtime.md), [ADR 004 (Pure-HCIR)](docs/adr/0004-pure-hcir-cognitive-os.md), [ADR 005 (Homoiconic VM)](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md), [ADR 006 (Fuzzy Cognition)](docs/adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md) |
 | **[Guides](docs/guides/quickstart.md)** | [Quickstart](docs/guides/quickstart.md), [CLI Reference](docs/guides/cli.md), [Configuration](docs/guides/configuration.md), [Deployment](docs/guides/deployment.md), [Plugin SDK](docs/guides/plugins.md), [Custom Nodes](docs/guides/custom-nodes.md), [Packages & Skills](docs/guides/hbpkg-and-skills.md), [Persistence & Backup](docs/guides/persistence-backup.md), [Robotics & IoT](docs/guides/robotics-iot.md) |
 | **[API Reference](docs/api/hcir.md)** | [HCIR Kernel](docs/api/hcir.md), [World Model](docs/api/world-model.md), [Language](docs/api/language.md), [Capabilities](docs/api/capabilities.md), [Reasoning](docs/api/reasoning.md), [SNN](docs/api/snn.md), [Memory](docs/api/memory.md), [Governance](docs/api/governance.md), [Security](docs/api/security.md), [Serving](docs/api/serving.md), [Benchmarks](docs/api/benchmarks.md), [Rust Kernels](docs/api/rust-kernels.md) |
 

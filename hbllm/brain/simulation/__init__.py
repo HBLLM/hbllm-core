@@ -7,54 +7,54 @@ and risk/safety evaluation.
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib
+from typing import Any
 
-_exp_path = Path(__file__).resolve().parents[3] / "experiments" / "legacy_brain" / "simulation"
-if _exp_path.exists() and str(_exp_path) not in __path__:
-    __path__.append(str(_exp_path))
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "SimulationBranch": ("hbllm.brain.simulation.branch", "SimulationBranch"),
+    "CounterfactualResult": (
+        "hbllm.brain.simulation.counterfactual_engine",
+        "CounterfactualResult",
+    ),
+    "ExecutionPlan": ("hbllm.brain.simulation.counterfactual_engine", "ExecutionPlan"),
+    "MentalSandbox": ("hbllm.brain.simulation.counterfactual_engine", "MentalSandbox"),
+    "PredictedWorldState": (
+        "hbllm.brain.simulation.counterfactual_engine",
+        "PredictedWorldState",
+    ),
+    "SimulationEvent": ("hbllm.brain.simulation.events", "SimulationEvent"),
+    "compute_state_hash": ("hbllm.brain.simulation.events", "compute_state_hash"),
+    "BoundingBox": ("hbllm.brain.simulation.geometry", "BoundingBox"),
+    "SurfaceGeometry": ("hbllm.brain.simulation.geometry", "SurfaceGeometry"),
+    "derive_surface_geometry": ("hbllm.brain.simulation.geometry", "derive_surface_geometry"),
+    "evaluate_support_stability": (
+        "hbllm.brain.simulation.geometry",
+        "evaluate_support_stability",
+    ),
+    "is_path_clear": ("hbllm.brain.simulation.geometry", "is_path_clear"),
+    "ActionOperator": ("hbllm.brain.simulation.operators", "ActionOperator"),
+    "MoveOperator": ("hbllm.brain.simulation.operators", "MoveOperator"),
+    "OperatorExecutionResult": (
+        "hbllm.brain.simulation.operators",
+        "OperatorExecutionResult",
+    ),
+    "PushOperator": ("hbllm.brain.simulation.operators", "PushOperator"),
+    "PutInOperator": ("hbllm.brain.simulation.operators", "PutInOperator"),
+    "StackOperator": ("hbllm.brain.simulation.operators", "StackOperator"),
+}
+
+__all__ = sorted(_EXPORTS.keys())
 
 
-from hbllm.brain.simulation.branch import SimulationBranch
-from hbllm.brain.simulation.counterfactual_engine import (
-    CounterfactualResult,
-    ExecutionPlan,
-    MentalSandbox,
-    PredictedWorldState,
-)
-from hbllm.brain.simulation.events import SimulationEvent, compute_state_hash
-from hbllm.brain.simulation.geometry import (
-    BoundingBox,
-    SurfaceGeometry,
-    derive_surface_geometry,
-    evaluate_support_stability,
-    is_path_clear,
-)
-from hbllm.brain.simulation.operators import (
-    ActionOperator,
-    MoveOperator,
-    OperatorExecutionResult,
-    PushOperator,
-    PutInOperator,
-    StackOperator,
-)
+def __getattr__(name: str) -> Any:
+    if name in _EXPORTS:
+        mod_path, attr = _EXPORTS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    "ActionOperator",
-    "BoundingBox",
-    "CounterfactualResult",
-    "ExecutionPlan",
-    "MentalSandbox",
-    "MoveOperator",
-    "OperatorExecutionResult",
-    "PredictedWorldState",
-    "PushOperator",
-    "PutInOperator",
-    "SimulationBranch",
-    "SimulationEvent",
-    "StackOperator",
-    "SurfaceGeometry",
-    "compute_state_hash",
-    "derive_surface_geometry",
-    "evaluate_support_stability",
-    "is_path_clear",
-]
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_EXPORTS.keys()))

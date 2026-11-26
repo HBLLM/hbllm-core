@@ -6,8 +6,9 @@ HBLLM is designed for enterprise environments where data isolation, secure code 
 
 Autonomous tool and Python execution is protected by a formal two-tier sandboxing pipeline in `hbllm.hcir.kernel.capability_sandboxing` (see **[Sandboxing Architecture](architecture/sandboxing.md)**):
 
-- **Tier 1 (Logical Policy Sandbox):** `CapabilitySandboxManager` checks `TrustLevel` (`SYSTEM`, `VERIFIED`, `UNTRUSTED`), `CapabilityPermissions` (`allow_filesystem`, `allow_network`, `allow_subprocess`, `allow_db_write`), and `infer_capability_permissions()` before dispatch.
-- **Tier 2 (Physical Process Isolation):** `SandboxedExecutor` validates Python ASTs (blocking `exec`, `eval`, `__import__`, `__subclasses__`, `os`, `sys`, `subprocess`), executes inside `python -I` with POSIX `RLIMIT_AS` / `RLIMIT_CPU` quotas and Linux network unsharing (`unshare -Urn`), closes parent write-end pipes immediately for clean EOF, and enforces strict execution timeouts.
+- **Tier 1 (Logical Policy Sandbox):** `PermissionEngine` + `CapabilitySandboxManager` checks `TrustLevel` (`SYSTEM`, `VERIFIED`, `UNTRUSTED`), `CapabilityPermissions` (`allow_filesystem`, `allow_network`, `allow_subprocess`, `allow_db_write`), and `infer_capability_permissions()` before dispatch.
+- **Tier 2 (Physical Process Isolation):** `SandboxedExecutor` validates Python ASTs (blocking `exec`, `eval`, `__import__`, `__subclasses__`, `os`, `sys`, `subprocess`), executes inside `python -I`, while `run_sandboxed_command()` (`hbllm.hcir.kernel.subprocess_sandbox`) isolates external plugin subprocesses (`plugins/hbllm_terminal`, `plugins/compiler-verification`) with POSIX `RLIMIT_AS` / `RLIMIT_CPU` / `RLIMIT_FSIZE` quotas, `unshare --user --net` when available, immediate parent write-end pipe closure, and `os.killpg` timeout cleanup.
+- **Multi-Tenant Workspace & Tx Enforcement:** `TieredWorkspace`, `HCIRWorkspaceState`, `HCIRInterpreter`, and `HCIRGateway` propagate `Scope(tenant_id=...)` into every `HCIRTransaction` verified by `ConstitutionalVerifier`.
 - **SSRF-Protected Web Fetch:** `WebCapabilityExecutor` (`hbllm.hcir.capabilities.web_capabilities`) validates every URL with `is_safe_url()` before connecting.
 
 ## 2. Multi-Tenant Identity & Data Isolation

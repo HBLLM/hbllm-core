@@ -79,8 +79,9 @@ flowchart LR
 ### Core Data Model
 
 - **`TransitionOutcome` (`StrEnum`):** Empirical transition classes (`TRAVERSABLE`, `BLOCKED`, `LETHAL`, `GOAL`, `CARGO`, `RECEPTACLE`, `ACTUATOR`, `STATE_TRANSFORM`, etc.) recorded per `scope` (`"feature"`, `"locus"`, `"context"`).
-- **`TransitionBelief`:** Tracks empirical outcome `counts`, `observed_effects`, `evidence_log`, and epoch stamps (`verified_epoch`, `outcome_epochs`). Computes `traversability_posterior()`, `outcome_prob()`, `epistemic_uncertainty()`, and `confidence()`, and serializes cleanly to/from HCIR `BeliefNode` (`to_belief_node()`, `from_belief_node()`).
+- **`DirichletOutcomePosterior` / `TransitionBelief`:** Tracks Dirichlet/Beta empirical outcome counts (`alpha_pass`, `beta_block`, `gamma_lethal`, `delta_goal`), `observed_effects`, `evidence_log`, and epoch stamps (`verified_epoch`, `outcome_epochs`). Computes `traversability_posterior()`, `outcome_prob()`, `epistemic_uncertainty()`, and `confidence()`, and serializes cleanly to/from HCIR `BeliefNode` (`to_belief_node()`, `from_belief_node()`).
 - **`CausalEffectRule`:** Records conditional transformations (`trigger_key`, `effect_signature`, `precondition_tokens`, `occurrences`, `confidence`) and serializes to/from HCIR `LearnedRuleNode`.
+- **Stateless Layer-0 Math ALUs & Homoiconic World Programs:** Spatial geodesics (`math.geodesic_field`), Bellman risk backup (`math.bellman_risk_backup`), collision cones (`math.collision_cone`), and Bayesian posterior updates (`math.bayesian_posterior_update`) run deterministically in Layer-0 ALUs (`MathCapabilityExecutor`), while epistemic phase arbitration, subgoal scheduling, curiosity probing, and deliberation gating are evaluated as homoiconic HCIR programs (`hbllm.hcir.world.cortical_programs`) over `FrozenGraphView`, returning only `StageResult.operations`.
 - **`TransitionEdgeEvaluation`:** Returned by `TransitionKnowledgeBase.evaluate_transition(...)` with `traversable`, `step_cost`, `risk_cost`, `goal_value`, `info_gain`, `mutates_state`, and `confidence`.
 
 ### Key Architectural Properties
@@ -93,9 +94,10 @@ flowchart LR
 
 ## 4. `PrefrontalWorkingMemory` & Faculty Roster
 
-- **`PrefrontalWorkingMemory` (`world/working_memory/memory.py`):** Governs action inhibitions (`inhibit_action`, `decay_inhibited_actions`), homeostatic state (`consume_energy`, `replenish_energy`), held inventory (`acquire_item`, `expend_item`), domain competence tracking (`record_domain_episode`), `DeclarativeNeuroSymbolicSkill` synthesis (`synthesize_skill_from_schema`, `find_matching_skill`), and schema failure backoff.
+- **`PrefrontalWorkingMemory` (`world/working_memory/memory.py`):** Governs action inhibitions (`inhibit_action`, `decay_inhibited_actions`), homeostatic state (`consume_energy`, `replenish_energy`), held inventory (`acquire_item`, `expend_item`), domain competence tracking (`record_domain_episode`), `SkillNode` / `DeclarativeNeuroSymbolicSkill` synthesis (`synthesize_skill_from_schema`, `find_matching_skill`), and schema failure backoff.
 - **`GovernedSetView` (`world/state/views.py`):** Exposes ontology views (`learned_goal_features`, `learned_barrier_features`, `learned_walkable_features`, `learned_cargo_features`, `learned_receptacle_features`, `verified_safe_features`) backed by `HCIRSymbolicWorldTheory` without mutable set drift.
-- **Measured Faculty Roster (R5 Ablation-Verified):** Retains stage owners plus positive-delta faculties (`prediction_budget`, `budget_governor`, `option_discovery`, `acc_conflict_monitor`, `object_planner`, `remote_causal`, `body_schema`, `subgoal_stack`, `habenular_ior`, `hazard_tracker`, `world_kernel`).
+- **`CorticalGroundingBridge` (`world/grounding/bridge.py`):** Maps scene entities and natural-language goals via `HCIRCompiler` construction intent parsing (`IntentType.ACT`) without hardcoded verb lists.
+- **Measured Faculty Roster (`2026-11-24` / `2026-11-25` R1 Ablations on `dev` + `widened_dev`):** Stage owners (`perception`, `assimilator`, `deliberation_engine`, `planner`, `motor`, `episodic_cortex`, `working_memory`, `symbolic_theory`) plus measured `keep` faculties (`body_schema`, `habenular_ior`, `remote_causal`, `object_planner`, `prediction_budget`, `budget_governor`, `acc_conflict_monitor` `Δgen=+0.0527`, `hazard_tracker` `Δgen=+0.0238`, `subgoal_stack` `Δgen=+0.0044`); `option_discovery` and `grounding_bridge` remain `experimental` (`Δgen=0.0000`).
 
 ---
 

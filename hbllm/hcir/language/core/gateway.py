@@ -53,26 +53,34 @@ class HCIRGateway:
         tiered_workspace: Any | None = None,
     ) -> None:
         self._graph = graph
+        if workspace is None:
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            workspace = HCIRWorkspaceState(graph=graph)
         self._workspace = workspace
         self._ontology_store = ontology_store
         self._tiered_workspace = tiered_workspace
 
     def _commit_node(self, node: EvidenceNode | GoalNode) -> None:
-        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
-            from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+        from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+        from hbllm.hcir.types import Scope
 
-            self._workspace.commit_operations(
-                [
-                    TransactionOperation(
-                        op=TransactionOp.UPSERT_NODE,
-                        node_id=node.id,
-                        node_data=node.model_dump(),
-                    )
-                ],
-                author="hcir_language_gateway",
-            )
-            return
-        self._graph.add_node(node)
+        tenant_id = getattr(self._workspace, "tenant_id", None) or "default"
+        node_to_commit = node
+        if getattr(getattr(node, "scope", None), "tenant_id", "default") != tenant_id:
+            node_to_commit = node.model_copy(update={"scope": Scope(tenant_id=tenant_id)})
+
+        self._workspace.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_to_commit.id,
+                    node_data=node_to_commit.model_dump(),
+                )
+            ],
+            author="hcir_language_gateway",
+            tenant_id=tenant_id,
+        )
 
     # ── Assertion: Language as Evidence ───────────────────────────────
 
@@ -130,34 +138,33 @@ class HCIRGateway:
         )
         self._commit_node(evidence)
 
-        # If entity exists, update observed property / spatial relation if supported
+        # If entity exists, update observed property / spatial relation via transactional copy
         if target_entity_id:
             ent = self._graph.get_node(target_entity_id)
             if isinstance(ent, PhysicalEntityNode):
+                from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+
+                ent_copy = ent.model_copy(deep=True)
                 target_dict = (
-                    ent.properties
-                    if hasattr(ent, "properties") and isinstance(ent.properties, dict)
-                    else ent.observed_properties
+                    ent_copy.properties
+                    if hasattr(ent_copy, "properties") and isinstance(ent_copy.properties, dict)
+                    else ent_copy.observed_properties
                 )
                 if subject_ref and subject_ref.properties:
                     target_dict.update(subject_ref.properties)
                 if object_ref and object_ref.properties:
                     target_dict.update(object_ref.properties)
-                if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
-                    from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-
-                    self._workspace.commit_operations(
-                        [
-                            TransactionOperation(
-                                op=TransactionOp.UPSERT_NODE,
-                                node_id=ent.id,
-                                node_data=ent.model_dump(),
-                            )
-                        ],
-                        author="hcir_language_gateway",
-                    )
-                else:
-                    self._graph.upsert_node(ent)
+                self._workspace.commit_operations(
+                    [
+                        TransactionOperation(
+                            op=TransactionOp.UPSERT_NODE,
+                            node_id=ent_copy.id,
+                            node_data=ent_copy.model_dump(),
+                        )
+                    ],
+                    author="hcir_language_gateway",
+                    tenant_id=getattr(self._workspace, "tenant_id", None) or "default",
+                )
 
         # Create spatial edge if both subject and object are grounded entities
         location_entity_id = grounded.grounded_entities.get(
@@ -179,21 +186,17 @@ class HCIRGateway:
                 # Check for duplicate edges
                 existing_edges = {e.id for e in self._graph.edges_from(target_entity_id)}
                 if edge.id not in existing_edges:
-                    if self._workspace is not None and hasattr(
-                        self._workspace, "commit_operations"
-                    ):
-                        self._workspace.commit_operations(
-                            [
-                                TransactionOperation(
-                                    op=TransactionOp.UPSERT_EDGE,
-                                    edge_id=edge.id,
-                                    edge_data=edge.model_dump(),
-                                )
-                            ],
-                            author="hcir_language_gateway",
-                        )
-                    else:
-                        self._graph.add_edge(edge)
+                    self._workspace.commit_operations(
+                        [
+                            TransactionOperation(
+                                op=TransactionOp.UPSERT_EDGE,
+                                edge_id=edge.id,
+                                edge_data=edge.model_dump(),
+                            )
+                        ],
+                        author="hcir_language_gateway",
+                        tenant_id=getattr(self._workspace, "tenant_id", None) or "default",
+                    )
                     logger.debug(
                         "HCIRGateway: Created %s edge %s → %s",
                         edge_type.value,

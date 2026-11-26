@@ -1,18 +1,8 @@
-"""HCIR Skill Acquisition System — Domain-Agnostic Base.
-
-Core provides only the skill protocol contract and reusable subskills.
-All domain-specific skills (ARC-AGI) live in their plugin package:
-    plugins/arc_agi_adapter/arc_skills/
-
-Plugins register their skills with CognitiveBlackbox.register_skill()
-at load time for generic dispatch via the BaseHierarchicalSkill protocol.
-"""
+"""HCIR Skill Acquisition System — Domain-Agnostic Base."""
 
 from __future__ import annotations
 
-from hbllm.hcir.skills.base import (
-    BaseHierarchicalSkill,
-)
+from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.skills.common_subskills import (
     ColorCluster,
     DiscreteVectorTranslator,
@@ -23,11 +13,7 @@ from hbllm.hcir.skills.common_subskills import (
     RemoteActuator,
     TemporalSyncPlanner,
 )
-from hbllm.hcir.skills.curriculum import (
-    CurricularSkillGraph,
-    CurricularSkillNode,
-    SkillTier,
-)
+from hbllm.hcir.skills.curriculum import CurricularSkillGraph, CurricularSkillNode, SkillTier
 from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
@@ -37,6 +23,7 @@ from hbllm.hcir.skills.declarative import (
     DeclarativeNeuroSymbolicSkill,
     EntityBoundingBoxPredicate,
     EntityCountPredicate,
+    ExprPredicate,
     GridDimensionPredicate,
     HomogeneousRegionPredicate,
     MetadataPredicate,
@@ -46,17 +33,26 @@ from hbllm.hcir.skills.declarative import (
     PredictiveConfidencePredicate,
     SkillEvaluationContext,
     SubgoalSequence,
+    SymbolicExpr,
     SymbolicPredicate,
     SymbolicSubgoal,
     SymmetryPredicate,
 )
-from hbllm.hcir.skills.induction import (
-    SkillInductionEngine,
+from hbllm.hcir.skills.induction import SkillInductionEngine
+from hbllm.hcir.skills.library_learner import (
+    AntiUnifiedCandidate,
+    LibraryLearner,
+    WakeSleepLibraryLearner,
+    anti_unify_streams,
+    compute_mdl_gain,
+    rewrite_stream_with_library,
+    sanitize_stream_for_cross_seed,
 )
 
 __all__ = [
     "ActionAffordancePredicate",
     "AllOf",
+    "AntiUnifiedCandidate",
     "AnyOf",
     "BaseHierarchicalSkill",
     "ColorCluster",
@@ -68,10 +64,12 @@ __all__ = [
     "DiscreteVectorTranslator",
     "EntityBoundingBoxPredicate",
     "EntityCountPredicate",
+    "ExprPredicate",
     "GridDimensionPredicate",
     "HomogeneousRegionPredicate",
     "LatticeNavigator",
     "LatticeQuantizer",
+    "LibraryLearner",
     "MetadataPredicate",
     "Not",
     "PearlCausalDoPredicate",
@@ -84,8 +82,14 @@ __all__ = [
     "SkillInductionEngine",
     "SkillTier",
     "SubgoalSequence",
+    "SymbolicExpr",
     "SymbolicPredicate",
     "SymbolicSubgoal",
     "SymmetryPredicate",
     "TemporalSyncPlanner",
+    "WakeSleepLibraryLearner",
+    "anti_unify_streams",
+    "compute_mdl_gain",
+    "rewrite_stream_with_library",
+    "sanitize_stream_for_cross_seed",
 ]

@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.cortical_programs import evaluate_symbolic_stage_intent
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.deliberation import (
     ActionProposal,
@@ -105,32 +105,7 @@ class DeliberationStage:
                     "meta": meta,
                 },
             )
-        act = ctx.signals.get("mental_plan_action")
-        if act is None:
-            act = ctx.signals.get("macro_action")
-        if act is None:
-            act = ctx.signals.get("curiosity_action")
-        if act is None:
-            actions = list(ctx.action_dynamics.keys())
-            act = actions[0] if actions else 1
-
-        ops: list[TransactionOperation] = [
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id="deliberation_decision",
-                node_data={
-                    "stage": self.name,
-                    "arbitrated_action": str(act),
-                    "step": ctx.step_counter,
-                },
-            )
-        ]
-        return StageResult(
-            author=self.name,
-            operations=ops,
-            signals={"arbitrated_action": act},
-            proposed_action=act,
-        )
+        return evaluate_symbolic_stage_intent(ctx, stage_kind="deliberation")
 
 
 __all__ = [

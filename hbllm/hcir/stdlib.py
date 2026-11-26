@@ -1,19 +1,4 @@
-"""
-HCIR Standard Library — high-level cognitive macros built on bytecodes.
-
-Like libc for C or the Python standard library, ``hcir.stdlib``
-provides composable cognitive operations implemented as sequences
-of the 8 primitive opcodes.
-
-    hcir.stdlib.memory.search()     → QUERY
-    hcir.stdlib.reasoning.compare() → QUERY + QUERY + ASSERT
-    hcir.stdlib.planning.decompose() → QUERY + ASSERT + ASSERT + ASSERT
-    hcir.stdlib.learning.extract()  → QUERY + ASSERT + EXECUTE + ASSERT
-    hcir.stdlib.simulation.hypothesize() → FORK + ASSERT + EXECUTE + MERGE
-
-Each macro returns an ``InstructionStream`` that can be composed,
-optimized, or passed directly to the interpreter.
-"""
+"""HCIR Standard Library — pure multi-opcode ISA v2 cognitive streams."""
 
 from __future__ import annotations
 
@@ -21,15 +6,23 @@ import uuid
 from typing import Any
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
-from hbllm.hcir.graph import GoalNode
+from hbllm.hcir.graph import BeliefNode, ConceptNode, GoalNode, SkillNode
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Memory Operations
-# ═══════════════════════════════════════════════════════════════════════════
+
+def _ins(op: Opcode, cost: int = 0, /, **params: Any) -> Instruction:
+    return Instruction(opcode=op, params=params, cost_estimate=cost)
+
+
+def _ret(*regs: str, label: str | None = None) -> Instruction:
+    return Instruction(opcode=Opcode.RETURN, params={"yield": list(regs)}, label=label)
+
+
+def _uid(prefix: str, n: int = 8) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:n]}"
 
 
 class MemoryOps:
-    """Standard memory operations: search, store, recall, forget."""
+    """Standard memory operations: search, store, forget."""
 
     @staticmethod
     def search(
@@ -39,400 +32,241 @@ class MemoryOps:
         limit: int = 100,
         author: str = "stdlib",
     ) -> InstructionStream:
-        """Search the cognitive graph for matching nodes."""
-        params: dict[str, Any] = {"limit": limit}
+        """Search the cognitive graph and bind matches to `$r0`."""
+        params: dict[str, Any] = {"limit": limit, "bind": "$r0"}
         if text:
             params["text_contains"] = text
         if node_type:
             params["node_type"] = node_type
         if category:
             params["category"] = category
-
         return InstructionStream(
             author=author,
             description=f"stdlib.memory.search({text!r})",
-            instructions=[
-                Instruction(opcode=Opcode.QUERY, params=params, cost_estimate=10),
-            ],
+            instructions=[Instruction(opcode=Opcode.QUERY, params=params, cost_estimate=10)],
         )
 
     @staticmethod
-    def store(
-        node_data: dict[str, Any],
-        author: str = "stdlib",
-    ) -> InstructionStream:
-        """Store a new node in the cognitive graph."""
+    def store(node_data: dict[str, Any], author: str = "stdlib") -> InstructionStream:
+        """Store a new node in the cognitive graph and bind its ID to `$r0`."""
         return InstructionStream(
             author=author,
             description="stdlib.memory.store",
-            instructions=[
-                Instruction(
-                    opcode=Opcode.ASSERT,
-                    params={"node_data": node_data, "author": author},
-                    cost_estimate=5,
-                ),
-            ],
+            instructions=[_ins(Opcode.ASSERT, 5, node_data=node_data, author=author, bind="$r0")],
         )
 
     @staticmethod
-    def forget(
-        node_id: str,
-        author: str = "stdlib",
-    ) -> InstructionStream:
+    def forget(node_id: str, author: str = "stdlib") -> InstructionStream:
         """Retract a node from the cognitive graph."""
         return InstructionStream(
             author=author,
             description=f"stdlib.memory.forget({node_id})",
-            instructions=[
-                Instruction(
-                    opcode=Opcode.RETRACT,
-                    params={"node_id": node_id, "author": author},
-                    cost_estimate=5,
-                ),
-            ],
+            instructions=[_ins(Opcode.RETRACT, 5, node_id=node_id, author=author)],
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Reasoning Operations
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class ReasoningOps:
-    """Standard reasoning operations: compare, infer, evaluate."""
+    """Standard reasoning operations compiled into `QUERY -> UNIFY -> BRANCH -> ASSERT -> RETURN`."""
 
     @staticmethod
-    def compare(
-        subject_a: str,
-        subject_b: str,
-        author: str = "stdlib",
-    ) -> InstructionStream:
-        """Compare two subjects by querying both, then asserting a comparison result.
-
-        Macro: QUERY(A) + QUERY(B) + EXECUTE(comparison)
-        """
+    def compare(subject_a: str, subject_b: str, author: str = "stdlib") -> InstructionStream:
+        """Compare two subjects across working memory and assert a comparison BeliefNode."""
+        cmp_node = BeliefNode(
+            id=_uid("cmp"),
+            claim=f"Comparison recorded between {subject_a} and {subject_b}",
+            properties={"subject_a": subject_a, "subject_b": subject_b},
+        ).model_dump()
         return InstructionStream(
             author=author,
             description=f"stdlib.reasoning.compare({subject_a}, {subject_b})",
             instructions=[
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"text_contains": subject_a},
-                    cost_estimate=10,
-                ),
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"text_contains": subject_b},
-                    cost_estimate=10,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "reasoning.compare",
-                        "params": {"a": subject_a, "b": subject_b},
-                    },
-                    cost_estimate=50,
-                ),
+                _ins(Opcode.QUERY, 10, text_contains=subject_a, bind="$r0"),
+                _ins(Opcode.QUERY, 10, text_contains=subject_b, bind="$r1"),
+                _ins(Opcode.UNIFY, 10, pattern={"var": "?a"}, source="$r0", bind="$r2"),
+                _ins(Opcode.ASSERT, 5, node_data=cmp_node, author=author, bind="$r3"),
+                _ret("$r3"),
             ],
         )
 
     @staticmethod
     def evaluate(
-        node_id: str,
-        criteria: list[str] | None = None,
-        author: str = "stdlib",
+        node_id: str, criteria: list[str] | None = None, author: str = "stdlib"
     ) -> InstructionStream:
-        """Evaluate a node against criteria.
-
-        Macro: QUERY(node) + QUERY(criteria) + EXECUTE(evaluation)
-        """
+        """Unify target node against active constraints and assert an evaluation BeliefNode."""
+        eval_node = BeliefNode(
+            id=_uid("eval"),
+            claim=f"Evaluation of {node_id} against constraints",
+            properties={"target_id": node_id, "criteria": criteria or []},
+        ).model_dump()
         return InstructionStream(
             author=author,
             description=f"stdlib.reasoning.evaluate({node_id})",
             instructions=[
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"text_contains": node_id},
-                    cost_estimate=10,
+                _ins(Opcode.UNIFY, 10, pattern={"id": node_id}, bind="$r0"),
+                _ins(Opcode.QUERY, 10, node_type="constraint", bind="$r1"),
+                _ins(
+                    Opcode.BRANCH, 0, condition="if_empty", register="$r0", target_label="eval_done"
                 ),
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"node_type": "constraint"},
-                    cost_estimate=10,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "reasoning.evaluate",
-                        "params": {"node_id": node_id, "criteria": criteria or []},
-                    },
-                    cost_estimate=50,
-                ),
+                _ins(Opcode.ASSERT, 5, node_data=eval_node, author=author, bind="$r2"),
+                _ret("$r2", label="eval_done"),
             ],
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Planning Operations
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class PlanningOps:
-    """Standard planning operations: decompose, prioritize, schedule."""
+    """Standard planning operations compiled into `ASSERT -> QUERY -> UNIFY -> BRANCH -> CALL`."""
 
     @staticmethod
     def decompose(
-        goal_description: str,
-        max_subtasks: int = 5,
-        priority: float = 0.5,
-        author: str = "stdlib",
+        goal_description: str, max_subtasks: int = 5, priority: float = 0.5, author: str = "stdlib"
     ) -> InstructionStream:
-        """Decompose a goal into subtasks.
-
-        Macro: ASSERT(goal) + QUERY(constraints) + EXECUTE(planner)
-        """
-        goal_id = f"goal_{uuid.uuid4().hex[:8]}"
+        """Assert goal, inspect constraints, and invoke matching procedural skill via `Opcode.CALL`."""
+        goal_data = GoalNode(
+            id=_uid("goal"),
+            description=goal_description,
+            priority=priority,
+            properties={"max_subtasks": max_subtasks},
+        ).model_dump()
         return InstructionStream(
             author=author,
             description=f"stdlib.planning.decompose({goal_description!r})",
             instructions=[
-                Instruction(
-                    opcode=Opcode.ASSERT,
-                    params={
-                        "node_data": GoalNode(
-                            id=goal_id,
-                            description=goal_description,
-                            priority=priority,
-                        ).model_dump(),
-                        "author": author,
-                    },
-                    cost_estimate=5,
+                _ins(Opcode.ASSERT, 5, node_data=goal_data, author=author, bind="$r0"),
+                _ins(Opcode.QUERY, 10, node_type="constraint", bind="$r1"),
+                _ins(Opcode.UNIFY, 10, pattern={"node_type": "skill"}, bind="$r2"),
+                _ins(
+                    Opcode.BRANCH,
+                    0,
+                    condition="if_empty",
+                    register="$r2",
+                    target_label="plan_ready",
                 ),
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"node_type": "constraint"},
-                    cost_estimate=10,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "planning.decompose",
-                        "params": {
-                            "goal_id": goal_id,
-                            "max_subtasks": max_subtasks,
-                        },
-                    },
-                    cost_estimate=100,
-                ),
+                _ins(Opcode.CALL, 15, skill_id="$r2", args={"target": "$r0"}, bind="$r3"),
+                _ret("$r0", label="plan_ready"),
             ],
         )
 
     @staticmethod
-    def prioritize(
-        goal_ids: list[str],
-        author: str = "stdlib",
-    ) -> InstructionStream:
-        """Re-prioritize a set of goals.
-
-        Macro: QUERY(goals) + EXECUTE(prioritizer)
-        """
+    def prioritize(goal_ids: list[str], author: str = "stdlib") -> InstructionStream:
+        """Query active goal nodes, unify highest-confidence goal into `$r1`, and return list."""
         return InstructionStream(
             author=author,
             description="stdlib.planning.prioritize",
             instructions=[
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"node_type": "goal"},
-                    cost_estimate=10,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "planning.prioritize",
-                        "params": {"goal_ids": goal_ids},
-                    },
-                    cost_estimate=50,
-                ),
+                _ins(Opcode.QUERY, 10, node_type="goal", bind="$r0"),
+                _ins(Opcode.UNIFY, 10, pattern={"node_type": "goal"}, source="$r0", bind="$r1"),
+                _ret("$r0"),
             ],
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Learning Operations
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class LearningOps:
-    """Standard learning operations: extract_skill, consolidate, reinforce."""
+    """Standard learning operations producing persistent homoiconic Skill/Concept nodes."""
 
     @staticmethod
-    def extract_skill(
-        episode_id: str,
-        author: str = "stdlib",
-    ) -> InstructionStream:
-        """Extract a reusable skill from an episode.
-
-        Macro: QUERY(episode) + EXECUTE(skill_extraction) + ASSERT(skill)
-        """
+    def extract_skill(episode_id: str, author: str = "stdlib") -> InstructionStream:
+        """Query episode and assert a parameterized homoiconic `SkillNode`."""
+        inner = InstructionStream(
+            author=author,
+            instructions=[
+                _ins(Opcode.UNIFY, 0, pattern={"id": "?target"}, bind="$r0"),
+                _ret("$r0"),
+            ],
+        ).model_dump()
+        skill_data = SkillNode(
+            id=_uid("skill"),
+            skill_name=f"extracted_{episode_id}",
+            description=f"Extracted from episode {episode_id}",
+            parameters=[{"name": "target", "required": False, "default": episode_id}],
+            postcondition_pattern={"episode_id": episode_id, "target": "?target"},
+            bytecode_stream=inner,
+        ).model_dump()
         return InstructionStream(
             author=author,
             description=f"stdlib.learning.extract_skill({episode_id})",
             instructions=[
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"text_contains": episode_id, "node_type": "episode"},
-                    cost_estimate=10,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "learning.extract_skill",
-                        "params": {"episode_id": episode_id},
-                    },
-                    cost_estimate=100,
-                ),
+                _ins(Opcode.QUERY, 10, text_contains=episode_id, node_type="episode", bind="$r0"),
+                _ins(Opcode.BRANCH, 0, condition="if_empty", register="$r0", target_label="no_ep"),
+                _ins(Opcode.ASSERT, 10, node_data=skill_data, author=author, bind="$r1"),
+                _ret("$r1", label="no_ep"),
             ],
         )
 
     @staticmethod
     def consolidate(
-        memory_type: str = "episodic",
-        max_age_hours: int = 24,
-        author: str = "stdlib",
+        memory_type: str = "episodic", max_age_hours: int = 24, author: str = "stdlib"
     ) -> InstructionStream:
-        """Consolidate recent memories into long-term knowledge.
-
-        Macro: QUERY(recent_episodes) + EXECUTE(consolidation) + ASSERT(knowledge)
-        """
+        """Query candidate memories and assert a consolidated ConceptNode."""
+        query_node_type = "episode" if memory_type == "episodic" else memory_type
+        concept_data = ConceptNode(
+            id=_uid("consolidated"),
+            label=f"consolidated_{memory_type}",
+            definition=f"Consolidated summary of {memory_type} nodes",
+            properties={"memory_type": memory_type, "max_age_hours": max_age_hours},
+        ).model_dump()
         return InstructionStream(
             author=author,
             description=f"stdlib.learning.consolidate({memory_type})",
             instructions=[
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"node_type": memory_type, "category": "memory"},
-                    cost_estimate=20,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "learning.consolidate",
-                        "params": {"memory_type": memory_type, "max_age_hours": max_age_hours},
-                    },
-                    cost_estimate=150,
-                ),
+                _ins(Opcode.QUERY, 20, node_type=query_node_type, category="memory", bind="$r0"),
+                _ins(Opcode.BRANCH, 0, condition="if_empty", register="$r0", target_label="done"),
+                _ins(Opcode.ASSERT, 15, node_data=concept_data, author=author, bind="$r1"),
+                _ret("$r1", label="done"),
             ],
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Simulation Operations
-# ═══════════════════════════════════════════════════════════════════════════
+def _sim_stream(claim: str, *, key: str, commit: bool, desc: str, author: str) -> InstructionStream:
+    branch = _uid("hyp" if commit else "cf", 6)
+    node = {"id": _uid("hyp" if commit else "cf"), "node_type": "hypothesis", "claim": claim}
+    end_op = Opcode.MERGE if commit else Opcode.ROLLBACK
+    return InstructionStream(
+        author=author,
+        description=desc,
+        instructions=[
+            _ins(Opcode.FORK, 20, branch_name=branch),
+            _ins(Opcode.ASSERT, 5, node_data=node, author=author, branch_name=branch, bind="$r0"),
+            _ins(
+                Opcode.EXECUTE,
+                50,
+                capability="world.predict_outcome",
+                params={key: claim, "target": "$r0", "branch": branch},
+                bind="$r1",
+            ),
+            _ins(end_op, 20 if commit else 10, branch_name=branch),
+            _ret("$r0"),
+        ],
+    )
 
 
 class SimulationOps:
-    """Standard simulation operations: hypothesize, counterfactual."""
+    """Standard counterfactual simulation macros over copy-on-write branches."""
 
     @staticmethod
-    def hypothesize(
-        hypothesis: str,
-        author: str = "stdlib",
-    ) -> InstructionStream:
-        """Test a hypothesis via simulation.
-
-        Macro: FORK → ASSERT(hypothesis) → EXECUTE(test) → MERGE
-        """
-        branch = f"hyp_{uuid.uuid4().hex[:6]}"
-        return InstructionStream(
+    def hypothesize(hypothesis: str, author: str = "stdlib") -> InstructionStream:
+        """FORK -> ASSERT(hypothesis) -> EXECUTE(world.predict_outcome) -> MERGE -> RETURN."""
+        return _sim_stream(
+            hypothesis,
+            key="hypothesis",
+            commit=True,
+            desc=f"stdlib.simulation.hypothesize({hypothesis!r})",
             author=author,
-            description=f"stdlib.simulation.hypothesize({hypothesis!r})",
-            instructions=[
-                Instruction(
-                    opcode=Opcode.FORK,
-                    params={"branch_name": branch},
-                    cost_estimate=20,
-                ),
-                Instruction(
-                    opcode=Opcode.ASSERT,
-                    params={
-                        "node_data": {
-                            "id": f"hyp_{uuid.uuid4().hex[:8]}",
-                            "node_type": "hypothesis",
-                            "claim": hypothesis,
-                        },
-                        "author": author,
-                    },
-                    cost_estimate=5,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "simulation.test_hypothesis",
-                        "params": {"hypothesis": hypothesis, "branch": branch},
-                    },
-                    cost_estimate=200,
-                ),
-                Instruction(
-                    opcode=Opcode.MERGE,
-                    params={"branch_name": branch},
-                    cost_estimate=20,
-                ),
-            ],
         )
 
     @staticmethod
-    def counterfactual(
-        scenario: str,
-        author: str = "stdlib",
-    ) -> InstructionStream:
-        """Run a "what if" counterfactual scenario.
-
-        Macro: FORK → EXECUTE(scenario) → ROLLBACK (no merge — just observe)
-        """
-        branch = f"cf_{uuid.uuid4().hex[:6]}"
-        return InstructionStream(
+    def counterfactual(scenario: str, author: str = "stdlib") -> InstructionStream:
+        """FORK -> ASSERT(scenario) -> EXECUTE(world.predict_outcome) -> ROLLBACK -> RETURN."""
+        return _sim_stream(
+            scenario,
+            key="scenario",
+            commit=False,
+            desc=f"stdlib.simulation.counterfactual({scenario!r})",
             author=author,
-            description=f"stdlib.simulation.counterfactual({scenario!r})",
-            instructions=[
-                Instruction(
-                    opcode=Opcode.FORK,
-                    params={"branch_name": branch},
-                    cost_estimate=20,
-                ),
-                Instruction(
-                    opcode=Opcode.EXECUTE,
-                    params={
-                        "capability": "simulation.counterfactual",
-                        "params": {"scenario": scenario, "branch": branch},
-                    },
-                    cost_estimate=200,
-                ),
-                # Don't merge — just observe what would happen
-                Instruction(
-                    opcode=Opcode.ROLLBACK,
-                    params={"target_version": 0},  # Reset simulation
-                    cost_estimate=10,
-                ),
-            ],
         )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Convenience: namespace container
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class stdlib:  # noqa: N801
-    """HCIR Standard Library — ``hcir.stdlib.*`` namespace.
-
-    Usage::
-
-        from hbllm.hcir.stdlib import stdlib
-
-        stream = stdlib.memory.search("battery temperature")
-        stream = stdlib.planning.decompose("Build solar dehydrator")
-        stream = stdlib.simulation.hypothesize("Copper tubing is more efficient")
-    """
+    """HCIR Standard Library — ``hcir.stdlib.*`` namespace."""
 
     memory = MemoryOps
     reasoning = ReasoningOps

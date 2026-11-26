@@ -7,61 +7,55 @@ and Continual Learning Loop without Catastrophic Forgetting.
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib
+from typing import Any
 
-# Extend package search path to include experiments/legacy_brain/continual
-_exp_path = Path(__file__).resolve().parents[3] / "experiments" / "legacy_brain" / "continual"
-if _exp_path.exists() and str(_exp_path) not in __path__:
-    __path__.append(str(_exp_path))
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "CompactionReport": ("hbllm.brain.continual.compaction", "CompactionReport"),
+    "ProvenancePreservingCompactor": (
+        "hbllm.brain.continual.compaction",
+        "ProvenancePreservingCompactor",
+    ),
+    "LifelongLearningLoop": ("hbllm.brain.continual.consolidation_engine", "LifelongLearningLoop"),
+    "LifelongRetentionAudit": (
+        "hbllm.brain.continual.consolidation_engine",
+        "LifelongRetentionAudit",
+    ),
+    "SleepConsolidationEngine": (
+        "hbllm.brain.continual.consolidation_engine",
+        "SleepConsolidationEngine",
+    ),
+    "SleepCycleSummary": ("hbllm.brain.continual.consolidation_engine", "SleepCycleSummary"),
+    "ContrastivePair": ("hbllm.brain.continual.replay", "ContrastivePair"),
+    "ReplayCandidate": ("hbllm.brain.continual.replay", "ReplayCandidate"),
+    "ReplayKind": ("hbllm.brain.continual.replay", "ReplayKind"),
+    "SleepReplayEngine": ("hbllm.brain.continual.replay", "SleepReplayEngine"),
+    "CandidateUpdate": ("hbllm.brain.continual.stability_gate", "CandidateUpdate"),
+    "GateVerdict": ("hbllm.brain.continual.stability_gate", "GateVerdict"),
+    "PlasticityStabilityEngine": (
+        "hbllm.brain.continual.stability_gate",
+        "PlasticityStabilityEngine",
+    ),
+    "StabilityGateReport": ("hbllm.brain.continual.stability_gate", "StabilityGateReport"),
+    "DualStoreMemory": ("hbllm.brain.continual.store", "DualStoreMemory"),
+    "EpisodicTrace": ("hbllm.brain.continual.store", "EpisodicTrace"),
+    "ImmutableEvent": ("hbllm.brain.continual.store", "ImmutableEvent"),
+    "MemoryLayer": ("hbllm.brain.continual.store", "MemoryLayer"),
+    "VersionedKnowledgeRecord": ("hbllm.brain.continual.store", "VersionedKnowledgeRecord"),
+}
 
-from hbllm.brain.continual.compaction import (
-    CompactionReport,
-    ProvenancePreservingCompactor,
-)
-from hbllm.brain.continual.consolidation_engine import (
-    LifelongLearningLoop,
-    LifelongRetentionAudit,
-    SleepConsolidationEngine,
-    SleepCycleSummary,
-)
-from hbllm.brain.continual.replay import (
-    ContrastivePair,
-    ReplayCandidate,
-    ReplayKind,
-    SleepReplayEngine,
-)
-from hbllm.brain.continual.stability_gate import (
-    CandidateUpdate,
-    GateVerdict,
-    PlasticityStabilityEngine,
-    StabilityGateReport,
-)
-from hbllm.brain.continual.store import (
-    DualStoreMemory,
-    EpisodicTrace,
-    ImmutableEvent,
-    MemoryLayer,
-    VersionedKnowledgeRecord,
-)
+__all__ = sorted(_EXPORTS.keys())
 
-__all__ = [
-    "CandidateUpdate",
-    "CompactionReport",
-    "ContrastivePair",
-    "DualStoreMemory",
-    "EpisodicTrace",
-    "GateVerdict",
-    "ImmutableEvent",
-    "LifelongLearningLoop",
-    "LifelongRetentionAudit",
-    "MemoryLayer",
-    "PlasticityStabilityEngine",
-    "ProvenancePreservingCompactor",
-    "ReplayCandidate",
-    "ReplayKind",
-    "SleepConsolidationEngine",
-    "SleepCycleSummary",
-    "SleepReplayEngine",
-    "StabilityGateReport",
-    "VersionedKnowledgeRecord",
-]
+
+def __getattr__(name: str) -> Any:
+    if name in _EXPORTS:
+        mod_path, attr = _EXPORTS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_EXPORTS.keys()))

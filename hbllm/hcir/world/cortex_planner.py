@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.world.cortical_programs import evaluate_symbolic_stage_intent
 from hbllm.hcir.world.cortical_stage import StageResult
 from hbllm.hcir.world.frontopolar_subgoal_stack import FrontopolarSubgoal, SubgoalType
 from hbllm.hcir.world.planning import (
@@ -69,29 +69,7 @@ class SimulationStage:
                     }
                 },
             )
-        proposed = None
-        if ctx.mental_plan:
-            first_step = ctx.mental_plan[0]
-            proposed = first_step.action if hasattr(first_step, "action") else first_step
-
-        ops: list[TransactionOperation] = [
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id="simulation_plan",
-                node_data={
-                    "stage": self.name,
-                    "plan_len": len(ctx.mental_plan),
-                    "step": ctx.step_counter,
-                },
-            )
-        ]
-        signals = {"mental_plan_action": proposed} if proposed is not None else {}
-        return StageResult(
-            author=self.name,
-            operations=ops,
-            signals=signals,
-            proposed_action=proposed,
-        )
+        return evaluate_symbolic_stage_intent(ctx, stage_kind="simulation")
 
 
 __all__ = [

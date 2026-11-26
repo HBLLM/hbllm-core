@@ -6,22 +6,23 @@ description: "System-wide architecture of HBLLM Core: 8 non-negotiable invariant
 # Architecture Overview
 
 > [!NOTE]
-> For formal architectural decisions, see **[ADR 004: Pure-HCIR Cognitive OS](../adr/0004-pure-hcir-cognitive-os.md)** alongside historical **[ADR 001](../adr/0001-hbllm-core-architecture.md)** and **[ADR 002](../adr/0002-operational-architecture-and-governance.md)**.
+> For formal architectural decisions, see **[ADR 005: Homoiconic Symbolic VM](../adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md)**, **[ADR 006: Fuzzy Symbolic Cognition (Phase 4 Target)](../adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md)**, and **[ADR 004: Pure-HCIR Cognitive OS](../adr/0004-pure-hcir-cognitive-os.md)** alongside historical **[ADR 001](../adr/0001-hbllm-core-architecture.md)** and **[ADR 002](../adr/0002-operational-architecture-and-governance.md)**.
 
-**HBLLM Core** is an event-sourced, neuro-symbolic **Cognitive OS** built around the **Human-Cognitive Intermediate Representation (`hbllm.hcir`)**. Rather than treating an autoregressive LLM as the runtime brain, HBLLM separates formal state ownership, cortical active inference, symbol grounding, multilingual parsing/realization, and governed execution into deterministic, verifiable subsystems.
+**HBLLM Core** is an event-sourced, neuro-symbolic **Cognitive OS** and **Homoiconic Symbolic VM** built around the **Human-Cognitive Intermediate Representation (`hbllm.hcir`)**. Rather than treating an autoregressive LLM as the runtime brain or scattering cognitive heuristics across procedural Python, HBLLM separates deterministic hardware ALUs and the constitutional kernel from experience-learned symbolic programs (`SkillNode`, `ConstructionNode`, `LearnedRuleNode`) inside `TieredWorkspace`.
 
 ---
 
-## 1. Eight Non-Negotiable Core Invariants
+## 1. Nine Non-Negotiable Core Invariants
 
 1. **State Ownership Invariant:** *Nodes emit intent. HCIR owns state.* All state changes are proposed as `TransactionOperation`s and committed atomically via `TransactionManager`.
-2. **Reasoning Invariant:** *Operators calculate. HCIR decides what becomes reality.* Reasoning operators receive immutable `FrozenGraphView` / `CognitiveContext` snapshots and return pure `CognitiveResult`s.
+2. **Reasoning Invariant:** *Operators calculate. HCIR decides what becomes reality.* Reasoning operators and cortical stages receive immutable `FrozenGraphView` / `CognitiveContext` snapshots and return pure `CognitiveResult` / `StageResult.operations` structures.
 3. **Zero LLM Dependency in Core:** `hbllm.hcir` (`world`, `grounding`, `reasoning`, `language`, `snn`, `capabilities`, `kernel`) has **zero** LLM client or network imports (enforced by `tests/unit/architecture/test_loc_budget.py`).
-4. **Constitutional Governance:** Every mutation passes through `ConstitutionalVerifier` and verification pipeline stages (`ScopeVerifier`, `SchemaVerifier`, `ResourceVerifier`, `PolicyVerifier`, `BranchModeVerifier`) before commit.
-5. **Multi-Tenant Memory Isolation:** Episodic, semantic, procedural, and belief memories are partitioned by `Scope` / `tenant_id` across `TieredWorkspace`.
-6. **Target State Evolution:** Changes upgrade toward declarative HCIR grammar, formal transactions, and dynamic causal predicates — never monkey-patches or task-specific branches.
+4. **Constitutional Governance:** Every mutation passes through `ConstitutionalVerifier` and verification pipeline stages (`ScopeVerifier`, `SchemaVerifier`, `ResourceVerifier`, `PolicyVerifier`, `BranchModeVerifier`) before commit, with `SecurityLevel.SYSTEM` / `"core_prior"` nodes protected from decay and budget eviction.
+5. **Multi-Tenant Memory Isolation:** Episodic, semantic, procedural, construction, and belief memories are partitioned strictly by `Scope` / `tenant_id` across every `TieredWorkspace` tier and HTTP/driver surface.
+6. **Target State Evolution:** Changes upgrade monotonically toward declarative HCIR programs, formal transactions, and dynamic causal posteriors — never monkey-patches or task-specific branches.
 7. **General Intelligence Directive:** The core remains strictly domain- and task-agnostic; environment adapters live externally in `plugins/` (see [Innate Priors](priors.md)).
-8. **Internal Memory Governance:** Learned world ontology lives in `HCIRSymbolicWorldTheory` (`TransitionKnowledgeBase`), transient state lives in `PrefrontalWorkingMemory`, and behaviors live in `DeclarativeNeuroSymbolicSkill`.
+8. **Internal Memory Governance:** Learned world ontology lives in `HCIRSymbolicWorldTheory` (`TransitionKnowledgeBase`), transient state lives in `PrefrontalWorkingMemory`, and behaviors live as parameterized homoiconic `SkillNode` (`bytecode_stream`) and `ConstructionNode` entries in `TieredWorkspace` (no ad-hoc engine attributes).
+9. **Homoiconic Symbolic-First Invariant ("Code = CPU, Graph = Mind"):** Layer-0 Python/Rust implements strictly deterministic hardware ALUs and the 12-opcode register-unification VM with strict `SyscallAllowlist(strict=True)` enforcement — never hardcoded verb/color lexical tables, high-level Python `EXECUTE` escapes, or metadata-only `SkillNode`s lacking executable `bytecode_stream`s (enforced by `tests/unit/architecture/test_homoiconic_invariants.py`).
 
 ---
 
@@ -31,8 +32,8 @@ description: "System-wide architecture of HBLLM Core: 8 non-negotiable invariant
 graph TB
     subgraph ENTRY["Entry Points & Adapters"]
         CLI["Typer CLI (hbllm.cli)"]
-        SERVE["FastAPI + MCP Server (hbllm.serving)"]
-        PLUGINS["Environment & Device Adapters (plugins/*_adapter)"]
+        SERVE["FastAPI + MCP Server (CognitiveSystemRegistry)"]
+        PLUGINS["CognitiveBlackbox & Adapters (hbllm.drivers, plugins/*_adapter)"]
         BOOT["Single Composition Root<br/>build_cognitive_system() (hbllm.runtime.bootstrap)"]
         CLI & SERVE & PLUGINS --> BOOT
     end
@@ -107,9 +108,10 @@ graph TB
 
 ---
 
-## 4. Compatibility & Transition Layers
+## 4. Serving, Driver & Boundary Unification
 
-During the Pure-HCIR consolidation (see [ADR 004](../adr/0004-pure-hcir-cognitive-os.md)):
-- `hbllm/brain/reasoning/`, `hbllm/brain/language/`, and core `hbllm/brain/snn/` act as compatibility re-export shims pointing into `hbllm.hcir.*`.
-- Legacy message-bus nodes in `hbllm/brain/` and `hbllm/serving/provider.py` remain strictly isolated from `hbllm/hcir/**` (verified by `tests/unit/architecture/test_loc_budget.py` and `test_layering.py`).
-- External environment integrations (`arc_agi_adapter`, `crafter_adapter`, `babyai_adapter`, `sokoban_adapter`, `overcooked_adapter`, `nethack_adapter`, `ai2thor_adapter`, `safety_gym_adapter`, `alfworld_adapter`, `developmental_adapter`) live in `plugins/` and never leak domain logic into `hbllm/`.
+Implemented across Pure-HCIR and Phase 3 (`M0`–`M6`):
+- **Single Pure-HCIR Serving & Driver Stack:** HTTP/WebSocket routes (`/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`, `/v1/chat/ws`, `/v1/memory/{session_id}`, `/v1/rules`) execute Pure-HCIR first per tenant via `CognitiveSystemRegistry` (`X-HBLLM-Engine: pure-hcir`) before optional brain/provider fallback; `CognitiveBlackbox` delegates `step()` / `adapt_to_observation()` / `reset()` over `build_cognitive_system()`.
+- **Compatibility & Packaging Boundaries:** `hbllm/brain/reasoning/`, `hbllm/brain/language/`, and core `hbllm/brain/snn/` re-export `hbllm.hcir.*`, while legacy message-bus nodes in `hbllm/brain/` remain isolated from `hbllm/hcir/**` with **0** `__path__.append` shims (`test_m0_substrate_hygiene.py`, `test_layering.py`).
+- **Permanent Phase 3 Invariants:** `tests/unit/architecture/test_homoiconic_invariants.py` permanently enforces zero lexical/color tables in `compiler.py`/`world/`, strict `SyscallAllowlist(strict=True)` gating in `sys_execute`, executable `bytecode_stream` emission across all `SkillNode` producers, serving/driver unification, and system-prior preservation during budget compaction.
+- **External Adapters:** Environment integrations (`arc_agi_adapter`, `crafter_adapter`, `babyai_adapter`, `sokoban_adapter`, `overcooked_adapter`, `nethack_adapter`, `ai2thor_adapter`, `safety_gym_adapter`, `alfworld_adapter`, `developmental_adapter`) live in `plugins/` without leaking domain logic into `hbllm/`.

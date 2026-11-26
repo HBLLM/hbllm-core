@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 import shlex
 from pathlib import Path
 from typing import Any
 
+from hbllm.hcir.kernel.capability_sandboxing import (
+    CapabilityPermissions,
+    CapabilityResourceLimits,
+    CapabilitySandboxManager,
+    IsolationMode,
+    SandboxedCapabilityPolicy,
+    TrustLevel,
+)
+from hbllm.hcir.kernel.subprocess_sandbox import run_sandboxed_command
 from hbllm.network.bus import InProcessBus
 from hbllm.network.messages import Message, MessageType
 
@@ -53,6 +60,26 @@ class TerminalExecutionNode:
         self.allowed_executables = allowed_executables or DEFAULT_ALLOWED_EXECUTABLES
         self.timeout_seconds = timeout_seconds
         self.workspace_dir = Path(workspace_dir or Path.cwd()).resolve()
+        self._sandbox_manager = CapabilitySandboxManager()
+        self._sandbox_manager.register_policy(
+            SandboxedCapabilityPolicy(
+                capability_name="terminal_exec",
+                provider_id=self.node_id,
+                trust_level=TrustLevel.VERIFIED,
+                isolation_mode=IsolationMode.SUBPROCESS,
+                permissions=CapabilityPermissions(
+                    allow_filesystem=True,
+                    allow_network=False,
+                    allow_subprocess=True,
+                    allow_db_write=False,
+                ),
+                resource_limits=CapabilityResourceLimits(
+                    max_cpu_seconds=max(1.0, float(timeout_seconds)),
+                    timeout_seconds=max(1.0, float(timeout_seconds)),
+                ),
+                required_permissions={"subprocess", "filesystem"},
+            )
+        )
 
     async def run(self, bus: InProcessBus) -> None:
         """Register this driver onto the core MessageBus."""
@@ -119,34 +146,33 @@ class TerminalExecutionNode:
             logger.warning("[%s] Blocked path escaping workspace: %s", self.node_id, argv)
             return
 
-        clean_env = {
-            "PATH": os.environ.get("PATH", ""),
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-        }
-        logger.info("[%s] Executing allowlisted command: %s", self.node_id, argv[0])
+        # Tier 1: CapabilitySandboxManager logical policy enforcement
+        if not (
+            self._sandbox_manager.check_permission("terminal_exec", self.node_id, "subprocess")
+            and self._sandbox_manager.check_permission("terminal_exec", self.node_id, "filesystem")
+        ):
+            logger.warning("[%s] CapabilitySandboxManager denied terminal execution", self.node_id)
+            return
+
+        logger.info(
+            "[%s] Executing allowlisted command via kernel sandbox: %s", self.node_id, argv[0]
+        )
         try:
-            process = await asyncio.create_subprocess_exec(
-                *argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.workspace_dir),
-                env=clean_env,
+            sb_result = await run_sandboxed_command(
+                argv,
+                cwd=self.workspace_dir,
+                timeout=self.timeout_seconds,
+                allow_network=False,
             )
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    process.communicate(), timeout=self.timeout_seconds
-                )
-            except (TimeoutError, asyncio.TimeoutError):
-                process.kill()
-                await process.wait()
+            if sb_result.timed_out:
                 logger.error(
                     "[%s] Command timed out after %.1fs", self.node_id, self.timeout_seconds
                 )
                 return
 
-            stdout = stdout_bytes.decode(errors="replace").strip()
-            stderr = stderr_bytes.decode(errors="replace").strip()
-            exit_code = process.returncode
+            stdout = sb_result.stdout
+            stderr = sb_result.stderr
+            exit_code = sb_result.exit_code
 
             output_text = (
                 f"Command: {argv[0]}\nExit Code: {exit_code}\nStdout:\n{stdout}\nStderr:\n{stderr}"

@@ -159,29 +159,40 @@ class DistilledSchema:
         return self.causal_predicate
 
     def to_transaction_operations(self, tenant_id: str = "default") -> list[TransactionOperation]:
-        """Convert distilled schema into transactional HCIR graph state mutations targeting semantic tier."""
-        return [
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=f"distilled_schema_{self.schema_id}",
-                node_data={
-                    "schema_id": self.schema_id,
-                    "action_motif": [
-                        int(a) if isinstance(a, (int, np.integer)) else str(a)
-                        for a in self.action_motif
-                    ],
-                    "confidence": float(self.confidence),
-                    "support_count": int(self.support_count),
-                    "tenant_id": tenant_id,
-                    "predicate": {
-                        "variable": self.causal_predicate.variable,
-                        "operator": self.causal_predicate.operator,
-                        "value": str(self.causal_predicate.value),
-                        "relation": str(self.causal_predicate.relation),
-                    },
-                    "metadata": self.metadata,
-                },
+        """Convert distilled schema into a homoiconic SkillNode transaction targeting semantic memory."""
+        node_id = f"distilled_schema_{self.schema_id}"
+        props = {
+            "schema_id": self.schema_id,
+            "action_motif": [
+                int(a) if isinstance(a, (int, np.integer)) else str(a) for a in self.action_motif
+            ],
+            "confidence": float(self.confidence),
+            "support_count": int(self.support_count),
+            "tenant_id": tenant_id,
+            "predicate": {
+                "variable": self.causal_predicate.variable,
+                "operator": self.causal_predicate.operator,
+                "value": str(self.causal_predicate.value),
+                "relation": str(self.causal_predicate.relation),
+            },
+            "metadata": self.metadata,
+        }
+        to_node = getattr(self.declarative_skill, "to_skill_node", None)
+        if callable(to_node):
+            skill_node = to_node(
+                skill_id=node_id,
+                tenant_id=tenant_id,
+                alpha_success=1.0 + float(self.support_count),
+                beta_failure=1.0,
             )
+            node_data = skill_node.model_copy(
+                update={"properties": {**skill_node.properties, **props}}
+            ).model_dump()
+            node_data["tenant_id"] = tenant_id
+        else:
+            node_data = props
+        return [
+            TransactionOperation(op=TransactionOp.UPSERT_NODE, node_id=node_id, node_data=node_data)
         ]
 
 
@@ -239,25 +250,16 @@ class HippocampalReplayConsolidator:
         credit_assignments: list[float] = []
 
         # 1. Reverse SWR replay: T - 1 down to 0
-        for step_idx in reversed(range(T)):
-            t = step_idx
+        for t in reversed(range(T)):
             trans = trajectory[t]
             delta_q = float(terminal_reward * (self.gamma ** (T - 1 - t)) * self.kappa)
-            if hasattr(trans, "value_estimate"):
-                trans.value_estimate += delta_q
-            else:
-                setattr(trans, "value_estimate", delta_q)
+            trans.value_estimate += delta_q
             credit_assignments.append(delta_q)
 
         # 2. Forward replay: 0 up to T - 1
-        forward_steps = 0
         for t in range(T):
-            trans = trajectory[t]
-            if hasattr(trans, "replay_count"):
-                trans.replay_count += 1
-            else:
-                setattr(trans, "replay_count", 1)
-            forward_steps += 1
+            trajectory[t].replay_count += 1
+        forward_steps = T
 
         record = {
             "trajectory_length": T,

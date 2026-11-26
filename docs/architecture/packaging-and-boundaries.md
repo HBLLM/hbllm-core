@@ -78,9 +78,11 @@ To ensure boundaries are never violated by accidental imports in PRs, automated 
    - Core `hbllm` never imports from `plugins/`.
    - Importing `plugins.developmental_adapter` loads **0** blacklisted optional extras (`fastapi`, `uvicorn`, `redis`, `qdrant_client`, `asyncpg`, `pgvector`, `cryptography`).
    - Core `dependencies` in `pyproject.toml` remain lean without server or vector-DB extras.
-2. **LOC Budgets & Zero-LLM Core Gate (`test_loc_budget.py`):**
-   - Enforces `<= 150,000` LOC across `hbllm/hcir/**/*.py` and `<= 300,000` LOC across `hbllm/**/*.py`.
-   - Enforces a strict ratchet reducing legacy `__path__.append` shims toward zero.
+2. **Zero-LLM Core & Substrate Hygiene (`test_loc_budget.py`, `test_m0_substrate_hygiene.py`):**
+   - Enforces **`0` legacy `__path__.append` shadow shims** (`MAX_PATH_APPEND_SHIMS = 0`), shipped-wheel module resolution, and zero workspace-absent commit fallbacks.
    - Verifies via AST inspection that `hbllm/hcir/**` imports **zero** LLM client libraries or external LLM scaffolds (`openai`, `anthropic`, `litellm`, `transformers`, `plugins.llm_scaffold`, `hbllm.serving.provider`).
-3. **Single Composition Root & Persistence Hygiene (`test_single_composition_root.py`, `test_no_direct_sqlite.py`):**
+3. **Permanent Homoiconic & Syscall Ratchets (`test_homoiconic_invariants.py`):**
+   - Bars hardcoded lexical/color keyword tables in `compiler.py` and `world/`.
+   - Verifies strict `SyscallAllowlist(strict=True)` enforcement in `sys_execute`, executable `bytecode_stream` emission on all `SkillNode` producers, serving/driver Pure-HCIR routing, and system-prior preservation during `consolidate_node_budget()`.
+4. **Single Composition Root & Persistence Hygiene (`test_single_composition_root.py`, `test_no_direct_sqlite.py`):**
    - Confirms runtime entry points compose through `build_cognitive_system()` and raw SQLite connections remain confined to `hbllm.persistence`, `hbllm.hcir.stores`, `hbllm.security`, and `hbllm.network.durable_bus`.

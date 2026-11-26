@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from hbllm.hcir.graph import FactNode, ProcedureNode, SkillNode
+from hbllm.hcir.graph import FactNode, ProcedureNode
 from hbllm.hcir.skills.declarative import (
     ActionAffordancePredicate,
     AllOf,
@@ -754,17 +754,13 @@ class PrefrontalWorkingMemory:
             ActionAffordancePredicate(required=required_actions) if required_actions else AllOf()
         )
 
-        skill_cls_name = f"SynthesizedSkill_{schema.schema_name}"
-        skill_instance = type(
-            skill_cls_name,
-            (DeclarativeNeuroSymbolicSkill,),
-            {
-                "skill_name": f"skill_{schema.schema_name.lower()}",
-                "description": f"Synthesized neuro-symbolic procedural skill for {schema.schema_name}",
-                "signature": signature_pred,
-                "program": subgoal_seq,
-            },
-        )()
+        skill_instance = DeclarativeNeuroSymbolicSkill()
+        skill_instance.skill_name = f"skill_{schema.schema_name.lower()}"
+        skill_instance.description = (
+            f"Synthesized neuro-symbolic procedural skill for {schema.schema_name}"
+        )
+        skill_instance.signature = signature_pred
+        skill_instance.program = subgoal_seq
 
         self.procedural_library[schema.schema_name] = skill_instance
         logger.info(
@@ -773,6 +769,19 @@ class PrefrontalWorkingMemory:
             len(subgoal_seq),
         )
         return skill_instance
+
+    def sanitize_procedural_library_for_transfer(self) -> None:
+        """Strip layout-local coordinates and surface features from stored procedural skills."""
+        strip_keys = ("pos", "target_positions", "feature", "required_feature", "color")
+        for skill in self.procedural_library.values():
+            prog = skill.program
+            if prog is not None:
+                for sg in prog.subgoals:
+                    for k in strip_keys:
+                        sg.target_query.pop(k, None)
+                    if "role" in sg.target_query and "id" not in sg.target_query:
+                        sg.target_query["id"] = f"?{sg.target_query['role']}"
+            skill.__dict__.pop("_procedural_macro", None)
 
     def register_procedural_skill(
         self,
@@ -944,71 +953,58 @@ class PrefrontalWorkingMemory:
         for item in self.held_items:
             ops.extend(item.to_transaction_operations())
         if self.active_schema:
-            node_id = f"active_schema_{self.active_schema.schema_name}"
-            node = ProcedureNode(
-                id=node_id,
-                name=self.active_schema.schema_name,
-                description=f"Active prefrontal subgoal schema {self.active_schema.schema_name}",
-                steps=[s.stage_id for s in self.active_schema.stages],
-                properties={
-                    "schema_name": self.active_schema.schema_name,
-                    "current_stage_idx": self.active_schema.current_stage_idx,
-                    "is_finished": self.active_schema.is_finished,
-                },
-            )
+            s = self.active_schema
             ops.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=node_id,
-                    node_data=node.model_dump(),
+                    node_id=f"active_schema_{s.schema_name}",
+                    node_data=ProcedureNode(
+                        id=f"active_schema_{s.schema_name}",
+                        name=s.schema_name,
+                        description=f"Active prefrontal subgoal schema {s.schema_name}",
+                        steps=[st.stage_id for st in s.stages],
+                        properties={
+                            "schema_name": s.schema_name,
+                            "current_stage_idx": s.current_stage_idx,
+                            "is_finished": s.is_finished,
+                        },
+                    ).model_dump(),
                 )
             )
         for name, skill in self.procedural_library.items():
-            node_id = f"procedural_skill_{name}"
-            skill_name = getattr(skill, "skill_name", name) or name
-            desc = getattr(skill, "description", "") or f"Procedural skill for {name}"
-            prog = getattr(skill, "program", None)
-            if prog is not None:
-                subgoal_count = (
-                    len(prog.subgoals)
-                    if hasattr(prog, "subgoals")
-                    else (len(prog) if hasattr(prog, "__len__") else 0)
-                )
-            else:
-                subgoal_count = 0
-
-            node = SkillNode(
-                id=node_id,
-                name=skill_name,
-                description=desc,
-                properties={
-                    "schema_name": name,
-                    "subgoal_count": subgoal_count,
-                },
+            nid = f"procedural_skill_{name}"
+            node = skill.to_skill_node(skill_id=nid)
+            sub_cnt = len(skill.program.subgoals) if skill.program is not None else 0
+            node = node.model_copy(
+                update={
+                    "description": node.description or f"Procedural skill for {name}",
+                    "properties": {
+                        **node.properties,
+                        "schema_name": name,
+                        "subgoal_count": sub_cnt,
+                    },
+                }
             )
             ops.append(
                 TransactionOperation(
-                    op=TransactionOp.UPSERT_NODE,
-                    node_id=node_id,
-                    node_data=node.model_dump(),
+                    op=TransactionOp.UPSERT_NODE, node_id=nid, node_data=node.model_dump()
                 )
             )
-        for barrier_pos in self.unlocked_barriers:
-            node_id = f"unlocked_barrier_{barrier_pos[0]}_{barrier_pos[1]}"
-            node = FactNode(
-                id=node_id,
-                statement=f"Barrier at {barrier_pos} has been unlocked",
-                properties={
-                    "position": list(barrier_pos),
-                    "unlocked": True,
-                    "fact_type": "unlocked_barrier",
-                },
-            )
+        for bp in self.unlocked_barriers:
+            nid = f"unlocked_barrier_{bp[0]}_{bp[1]}"
             ops.append(
                 TransactionOperation(
                     op=TransactionOp.UPSERT_NODE,
-                    node_id=node_id,
-                    node_data=node.model_dump(),
+                    node_id=nid,
+                    node_data=FactNode(
+                        id=nid,
+                        statement=f"Barrier at {bp} has been unlocked",
+                        properties={
+                            "position": list(bp),
+                            "unlocked": True,
+                            "fact_type": "unlocked_barrier",
+                        },
+                    ).model_dump(),
                 )
             )
 

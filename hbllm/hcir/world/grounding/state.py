@@ -46,5 +46,6 @@ class CorticalGroundingState:
     cached_entity_concepts: dict[str, ConceptAssignment] = field(default_factory=dict)
     cached_entity_priors: dict[str, dict[str, float]] = field(default_factory=dict)
     adapted_role_pairs: set[tuple[int, str]] = field(default_factory=set)
+    promoted_concept_ids: set[str] = field(default_factory=set)
     verified_outcomes_count: int = 0
     rejected_actions_count: int = 0

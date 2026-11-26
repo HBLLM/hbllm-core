@@ -475,3 +475,129 @@ class UnifiedReasoningRuntime:
             operator_id="unified_runtime_merged",
             resource_cost=total_cost,
         )
+
+    async def execute_homoiconic_program(
+        self,
+        graph: CognitiveGraph,
+        stream: Any,
+        services: Any,
+        *,
+        problem_id: str = "cortical_program",
+        scope: Scope | None = None,
+        initial_bindings: dict[str, Any] | None = None,
+    ) -> OperatorTrace:
+        """Execute an ISA v2 `InstructionStream` on a copy-on-write fork and propose a transaction.
+
+        Upholds the Reasoning Invariant ("Operators calculate; HCIR decides"): the input
+        `graph` is never mutated in place; committed mutations on the isolated branch are
+        diffed into `OperatorTrace.proposed_transaction`.
+        """
+        from collections.abc import Mapping as _Mapping
+
+        from hbllm.hcir.interpreter import HCIRInterpreter
+        from hbllm.hcir.kernel.services import KernelServices
+        from hbllm.hcir.kernel.verification import create_default_pipeline
+        from hbllm.hcir.transactions import TransactionOp
+        from hbllm.hcir.workspace import HCIRWorkspaceState
+
+        start_time = time.time()
+        frozen_view = FrozenGraphView.from_graph(graph)
+        eff_scope = scope or Scope()
+        fork_graph = graph.fork()
+        base_ids = set(graph.nodes.keys())
+        base_edge_ids = set(graph.edges.keys())
+
+        fork_ws = HCIRWorkspaceState(
+            graph=fork_graph,
+            tenant_id=eff_scope.tenant_id,
+        )
+        fork_services = services
+        if fork_services is None:
+            fork_services = KernelServices.create_default(
+                fork_ws,
+                verification_pipeline=create_default_pipeline(default_scope=eff_scope),
+            )
+        else:
+            fork_services = KernelServices(
+                workspace=fork_ws,
+                transaction_manager=fork_services.transaction_manager.__class__(
+                    fork_ws,
+                    verification_stages=list(
+                        getattr(fork_services.transaction_manager, "_verification_stages", [])
+                    ),
+                    event_bus=fork_services.event_bus,
+                ),
+                capability_resolver=fork_services.capability_resolver,
+                scheduler=fork_services.scheduler,
+                event_bus=fork_services.event_bus,
+            )
+
+        interp = HCIRInterpreter(fork_ws, services=fork_services)
+        binds = dict(initial_bindings) if isinstance(initial_bindings, _Mapping) else None
+        exec_res = await interp.execute(stream, initial_bindings=binds)
+
+        proposed_ops: list[TransactionOperation] = []
+        for nid, node in fork_ws.graph.nodes.items():
+            prev_node = graph.nodes.get(nid)
+            if prev_node is None or prev_node.model_dump() != node.model_dump():
+                proposed_ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_NODE if nid in base_ids else TransactionOp.ADD_NODE,
+                        node_id=nid,
+                        node_data=node.model_dump(),
+                    )
+                )
+        for nid in base_ids - set(fork_ws.graph.nodes.keys()):
+            proposed_ops.append(TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=nid))
+        for eid, edge in fork_ws.graph.edges.items():
+            prev_edge = graph.edges.get(eid)
+            if prev_edge is None or prev_edge.model_dump() != edge.model_dump():
+                proposed_ops.append(
+                    TransactionOperation(
+                        op=TransactionOp.UPSERT_EDGE
+                        if eid in base_edge_ids
+                        else TransactionOp.ADD_EDGE,
+                        edge_id=eid,
+                        edge_data=edge.model_dump(),
+                    )
+                )
+        for eid in base_edge_ids - set(fork_ws.graph.edges.keys()):
+            proposed_ops.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=eid))
+
+        completed_evt = exec_res.events[0] if exec_res.events else {}
+        final_res = CognitiveResult(
+            status=ResultStatus.SUCCESS if exec_res.success else ResultStatus.ERROR,
+            conclusions={
+                "program_description": getattr(stream, "description", problem_id),
+                "return_value": completed_evt.get("return_value"),
+                "registers": completed_evt.get("registers", {}),
+            },
+            confidence=1.0 if exec_res.success else 0.0,
+            proposed_transitions=proposed_ops,
+            operator_id=problem_id,
+            metadata={"error": exec_res.error} if exec_res.error else {},
+        )
+        tx = (
+            HCIRTransaction(
+                author=f"reasoning_runtime:{problem_id}",
+                tenant_id=eff_scope.tenant_id,
+                parent_snapshot_hash=frozen_view.content_hash,
+                operations=proposed_ops,
+                provenance=Provenance(
+                    created_by="unified_reasoning_runtime", source_type="inferred"
+                ),
+            )
+            if proposed_ops
+            else None
+        )
+        return OperatorTrace(
+            problem=ReasoningProblem(
+                problem_id=problem_id,
+                problem_type=ProblemType.CUSTOM,
+                description=getattr(stream, "description", problem_id),
+            ),
+            context_hash=frozen_view.content_hash,
+            final_result=final_res,
+            proposed_transaction=tx,
+            total_wall_clock_ms=(time.time() - start_time) * 1000.0,
+        )

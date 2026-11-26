@@ -60,6 +60,10 @@ class GroundingResolver:
     ) -> None:
         self._graph = graph
         self._ref_resolver = reference_resolver or ReferenceResolver()
+        if workspace is None:
+            from hbllm.hcir.workspace import HCIRWorkspaceState
+
+            workspace = HCIRWorkspaceState(graph=graph)
         self._workspace = workspace
         self._lexicon = lexicon
 
@@ -319,30 +323,31 @@ class GroundingResolver:
         introduce new entity hypotheses into the world model.
         """
         from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+        from hbllm.hcir.types import Scope
 
+        tenant_id = getattr(self._workspace, "tenant_id", None) or "default"
         concept_name = ref.concept_name or "entity"
         entity = PhysicalEntityNode(
             entity_type=concept_name,
             entity_name=concept_name,
             name=concept_name,
             properties=dict(ref.properties) if ref.properties else {},
+            scope=Scope(tenant_id=tenant_id),
             tags=["language_introduced", concept_name],
         )
 
-        # Commit through workspace if available, else direct graph add
-        if self._workspace is not None and hasattr(self._workspace, "commit_operations"):
-            self._workspace.commit_operations(
-                [
-                    TransactionOperation(
-                        op=TransactionOp.UPSERT_NODE,
-                        node_id=entity.id,
-                        node_data=entity.model_dump(),
-                    )
-                ],
-                author="grounding_resolver",
-            )
-        else:
-            self._graph.add_node(entity)
+        # Commit atomically through workspace TransactionManager
+        self._workspace.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=entity.id,
+                    node_data=entity.model_dump(),
+                )
+            ],
+            author="grounding_resolver",
+            tenant_id=tenant_id,
+        )
 
         logger.info(
             "GroundingResolver: auto-created PhysicalEntityNode '%s' (id=%s) from assertion",

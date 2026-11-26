@@ -138,6 +138,29 @@ class SubstrateDivergenceError(RuntimeError):
     """Raised when native graph acceleration substrate diverges from authoritative Python graph."""
 
 
+class _CoWMappingView(Mapping[str, Any]):
+    """Read-only mapping view that materializes CoW node/edge clones on item lookup."""
+
+    def __init__(self, backing: dict[str, Any], getter: Any) -> None:
+        self._backing = backing
+        self._getter = getter
+
+    def __getitem__(self, key: str) -> Any:
+        val = self._getter(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._backing)
+
+    def __len__(self) -> int:
+        return len(self._backing)
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._backing
+
+
 _NATIVE_INIT_WARNED = False
 
 
@@ -204,6 +227,9 @@ class CognitiveGraph:
 
         # ── Copy-on-write fork state (WP4) ──
         self._cow_indexes: bool = False
+        self._cow_shared: bool = False
+        self._owned_nodes: set[str] = set()
+        self._owned_edges: set[str] = set()
         self._dirty_nodes: set[str] | None = None
         self._dirty_edges: set[str] | None = None
         self._fork_parent: CognitiveGraph | None = None
@@ -260,6 +286,9 @@ class CognitiveGraph:
         self._materialize_indexes()
         if node.id in self._nodes:
             raise ValueError(f"Duplicate node ID: {node.id}")
+        if self._cow_shared:
+            node = node.model_copy(deep=True)
+            self._owned_nodes.add(node.id)
         self._mark_dirty_node(node.id)
         self._nodes[node.id] = node
         self._index_node(node)
@@ -295,6 +324,9 @@ class CognitiveGraph:
     def upsert_node(self, node: HCIRNode, author: str = "system") -> None:
         """Add or replace a node in the graph."""
         self._materialize_indexes()
+        if self._cow_shared:
+            node = node.model_copy(deep=True)
+            self._owned_nodes.add(node.id)
         self._mark_dirty_node(node.id)
         old = self._nodes.get(node.id)
         if old is not None:
@@ -380,7 +412,12 @@ class CognitiveGraph:
 
     def get_node(self, node_id: str) -> HCIRNode | None:
         """Retrieve a node by ID.  O(1)."""
-        return self._nodes.get(node_id)
+        node = self._nodes.get(node_id)
+        if node is not None and self._cow_shared and node_id not in self._owned_nodes:
+            node = node.model_copy(deep=True)
+            self._nodes[node_id] = node
+            self._owned_nodes.add(node_id)
+        return node
 
     def has_node(self, node_id: str) -> bool:
         return node_id in self._nodes
@@ -392,16 +429,26 @@ class CognitiveGraph:
     @property
     def nodes(self) -> Mapping[str, HCIRNode]:
         """Read-only mapping view of nodes (mutate via TransactionManager)."""
+        if self._cow_shared:
+            return _CoWMappingView(self._nodes, self.get_node)
         return MappingProxyType(self._nodes)
 
     @property
     def edges(self) -> Mapping[str, HCIREdge]:
         """Read-only mapping view of edges (mutate via TransactionManager)."""
+        if self._cow_shared:
+            return _CoWMappingView(self._edges, self.get_edge)
         return MappingProxyType(self._edges)
 
     def all_nodes(self) -> Iterator[HCIRNode]:
         """Iterate over all nodes."""
-        yield from self._nodes.values()
+        if not self._cow_shared:
+            yield from self._nodes.values()
+            return
+        for nid in list(self._nodes.keys()):
+            node = self.get_node(nid)
+            if node is not None:
+                yield node
 
     # ── Edge Operations ──────────────────────────────────────────────
 
@@ -414,6 +461,9 @@ class CognitiveGraph:
         for nid in edge.sources + edge.targets:
             if nid not in self._nodes:
                 raise ValueError(f"Dangling edge reference: node '{nid}' not in graph")
+        if self._cow_shared:
+            edge = edge.model_copy(deep=True)
+            self._owned_edges.add(edge.id)
         self._edges[edge.id] = edge
         for src in edge.sources:
             self._edges_by_source.setdefault(src, set()).add(edge.id)
@@ -474,7 +524,12 @@ class CognitiveGraph:
         return edge
 
     def get_edge(self, edge_id: str) -> HCIREdge | None:
-        return self._edges.get(edge_id)
+        edge = self._edges.get(edge_id)
+        if edge is not None and self._cow_shared and edge_id not in self._owned_edges:
+            edge = edge.model_copy(deep=True)
+            self._edges[edge_id] = edge
+            self._owned_edges.add(edge_id)
+        return edge
 
     def has_edge(self, edge_id: str) -> bool:
         return edge_id in self._edges
@@ -484,22 +539,28 @@ class CognitiveGraph:
         return len(self._edges)
 
     def all_edges(self) -> Iterator[HCIREdge]:
-        yield from self._edges.values()
+        if not self._cow_shared:
+            yield from self._edges.values()
+            return
+        for eid in list(self._edges.keys()):
+            edge = self.get_edge(eid)
+            if edge is not None:
+                yield edge
 
     def edges_from(self, node_id: str) -> list[HCIREdge]:
         """All edges where ``node_id`` is a source."""
         return [
-            self._edges[eid]
+            edge
             for eid in self._edges_by_source.get(node_id, set())
-            if eid in self._edges
+            if (edge := self.get_edge(eid)) is not None
         ]
 
     def edges_to(self, node_id: str) -> list[HCIREdge]:
         """All edges where ``node_id`` is a target."""
         return [
-            self._edges[eid]
+            edge
             for eid in self._edges_by_target.get(node_id, set())
-            if eid in self._edges
+            if (edge := self.get_edge(eid)) is not None
         ]
 
     def edges_between(self, node_a: str, node_b: str, directed: bool = False) -> list[HCIREdge]:
@@ -515,7 +576,7 @@ class CognitiveGraph:
             out_b = self._edges_by_source.get(node_b, set())
             in_a = self._edges_by_target.get(node_a, set())
             matched = matched | (out_b & in_a)
-        return [self._edges[eid] for eid in matched if eid in self._edges]
+        return [edge for eid in matched if (edge := self.get_edge(eid)) is not None]
 
     def neighbors(self, node_id: str, direction: str = "both") -> list[str]:
         """Get all directly connected node IDs.
@@ -759,34 +820,38 @@ class CognitiveGraph:
     def nodes_by_type(self, node_type: HCIRNodeType) -> list[HCIRNode]:
         """O(k) where k is the number of nodes of that type."""
         return [
-            self._nodes[nid]
+            node
             for nid in self._idx_by_type.get(node_type, set())
-            if nid in self._nodes
+            if (node := self.get_node(nid)) is not None
         ]
 
     def nodes_by_category(self, category: CognitiveCategory) -> list[HCIRNode]:
         return [
-            self._nodes[nid]
+            node
             for nid in self._idx_by_category.get(category, set())
-            if nid in self._nodes
+            if (node := self.get_node(nid)) is not None
         ]
 
     def nodes_by_lifecycle(self, lifecycle: NodeLifecycle) -> list[HCIRNode]:
         return [
-            self._nodes[nid]
+            node
             for nid in self._idx_by_lifecycle.get(lifecycle, set())
-            if nid in self._nodes
+            if (node := self.get_node(nid)) is not None
         ]
 
     def nodes_by_scope(self, tenant_id: str) -> list[HCIRNode]:
         return [
-            self._nodes[nid]
+            node
             for nid in self._idx_by_scope.get(tenant_id, set())
-            if nid in self._nodes
+            if (node := self.get_node(nid)) is not None
         ]
 
     def nodes_by_tag(self, tag: str) -> list[HCIRNode]:
-        return [self._nodes[nid] for nid in self._idx_by_tag.get(tag, set()) if nid in self._nodes]
+        return [
+            node
+            for nid in self._idx_by_tag.get(tag, set())
+            if (node := self.get_node(nid)) is not None
+        ]
 
     # ── Views ────────────────────────────────────────────────────────
 
@@ -924,6 +989,9 @@ class CognitiveGraph:
         self._node_digests.clear()
         self._edge_digests.clear()
         self._content_digest = 0
+        self._cow_shared = False
+        self._owned_nodes.clear()
+        self._owned_edges.clear()
         if self._native_adapter is not None:
             try:
                 from hbllm.hcir.native_adapter import NativeGraphAdapter
@@ -1018,6 +1086,12 @@ class CognitiveGraph:
         forked._content_digest = self._content_digest
         forked._cow_indexes = True
         self._cow_indexes = True
+        forked._cow_shared = True
+        self._cow_shared = True
+        forked._owned_nodes = set()
+        self._owned_nodes = set()
+        forked._owned_edges = set()
+        self._owned_edges = set()
         forked._dirty_nodes = set()
         forked._dirty_edges = set()
         forked._fork_parent = self

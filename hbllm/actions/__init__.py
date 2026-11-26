@@ -2,46 +2,43 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib
+from typing import Any
 
-# Extend package search path to include experiments/legacy_actions
-_exp_path = Path(__file__).resolve().parents[2] / "experiments" / "legacy_actions"
-if _exp_path.exists() and str(_exp_path) not in __path__:
-    __path__.append(str(_exp_path))
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "ApiNode": ("hbllm.actions.api_node", "ApiNode"),
+    "BrowserNode": ("hbllm.actions.browser_node", "BrowserNode"),
+    "CausalObstacleResolver": ("hbllm.actions.causal_planner", "CausalObstacleResolver"),
+    "TopologicalFrontierNavigator": (
+        "hbllm.actions.causal_planner",
+        "TopologicalFrontierNavigator",
+    ),
+    "ComplexityDetector": ("hbllm.actions.complexity", "ComplexityDetector"),
+    "ExecutionNode": ("hbllm.actions.execution_node", "ExecutionNode"),
+    "FuzzyNode": ("hbllm.actions.fuzzy_node", "FuzzyNode"),
+    "LogicNode": ("hbllm.actions.logic_node", "LogicNode"),
+    "CancelTaskTool": ("hbllm.actions.scheduler_tools", "CancelTaskTool"),
+    "ScheduleEventTool": ("hbllm.actions.scheduler_tools", "ScheduleEventTool"),
+    "ScheduleRecurringTool": ("hbllm.actions.scheduler_tools", "ScheduleRecurringTool"),
+    "ToolNode": ("hbllm.actions.tool_registry", "ToolNode"),
+    "ToolRegistry": ("hbllm.actions.tool_registry", "ToolRegistry"),
+    "ToolResult": ("hbllm.actions.tool_registry", "ToolResult"),
+    "tool": ("hbllm.actions.tool_registry", "tool"),
+    "ToolRouterNode": ("hbllm.actions.tool_router", "ToolRouterNode"),
+}
 
-from hbllm.actions.api_node import ApiNode
-from hbllm.actions.browser_node import BrowserNode
-from hbllm.actions.causal_planner import (
-    CausalObstacleResolver,
-    TopologicalFrontierNavigator,
-)
-from hbllm.actions.complexity import ComplexityDetector
-from hbllm.actions.execution_node import ExecutionNode
-from hbllm.actions.fuzzy_node import FuzzyNode
-from hbllm.actions.logic_node import LogicNode
-from hbllm.actions.scheduler_tools import (
-    CancelTaskTool,
-    ScheduleEventTool,
-    ScheduleRecurringTool,
-)
-from hbllm.actions.tool_registry import ToolNode, ToolRegistry, ToolResult, tool
-from hbllm.actions.tool_router import ToolRouterNode
+__all__ = sorted(_EXPORTS.keys())
 
-__all__ = [
-    "ApiNode",
-    "BrowserNode",
-    "CausalObstacleResolver",
-    "ComplexityDetector",
-    "ExecutionNode",
-    "FuzzyNode",
-    "LogicNode",
-    "TopologicalFrontierNavigator",
-    "ToolNode",
-    "ToolRegistry",
-    "ToolResult",
-    "ToolRouterNode",
-    "ScheduleEventTool",
-    "ScheduleRecurringTool",
-    "CancelTaskTool",
-    "tool",
-]
+
+def __getattr__(name: str) -> Any:
+    if name in _EXPORTS:
+        mod_path, attr = _EXPORTS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_EXPORTS.keys()))

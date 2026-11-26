@@ -118,8 +118,18 @@ def _require_bus() -> Any:
 @router.get("/memory/{session_id}")
 async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
     """Retrieve recent conversation history for a tenant's session."""
+    from hbllm.serving.cognitive_registry import get_cognitive_registry
+
     tenant_id = get_tenant_id(request)
-    bus = _require_bus()
+    registry = _state.get("cognitive_registry") or get_cognitive_registry()
+    brain = _state.get("brain")
+    bus = getattr(brain, "bus", None)
+    if not bus:
+        return {
+            "session_id": session_id,
+            "tenant_id": tenant_id,
+            "turns": registry.get_session_turns(tenant_id, session_id, limit=limit),
+        }
 
     correlation_id = str(uuid.uuid4())
     response_future: asyncio.Future[Message] = asyncio.get_event_loop().create_future()
@@ -143,9 +153,17 @@ async def get_memory(request: Request, session_id: str, limit: int = 20) -> Any:
 
     try:
         result = await asyncio.wait_for(response_future, timeout=5.0)
-        return result.payload
+        payload = dict(result.payload)
+        if not payload.get("turns"):
+            local_turns = registry.get_session_turns(tenant_id, session_id, limit=limit)
+            if local_turns:
+                payload["turns"] = local_turns
+        return payload
     except (TimeoutError, asyncio.TimeoutError):
-        return {"session_id": session_id, "turns": []}
+        return {
+            "session_id": session_id,
+            "turns": registry.get_session_turns(tenant_id, session_id, limit=limit),
+        }
     finally:
         await bus.unsubscribe(sub)
 
@@ -335,14 +353,31 @@ async def knowledge_stats() -> Any:
 
 
 @router.get("/rules")
-async def list_rules() -> Any:
-    """List extracted if→then rules from the RuleExtractorNode."""
+async def list_rules(request: Request) -> Any:
+    """List extracted symbolic rules from the tenant's CognitiveSystem and any RuleExtractorNode."""
+    from hbllm.serving.cognitive_registry import get_cognitive_registry
+
+    rules: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if tenant_id and isinstance(tenant_id, str):
+        registry = _state.get("cognitive_registry") or get_cognitive_registry()
+        for rule in registry.list_tenant_rules(tenant_id):
+            rid = str(rule.get("id", ""))
+            if rid and rid not in seen_ids:
+                seen_ids.add(rid)
+                rules.append(rule)
+
     brain = _state.get("brain")
     node_map = _get_node_map(brain)
     for node in node_map.values():
         if hasattr(node, "rules"):
-            return {
-                "rules": [r.to_dict() for r in node.rules],
-                "total": len(node.rules),
-            }
-    return {"rules": [], "total": 0}
+            for r in node.rules:
+                d = r.to_dict()
+                rid = str(d.get("id", ""))
+                if not rid or rid not in seen_ids:
+                    if rid:
+                        seen_ids.add(rid)
+                    rules.append(d)
+            break
+    return {"rules": rules, "total": len(rules)}

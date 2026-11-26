@@ -356,52 +356,23 @@ class AutonomousEpistemicEngine:
 
         # Track 2: Four Neuromodulatory Systems (Dopamine, Noradrenaline, Acetylcholine, Serotonin)
 
-        # Faculty: Hierarchical Predictive Coding Cortical Columns (Rao & Ballard / Friston)
-
-        # Faculty: BA10 Metacognitive Confidence Calibration & Agency Monitor (Fleming & Dolan)
-
-        # Faculty: Working Concept Store & Analogical Schema Retrieval (AGI Gap 6)
-        from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
-
-        self.working_concept_store: WorkingConceptStore = WorkingConceptStore()
-
-        # Faculty: Causal Schema Inducer & Latent Variable Discovery (AGI Gap 7)
         from hbllm.hcir.grounding.causal.schema import SchemaInducer
-
-        self.schema_inducer: SchemaInducer = SchemaInducer()
-
-        # Faculty: Temporal Option Discovery & Bottleneck Cuts (AGI Gap 11)
+        from hbllm.hcir.grounding.concepts.store import WorkingConceptStore
+        from hbllm.hcir.kernel.safety_corrigibility import CorrigibilityMonitor
+        from hbllm.hcir.skills.library_learner import LibraryLearner
         from hbllm.hcir.world.option_discovery import OptionDiscoveryEngine
 
+        self.working_concept_store: WorkingConceptStore = WorkingConceptStore()
+        self.schema_inducer: SchemaInducer = SchemaInducer()
         self.option_discovery: OptionDiscoveryEngine = OptionDiscoveryEngine()
-
-        # Faculty: Corrigibility Monitor (AGI Gap 15)
-        from hbllm.hcir.kernel.safety_corrigibility import CorrigibilityMonitor
-
+        self.library_learner: LibraryLearner | None = LibraryLearner(
+            tiered_workspace=tiered_workspace
+        )
+        self.library_learner.attach_episodic_cortex(self.episodic_cortex)
         self.corrigibility_monitor: CorrigibilityMonitor = CorrigibilityMonitor()
-
-        # Faculty: Temporal State Buffer & State Difference Computer (W041-W047)
-
-        # Faculty: Transition Sequence Model & Reversibility Engine (W048-W050)
-
-        # Faculty: Interventional Causal Discovery Engine (W061-W070)
-
-        # Faculty: Rule Induction & Latent Structure Engine (W071-W080)
-
-        # Faculty: Whole-Grid Outcome Predictor & Rollout Engine (W081-W089)
-
-        # Domain 13: Relational Confidence & Evidence Provenance (W121-W130)
-        # Delegated to formal internal memory stores (symbolic_theory and working_memory)
-
-        # ── Interactive World-Modeling Faculties (W161–W190) ──────────────────
-        # Module 1: Ungrounded Action Discovery & Constrained Experimentation (W161-W165, W171, W187, W188)
         self.budget_governor: ActionBudgetGovernor = ActionBudgetGovernor(
             max_budget=self.exploration_budget
         )
-
-        # Module 2: Open-Set Goal Induction & Reachability Deadlock Pruning (W168-W170, W174, W175, W181, W182)
-
-        # Module 3: Temporal Dynamics, Dual-Store Memory & Objective Efficiency (W167, W172, W173, W176-W180, W189, W190)
 
         self.bg_feature: int = 0
         self.hypotheses: list[CausalHypothesis] = []
@@ -1056,6 +1027,8 @@ class AutonomousEpistemicEngine:
         Optionally hydrates learned skills, goals, barriers, and axioms from the Persistent tier.
         """
         self.tiered_workspace = tiered
+        if self.library_learner is not None:
+            self.library_learner.attach_workspace(tiered, tenant_id=tiered.tenant_id)
         frame = tiered.create_task_frame(goal_id=goal_id)
         self.active_task_frame = frame
 
@@ -1126,6 +1099,22 @@ class AutonomousEpistemicEngine:
             ntype = getattr(node, "node_type", "")
             props = getattr(node, "properties", {}) or {}
 
+            if ntype == "learned_rule" and getattr(node, "domain", "") == "tool_barrier_posterior":
+                t_f, b_f = props.get("tool_feat"), props.get("barrier_feat")
+                if t_f is not None and b_f is not None:
+                    alpha = float(props.get("alpha_unlock", 1.0))
+                    beta = float(props.get("beta_fail", 1.0))
+                    self.symbolic_theory._tool_barrier_posteriors[(t_f, b_f)] = (alpha, beta)
+                    mean = alpha / max(1e-9, alpha + beta)
+                    if mean > 0.55:
+                        self.symbolic_theory.tool_barrier_affinities.setdefault(t_f, set()).add(b_f)
+                    elif mean < 0.45:
+                        self.symbolic_theory.tool_barrier_incompatibilities.setdefault(
+                            t_f, set()
+                        ).add(b_f)
+                    hydrated_count += 1
+                continue
+
             # 1. Restore Procedural Skills
             if nid.startswith("procedural_skill_") or ntype == "skill":
                 schema_name = (
@@ -1135,16 +1124,22 @@ class AutonomousEpistemicEngine:
                     or nid.removeprefix("procedural_skill_")
                 )
                 if schema_name not in self.working_memory.procedural_library:
+                    from hbllm.hcir.graph import SkillNode
                     from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
 
-                    class RestoredSkill(DeclarativeNeuroSymbolicSkill):
-                        skill_name = schema_name
-                        description = (
-                            getattr(node, "description", "")
-                            or f"Restored persistent skill {schema_name}"
+                    if isinstance(node, SkillNode):
+                        restored = DeclarativeNeuroSymbolicSkill.from_skill_node(node)
+                        restored.skill_name = restored.skill_name or schema_name
+                        restored.description = (
+                            restored.description or f"Restored persistent skill {schema_name}"
                         )
-
-                    self.working_memory.register_procedural_skill(schema_name, RestoredSkill())
+                    else:
+                        restored = DeclarativeNeuroSymbolicSkill()
+                        restored.skill_name = schema_name
+                        restored.description = str(
+                            props.get("description") or f"Restored persistent skill {schema_name}"
+                        )
+                    self.working_memory.register_procedural_skill(schema_name, restored)
                     hydrated_count += 1
                     logger.info(
                         "AutonomousEpistemicEngine: Hydrated persistent skill '%s'", schema_name
@@ -2288,25 +2283,27 @@ class AutonomousEpistemicEngine:
         world theory, and commits mutations through TransactionManager if available.
         """
         res = self.episodic_cortex.consolidate_sleep_replay(terminal_reward=terminal_reward)
-        schemas = res.get("schemas", [])
-        for schema in schemas:
+        for schema in res.get("schemas", []):
             self.symbolic_theory.register_predicate(schema.causal_predicate)
             if hasattr(self, "procedural_macros"):
                 self.procedural_macros[schema.schema_id] = schema.action_motif
-
-        # Propose state mutations through TransactionManager if present
         all_ops = list(res.get("operations", []))
-
         if self.transaction_manager is not None and all_ops:
             from hbllm.hcir.transactions import HCIRTransaction
 
             for i in range(0, len(all_ops), 400):
-                tx = HCIRTransaction(
-                    author="HippocampalReplayConsolidator",
-                    operations=all_ops[i : i + 400],
+                self.transaction_manager.commit(
+                    HCIRTransaction(
+                        author="HippocampalReplayConsolidator", operations=all_ops[i : i + 400]
+                    )
                 )
-                self.transaction_manager.commit(tx)
-
+        if self.library_learner is not None:
+            self.library_learner.ingest_episodic_trajectories(
+                self.episodic_cortex.successful_trajectories, abstract_surface=True
+            )
+            sleep_ws = self.tiered_workspace or self._commit_workspace()
+            if sleep_ws is not None:
+                res["library_learning"] = self.library_learner.sleep_consolidation(sleep_ws)
         return res
 
     def retrieve_relational_analogies(

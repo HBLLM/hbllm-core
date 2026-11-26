@@ -1,74 +1,39 @@
-"""Declarative Neuro-Symbolic Skill Grammar and Compilation Engine — HCIR §6.
-
-Provides a domain-agnostic declarative domain-specific language (DSL) to specify
-and compile hierarchical skills in the core HBLLM Cognitive OS.
-
-Features:
-1. Composable Symbolic Predicates (ActionAffordance, EntityCount, PanelConstraint,
-   CutSet, Symmetry, and Boolean logic AllOf, AnyOf, Not).
-2. Cognitive Lifting (transforms 2D lattice observations into a cached, typed
-   SkillEvaluationContext with segmented EntityComponents and spatial metrics).
-3. Declarative Subgoals & Intent Hierarchy (SymbolicSubgoal, SubgoalSequence).
-4. Direct HCIR Bytecode Compilation (compiles declarative subgoals into
-   canonical InstructionStream: QUERY -> ASSERT -> EXECUTE).
-5. Seamless execution dispatch conforming to BaseHierarchicalSkill.
-"""
+"""Declarative Neuro-Symbolic Skill Grammar, Serializable SymbolicExpr AST & Compilation."""
 
 from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any, ClassVar
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
-from hbllm.hcir.primitives import (
-    EntityComponent,
-    Grid,
-    detect_background_color,
-    segment_entities,
-)
+from hbllm.hcir.capabilities.math_capabilities import compute_symmetry_score, compute_topology_cuts
+from hbllm.hcir.graph import NodeLifecycle, SkillNode
+from hbllm.hcir.primitives import EntityComponent, Grid, detect_background_color, segment_entities
 from hbllm.hcir.skills.base import BaseHierarchicalSkill
 from hbllm.hcir.spatial_planner import SpatialActionIntent
-
-if TYPE_CHECKING:
-    pass
+from hbllm.hcir.types import Provenance, Scope
 
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 1. Cognitive Lifting & Evaluation Context
-# ═══════════════════════════════════════════════════════════════════════════
-
-
 class SkillEvaluationContext:
-    """Cached, lifted cognitive context for evaluating symbolic skill predicates.
-
-    Provides lazy evaluation and caching of segmented entities, background
-    colors, and panel subgrids so predicates do not perform redundant work.
-    """
+    """Cached, lifted cognitive context for evaluating symbolic skill predicates."""
 
     def __init__(
-        self,
-        grid: Grid,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
+        self, grid: Grid, available_actions: list[int], metadata: dict[str, Any] | None = None
     ) -> None:
-        if not isinstance(grid, np.ndarray):
-            grid = np.asarray(grid)
-        if grid.ndim == 3:
-            grid = grid[-1]
-        self.grid: Grid = grid
+        arr = np.asarray(grid)
+        self.grid: Grid = arr[-1] if arr.ndim == 3 else arr
         self.available_actions: list[int] = list(available_actions)
         self.available_actions_set: set[int] = set(available_actions)
         self.metadata: dict[str, Any] = metadata or {}
-
-        # Lazy cached values
         self._bg_color: int | None = None
         self._entities_4conn: list[EntityComponent] | None = None
         self._entities_8conn: list[EntityComponent] | None = None
@@ -91,48 +56,215 @@ class SkillEvaluationContext:
     @property
     def color_histogram(self) -> dict[int, int]:
         if self._color_hist is None:
-            counts = Counter(int(x) for x in self.grid.flatten())
-            self._color_hist = dict(counts)
+            self._color_hist = dict(Counter(int(x) for x in self.grid.flatten()))
         return self._color_hist
 
     def get_entities(self, connectivity: int = 4) -> list[EntityComponent]:
         """Return segmented entities on the lattice, lazily computed and cached."""
-        if connectivity == 8:
-            if self._entities_8conn is None:
-                self._entities_8conn = segment_entities(
-                    self.grid, bg_color=self.background_color, connectivity=8
-                )
-            return self._entities_8conn
-        if self._entities_4conn is None:
-            self._entities_4conn = segment_entities(
-                self.grid, bg_color=self.background_color, connectivity=4
+        attr = "_entities_8conn" if connectivity == 8 else "_entities_4conn"
+        cached = getattr(self, attr)
+        if cached is None:
+            cached = segment_entities(
+                self.grid, bg_color=self.background_color, connectivity=connectivity
             )
-        return self._entities_4conn
+            setattr(self, attr, cached)
+        return cached
 
     def create_subcontext(
         self, r_min: int, r_max: int, c_min: int, c_max: int
     ) -> SkillEvaluationContext:
         """Create a subcontext for an extracted spatial subgrid (e.g. console panel)."""
-        subgrid = self.grid[r_min:r_max, c_min:c_max].copy()
         return SkillEvaluationContext(
-            grid=subgrid,
-            available_actions=self.available_actions,
-            metadata=dict(self.metadata),
+            self.grid[r_min:r_max, c_min:c_max].copy(), self.available_actions, dict(self.metadata)
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 2. Composable Symbolic Predicates
-# ═══════════════════════════════════════════════════════════════════════════
+def _eval_affordance(a: Mapping[str, Any], ctx: Any) -> bool:
+    raw = (
+        ctx.available_actions_set
+        if hasattr(ctx, "available_actions_set")
+        else ctx.get("available_actions", ())
+        if isinstance(ctx, Mapping)
+        else getattr(ctx, "available_actions", ())
+    )
+    acts = set(raw)
+    if a.get("exact") is not None and acts != set(a["exact"]):
+        return False
+    req, forb = set(a.get("required") or ()), set(a.get("forbidden") or ())
+    return (not req or req.issubset(acts)) and (not forb or forb.isdisjoint(acts))
+
+
+def _eval_entity_match(
+    a: Mapping[str, Any], ctx: SkillEvaluationContext, *, bbox_mode: bool
+) -> bool:
+    ents = ctx.get_entities(connectivity=int(a.get("connectivity", 4)))
+    color, is_frame = a.get("color"), a.get("is_frame")
+    mw, xw, mh, xh, ma, xa = (
+        a.get(k)
+        for k in ("min_width", "max_width", "min_height", "max_height", "min_area", "max_area")
+    )
+    matched, min_cnt, max_cnt = 0, int(a.get("min_count", 1)), a.get("max_count")
+    for e in ents:
+        if (color is not None and e.color != color) or (
+            is_frame is not None and e.is_frame != is_frame
+        ):
+            continue
+        if (mw is not None and e.width < mw) or (xw is not None and e.width > xw):
+            continue
+        if (mh is not None and e.height < mh) or (xh is not None and e.height > xh):
+            continue
+        if (ma is not None and e.area < ma) or (xa is not None and e.area > xa):
+            continue
+        matched += 1
+        if bbox_mode and matched >= min_cnt:
+            return True
+    return (
+        False
+        if bbox_mode
+        else (matched >= min_cnt and (max_cnt is None or matched <= int(max_cnt)))
+    )
+
+
+def _eval_grid_dim(a: Mapping[str, Any], ctx: SkillEvaluationContext) -> bool:
+    h, w, exact = ctx.height, ctx.width, a.get("exact_shape")
+    if exact is not None and (h, w) != tuple(exact):
+        return False
+    bounds = (
+        ("min_height", h, False),
+        ("max_height", h, True),
+        ("min_width", w, False),
+        ("max_width", w, True),
+    )
+    return not any(
+        a.get(k) is not None and (val > a[k] if is_max else val < a[k]) for k, val, is_max in bounds
+    )
+
+
+def _eval_region_or_density(
+    a: Mapping[str, Any], ctx: SkillEvaluationContext, *, density_mode: bool
+) -> bool:
+    h, w = ctx.height, ctx.width
+    r0, r1 = (
+        int(round(a.get("min_row_ratio", 0.0) * h)),
+        int(round(a.get("max_row_ratio", 1.0) * h)),
+    )
+    c0, c1 = (
+        int(round(a.get("min_col_ratio", 0.0) * w)),
+        int(round(a.get("max_col_ratio", 1.0) * w)),
+    )
+    if r0 >= r1 or c0 >= c1 or (sub := ctx.grid[r0:r1, c0:c1]).size == 0:
+        return False
+    if density_mode:
+        non_bg = int(np.sum(sub != ctx.background_color))
+        return non_bg >= int(a.get("min_count", 1)) and (
+            a.get("max_count") is None or non_bg <= int(a["max_count"])
+        )
+    return bool(
+        np.all(sub == (ctx.background_color if a.get("require_background", True) else sub.flat[0]))
+    )
+
+
+def _eval_causal_do(a: Mapping[str, Any], ctx: SkillEvaluationContext) -> bool:
+    if not ctx.metadata or (val := ctx.metadata.get(str(a["variable"]))) is None:
+        return False
+    exp, op = a.get("expected_value"), str(a.get("operator", "=="))
+    if op == "==":
+        return val == exp
+    if op == "!=":
+        return val != exp
+    if op in (">", "<") and exp is not None:
+        return float(val) > float(exp) if op == ">" else float(val) < float(exp)
+    return val in exp if op == "in" else False
+
+
+_SYM_KEYS = ("axis", "max_deviation", "min_entities", "min_area", "max_area", "ignore_top_colors")
+
+
+class SymbolicExpr(BaseModel):
+    """Serializable, inspectable symbolic predicate expression AST backed by Layer-0 ALUs."""
+
+    op: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    children: list[SymbolicExpr] = Field(default_factory=list)
+    alu_syscall: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump()
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> SymbolicExpr:
+        return cls.model_validate(dict(data))
+
+    def evaluate(self, ctx: SkillEvaluationContext | Any) -> bool:
+        """Evaluate the AST against a lifted `SkillEvaluationContext` using Layer-0 ALUs."""
+        op, a, ch = self.op, self.args, self.children
+        if op == "all_of":
+            return all(c.evaluate(ctx) for c in ch)
+        if op == "any_of":
+            return any(c.evaluate(ctx) for c in ch)
+        if op == "not":
+            return not ch[0].evaluate(ctx) if ch else True
+        if op == "affordance":
+            return _eval_affordance(a, ctx)
+        if op == "grid_dim":
+            return _eval_grid_dim(a, ctx)
+        if op in ("entity_bbox", "entity_count"):
+            return _eval_entity_match(a, ctx, bbox_mode=op == "entity_bbox")
+        if op == "color_dist":
+            hist = ctx.color_histogram
+            d, mn, mx = len(hist), a.get("min_distinct_colors"), a.get("max_distinct_colors")
+            return (
+                (mn is None or d >= mn)
+                and (mx is None or d <= mx)
+                and set(a.get("present_colors") or ()).issubset(hist)
+                and set(a.get("absent_colors") or ()).isdisjoint(hist)
+            )
+        if op == "cut_set":
+            cuts = compute_topology_cuts(ctx.grid, bg_color=ctx.background_color)
+            return int(cuts["partition_count"]) >= int(a.get("min_partitions", 2))
+        if op in ("homogeneous_region", "pixel_density"):
+            return _eval_region_or_density(a, ctx, density_mode=op == "pixel_density")
+        if op == "symmetry":
+            kw = {k: a[k] for k in _SYM_KEYS if k in a}
+            return bool(
+                compute_symmetry_score(ctx.grid, bg_color=ctx.background_color, **kw)["symmetric"]
+            )
+        if op == "metadata":
+            return bool(ctx.metadata) and ctx.metadata.get(str(a["key"])) == a.get("expected_value")
+        if op == "causal_do":
+            return _eval_causal_do(a, ctx)
+        if self.op == "predictive_confidence":
+            if not ctx.metadata:
+                return True
+            fe, conf = (
+                ctx.metadata.get("total_free_energy"),
+                ctx.metadata.get("calibrated_confidence"),
+            )
+            return (fe is None or float(fe) <= float(a.get("max_free_energy", 1.0))) and (
+                conf is None or float(conf) >= float(a.get("min_confidence", 0.5))
+            )
+        raise ValueError(f"Unknown SymbolicExpr op: {self.op!r}")
 
 
 class SymbolicPredicate(ABC):
-    """Abstract base class for all declarative neuro-symbolic predicates."""
+    """Base contract for declarative predicates (serializable via `to_expr()`)."""
 
     @abstractmethod
     def evaluate(self, ctx: SkillEvaluationContext) -> bool:
         """Evaluate the predicate against the lifted cognitive context."""
-        ...
+
+    def to_expr(self) -> SymbolicExpr:
+        """Return serializable `SymbolicExpr` AST for graph persistence."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement SymbolicExpr conversion"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.to_expr().to_dict()
+
+    @staticmethod
+    def from_dict(data: Mapping[str, Any]) -> ExprPredicate:
+        return ExprPredicate(SymbolicExpr.from_dict(data))
 
     def __and__(self, other: SymbolicPredicate) -> AllOf:
         return AllOf(self, other)
@@ -144,33 +276,72 @@ class SymbolicPredicate(ABC):
         return Not(self)
 
 
-class AllOf(SymbolicPredicate):
-    """Logical conjunction (AND) of multiple symbolic predicates."""
+def _ser(val: Any) -> Any:
+    if isinstance(val, set):
+        return sorted(val) if all(isinstance(x, int) for x in val) else sorted(map(str, val))
+    return list(val) if isinstance(val, tuple) else val
 
+
+class _ExprBackedPredicate(SymbolicPredicate):
+    _op: ClassVar[str] = "all_of"
+    _alu: ClassVar[str | None] = None
+
+    def to_expr(self) -> SymbolicExpr:
+        return SymbolicExpr(
+            op=self._op, alu_syscall=self._alu, args={k: _ser(v) for k, v in vars(self).items()}
+        )
+
+    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
+        return self.to_expr().evaluate(ctx)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({', '.join(f'{k}={v!r}' for k, v in vars(self).items())})"
+
+
+class ExprPredicate(_ExprBackedPredicate):
+    """Concrete predicate wrapping any deserialized `SymbolicExpr` AST."""
+
+    def __init__(self, expr: SymbolicExpr) -> None:
+        self.expr = expr
+
+    def to_expr(self) -> SymbolicExpr:
+        return self.expr
+
+
+def _child_expr(p: SymbolicPredicate) -> SymbolicExpr:
+    try:
+        return p.to_expr()
+    except NotImplementedError:
+        return SymbolicExpr(op="all_of")
+
+
+class _NaryPredicate(_ExprBackedPredicate):
     def __init__(self, *predicates: SymbolicPredicate) -> None:
         self.predicates: list[SymbolicPredicate] = list(predicates)
+
+    def to_expr(self) -> SymbolicExpr:
+        return SymbolicExpr(op=self._op, children=[_child_expr(p) for p in self.predicates])
+
+
+class AllOf(_NaryPredicate):
+    """Logical conjunction (AND) of multiple symbolic predicates."""
+
+    _op: ClassVar[str] = "all_of"
 
     def evaluate(self, ctx: SkillEvaluationContext) -> bool:
         return all(p.evaluate(ctx) for p in self.predicates)
 
-    def __repr__(self) -> str:
-        return f"AllOf({', '.join(repr(p) for p in self.predicates)})"
 
-
-class AnyOf(SymbolicPredicate):
+class AnyOf(_NaryPredicate):
     """Logical disjunction (OR) of multiple symbolic predicates."""
 
-    def __init__(self, *predicates: SymbolicPredicate) -> None:
-        self.predicates: list[SymbolicPredicate] = list(predicates)
+    _op: ClassVar[str] = "any_of"
 
     def evaluate(self, ctx: SkillEvaluationContext) -> bool:
         return any(p.evaluate(ctx) for p in self.predicates)
 
-    def __repr__(self) -> str:
-        return f"AnyOf({', '.join(repr(p) for p in self.predicates)})"
 
-
-class Not(SymbolicPredicate):
+class Not(_ExprBackedPredicate):
     """Logical negation (NOT) of a symbolic predicate."""
 
     def __init__(self, predicate: SymbolicPredicate) -> None:
@@ -179,476 +350,177 @@ class Not(SymbolicPredicate):
     def evaluate(self, ctx: SkillEvaluationContext) -> bool:
         return not self.predicate.evaluate(ctx)
 
-    def __repr__(self) -> str:
-        return f"Not({self.predicate!r})"
+    def to_expr(self) -> SymbolicExpr:
+        return SymbolicExpr(op="not", children=[_child_expr(self.predicate)])
 
 
-# ── Structural & Affordance Predicates ─────────────────────────────────────
-
-
-class ActionAffordancePredicate(SymbolicPredicate):
+@dataclass(eq=False, repr=False)
+class ActionAffordancePredicate(_ExprBackedPredicate):
     """Evaluates whether available actions satisfy specified affordance constraints."""
 
-    def __init__(
-        self,
-        required: set[Any] | Sequence[Any] | None = None,
-        forbidden: set[Any] | Sequence[Any] | None = None,
-        exact: set[Any] | Sequence[Any] | None = None,
-    ) -> None:
-        self.required: set[Any] = set(required) if required is not None else set()
-        self.forbidden: set[Any] = set(forbidden) if forbidden is not None else set()
-        self.exact: set[Any] | None = set(exact) if exact is not None else None
+    _op: ClassVar[str] = "affordance"
+    required: Any = None
+    forbidden: Any = None
+    exact: Any = None
+
+    def __post_init__(self) -> None:
+        self.required = set(self.required) if self.required is not None else set()
+        self.forbidden = set(self.forbidden) if self.forbidden is not None else set()
+        self.exact = set(self.exact) if self.exact is not None else None
 
     def evaluate(self, ctx: SkillEvaluationContext | Any) -> bool:
-        if hasattr(ctx, "available_actions_set"):
-            acts = ctx.available_actions_set
-        elif isinstance(ctx, dict):
-            acts = set(ctx.get("available_actions", []))
-        elif hasattr(ctx, "available_actions"):
-            acts = set(getattr(ctx, "available_actions"))
-        else:
-            acts = set()
-
-        if self.exact is not None and acts != self.exact:
-            return False
-        if self.required and not self.required.issubset(acts):
-            return False
-        if self.forbidden and not self.forbidden.isdisjoint(acts):
-            return False
-        return True
-
-    def __repr__(self) -> str:
-        return (
-            f"ActionAffordancePredicate(required={self.required}, "
-            f"forbidden={self.forbidden}, exact={self.exact})"
+        return _eval_affordance(
+            {"required": self.required, "forbidden": self.forbidden, "exact": self.exact}, ctx
         )
 
 
-class GridDimensionPredicate(SymbolicPredicate):
-    """Evaluates whether grid dimensions fall within specified bounds."""
-
-    def __init__(
-        self,
-        min_height: int | None = None,
-        max_height: int | None = None,
-        min_width: int | None = None,
-        max_width: int | None = None,
-        exact_shape: tuple[int, int] | None = None,
-    ) -> None:
-        self.min_height = min_height
-        self.max_height = max_height
-        self.min_width = min_width
-        self.max_width = max_width
-        self.exact_shape = exact_shape
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        h, w = ctx.height, ctx.width
-        if self.exact_shape is not None and (h, w) != self.exact_shape:
-            return False
-        if self.min_height is not None and h < self.min_height:
-            return False
-        if self.max_height is not None and h > self.max_height:
-            return False
-        if self.min_width is not None and w < self.min_width:
-            return False
-        if self.max_width is not None and w > self.max_width:
-            return False
-        return True
-
-    def __repr__(self) -> str:
-        return (
-            f"GridDimensionPredicate(h=[{self.min_height}, {self.max_height}], "
-            f"w=[{self.min_width}, {self.max_width}], exact={self.exact_shape})"
-        )
+@dataclass(eq=False, repr=False)
+class GridDimensionPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "grid_dim"
+    min_height: int | None = None
+    max_height: int | None = None
+    min_width: int | None = None
+    max_width: int | None = None
+    exact_shape: tuple[int, int] | None = None
 
 
-class EntityBoundingBoxPredicate(SymbolicPredicate):
-    """Evaluates whether at least `min_count` entities match bounding-box constraints."""
-
-    def __init__(
-        self,
-        min_width: int | None = None,
-        max_width: int | None = None,
-        min_height: int | None = None,
-        max_height: int | None = None,
-        min_count: int = 1,
-        color: int | None = None,
-        connectivity: int = 4,
-    ) -> None:
-        self.min_width = min_width
-        self.max_width = max_width
-        self.min_height = min_height
-        self.max_height = max_height
-        self.min_count = min_count
-        self.color = color
-        self.connectivity = connectivity
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        matching = 0
-        for e in ctx.get_entities(connectivity=self.connectivity):
-            if self.color is not None and e.color != self.color:
-                continue
-            if self.min_width is not None and e.width < self.min_width:
-                continue
-            if self.max_width is not None and e.width > self.max_width:
-                continue
-            if self.min_height is not None and e.height < self.min_height:
-                continue
-            if self.max_height is not None and e.height > self.max_height:
-                continue
-            matching += 1
-            if matching >= self.min_count:
-                return True
-        return False
-
-    def __repr__(self) -> str:
-        return (
-            f"EntityBoundingBoxPredicate(w=[{self.min_width}, {self.max_width}], "
-            f"h=[{self.min_height}, {self.max_height}], min_count={self.min_count})"
-        )
+@dataclass(eq=False, repr=False)
+class EntityBoundingBoxPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "entity_bbox"
+    _alu: ClassVar[str | None] = "math.connected_components"
+    min_width: int | None = None
+    max_width: int | None = None
+    min_height: int | None = None
+    max_height: int | None = None
+    min_count: int = 1
+    color: int | None = None
+    connectivity: int = 4
 
 
-class EntityCountPredicate(SymbolicPredicate):
-    """Evaluates whether the count of segmented entities meeting criteria falls in range."""
-
-    def __init__(
-        self,
-        min_count: int = 1,
-        max_count: int | None = None,
-        color: int | None = None,
-        is_frame: bool | None = None,
-        min_area: int | None = None,
-        max_area: int | None = None,
-        connectivity: int = 4,
-    ) -> None:
-        self.min_count = min_count
-        self.max_count = max_count
-        self.color = color
-        self.is_frame = is_frame
-        self.min_area = min_area
-        self.max_area = max_area
-        self.connectivity = connectivity
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        matching = 0
-        for e in ctx.get_entities(connectivity=self.connectivity):
-            if self.color is not None and e.color != self.color:
-                continue
-            if self.is_frame is not None and e.is_frame != self.is_frame:
-                continue
-            if self.min_area is not None and e.area < self.min_area:
-                continue
-            if self.max_area is not None and e.area > self.max_area:
-                continue
-            matching += 1
-
-        if matching < self.min_count:
-            return False
-        if self.max_count is not None and matching > self.max_count:
-            return False
-        return True
-
-    def __repr__(self) -> str:
-        return (
-            f"EntityCountPredicate(min={self.min_count}, max={self.max_count}, color={self.color})"
-        )
+@dataclass(eq=False, repr=False)
+class EntityCountPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "entity_count"
+    _alu: ClassVar[str | None] = "math.connected_components"
+    min_count: int = 1
+    max_count: int | None = None
+    color: int | None = None
+    is_frame: bool | None = None
+    min_area: int | None = None
+    max_area: int | None = None
+    connectivity: int = 4
 
 
-class ColorDistributionPredicate(SymbolicPredicate):
-    """Evaluates the presence, absence, and variety of colors in the lattice."""
+@dataclass(eq=False, repr=False)
+class ColorDistributionPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "color_dist"
+    present_colors: Any = None
+    absent_colors: Any = None
+    min_distinct_colors: int | None = None
+    max_distinct_colors: int | None = None
 
-    def __init__(
-        self,
-        present_colors: set[int] | Sequence[int] | None = None,
-        absent_colors: set[int] | Sequence[int] | None = None,
-        min_distinct_colors: int | None = None,
-        max_distinct_colors: int | None = None,
-    ) -> None:
-        self.present_colors: set[int] = set(present_colors) if present_colors is not None else set()
-        self.absent_colors: set[int] = set(absent_colors) if absent_colors is not None else set()
-        self.min_distinct_colors = min_distinct_colors
-        self.max_distinct_colors = max_distinct_colors
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        hist = ctx.color_histogram
-        distinct = len(hist)
-
-        if self.min_distinct_colors is not None and distinct < self.min_distinct_colors:
-            return False
-        if self.max_distinct_colors is not None and distinct > self.max_distinct_colors:
-            return False
-        if self.present_colors and not self.present_colors.issubset(hist.keys()):
-            return False
-        if self.absent_colors and not self.absent_colors.isdisjoint(hist.keys()):
-            return False
-        return True
-
-    def __repr__(self) -> str:
-        return (
-            f"ColorDistributionPredicate(present={self.present_colors}, "
-            f"absent={self.absent_colors}, distinct=[{self.min_distinct_colors}, {self.max_distinct_colors}])"
-        )
+    def __post_init__(self) -> None:
+        self.present_colors = set(self.present_colors) if self.present_colors is not None else set()
+        self.absent_colors = set(self.absent_colors) if self.absent_colors is not None else set()
 
 
-class CutSetPredicate(SymbolicPredicate):
-    """Evaluates whether the environment contains topological bottleneck cut-sets."""
+@dataclass(eq=False, repr=False)
+class CutSetPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "cut_set"
+    _alu: ClassVar[str | None] = "math.topology_cuts"
+    min_partitions: int = 2
 
-    def __init__(self, min_partitions: int = 2) -> None:
-        self.min_partitions = min_partitions
 
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
+@dataclass(eq=False, repr=False)
+class HomogeneousRegionPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "homogeneous_region"
+    min_row_ratio: float = 0.0
+    max_row_ratio: float = 1.0
+    min_col_ratio: float = 0.0
+    max_col_ratio: float = 1.0
+    require_background: bool = True
 
-        barrier_cells = {
-            (r, c)
-            for r in range(ctx.height)
-            for c in range(ctx.width)
-            if ctx.grid[r, c] == ctx.background_color
+
+@dataclass(eq=False, repr=False)
+class SymmetryPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "symmetry"
+    _alu: ClassVar[str | None] = "math.symmetry_score"
+    axis: str = "vertical"
+    max_deviation: float = 2.0
+    min_entities: int = 2
+    min_area: int = 9
+    max_area: int = 36
+    ignore_top_colors: int = 3
+
+
+@dataclass(eq=False, repr=False)
+class MetadataPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "metadata"
+    key: str = ""
+    expected_value: Any = True
+
+
+@dataclass(eq=False, repr=False)
+class PearlCausalDoPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "causal_do"
+    variable: str = ""
+    expected_value: Any = None
+    operator: str = "=="
+
+
+@dataclass(eq=False, repr=False)
+class PredictiveConfidencePredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "predictive_confidence"
+    max_free_energy: float = 1.0
+    min_confidence: float = 0.5
+
+
+@dataclass(eq=False, repr=False)
+class PixelDensityPredicate(_ExprBackedPredicate):
+    _op: ClassVar[str] = "pixel_density"
+    min_count: int = 1
+    max_count: int | None = None
+    min_row_ratio: float = 0.0
+    max_row_ratio: float = 1.0
+    min_col_ratio: float = 0.0
+    max_col_ratio: float = 1.0
+
+
+def _subgoal_instructions(
+    sg: SymbolicSubgoal, author: str, *, include_assert: bool, fallback_target: str | None = None
+) -> list[Instruction]:
+    def _ins(op: Opcode, cost: int, **params: Any) -> Instruction:
+        return Instruction(opcode=op, params=params, cost_estimate=cost)
+
+    ins: list[Instruction] = []
+    if sg.target_query:
+        ins.append(_ins(Opcode.UNIFY, 10, pattern=dict(sg.target_query), bind="$r0"))
+    if include_assert:
+        node_data = {
+            "id": f"sg_{author}_{sg.intent.value.lower()}",
+            "node_type": "goal",
+            "description": sg.intent.value,
+            "properties": {
+                "intent": sg.intent.value,
+                "target_query": dict(sg.target_query),
+                "timeout": sg.timeout_steps,
+            },
         }
-        passable_cells = [
-            (r, c)
-            for r in range(ctx.height)
-            for c in range(ctx.width)
-            if ctx.grid[r, c] != ctx.background_color
-        ]
-        if not passable_cells:
-            return False
-
-        # Check if entities/cells are partitioned into multiple disconnected components
-        visited: set[tuple[int, int]] = set()
-        partitions = 0
-        for cell in passable_cells:
-            if cell not in visited:
-                comp = TopologicalCutSetAnalyzer.get_reachable_component(
-                    start=cell,
-                    barrier_cells=barrier_cells,
-                    grid_shape=(ctx.height, ctx.width),
-                )
-                visited.update(comp)
-                partitions += 1
-                if partitions >= self.min_partitions:
-                    return True
-        return partitions >= self.min_partitions
-
-    def __repr__(self) -> str:
-        return f"CutSetPredicate(min_partitions={self.min_partitions})"
-
-
-class HomogeneousRegionPredicate(SymbolicPredicate):
-    """Evaluates whether a specified subgrid region is completely homogeneous (all background)."""
-
-    def __init__(
-        self,
-        min_row_ratio: float = 0.0,
-        max_row_ratio: float = 1.0,
-        min_col_ratio: float = 0.0,
-        max_col_ratio: float = 1.0,
-        require_background: bool = True,
-    ) -> None:
-        self.min_row_ratio = min_row_ratio
-        self.max_row_ratio = max_row_ratio
-        self.min_col_ratio = min_col_ratio
-        self.max_col_ratio = max_col_ratio
-        self.require_background = require_background
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        h, w = ctx.height, ctx.width
-        r_min = int(round(self.min_row_ratio * h))
-        r_max = int(round(self.max_row_ratio * h))
-        c_min = int(round(self.min_col_ratio * w))
-        c_max = int(round(self.max_col_ratio * w))
-
-        if r_min >= r_max or c_min >= c_max:
-            return False
-
-        sub = ctx.grid[r_min:r_max, c_min:c_max]
-        if sub.size == 0:
-            return False
-
-        if self.require_background:
-            return bool(np.all(sub == ctx.background_color))
-        first = sub.flat[0]
-        return bool(np.all(sub == first))
-
-    def __repr__(self) -> str:
-        return (
-            f"HomogeneousRegionPredicate(r=[{self.min_row_ratio:.2f}, {self.max_row_ratio:.2f}], "
-            f"c=[{self.min_col_ratio:.2f}, {self.max_col_ratio:.2f}])"
+        ins.append(_ins(Opcode.ASSERT, 5, node_data=node_data, author=author, bind="$r1"))
+    target = "$r0" if sg.target_query else fallback_target
+    ins.append(
+        _ins(
+            Opcode.EXECUTE,
+            25,
+            capability=f"motor.{sg.intent.value.lower()}",
+            params={"target": target, **dict(sg.parameters)},
         )
-
-
-class SymmetryPredicate(SymbolicPredicate):
-    """Evaluates bilateral or rotational symmetry across segmented entities or grid."""
-
-    def __init__(
-        self,
-        axis: str = "vertical",
-        max_deviation: float = 2.0,
-        min_entities: int = 2,
-        min_area: int = 9,
-        max_area: int = 36,
-        ignore_top_colors: int = 3,
-    ) -> None:
-        self.axis = axis
-        self.max_deviation = max_deviation
-        self.min_entities = min_entities
-        self.min_area = min_area
-        self.max_area = max_area
-        self.ignore_top_colors = ignore_top_colors
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        hist = ctx.color_histogram
-        sorted_colors = sorted(hist.keys(), key=lambda c: hist[c], reverse=True)
-        ignored = set(sorted_colors[: self.ignore_top_colors]) | {0, ctx.background_color}
-
-        entities = [
-            e
-            for e in ctx.get_entities()
-            if e.color not in ignored and self.min_area <= e.area <= self.max_area
-        ]
-        if len(entities) < self.min_entities:
-            return False
-
-        colors = {e.color for e in entities}
-        mid = (ctx.width - 1) / 2.0 if self.axis == "vertical" else (ctx.height - 1) / 2.0
-        for c in colors:
-            col_ents = [e for e in entities if e.color == c]
-            if len(col_ents) in (2, 4):
-                if self.axis == "vertical":
-                    c_mean = sum(e.centroid[1] for e in col_ents) / len(col_ents)
-                else:
-                    c_mean = sum(e.centroid[0] for e in col_ents) / len(col_ents)
-                if abs(c_mean - mid) <= self.max_deviation:
-                    return True
-        return False
-
-    def __repr__(self) -> str:
-        return f"SymmetryPredicate(axis={self.axis}, max_dev={self.max_deviation})"
-
-
-class MetadataPredicate(SymbolicPredicate):
-    """Evaluates conditions on contextual observation or agent metadata."""
-
-    def __init__(self, key: str, expected_value: Any = True) -> None:
-        self.key = key
-        self.expected_value = expected_value
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        if not ctx.metadata:
-            return False
-        return ctx.metadata.get(self.key) == self.expected_value
-
-    def __repr__(self) -> str:
-        return f"MetadataPredicate({self.key}={self.expected_value})"
-
-
-class PearlCausalDoPredicate(SymbolicPredicate):
-    """Evaluates whether an intervention condition is satisfied under Pearl's do(X=x) calculus.
-
-    Verifies that an interventional variable or state metadata matches the desired target value,
-    enforcing that the skill only triggers when causal preconditions are actively held.
-    """
-
-    def __init__(self, variable: str, expected_value: Any, operator: str = "==") -> None:
-        self.variable = variable
-        self.expected_value = expected_value
-        self.operator = operator
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        if not ctx.metadata:
-            return False
-        val = ctx.metadata.get(self.variable)
-        if val is None:
-            return False
-        if self.operator == "==":
-            return val == self.expected_value
-        elif self.operator == "!=":
-            return val != self.expected_value
-        elif self.operator == ">":
-            return float(val) > float(self.expected_value)
-        elif self.operator == "<":
-            return float(val) < float(self.expected_value)
-        elif self.operator == "in":
-            return val in self.expected_value
-        return False
-
-    def __repr__(self) -> str:
-        return f"PearlCausalDoPredicate(do({self.variable}{self.operator}{self.expected_value}))"
-
-
-class PredictiveConfidencePredicate(SymbolicPredicate):
-    """Evaluates whether the agent's hierarchical predictive coding confidence/free-energy
-    is within acceptable precision bounds before executing a declarative skill.
-    """
-
-    def __init__(self, max_free_energy: float = 1.0, min_confidence: float = 0.5) -> None:
-        self.max_free_energy = max_free_energy
-        self.min_confidence = min_confidence
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        if not ctx.metadata:
-            return True  # Permissive default if no predictive metadata is present
-        fe = ctx.metadata.get("total_free_energy")
-        if fe is not None and float(fe) > self.max_free_energy:
-            return False
-        conf = ctx.metadata.get("calibrated_confidence")
-        if conf is not None and float(conf) < self.min_confidence:
-            return False
-        return True
-
-    def __repr__(self) -> str:
-        return f"PredictiveConfidencePredicate(max_free_energy={self.max_free_energy}, min_confidence={self.min_confidence})"
-
-
-class PixelDensityPredicate(SymbolicPredicate):
-    """Evaluates non-background pixel count within a region."""
-
-    def __init__(
-        self,
-        min_count: int = 1,
-        max_count: int | None = None,
-        min_row_ratio: float = 0.0,
-        max_row_ratio: float = 1.0,
-        min_col_ratio: float = 0.0,
-        max_col_ratio: float = 1.0,
-    ) -> None:
-        self.min_count = min_count
-        self.max_count = max_count
-        self.min_row_ratio = min_row_ratio
-        self.max_row_ratio = max_row_ratio
-        self.min_col_ratio = min_col_ratio
-        self.max_col_ratio = max_col_ratio
-
-    def evaluate(self, ctx: SkillEvaluationContext) -> bool:
-        h, w = ctx.height, ctx.width
-        r_min = int(round(self.min_row_ratio * h))
-        r_max = int(round(self.max_row_ratio * h))
-        c_min = int(round(self.min_col_ratio * w))
-        c_max = int(round(self.max_col_ratio * w))
-        sub = ctx.grid[r_min:r_max, c_min:c_max]
-        non_bg = int(np.sum(sub != ctx.background_color))
-        if non_bg < self.min_count:
-            return False
-        if self.max_count is not None and non_bg > self.max_count:
-            return False
-        return True
-
-    def __repr__(self) -> str:
-        return f"PixelDensityPredicate(min_count={self.min_count})"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 3. Declarative Subgoal Programs & Bytecode Compilation
-# ═══════════════════════════════════════════════════════════════════════════
+    )
+    return ins
 
 
 @dataclass
 class SymbolicSubgoal:
-    """A single declarative subgoal in the hierarchical skill program.
-
-    Specifies the semantic intent, a structural query for the target entity
-    or location, and optional preconditions/parameters.
-    """
+    """Declarative subgoal compiling to pure allowlisted ISA v2 bytecode."""
 
     intent: SpatialActionIntent
     target_query: dict[str, Any] = field(default_factory=dict)
@@ -657,45 +529,8 @@ class SymbolicSubgoal:
     timeout_steps: int = 50
 
     def compile_to_instructions(self, author: str = "declarative_skill") -> list[Instruction]:
-        """Compile this subgoal into canonical HCIR bytecode instructions."""
-        instructions: list[Instruction] = []
-
-        # 1. QUERY the graph for matching target entity
-        if self.target_query:
-            instructions.append(
-                Instruction(
-                    opcode=Opcode.QUERY,
-                    params={"query": dict(self.target_query)},
-                    cost_estimate=10,
-                )
-            )
-
-        # 2. ASSERT the active subgoal milestone
-        instructions.append(
-            Instruction(
-                opcode=Opcode.ASSERT,
-                params={
-                    "intent": self.intent.value,
-                    "target_query": self.target_query,
-                    "timeout": self.timeout_steps,
-                    "author": author,
-                },
-                cost_estimate=5,
-            )
-        )
-
-        # 3. EXECUTE the declarative spatial intent
-        instructions.append(
-            Instruction(
-                opcode=Opcode.EXECUTE,
-                params={
-                    "capability": f"spatial.{self.intent.value.lower()}",
-                    "parameters": dict(self.parameters),
-                },
-                cost_estimate=25,
-            )
-        )
-        return instructions
+        """Compile this subgoal into allowlisted ISA v2 instructions (`UNIFY -> ASSERT -> EXECUTE`)."""
+        return _subgoal_instructions(self, author, include_assert=True)
 
 
 class SubgoalSequence:
@@ -715,108 +550,154 @@ class SubgoalSequence:
 
     def compile_to_stream(self, skill_name: str = "declarative_skill") -> InstructionStream:
         """Compile all subgoals in the sequence into an HCIR InstructionStream."""
-        stream = InstructionStream(
+        return InstructionStream(
             author=skill_name,
             description=f"Compiled HCIR program for {skill_name}",
+            instructions=[
+                ins for sg in self.subgoals for ins in sg.compile_to_instructions(author=skill_name)
+            ],
         )
-        for subgoal in self.subgoals:
-            for ins in subgoal.compile_to_instructions(author=skill_name):
-                stream.append(ins)
-        return stream
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 4. Declarative Neuro-Symbolic Skill Base Class
-# ═══════════════════════════════════════════════════════════════════════════
 
 
 class DeclarativeNeuroSymbolicSkill(BaseHierarchicalSkill):
-    """Base class for skills specified via declarative neuro-symbolic grammar.
+    """Declarative skill compiling to homoiconic `SkillNode` graphs and ISA v2 bytecode."""
 
-    Subclasses define:
-    - `description`: Optional natural language or symbolic description of the skill.
-    - `signature`: A composable `SymbolicPredicate` defining invariant recognition.
-    - `program`: An optional `SubgoalSequence` defining the high-level intent plan.
-    - Subclasses can optionally implement `solve(ctx)` to synthesize concrete
-      actions using core mathematical/spatial solvers.
-    """
-
+    name: str = ""
     description: str = ""
     signature: SymbolicPredicate = AllOf()
     program: SubgoalSequence | None = None
+    _compiled_stream: InstructionStream | None = None
 
     def get_metadata(self) -> dict[str, Any]:
-        """Optional hook for skill instances to contribute dynamic state to evaluation context."""
         return {}
 
     def can_handle(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
+        self, grid: np.ndarray, available_actions: list[int], metadata: dict[str, Any] | None = None
     ) -> bool:
-        """Evaluate invariant recognition using the declarative symbolic signature."""
-        meta = {**self.get_metadata(), **(metadata or {})}
         ctx = SkillEvaluationContext(
             grid=grid,
             available_actions=available_actions,
-            metadata=meta,
+            metadata={**self.get_metadata(), **(metadata or {})},
         )
         try:
             return bool(self.signature.evaluate(ctx))
-        except Exception as e:
-            logger.debug(
-                "Declarative skill '%s' error evaluating signature: %s",
-                self.skill_name,
-                e,
-            )
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.debug("Declarative skill '%s' evaluation error: %s", self.skill_name, exc)
             return False
 
     def compile_to_instruction_stream(
-        self,
-        grid: np.ndarray,
-        available_actions: list[int],
-        metadata: dict[str, Any] | None = None,
+        self, grid: np.ndarray, available_actions: list[int], metadata: dict[str, Any] | None = None
     ) -> InstructionStream:
         """Compile this declarative skill into an executable HCIR InstructionStream."""
-        if self.program is not None:
-            return self.program.compile_to_stream(skill_name=self.skill_name)
-        return InstructionStream(
-            author=self.skill_name,
-            description=f"Empty instruction stream for {self.skill_name}",
+        if self._compiled_stream is not None:
+            return self._compiled_stream.model_copy(deep=True)
+        return (
+            self.program.compile_to_stream(skill_name=self.skill_name)
+            if self.program is not None
+            else InstructionStream(
+                author=self.skill_name,
+                description=f"Empty instruction stream for {self.skill_name}",
+            )
         )
+
+    def to_skill_node(
+        self,
+        *,
+        skill_id: str | None = None,
+        tenant_id: str = "default",
+        alpha_success: float = 2.0,
+        beta_failure: float = 1.0,
+    ) -> SkillNode:
+        """Export this skill as a parameterized homoiconic `SkillNode` executable via `Opcode.CALL`."""
+        params_meta: list[dict[str, Any]] = []
+        instructions: list[Instruction] = []
+        for idx, sg in enumerate(list(self.program.subgoals) if self.program is not None else []):
+            pname = f"target_{idx}"
+            if sg.target_query:
+                params_meta.append(
+                    {
+                        "name": pname,
+                        "role": str(sg.target_query.get("role", "")),
+                        "required": False,
+                        "default": dict(sg.target_query),
+                    }
+                )
+            instructions.extend(
+                _subgoal_instructions(
+                    sg, self.skill_name, include_assert=False, fallback_target=f"?{pname}"
+                )
+            )
+        if not instructions:
+            instructions.append(
+                Instruction(
+                    opcode=Opcode.UNIFY,
+                    params={"pattern": {"role": "?target"}, "bind": "$r0"},
+                    cost_estimate=5,
+                )
+            )
+        instructions.append(Instruction(opcode=Opcode.RETURN, params={"yield": ["$r0"]}))
+        stream = InstructionStream(
+            author=self.skill_name,
+            description=self.description or self.skill_name,
+            instructions=instructions,
+        )
+        try:
+            pre_pat: dict[str, Any] = {"symbolic_expr": self.signature.to_dict()}
+        except NotImplementedError:
+            pre_pat = {"signature": repr(self.signature)}
+        return SkillNode(
+            id=skill_id or f"skill_{self.skill_name}",
+            skill_name=self.skill_name,
+            description=self.description,
+            parameters=params_meta,
+            precondition_pattern=pre_pat,
+            postcondition_pattern={
+                "intent": self.semantic_intent.value.lower(),
+                "skill_name": self.skill_name,
+            },
+            bytecode_stream=stream.model_dump(),
+            alpha_success=alpha_success,
+            beta_failure=beta_failure,
+            lifecycle=NodeLifecycle.ACTIVE,
+            provenance=Provenance(created_by="declarative_skill"),
+            scope=Scope(tenant_id=tenant_id),
+            tags=["declarative_skill", self.skill_name],
+        )
+
+    @classmethod
+    def from_skill_node(cls, node: SkillNode) -> DeclarativeNeuroSymbolicSkill:
+        """Reconstruct a runnable declarative skill from a graph `SkillNode` (zero subclassing)."""
+        skill = cls()
+        skill.skill_name, skill.description = node.skill_name or node.name, node.description
+        if (
+            isinstance(node.precondition_pattern, Mapping)
+            and "symbolic_expr" in node.precondition_pattern
+        ):
+            skill.signature = SymbolicPredicate.from_dict(
+                node.precondition_pattern["symbolic_expr"]
+            )
+        if node.bytecode_stream is not None:
+            skill._compiled_stream = InstructionStream.model_validate(node.bytecode_stream)
+        return skill
 
     def solve(
         self, ctx: SkillEvaluationContext, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
-        """Synthesize concrete actions from the lifted cognitive context.
-
-        Override in subclass to provide procedural or symbolic solver logic.
-        Default implementation returns an empty list.
-        """
         return []
 
     def plan(
-        self,
-        grid: np.ndarray,
-        current_level: int = 0,
-        metadata: dict[str, Any] | None = None,
+        self, grid: np.ndarray, current_level: int = 0, metadata: dict[str, Any] | None = None
     ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
-        """Synthesize action sequence using the cognitive evaluation context."""
-        ctx = SkillEvaluationContext(
-            grid=grid,
-            available_actions=[1, 2, 3, 4, 5, 6, 7],  # default superset
-            metadata=metadata,
+        return self.solve(
+            SkillEvaluationContext(
+                grid=grid, available_actions=[1, 2, 3, 4, 5, 6, 7], metadata=metadata
+            ),
+            current_level=current_level,
         )
-        return self.solve(ctx, current_level=current_level)
 
 
 class CompositeDeclarativeSkill(DeclarativeNeuroSymbolicSkill):
-    """Hierarchically composed macro-skill sequencing multiple declarative sub-skills.
-
-    Combines sub-skill signatures via composable conjunction (AllOf) and
-    concatenates their SubgoalSequence programs into a unified macro-program.
-    """
+    """Hierarchically composed macro-skill sequencing multiple declarative sub-skills."""
 
     def __init__(
         self,
@@ -826,29 +707,20 @@ class CompositeDeclarativeSkill(DeclarativeNeuroSymbolicSkill):
     ) -> None:
         self.sub_skills = list(skills)
         self.skill_name = skill_name
-        self.description = (
-            description
-            or f"Macro-skill composed of {len(skills)} sub-skills: {[getattr(s, 'skill_name', str(s)) for s in skills]}"
-        )
-
-        signatures = [s.signature for s in skills if getattr(s, "signature", None) is not None]
-        self.signature = AllOf(*signatures) if signatures else AllOf()
-
-        all_subgoals = []
-        for s in skills:
-            prog = getattr(s, "program", None)
-            if prog is not None and hasattr(prog, "subgoals"):
-                all_subgoals.extend(prog.subgoals)
-        self.program = SubgoalSequence(*all_subgoals) if all_subgoals else None
+        self.description = description or f"Macro-skill composed of {len(skills)} sub-skills"
+        sigs = [s.signature for s in skills if getattr(s, "signature", None) is not None]
+        self.signature = AllOf(*sigs) if sigs else AllOf()
+        all_sg = [
+            sg for s in skills for sg in (s.program.subgoals if s.program is not None else [])
+        ]
+        self.program = SubgoalSequence(*all_sg) if all_sg else None
 
     def solve(
         self, ctx: SkillEvaluationContext, current_level: int = 0
     ) -> list[tuple[int, dict[str, int] | None]] | list[int]:
-        """Execute sub-skills sequentially, concatenating actions."""
         actions: list[Any] = []
         for s in self.sub_skills:
-            if hasattr(s, "solve"):
-                acts = s.solve(ctx, current_level=current_level)
-                if acts:
-                    actions.extend(acts)
+            acts = s.solve(ctx, current_level=current_level)
+            if acts:
+                actions.extend(acts)
         return actions

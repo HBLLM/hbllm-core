@@ -43,7 +43,7 @@ from hbllm.hcir.query import GraphQuery, QueryResult
 from hbllm.hcir.snapshot import Snapshot
 from hbllm.hcir.stores import IEventStore, InMemoryEventStore
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
-from hbllm.hcir.types import BranchMode
+from hbllm.hcir.types import BranchMode, SecurityLevel
 from hbllm.hcir.workspace import HCIRWorkspaceState
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,14 @@ logger = logging.getLogger(__name__)
 from hbllm.hcir.tier_types import WorkspaceTier
 
 __all_tier__ = WorkspaceTier  # re-export (canonical home: hbllm.hcir.tier_types)
+
+
+def _is_protected_system_prior(node: Any) -> bool:
+    """Return True if *node* is an immutable system/innate prior exempt from user eviction."""
+    if getattr(getattr(node, "scope", None), "security_level", None) == SecurityLevel.SYSTEM:
+        return True
+    tags = getattr(node, "tags", None) or ()
+    return "core_prior" in tags
 
 
 @dataclass(frozen=True)
@@ -931,6 +939,8 @@ class TieredWorkspace:
         remove_ops: list[TransactionOperation] = []
 
         for node in target_ws.graph.all_nodes():
+            if _is_protected_system_prior(node):
+                continue
             props = getattr(node, "properties", {})
             # Protected nodes (core axioms, permanent skills, protected concepts)
             if props.get("permanent") or props.get("is_axiom") or props.get("locked"):
@@ -1023,7 +1033,10 @@ class TieredWorkspace:
                 if node_a.id in to_remove_in_group:
                     continue
                 label_a = (
-                    getattr(node_a, "name", "") or getattr(node_a, "label", "") or node_a.id
+                    getattr(node_a, "name", "")
+                    or getattr(node_a, "skill_name", "")
+                    or getattr(node_a, "label", "")
+                    or node_a.id
                 ).lower()
                 conf_a = float(getattr(node_a, "confidence", 0.5) or 0.5)
 
@@ -1031,8 +1044,15 @@ class TieredWorkspace:
                     node_b = group[j]
                     if node_b.id in to_remove_in_group:
                         continue
+                    prot_a = _is_protected_system_prior(node_a)
+                    prot_b = _is_protected_system_prior(node_b)
+                    if prot_a and prot_b:
+                        continue
                     label_b = (
-                        getattr(node_b, "name", "") or getattr(node_b, "label", "") or node_b.id
+                        getattr(node_b, "name", "")
+                        or getattr(node_b, "skill_name", "")
+                        or getattr(node_b, "label", "")
+                        or node_b.id
                     ).lower()
                     conf_b = float(getattr(node_b, "confidence", 0.5) or 0.5)
 
@@ -1043,7 +1063,12 @@ class TieredWorkspace:
                     sim = inter / max(1, union) if union > 0 else 0.0
 
                     if sim >= similarity_threshold:
-                        loser = node_b if conf_a >= conf_b else node_a
+                        if prot_a:
+                            loser = node_b
+                        elif prot_b:
+                            loser = node_a
+                        else:
+                            loser = node_b if conf_a >= conf_b else node_a
                         to_remove_in_group.add(loser.id)
                         remove_ops.append(
                             TransactionOperation(op=TransactionOp.REMOVE_NODE, node_id=loser.id)

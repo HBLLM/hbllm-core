@@ -163,7 +163,7 @@ class ProceduralMacro:
             target_entity=self.macro_id,
         )
 
-    def to_declarative_skill(self) -> Any:
+    def to_declarative_skill(self, abstract_surface: bool = False) -> Any:
         """Export procedural macro as a formal DeclarativeNeuroSymbolicSkill."""
         from hbllm.hcir.skills.declarative import (
             ActionAffordancePredicate,
@@ -179,19 +179,19 @@ class ProceduralMacro:
         signature = ActionAffordancePredicate(required=req_actions)
         subgoals: list[SymbolicSubgoal] = []
         if self.waypoints:
-            for wp in self.waypoints:
+            for idx, wp in enumerate(self.waypoints):
                 role = getattr(wp, "role", "waypoint")
                 feat = getattr(wp, "feature", None)
                 target_pos = getattr(wp, "target_pos", None)
                 intent = (
                     SpatialActionIntent.ACTUATE if role == "goal" else SpatialActionIntent.NAVIGATE
                 )
-                subgoals.append(
-                    SymbolicSubgoal(
-                        intent=intent,
-                        target_query={"role": role, "feature": feat, "pos": target_pos},
-                    )
+                target_query: dict[str, Any] = (
+                    {"role": role, "id": f"?{role}_{idx}"}
+                    if abstract_surface
+                    else {"role": role, "feature": feat, "pos": target_pos}
                 )
+                subgoals.append(SymbolicSubgoal(intent=intent, target_query=target_query))
         else:
             for act in self.action_sequence:
                 subgoals.append(
@@ -209,7 +209,8 @@ class ProceduralMacro:
         )
         skill.signature = signature
         skill.program = SubgoalSequence(*subgoals) if subgoals else None
-        setattr(skill, "_procedural_macro", self)
+        if not abstract_surface:
+            setattr(skill, "_procedural_macro", self)
         return skill
 
     @property
@@ -239,6 +240,8 @@ class EpisodicTransition:
     grid_snapshot: np.ndarray | None = None
     state_signature: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    value_estimate: float = 0.0
+    replay_count: int = 0
 
     def __init__(
         self,
@@ -255,6 +258,8 @@ class EpisodicTransition:
         grid_snapshot: np.ndarray | None = None,
         state_signature: str = "",
         metadata: dict[str, Any] | None = None,
+        value_estimate: float = 0.0,
+        replay_count: int = 0,
     ) -> None:
         self.step = step
         self.avatar_pos = avatar_pos
@@ -272,6 +277,8 @@ class EpisodicTransition:
         self.grid_snapshot = grid_snapshot
         self.state_signature = state_signature
         self.metadata = metadata if metadata is not None else {}
+        self.value_estimate = value_estimate
+        self.replay_count = replay_count
 
     def to_causal_predicate(self) -> CausalPredicate:
         """Export episodic transition as a formal Pearl do(a) causal predicate."""

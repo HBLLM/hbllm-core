@@ -12,8 +12,8 @@ description: "Event-sourced, 100% LLM-free neuro-symbolic cognitive operating sy
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/Rust-13%20Crates-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-599%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
-[![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-92.5%25%20Zero--Shot-cyan.svg)](api/benchmarks.md)
+[![Tests](https://img.shields.io/badge/Tests-623%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
+[![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-94.2%25%20Zero--Shot-cyan.svg)](api/benchmarks.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 
 </div>
@@ -32,11 +32,11 @@ Most AI frameworks bolt prompts and vector databases onto an external LLM and tr
 <div class="feature-grid">
 <div class="feature-card">
 <h3>🧠 HCIR Cognitive OS Kernel</h3>
-<p>8-opcode bytecode VM, 4-tier <code>TieredWorkspace</code>, <code>SQLiteEventStore</code> with bounded compaction, <code>ConstitutionalVerifier</code>, and <code>ExecutiveRuntime</code>. <a href="architecture/hcir-kernel-os.md">Architecture &rarr;</a></p>
+<p>12-opcode ISA v2 register-unification VM (<code>$r0..$r7</code>, <code>CallStack</code>, strict <code>SyscallAllowlist</code>), 4-tier <code>TieredWorkspace</code>, <code>SQLiteEventStore</code>, homoiconic <code>SkillNode</code> / <code>ConstructionNode</code> programs, <code>ConstitutionalVerifier</code>, and <code>ExecutiveRuntime</code>. <a href="architecture/hcir-kernel-os.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>🌍 5-Stage Cortical World Model</h3>
-<p>Perception &rarr; Assimilation &rarr; Simulation &rarr; Deliberation &rarr; Motor Dispatch, unified over HCIR-backed <code>TransitionKnowledgeBase</code> and <code>PrefrontalWorkingMemory</code>. <a href="architecture/cortical-world-model.md">Architecture &rarr;</a></p>
+<p>Perception &rarr; Assimilation &rarr; Simulation &rarr; Deliberation &rarr; Motor Dispatch over Dirichlet/Beta posteriors (<code>TransitionKnowledgeBase</code>), stateless <code>math.*</code> ALUs, and homoiconic <code>cortical_programs.py</code>. <a href="architecture/cortical-world-model.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>👁️ Symbol Grounding Engine (SGE)</h3>
@@ -44,7 +44,7 @@ Most AI frameworks bolt prompts and vector databases onto an external LLM and tr
 </div>
 <div class="feature-card">
 <h3>🗣️ Non-LLM Language &amp; Reading</h3>
-<p><code>MultilingualLanguageRuntime</code> (English, Sinhala, Tamil), SymSpell normalizer, <code>ExpositoryProseProcessor</code>, and Track T4 <code>ReadingCurriculumIngestor</code>. <a href="architecture/language-and-reading.md">Architecture &rarr;</a></p>
+<p><code>MultilingualLanguageRuntime</code> (<code>en</code>, <code>si</code>, <code>ta</code>), <code>ConstructionNode</code> embodied construction grammar, 4-step unknown-instruction resolution, SymSpell normalizer, and Track T4 <code>ReadingCurriculumIngestor</code>. <a href="architecture/language-and-reading.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>🧩 14 Composable Reasoning Operators</h3>
@@ -64,7 +64,7 @@ Most AI frameworks bolt prompts and vector databases onto an external LLM and tr
 </div>
 <div class="feature-card">
 <h3>🛡️ Multi-Tenant Security &amp; Sandboxing</h3>
-<p>Fail-closed <code>JWTAuthMiddleware</code>, <code>TenantGuard</code> isolation, two-tier subprocess sandboxing, SSRF-guarded web fetch, <code>PIIRedactor</code>, and hash-chained <code>AuditTrail</code>. <a href="security.md">Security &rarr;</a></p>
+<p>Fail-closed <code>JWTAuthMiddleware</code>, <code>TenantGuard</code> isolation, two-tier process sandboxing (<code>run_sandboxed_command</code>), SSRF-guarded web fetch, <code>PIIRedactor</code>, and hash-chained <code>AuditTrail</code>. <a href="security.md">Security &rarr;</a></p>
 </div>
 </div>
 
@@ -78,32 +78,32 @@ flowchart TB
 
     subgraph HCIR["Pure-HCIR Cognitive OS (hbllm.hcir — 0 LLM Imports)"]
         direction TB
-        LANG["hcir.language<br/>MultilingualRuntime (en/si/ta), Discourse &amp; Track T4"]
-        WORLD["hcir.world<br/>5-Stage CorticalPipeline, TransitionKB, WorkingMemory"]
+        LANG["hcir.language<br/>MultilingualRuntime (en/si/ta), Construction Grammar &amp; Track T4"]
+        WORLD["hcir.world<br/>5-Stage CorticalPipeline, Dirichlet TransitionKB, WorkingMemory"]
         SGE["hcir.grounding<br/>FeatureExtractors, Tracker, ConceptLearner, Committer"]
         REAS["hcir.reasoning<br/>UnifiedReasoningRuntime + 14 Operators"]
         SNN["hcir.snn<br/>LIF, STDP, WTA, Neuromodulation &amp; Perception"]
-        CAP["hcir.capabilities<br/>CommandDispatcher, ConceptExplainer, Curiosity, Tools"]
-        KERNEL["hcir.kernel &amp; TieredWorkspace<br/>TransactionManager, ConstitutionalVerifier, SandboxManager, 4 Tiers"]
+        CAP["hcir.capabilities<br/>CommandDispatcher, ConceptExplainer, Curiosity, Layer-0 Math ALUs"]
+        KERNEL["hcir.kernel &amp; TieredWorkspace<br/>ISA v2 VM, TransactionManager, ConstitutionalVerifier, SandboxManager, 4 Tiers"]
     end
 
     ROOT --> LANG & WORLD & SGE & REAS & SNN & CAP
     LANG & WORLD & SGE & REAS & CAP --> KERNEL
     KERNEL <-->|"Verified PyO3 Accelerator"| RUST["13 Rust Crates (hcir_graph, simulation_engine, structure_matcher, ...)"]
-    ROOT --- SERVE["hbllm.serving (FastAPI / MCP) &amp; plugins/*_adapter"]
+    ROOT --- SERVE["hbllm.serving (Per-Tenant CognitiveSystemRegistry) &amp; CognitiveBlackbox / plugins/*_adapter"]
 ```
 
 ---
 
-## Sealed Held-Out v2 Performance (`eval-phase2-r10`)
+## Sealed Held-Out v2 Performance (`eval-phase3-final`)
 
-Measured on `benchmarks/suites/heldout.yaml` (`n = 120` trials, commit `a26f09bd`, `2026-11-21`, see `reports/heldout/LEDGER.md`):
+Measured on `benchmarks/suites/heldout.yaml` (`n = 120` trials, commit `072b4cb1`, `2026-11-26`, see `reports/heldout/LEDGER.md`):
 
 | Benchmark Dimension | Result | 95% Wilson CI |
 |---|---|---|
-| **Zero-Shot Solve Rate** | **92.5%** (`111 / 120`) | `[0.8636, 0.9600]` |
-| **Cross-Seed Transfer** | **90.35%** (`114` eps, `161` skills consolidated) | `[0.8354, 0.9453]` |
-| **Same-Layout Replay** | **100.0%** (`generality = 0.9021`) | — |
+| **Zero-Shot Solve Rate** | **94.2%** (`113 / 120`, `2` deaths) | `[0.8845, 0.9715]` |
+| **Cross-Seed Transfer** | **90.35%** (`114` eps, `28,330` skills; `widened_dev`: `94.74%`) | `[0.8354, 0.9453]` |
+| **Same-Layout Replay** | **100.0%** (`6/6` tasks `5/5`, `generality = 0.8979`) | — |
 | **LLM Token Cost** | **0 tokens** | — |
 
 ---

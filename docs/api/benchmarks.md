@@ -23,22 +23,24 @@ HBLLM validates cognitive generalization, cross-seed transfer, lifelong replay, 
 | `heldout` | `benchmarks/suites/heldout.yaml` | **Sealed Held-Out v2** (`n=120`, 20 seeds/task); gated by `EvaluationProtocol` to run **only** on a clean `HEAD` with an explicit `eval-*` git tag |
 | `independent` | `benchmarks/suites/independent.yaml` | Independent blind generalization check |
 
-### Official Sealed Held-Out v2 Results (`eval-phase2-r10`, `2026-11-21`)
+### Official Sealed Held-Out v2 Results (`eval-phase3-final`, `2026-11-26`)
 
-Recorded in `reports/heldout/LEDGER.md` on commit `a26f09bd` (`n = 120` unseen trials):
+Recorded in `reports/heldout/LEDGER.md` on commit `072b4cb1` (`n = 120` unseen trials across 5 regimes, zero `HCIR_SCOPE_VIOLATION` warnings):
 
 | Dimension | Solve Rate / Score | Wilson 95% CI | Details |
 |---|---|---|---|
-| **Zero-Shot** | **0.9250** (`111 / 120`) | `[0.8636, 0.9600]` | Generality `0.8236`, exploration deaths `4` (`3.33%`), **0 LLM tokens** |
-| **Cross-Seed Transfer** | **0.9035** (`114` episodes) | `[0.8354, 0.9453]` | `skills_consolidated = 161` across distinct procedural seeds |
-| **Same-Layout Replay** | **1.0000** | — | Generality `0.9021`, `mean_steps_to_stable_policy = 0.0` |
+| **Zero-Shot** | **0.9417** (`113 / 120`) | `[0.8845, 0.9715]` | Generality `0.8359`, exploration deaths `2` (`1.67%`), **0 LLM tokens** |
+| **Cross-Seed Transfer** | **0.9035** (`114` episodes) | `[0.8354, 0.9453]` | `skills_consolidated = 28,330` across distinct procedural seeds |
+| **Same-Layout Replay** | **1.0000** (`6/6` tasks `5/5`) | — | Generality `0.8979`, `mean_steps_to_stable_policy = 0.0` |
 
-**Per-Family Zero-Shot / Cross-Seed Transfer (`eval-phase2-r10`):**
-- `continuous`: **1.0000** / **1.0000**
+**Per-Family Zero-Shot / Cross-Seed Transfer (`eval-phase3-final`):**
 - `symbolic`: **1.0000** / **1.0000**
-- `grid`: **0.9500** / **0.9737**
-- `stochastic_dynamic`: **0.8500** / **0.7895**
-- `partial_observability`: **0.8000** / **0.6842**
+- `grid`: **0.9750** / **1.0000**
+- `continuous`: **0.9500** / **1.0000**
+- `stochastic_dynamic`: **0.9500** / **0.8947**
+- `partial_observability`: **0.8000** / **0.5263**
+
+**Companion `widened_dev` Gate (`9fbbf52e`, `n = 120` zero-shot / `114` transfer):** `zero_shot = 0.7750` (`generality = 0.7503`), `cross_seed_transfer = 0.9474` (`[0.8899, 0.9757]`). Compared against the Phase 2 baseline (`eval-phase2-r10` on `a26f09bd`: `0.9250` zero-shot, `111/120`, `4` deaths), Phase 3 (`eval-phase3-final`) improves zero-shot solve rate by `+0.0167` (`+2` solved tasks) and halves exploration deaths (`2` vs. `4`).
 
 ### CLI Usage
 

@@ -4,8 +4,8 @@ The cognitive core of HBLLM (`core/hbllm/`) must ALWAYS embody domain-general in
 
 ## 1. Absolute Prohibition of Single-Task Solvers in Core
 - **No Single-Task Routines:** Never add functions, classes, heuristic branches, or algorithms designed only to solve a single game, level, or benchmark (e.g., dedicated ARC-AGI game/puzzle solvers, bespoke grid game tricks, or level-specific hacks) into `core/hbllm/`.
-- **Universal Principles Only:** All algorithms in the core must be grounded in universal physical, mathematical, or neuro-symbolic principles (active inference, Pearl's causal *do(a)* calculus, topological manifold routing, dynamic affordance learning, A*/MCTS counterfactual simulation).
+- **Universal Principles & Declared Priors Only:** All innate mechanisms in the core are strictly bounded by `docs/architecture/priors.md` (Spelke Core Knowledge: objectness, spatial topology, agency, discrete numerosity; plus temporal precedence, Pearl's causal *do(a)* calculus, and expected free energy / active inference). Any rule, concept, affordance, or linguistic meaning outside that catalog is empirical world knowledge and **must be learned in-environment or read via symbolic constructions**, never hardcoded in Python.
 
 ## 2. Benchmark & Adapter Layering
 - **Adapters Outside Core:** Environment wrappers, competition-specific harnesses (e.g. `kaggle_submission/`, `benchmarks/`), and integration adapters (e.g. AI2-THOR, Safety Gym) belong outside the cognitive core.
-- **Solving Novel Domains:** If a benchmark or environment highlights a failure mode, solve it by improving the domain-general reasoning faculties (e.g., richer causal hypothesis pruning, topological cut-set decomposition, general deadlock detection), NEVER by writing a bespoke solver for that specific game or task.
+- **Solving Novel Domains:** When a benchmark or environment exposes a failure mode, strengthen universal Layer-0 math/physics ALUs or Layer-2 homoiconic skill/construction acquisition — NEVER write a bespoke solver or hardcode domain rules in `hbllm/`.

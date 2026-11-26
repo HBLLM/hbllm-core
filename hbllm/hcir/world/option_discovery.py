@@ -1,21 +1,4 @@
-"""Temporal Abstraction & Option Discovery Engine — Sutton, Precup & Singh (AGI Gap 11).
-
-Autonomous discovery of temporal options, macro-actions, and bottleneck states:
-1. Bottleneck State Discovery (McGovern & Barto, Şimşek & Barto):
-   - Computes articulation points (cut vertices) and betweenness centrality over
-     topological manifolds and empirical state transition graphs.
-   - Identifies critical choke points (doors, keys, switches, passage corridors)
-     whose traversal is necessary to partition state space.
-2. Option Induction <I, pi, beta> (Sutton, Precup, Singh 1999):
-   - Initiation set I: Spatial/causal precondition under which the option is viable.
-   - Policy / Subgoal sequence pi: Abstract action sequence driving agent to the bottleneck.
-   - Termination condition beta: Deterministic termination upon reaching the bottleneck state.
-3. Hierarchy Formation & Option Reuse Tracking:
-   - Tracks option invocations across episodes and contexts.
-   - Calculates option reuse rate: R_option = reused_steps / total_steps.
-   - High-reuse options are consolidated into DeclarativeNeuroSymbolicSkill instances
-     and registered into the LibraryLearner.
-"""
+"""Temporal Abstraction & Option Discovery Engine — Sutton, Precup & Singh (AGI Gap 11)."""
 
 from __future__ import annotations
 
@@ -27,7 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
+from hbllm.hcir.graph import NodeLifecycle, SkillNode
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.types import Provenance, Scope
 
 if TYPE_CHECKING:
     from hbllm.hcir.skills.declarative import DeclarativeNeuroSymbolicSkill
@@ -65,47 +51,90 @@ class DiscoveredOption:
             SymbolicSubgoal,
         )
 
-        subgoals = []
-        for s in self.subgoal_sequence:
-            intent = getattr(SpatialActionIntent, s, SpatialActionIntent.NAVIGATE_TO)
-            subgoals.append(
-                SymbolicSubgoal(
-                    intent=intent,
-                    target_query={"target": self.bottleneck_state},
-                )
+        subgoals = [
+            SymbolicSubgoal(
+                intent=getattr(SpatialActionIntent, s, SpatialActionIntent.NAVIGATE_TO),
+                target_query={"target": self.bottleneck_state},
             )
+            for s in (self.subgoal_sequence or ["NAVIGATE_TO"])
+        ]
+        skill = DeclarativeNeuroSymbolicSkill()
+        skill.name = skill.skill_name = self.name
+        skill.description = f"Discovered option targeting bottleneck state {self.bottleneck_state}"
+        skill.signature = ActionAffordancePredicate(required={1, 2, 3, 4})
+        skill.program = SubgoalSequence(*subgoals)
+        return skill
 
-        if not subgoals:
-            subgoals.append(
-                SymbolicSubgoal(
-                    intent=SpatialActionIntent.NAVIGATE_TO,
-                    target_query={"target": self.bottleneck_state},
-                )
-            )
+    def to_skill_node(self, tenant_id: str = "default") -> SkillNode:
+        """Serialize discovered option into a parameterized homoiconic `SkillNode`."""
+        from hbllm.hcir.skills.declarative import ActionAffordancePredicate
 
-        class AutonomousOptionSkill(DeclarativeNeuroSymbolicSkill):
-            name = self.name
-            description = f"Discovered option targeting bottleneck state {self.bottleneck_state}"
-            signature = ActionAffordancePredicate(required={1, 2, 3, 4})
-            program = SubgoalSequence(*subgoals)
+        def _ins(op: Opcode, cost: int, label: str | None = None, **p: Any) -> Instruction:
+            return Instruction(opcode=op, params=p, cost_estimate=cost, label=label)
 
-        return AutonomousOptionSkill()
+        stream = InstructionStream(
+            author="option_discovery",
+            description=f"Option {self.name} reaching bottleneck {self.bottleneck_state}",
+            instructions=[
+                _ins(
+                    Opcode.BRANCH,
+                    1,
+                    condition="if_not_empty",
+                    register="$r0",
+                    target_label="act_nav",
+                ),
+                _ins(Opcode.UNIFY, 10, pattern={"role": "portal", "id": "?bottleneck"}, bind="$r0"),
+                _ins(
+                    Opcode.EXECUTE,
+                    20,
+                    "act_nav",
+                    capability="motor.navigate",
+                    params={"target": "$r0"},
+                ),
+                Instruction(opcode=Opcode.RETURN, params={"yield": ["$r0"]}),
+            ],
+        )
+        return SkillNode(
+            id=f"discovered_option_{self.option_id}",
+            skill_name=self.name,
+            description=f"Discovered option targeting bottleneck state {self.bottleneck_state}",
+            parameters=[
+                {
+                    "name": "bottleneck",
+                    "role": "portal",
+                    "required": False,
+                    "default": list(self.bottleneck_state),
+                }
+            ],
+            precondition_pattern={
+                "symbolic_expr": ActionAffordancePredicate(required={1, 2, 3, 4}).to_dict()
+            },
+            postcondition_pattern={"intent": "reach_bottleneck", "target": "?bottleneck"},
+            bytecode_stream=stream.model_dump(),
+            alpha_success=1.0 + float(self.success_count),
+            beta_failure=1.0 + float(max(0, self.reuse_count - self.success_count)),
+            success_rate=self.success_rate,
+            invocation_count=self.reuse_count,
+            lifecycle=NodeLifecycle.ACTIVE,
+            provenance=Provenance(created_by="option_discovery"),
+            scope=Scope(tenant_id=tenant_id),
+            tags=["discovered_option", "portal"],
+            properties={
+                "option_id": self.option_id,
+                "bottleneck_state": list(self.bottleneck_state),
+                "subgoal_sequence": list(self.subgoal_sequence),
+                "reuse_count": self.reuse_count,
+                "success_count": self.success_count,
+                "success_rate": self.success_rate,
+            },
+        )
 
     def to_transaction_operations(self) -> list[TransactionOperation]:
-        """Propose atomic HCIR transactions persisting discovered option beliefs."""
+        """Propose atomic HCIR transactions persisting the homoiconic option `SkillNode`."""
+        node = self.to_skill_node()
         return [
             TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=f"discovered_option_{self.option_id}",
-                node_data={
-                    "option_id": self.option_id,
-                    "name": self.name,
-                    "bottleneck_state": self.bottleneck_state,
-                    "subgoal_sequence": self.subgoal_sequence,
-                    "reuse_count": self.reuse_count,
-                    "success_count": self.success_count,
-                    "success_rate": self.success_rate,
-                },
+                op=TransactionOp.UPSERT_NODE, node_id=node.id, node_data=node.model_dump()
             )
         ]
 
@@ -242,28 +271,21 @@ class OptionDiscoveryEngine:
         return {node: cb[i] * scale for i, node in enumerate(nodes)}
 
     def grid_to_adjacency(
-        self,
-        grid: np.ndarray,
-        walkable_val: int = 0,
+        self, grid: np.ndarray, walkable_val: int = 0
     ) -> dict[tuple[int, int], set[tuple[int, int]]]:
         """Convert 2D lattice into an undirected 4-connected spatial adjacency graph."""
         H, W = grid.shape
         mask = grid == walkable_val
         rows, cols = np.nonzero(mask)
         adjacency: dict[tuple[int, int], set[tuple[int, int]]] = {}
-        for r_raw, c_raw in zip(rows.tolist(), cols.tolist()):
-            u = (r_raw, c_raw)
-            nbs: set[tuple[int, int]] = set()
-            if r_raw > 0 and mask[r_raw - 1, c_raw]:
-                nbs.add((r_raw - 1, c_raw))
-            if r_raw + 1 < H and mask[r_raw + 1, c_raw]:
-                nbs.add((r_raw + 1, c_raw))
-            if c_raw > 0 and mask[r_raw, c_raw - 1]:
-                nbs.add((r_raw, c_raw - 1))
-            if c_raw + 1 < W and mask[r_raw, c_raw + 1]:
-                nbs.add((r_raw, c_raw + 1))
+        for r, c in zip(rows.tolist(), cols.tolist()):
+            nbs = {
+                (nr, nc)
+                for nr, nc in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1))
+                if 0 <= nr < H and 0 <= nc < W and mask[nr, nc]
+            }
             if nbs:
-                adjacency[u] = nbs
+                adjacency[(r, c)] = nbs
         return adjacency
 
     def discover_bottlenecks_from_grid(

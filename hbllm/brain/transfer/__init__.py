@@ -7,51 +7,42 @@ and zero-shot analogical plan synthesis.
 
 from __future__ import annotations
 
-from pathlib import Path
+import importlib
+from typing import Any
 
-_exp_path = Path(__file__).resolve().parents[3] / "experiments" / "legacy_brain" / "transfer"
-if _exp_path.exists() and str(_exp_path) not in __path__:
-    __path__.append(str(_exp_path))
+_EXPORTS: dict[str, tuple[str, str]] = {
+    "AnalogicalTransfer": ("hbllm.brain.transfer.engine", "AnalogicalTransfer"),
+    "AnalogicalTransferEngine": ("hbllm.brain.transfer.engine", "AnalogicalTransferEngine"),
+    "ConditionalAnalogicalHypothesis": (
+        "hbllm.brain.transfer.engine",
+        "ConditionalAnalogicalHypothesis",
+    ),
+    "GroundedEpisode": ("hbllm.brain.transfer.extractor", "GroundedEpisode"),
+    "RelationalSchemaExtractor": ("hbllm.brain.transfer.extractor", "RelationalSchemaExtractor"),
+    "MappingStatus": ("hbllm.brain.transfer.mapper", "MappingStatus"),
+    "StructuralMappingResult": ("hbllm.brain.transfer.mapper", "StructuralMappingResult"),
+    "StructureMappingEngine": ("hbllm.brain.transfer.mapper", "StructureMappingEngine"),
+    "ActionTemplate": ("hbllm.brain.transfer.schema", "ActionTemplate"),
+    "ConsequenceTemplate": ("hbllm.brain.transfer.schema", "ConsequenceTemplate"),
+    "RelationalSchema": ("hbllm.brain.transfer.schema", "RelationalSchema"),
+    "SchemaConstraint": ("hbllm.brain.transfer.schema", "SchemaConstraint"),
+    "SchemaLifecycleStatus": ("hbllm.brain.transfer.schema", "SchemaLifecycleStatus"),
+    "SchemaRelation": ("hbllm.brain.transfer.schema", "SchemaRelation"),
+    "SchemaRole": ("hbllm.brain.transfer.schema", "SchemaRole"),
+}
+
+__all__ = sorted(_EXPORTS.keys())
 
 
-from hbllm.brain.transfer.engine import (
-    AnalogicalTransfer,
-    AnalogicalTransferEngine,
-    ConditionalAnalogicalHypothesis,
-)
-from hbllm.brain.transfer.extractor import (
-    GroundedEpisode,
-    RelationalSchemaExtractor,
-)
-from hbllm.brain.transfer.mapper import (
-    MappingStatus,
-    StructuralMappingResult,
-    StructureMappingEngine,
-)
-from hbllm.brain.transfer.schema import (
-    ActionTemplate,
-    ConsequenceTemplate,
-    RelationalSchema,
-    SchemaConstraint,
-    SchemaLifecycleStatus,
-    SchemaRelation,
-    SchemaRole,
-)
+def __getattr__(name: str) -> Any:
+    if name in _EXPORTS:
+        mod_path, attr = _EXPORTS[name]
+        mod = importlib.import_module(mod_path)
+        val = getattr(mod, attr)
+        globals()[name] = val
+        return val
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    "ActionTemplate",
-    "AnalogicalTransfer",
-    "AnalogicalTransferEngine",
-    "ConditionalAnalogicalHypothesis",
-    "ConsequenceTemplate",
-    "GroundedEpisode",
-    "MappingStatus",
-    "RelationalSchema",
-    "RelationalSchemaExtractor",
-    "SchemaConstraint",
-    "SchemaLifecycleStatus",
-    "SchemaRelation",
-    "SchemaRole",
-    "StructuralMappingResult",
-    "StructureMappingEngine",
-]
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + list(_EXPORTS.keys()))

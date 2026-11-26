@@ -1,0 +1,315 @@
+language: en
+lexical_rules:
+  articles: ["the ", "a ", "an ", "this ", "that ", "all "]
+  directions: ["left", "right", "up", "down", "north", "south", "east", "west"]
+  question_starters: ["what", "where", "when", "why", "how", "who", "which", "is", "are", "was", "were", "do", "does", "did", "can", "could", "would", "will", "should"]
+  target_slot_names: ["target", "target_entity", "entity", "object", "noun", "item"]
+  spatial_relations:
+    left of: LEFT_OF
+    right of: RIGHT_OF
+    above: ABOVE
+    below: BELOW
+    inside: INSIDE
+    contains: CONTAINS
+    adjacent to: ADJACENT
+  causal_connectives:
+    - [" need ", "requires"]
+    - [" needs ", "requires"]
+    - [" require ", "requires"]
+    - [" requires ", "requires"]
+    - [" unlock ", "unlocks"]
+    - [" unlocks ", "unlocks"]
+    - [" clear ", "clears"]
+    - [" clears ", "clears"]
+    - [" cause ", "causes"]
+    - [" causes ", "causes"]
+    - [" enable ", "enables"]
+    - [" enables ", "enables"]
+  if_then: ["if ", " then ", "implies"]
+  perceptual_color_defaults:
+    black: 0
+    blue: 1
+    red: 2
+    green: 3
+    yellow: 4
+    grey: 5
+    gray: 5
+    magenta: 6
+    orange: 7
+    cyan: 8
+    brown: 9
+  role_hints:
+    tool: ["key"]
+    barrier: ["door", "barrier"]
+    goal: ["goal"]
+  definitional_patterns:
+    - "^(?:to\\s+)([a-z][a-z0-9_-]{2,24})\\s+(?:a\\s+|an\\s+|the\\s+)?([a-z][a-z0-9_\\s-]{1,28}?)\\s+(?:means\\s+to|is\\s+to)\\s+(.+)$"
+    - "^([a-z][a-z0-9_-]{2,24})ing\\s+(?:a\\s+|an\\s+|the\\s+)?([a-z][a-z0-9_\\s-]{1,28}?)\\s+means\\s+(?:to\\s+)?(.+)$"
+
+constructions:
+  - id: cxn_en_act
+    construction_name: en_imperative_act
+    language: en
+    intent_type: act
+    syntactic_template: "{action} {target} {direction?}"
+    trigger_tokens: ["push", "move", "grab", "pick up", "pull", "open", "close", "press", "navigate to", "go to", "reach", "touch"]
+    slot_constraints:
+      target: entity
+    semantic_mapping:
+      default_action: act
+      description_template: "Act: {action} on {target_ref}"
+    compiled_hcir_template:
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{act_id}"
+            node_type: action_intent
+            action: "{action}"
+            target_ref: "{target_ref}"
+            priority: "{priority}"
+          author: "{author}"
+      - opcode: EXECUTE
+        cost_estimate: 50
+        params:
+          capability: "motor_{action}"
+          target_entity_id: "{target_ref}"
+          target_ref: "{target_ref}"
+          params:
+            action: "{action}"
+            target: "{target_ref}"
+
+  - id: cxn_en_investigate
+    construction_name: en_investigate
+    language: en
+    intent_type: investigate
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["find why", "investigate", "analyze", "why did", "diagnose"]
+    semantic_mapping:
+      default_action: find_cause
+      description_template: "Investigate: {subject}"
+    compiled_hcir_template:
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{goal_id}"
+            node_type: goal
+            description: "Investigate: {subject} ({action})"
+            priority: "{priority}"
+          author: "{author}"
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          node_type: observation
+          text_contains: "{subject}"
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          node_type: procedure
+          text_contains: "{action_or_subject}"
+      - opcode: EXECUTE
+        cost_estimate: 100
+        params:
+          capability: causal_analysis
+          params:
+            subject: "{subject}"
+            action: "{action}"
+            goal_id: "{goal_id}"
+
+  - id: cxn_en_plan
+    construction_name: en_plan
+    language: en
+    intent_type: plan
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["plan", "how to", "design", "steps for"]
+    semantic_mapping:
+      default_action: plan_steps
+      description_template: "Plan: {subject}"
+    compiled_hcir_template:
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{goal_id}"
+            node_type: goal
+            description: "Plan: {subject}"
+            priority: "{priority}"
+          author: "{author}"
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          node_type: constraint
+      - opcode: EXECUTE
+        cost_estimate: 150
+        params:
+          capability: planning
+          params:
+            goal_id: "{goal_id}"
+            subject: "{subject}"
+
+  - id: cxn_en_create
+    construction_name: en_create
+    language: en
+    intent_type: create
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["create", "build", "generate", "write", "make"]
+    semantic_mapping:
+      default_action: create_item
+      description_template: "Create: {subject}"
+    compiled_hcir_template:
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{goal_id}"
+            node_type: goal
+            description: "Create: {subject}"
+            priority: "{priority}"
+          author: "{author}"
+      - opcode: EXECUTE
+        cost_estimate: 200
+        params:
+          capability: content_generation
+          params:
+            subject: "{subject}"
+            action: "{action}"
+
+  - id: cxn_en_modify
+    construction_name: en_modify
+    language: en
+    intent_type: modify
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["modify", "change", "update", "fix"]
+    semantic_mapping:
+      default_action: modify_item
+      description_template: "Modify: {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject}"
+      - opcode: EXECUTE
+        cost_estimate: 100
+        params:
+          capability: content_modification
+          params:
+            subject: "{subject}"
+            action: "{action}"
+
+  - id: cxn_en_delete
+    construction_name: en_delete
+    language: en
+    intent_type: delete
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["remove", "delete", "clean up"]
+    semantic_mapping:
+      default_action: delete_item
+      description_template: "Delete: {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject}"
+      - opcode: RETRACT
+        cost_estimate: 5
+        params:
+          node_id: "{subject}"
+
+  - id: cxn_en_simulate
+    construction_name: en_simulate
+    language: en
+    intent_type: simulate
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["simulate", "what if", "imagine", "try"]
+    semantic_mapping:
+      default_action: simulate_scenario
+      description_template: "Simulate: {subject}"
+    compiled_hcir_template:
+      - opcode: FORK
+        cost_estimate: 20
+        params:
+          branch_name: "{branch}"
+      - opcode: EXECUTE
+        cost_estimate: 200
+        params:
+          capability: simulation
+          params:
+            scenario: "{subject}"
+            branch: "{branch}"
+      - opcode: MERGE
+        cost_estimate: 20
+        params:
+          branch_name: "{branch}"
+
+  - id: cxn_en_learn
+    construction_name: en_learn
+    language: en
+    intent_type: learn
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["remember", "learn", "note"]
+    semantic_mapping:
+      default_action: learn_fact
+      description_template: "Learn: {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject}"
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{belief_id}"
+            node_type: belief
+            claim: "{subject}"
+            belief_type: learned
+          author: "{author}"
+      - opcode: EXECUTE
+        cost_estimate: 50
+        params:
+          capability: skill_extraction
+          params:
+            subject: "{subject}"
+
+  - id: cxn_en_monitor
+    construction_name: en_monitor
+    language: en
+    intent_type: monitor
+    syntactic_template: "{trigger} {subject}"
+    trigger_tokens: ["watch", "alert me", "track", "monitor"]
+    semantic_mapping:
+      default_action: monitor_state
+      description_template: "Monitor: {subject}"
+    compiled_hcir_template:
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{goal_id}"
+            node_type: goal
+            description: "Monitor: {subject}"
+            priority: "{priority}"
+          author: "{author}"
+      - opcode: WAIT
+        cost_estimate: 5
+        params:
+          condition: "{subject}"
+          timeout_ms: 60000
+
+  - id: cxn_en_query
+    construction_name: en_query
+    language: en
+    intent_type: query
+    syntactic_template: "{subject}"
+    trigger_tokens: []
+    semantic_mapping:
+      default_action: evaluate_prompt
+      description_template: "Query: {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject?}"
+          node_type: "{slot.node_type?}"
+

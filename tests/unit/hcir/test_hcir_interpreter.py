@@ -36,8 +36,21 @@ class TestBytecode:
         assert stream.total_cost_estimate == 15
 
     def test_all_opcodes_exist(self):
-        assert len(Opcode) == 8
-        expected = {"ASSERT", "RETRACT", "QUERY", "EXECUTE", "WAIT", "FORK", "MERGE", "ROLLBACK"}
+        assert len(Opcode) == 12
+        expected = {
+            "ASSERT",
+            "RETRACT",
+            "QUERY",
+            "EXECUTE",
+            "WAIT",
+            "FORK",
+            "MERGE",
+            "ROLLBACK",
+            "UNIFY",
+            "BRANCH",
+            "CALL",
+            "RETURN",
+        }
         assert {o.value for o in Opcode} == expected
 
 

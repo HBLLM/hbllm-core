@@ -40,6 +40,7 @@ class CognitiveSystemRegistry:
     ) -> None:
         self._lock = threading.Lock()
         self._systems: OrderedDict[str, Any] = OrderedDict()
+        self._session_turns: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._max_tenants = max(1, max_tenants)
         self._enable_grounding = enable_grounding
         self.hcir_fallback_count: int = 0
@@ -86,16 +87,70 @@ class CognitiveSystemRegistry:
                 self._systems.popitem(last=False)
             return system
 
+    def record_session_turn(self, tenant_id: str, session_id: str, role: str, content: str) -> None:
+        """Record a dialogue turn scoped to `(tenant_id, session_id)` (bounded to 100 turns)."""
+        if not tenant_id or not session_id or not content:
+            return
+        with self._lock:
+            turns = self._session_turns.setdefault((tenant_id, session_id), [])
+            turns.append({"role": role, "content": content})
+            if len(turns) > 100:
+                del turns[:-100]
+
+    def get_session_turns(
+        self, tenant_id: str, session_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Return recent conversation turns for `(tenant_id, session_id)`."""
+        with self._lock:
+            turns = list(self._session_turns.get((tenant_id, session_id), ()))
+        if limit <= 0:
+            return []
+        return turns[-limit:]
+
+    def list_tenant_rules(self, tenant_id: str) -> list[dict[str, Any]]:
+        """Return learned symbolic rules and innate rule priors for *tenant_id*."""
+        from hbllm.hcir.graph import HCIRNodeType
+
+        system = self.get_or_create(tenant_id)
+        seen: set[str] = set()
+        rules: list[dict[str, Any]] = []
+        for ws in (system.tiered_workspace.brain, system.tiered_workspace.persistent):
+            for node in ws.graph.nodes_by_type(HCIRNodeType.LEARNED_RULE):
+                if node.id in seen:
+                    continue
+                node_tenant = getattr(getattr(node, "scope", None), "tenant_id", tenant_id)
+                sec_lvl = str(getattr(getattr(node, "scope", None), "security_level", "") or "")
+                if node_tenant not in (tenant_id, "default") and sec_lvl.lower() != "system":
+                    continue
+                seen.add(node.id)
+                rules.append(
+                    {
+                        "id": node.id,
+                        "condition": str(getattr(node, "condition", "")),
+                        "prediction": str(getattr(node, "prediction", "")),
+                        "domain": str(getattr(node, "domain", "general")),
+                        "confidence": float(getattr(node, "confidence", 0.5) or 0.5),
+                    }
+                )
+        return rules
+
     async def process_dialogue(
         self,
         tenant_id: str,
         text: str,
         *,
+        session_id: str = "default_session",
         speaker_id: str = "human",
     ) -> Any:
         """Execute synchronous HCIR dialogue turn in FastAPI's worker threadpool."""
         system = self.get_or_create(tenant_id)
-        return await run_in_threadpool(system.process_dialogue, text, speaker_id=speaker_id)
+        result = await run_in_threadpool(system.process_dialogue, text, speaker_id=speaker_id)
+        if bool(getattr(result, "is_success", False)):
+            resp_text = str(getattr(result, "response_text", "") or "")
+            if resp_text:
+                self.record_session_turn(tenant_id, session_id, "user", text)
+                self.record_session_turn(tenant_id, session_id, "assistant", resp_text)
+        return result
 
     def record_fallback(self) -> int:
         """Increment and return the count of Pure-HCIR fast-path exceptions."""
@@ -107,6 +162,7 @@ class CognitiveSystemRegistry:
         """Drop all cached per-tenant runtimes (primarily for test isolation)."""
         with self._lock:
             self._systems.clear()
+            self._session_turns.clear()
             self.hcir_fallback_count = 0
 
 

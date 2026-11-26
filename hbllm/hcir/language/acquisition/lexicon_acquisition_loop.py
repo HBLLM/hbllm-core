@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from hbllm.hcir.graph import CognitiveGraph
+from hbllm.hcir.graph import CognitiveGraph, ConstructionNode, NodeLifecycle
 from hbllm.hcir.grounding.concepts.registry import GroundedConceptRegistry
 from hbllm.hcir.language.acquisition.contrastive_learner import ContrastiveLearner
 from hbllm.hcir.language.acquisition.cross_situational_learner import CrossSituationalLearner
@@ -25,6 +25,8 @@ from hbllm.hcir.language.acquisition.lexical_hypothesis import (
     LexicalTargetType,
 )
 from hbllm.hcir.language.acquisition.ostensive_teacher import OstensiveTeacher
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.types import Provenance, Scope
 
 logger = logging.getLogger(__name__)
 
@@ -199,3 +201,58 @@ class LexiconAcquisitionLoop:
     ) -> RealizationResult:
         """Realize meaning to language token (generation)."""
         return self._lexicon.realize_target(target_id, target_type=target_type, language=language)
+
+    def learn_verb_construction(
+        self,
+        verb_token: str,
+        skill_id: str,
+        *,
+        workspace: Any,
+        language: str = "en",
+        tenant_id: str = "default",
+    ) -> ConstructionNode:
+        """Persist a learned `(verb_token <-> CALL(skill_id))` `ConstructionNode` transactionally."""
+        clean = verb_token.strip().lower()
+        tpl: list[dict[str, Any]] = [
+            {
+                "opcode": "UNIFY",
+                "cost_estimate": 5,
+                "params": {"pattern": {"id": "{target_ref}"}, "bind": "$r0"},
+            },
+            {
+                "opcode": "CALL",
+                "cost_estimate": 15,
+                "params": {
+                    "skill_id": skill_id,
+                    "args": {"target": "$r0", "target_ref": "{target_ref}"},
+                    "bind": "$r1",
+                },
+            },
+            {"opcode": "RETURN", "params": {"yield": ["$r1"]}},
+        ]
+        cxn = ConstructionNode(
+            id=f"cxn_{language}_{clean}",
+            construction_name=f"acquired_{clean}",
+            language=language,
+            intent_type="act",
+            syntactic_template="{action} {target}",
+            trigger_tokens=[clean],
+            semantic_mapping={"default_action": clean},
+            compiled_hcir_template=tpl,
+            alpha_success=2.0,
+            beta_failure=1.0,
+            lifecycle=NodeLifecycle.ACTIVE,
+            provenance=Provenance(created_by="lexicon_acquisition"),
+            scope=Scope(tenant_id=tenant_id),
+            tags=["learned_construction", clean],
+        )
+        workspace.commit_operations(
+            [
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE, node_id=cxn.id, node_data=cxn.model_dump()
+                )
+            ],
+            author="lexicon_acquisition",
+            tenant_id=tenant_id,
+        )
+        return cxn

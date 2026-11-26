@@ -589,11 +589,20 @@ class CognitiveBlackbox:
         blackbox.update(action, feedback)
     """
 
-    def __init__(self, workspace: HCIRWorkspaceState | None = None) -> None:
-        self.workspace = workspace or HCIRWorkspaceState()
+    def __init__(
+        self,
+        workspace: HCIRWorkspaceState | None = None,
+        *,
+        system: Any | None = None,
+        tenant_id: str = "default",
+        memory_dir: Path | str | None = None,
+        enable_grounding: bool = True,
+    ) -> None:
+        self.tenant_id = tenant_id
+        self._memory_dir = Path(memory_dir) if memory_dir is not None else None
+        self._enable_grounding = enable_grounding
         self.spatial_planner = HCIRSpatialEntityPlanner()
         self.goal_decomposer = HierarchicalGoalDecomposer()
-        self.learning_loop = LearningLoopEngine(self.workspace)
         self.state = AgentState()
 
         # Core interventional causal discovery, affordance learning, and active inference
@@ -632,6 +641,17 @@ class CognitiveBlackbox:
         self._cognitive_systems: dict[str, Any] = {}
         self._observation_adapter: Any | None = None
 
+        if system is not None:
+            self._cognitive_systems["default"] = system
+            self._epistemic_engines["default"] = system.engine
+            self.workspace = workspace if workspace is not None else system.workspace
+        elif workspace is not None:
+            self.workspace = workspace
+        else:
+            default_sys = self.get_cognitive_system("default")
+            self.workspace = default_sys.workspace
+        self.learning_loop = LearningLoopEngine(self.workspace)
+
     @property
     def epistemic_engine(self) -> AutonomousEpistemicEngine:
         """Return the default AutonomousEpistemicEngine bound to this blackbox."""
@@ -642,12 +662,82 @@ class CognitiveBlackbox:
         if source_id not in self._cognitive_systems:
             from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
+            mem_dir = (self._memory_dir / source_id) if self._memory_dir is not None else None
             system = build_cognitive_system(
-                CognitiveSystemConfig(world_id=source_id, memory_dir=None, enable_grounding=True)
+                CognitiveSystemConfig(
+                    world_id=source_id,
+                    memory_dir=mem_dir,
+                    tenant_id=self.tenant_id,
+                    enable_grounding=self._enable_grounding,
+                )
             )
             self._cognitive_systems[source_id] = system
             self._epistemic_engines[source_id] = system.engine
         return self._cognitive_systems[source_id]
+
+    def adapt_to_observation(
+        self,
+        driver_input: DriverInput,
+        available_actions: list[DriverAction] | None = None,
+        perception_data: dict[str, Any] | None = None,
+    ) -> Any:
+        """Convert a `DriverInput` + optional perception payload into an `EmbodiedObservation`."""
+        from hbllm.hcir.world.percept import EmbodiedObservation
+
+        source_id = driver_input.source_id or "default"
+        raw = (
+            perception_data.get("grid")
+            if perception_data and "grid" in perception_data
+            else driver_input.raw_data
+        )
+        lattice: np.ndarray | None = None
+        if raw is not None:
+            arr = np.asarray(raw)
+            if arr.ndim >= 1 and arr.size > 0 and np.issubdtype(arr.dtype, np.number):
+                lattice = arr
+        meta = dict(driver_input.metadata or {})
+        if perception_data:
+            for k, v in perception_data.items():
+                if k != "grid" and k not in meta:
+                    meta[k] = v
+        avail = [a.action_id for a in (available_actions or ())]
+        return EmbodiedObservation(
+            lattice=lattice,
+            available_actions=avail,
+            context_id=source_id,
+            metadata=meta,
+        )
+
+    def step(
+        self,
+        driver_input: DriverInput,
+        available_actions: list[DriverAction],
+        perception_data: dict[str, Any] | None = None,
+    ) -> DriverAction:
+        """Execute a full cognitive step via the canonical `CognitiveSystem` (`build_cognitive_system`)."""
+        source_id = driver_input.source_id or "default"
+        system = self.get_cognitive_system(source_id)
+        engine = system.engine
+        state = self.get_state(source_id)
+        obs = self.adapt_to_observation(driver_input, available_actions, perception_data)
+        chosen_id, _ = engine.step(obs, last_action=state.last_action_id)
+
+        state.step_count += 1
+        state.last_action_id = chosen_id
+        theory = engine.symbolic_theory
+        state.learned_obstacle_features.update(theory.barrier_features)
+        state.learned_traversable_features.update(theory.walkable_features)
+        state.learned_target_features.update(theory.goal_features)
+        if engine.avatar_feature is not None:
+            state.avatar_feature = engine.avatar_feature
+        for act_id, dyn in engine.action_dynamics.items():
+            if isinstance(act_id, int):
+                state.action_models[act_id] = dyn
+
+        for avail in available_actions:
+            if avail.action_id == chosen_id:
+                return avail
+        return available_actions[0] if available_actions else DriverAction(action_id=chosen_id)
 
     @property
     def observation_adapter(self) -> Any:
@@ -908,17 +998,25 @@ class CognitiveBlackbox:
 
     def _upsert_var(self, name: str, value: Any) -> None:
         """Upsert a WorldVariableNode into the workspace graph."""
+        from hbllm.hcir.types import Scope
+
+        eff_tenant = getattr(self.workspace, "tenant_id", None) or self.tenant_id or "default"
         existing = self.workspace.graph.get_node(name)
         if isinstance(existing, WorldVariableNode):
             op = TransactionOperation(
                 op=TransactionOp.MODIFY_NODE, node_id=name, changes={"value": value}
             )
         else:
-            node = WorldVariableNode(id=name, variable_name=name, value=value)
+            node = WorldVariableNode(
+                id=name,
+                variable_name=name,
+                value=value,
+                scope=Scope(tenant_id=eff_tenant),
+            )
             op = TransactionOperation(
                 op=TransactionOp.UPSERT_NODE, node_id=name, node_data=node.model_dump()
             )
-        self.workspace.commit_operations([op], author="cognitive_blackbox")
+        self.workspace.commit_operations([op], author="cognitive_blackbox", tenant_id=eff_tenant)
 
     # ── Observation (Input) ───────────────────────────────────────────────
 
@@ -3033,6 +3131,11 @@ class CognitiveBlackbox:
 
         self._source_entity_graphs.pop(source_id, None)
         self.spatial_planner.reset(is_retry=is_retry)
+        if source_id in self._epistemic_engines:
+            self._epistemic_engines[source_id].reset_episode(
+                retain_dynamics=retain_memory,
+                is_new_context=not is_retry,
+            )
 
     # ── Knowledge Graph Persistence ───────────────────────────────────────
 

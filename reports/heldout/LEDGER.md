@@ -26,3 +26,4 @@ Append-only audit log of official held-out evaluations.
 |---|---|---|---|---|---|---|---|---|
 | 20261117_054729 | `f0587fc1` | `eval-phase2-r9` | `b14d80e89bc8cc3e` | `fc495a2dba8a1a49` | handcrafted | 0.6472 (sr=0.6083, CI=[0.5189, 0.691]) | 0.6930 (CI=[0.6032, 0.7702]) | `f0587fc183b07a732fb7886d4b4bb3473f79c730_handcrafted_20261117_054729.json` |
 | 20261121_070917 | `a26f09bd` | `eval-phase2-r10` | `ab50c10ca4881dae` | `aec58d7269d2cd6d` | handcrafted | 0.8236 (sr=0.9250, CI=[0.8636, 0.96]) | 0.9035 (CI=[0.8354, 0.9453]) | `a26f09bd4605752d9b2a3cc5c298b29c634dd420_handcrafted_20261121_070917.json` |
+| 20261126_112547 | `072b4cb1` | `eval-phase3-final` | `ab50c10ca4881dae` | `aec58d7269d2cd6d` | handcrafted | 0.8359 (sr=0.9417, CI=[0.8845, 0.9715]) | 0.9035 (CI=[0.8354, 0.9453]) | `072b4cb1cc429d9959fc48abe879b8e3be1432d0_handcrafted_20261126_112547.json` |
