@@ -421,7 +421,7 @@ def test_node_budget_consolidation_preserves_system_priors_and_tenant_scope(tmp_
             enable_grounding=False,
         )
     )
-    ws = system.tiered_workspace.persistent
+    ws = system.tiered_workspace.brain
     assert ws.graph.get_node("prior_skill_count_entities") is not None
 
     prior_ids = [n.id for n in ws.graph.all_nodes()]
@@ -442,10 +442,14 @@ def test_node_budget_consolidation_preserves_system_priors_and_tenant_scope(tmp_
                 node_data=node.model_dump(),
             )
         )
-    ws.commit_operations(low_ops, author="test_writer", tenant_id=tenant)
+    grant = system.tiered_workspace._system_grant
+    commit_res = ws.commit_operations(
+        low_ops, author="core_priors_loader", grant=grant, tenant_id=tenant
+    )
+    assert commit_res.is_committed
 
     cap = len(prior_ids) + 4
-    evicted = ws.consolidate_node_budget(max_nodes=cap)
+    evicted = ws.consolidate_node_budget(max_nodes=cap, grant=grant)
     assert len(evicted) >= 12
     assert "prior_skill_count_entities" not in evicted
     assert ws.graph.get_node("prior_skill_count_entities") is not None

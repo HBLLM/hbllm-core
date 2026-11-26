@@ -237,6 +237,8 @@ def _mount_archived_experiments_for_tests() -> None:
     mounts = {
         "hbllm.actions": exp_root / "legacy_actions",
         "hbllm.perception": exp_root / "legacy_perception",
+        "hbllm.perception.providers": exp_root / "legacy_perception" / "providers",
+        "hbllm.perception.adapters": exp_root / "legacy_perception" / "adapters",
         "hbllm.experiment": exp_root / "hbllm_experiment",
         "hbllm.brain.composites": exp_root / "legacy_brain" / "composites",
         "hbllm.brain.continual": exp_root / "legacy_brain" / "continual",
