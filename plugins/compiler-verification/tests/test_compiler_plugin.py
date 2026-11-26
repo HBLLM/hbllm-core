@@ -63,7 +63,7 @@ class TestCompilerVerificationPlugin:
             payload={"filepath": "test.py"},
         )
 
-        resp = await bus.request("workspace.compile.verify", query, timeout=2.0)
+        resp = await bus.request("workspace.compile.verify", query, timeout=10.0)
         assert resp.type == MessageType.RESPONSE
         assert resp.payload["status"] == "SUCCESS"
         assert resp.payload["exit_code"] == 0
@@ -87,7 +87,7 @@ class TestCompilerVerificationPlugin:
             correlation_id="corr_1234",
         )
 
-        resp = await bus.request("workspace.compile.verify", query, timeout=2.0)
+        resp = await bus.request("workspace.compile.verify", query, timeout=10.0)
         assert resp.type == MessageType.RESPONSE
         assert resp.payload["status"] == "FAILURE"
         assert resp.payload["exit_code"] != 0

@@ -977,7 +977,12 @@ class PrefrontalWorkingMemory:
             sub_cnt = len(skill.program.subgoals) if skill.program is not None else 0
             node = node.model_copy(
                 update={
-                    "properties": {**node.properties, "schema_name": name, "subgoal_count": sub_cnt}
+                    "description": node.description or f"Procedural skill for {name}",
+                    "properties": {
+                        **node.properties,
+                        "schema_name": name,
+                        "subgoal_count": sub_cnt,
+                    },
                 }
             )
             ops.append(

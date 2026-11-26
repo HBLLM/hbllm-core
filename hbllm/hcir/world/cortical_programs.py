@@ -267,6 +267,15 @@ def _select_pure_stage_action(
             "mental_plan",
         )
 
+    signal_plan_act = ctx.signals.get("mental_plan_action")
+    if signal_plan_act is not None:
+        return (
+            signal_plan_act,
+            {"source": "mental_plan_signal", "phase": EpistemicPhase.EXPLOITATION.value},
+            EpistemicPhase.EXPLOITATION,
+            "mental_plan_signal",
+        )
+
     goal_cells: list[tuple[int, int]] = list(ctx.learned_goal_positions)
     lethal_cells: list[tuple[int, int]] = list(ctx.current_context_hazards)
     blocked_cells: list[tuple[int, int]] = list(ctx.learned_barriers)
