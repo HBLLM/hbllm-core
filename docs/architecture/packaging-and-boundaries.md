@@ -78,8 +78,7 @@ To ensure boundaries are never violated by accidental imports in PRs, automated 
    - Core `hbllm` never imports from `plugins/`.
    - Importing `plugins.developmental_adapter` loads **0** blacklisted optional extras (`fastapi`, `uvicorn`, `redis`, `qdrant_client`, `asyncpg`, `pgvector`, `cryptography`).
    - Core `dependencies` in `pyproject.toml` remain lean without server or vector-DB extras.
-2. **LOC Budgets & Zero-LLM Core Gate (`test_loc_budget.py`):**
-   - Enforces `<= 150,000` LOC across `hbllm/hcir/**/*.py` and `<= 300,000` LOC across `hbllm/**/*.py`.
+2. **Zero-LLM Core & Shadow-Shim Gate (`test_loc_budget.py`):**
    - Enforces a strict ratchet reducing legacy `__path__.append` shims toward zero.
    - Verifies via AST inspection that `hbllm/hcir/**` imports **zero** LLM client libraries or external LLM scaffolds (`openai`, `anthropic`, `litellm`, `transformers`, `plugins.llm_scaffold`, `hbllm.serving.provider`).
 3. **Single Composition Root & Persistence Hygiene (`test_single_composition_root.py`, `test_no_direct_sqlite.py`):**

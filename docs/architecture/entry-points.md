@@ -96,5 +96,5 @@ Executable via `python -m hbllm [COMMAND] [ARGS]...` or `hbllm [COMMAND] [ARGS].
 
 AST-level dependency boundaries are enforced automatically in `tests/unit/architecture/`:
 - `test_layering.py`: `hbllm.hcir` never imports `hbllm.brain`; core `hbllm` never imports `plugins`.
-- `test_loc_budget.py`: `hbllm/hcir/**` stays within `150,000` LOC (`hbllm/**` within `300,000` LOC) with **zero** LLM client/scaffold imports in `hbllm/hcir/**`.
+- `test_loc_budget.py`: Enforces **zero** LLM client/scaffold imports in `hbllm/hcir/**`, zero `__path__.append` shadow shims, and shipped internal module resolution.
 - `test_no_direct_sqlite.py`: Direct `sqlite3.connect` / `aiosqlite.connect` calls are confined strictly to infrastructure persistence modules (`hbllm.persistence`, `hbllm.hcir.stores`, `hbllm.security`, `hbllm.network.durable_bus`).

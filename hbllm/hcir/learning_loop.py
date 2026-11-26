@@ -102,13 +102,17 @@ class LearningLoopEngine:
     """Orchestrates the cognitive reflection and skill induction loop."""
 
     def __init__(
-        self, workspace: HCIRWorkspaceState, transaction_manager: Any | None = None
+        self,
+        workspace: HCIRWorkspaceState,
+        transaction_manager: Any | None = None,
+        library_learner: Any | None = None,
     ) -> None:
         from hbllm.hcir.kernel.transaction_manager import TransactionManager
 
         self._workspace = workspace
         self._tx_manager = transaction_manager or TransactionManager(workspace)
         self._skill_compiler = SkillCompiler()
+        self._library_learner = library_learner
         self._history: list[CognitiveReflectionOutcome] = []
 
     def evaluate_receipt(
@@ -159,15 +163,17 @@ class LearningLoopEngine:
         if not outcome.should_extract_skill:
             return None
 
+        eff_tenant = receipt.author or "default"
         skill_node = self._skill_compiler.compile_receipt_to_skill(
             receipt=receipt,
             skill_name=outcome.learned_skill_name,
             description=outcome.description,
-            tenant_id=receipt.author or "default",
+            tenant_id=eff_tenant,
             source_stream=source_stream,
         )
         tx = HCIRTransaction(
             author=author,
+            tenant_id=eff_tenant,
             operations=[
                 TransactionOperation(
                     op=TransactionOp.ADD_NODE,
@@ -178,4 +184,8 @@ class LearningLoopEngine:
             provenance=Provenance(created_by=author),
         )
         res = self._tx_manager.commit(tx)
+        if res.is_committed and self._library_learner is not None:
+            record_fn = getattr(self._library_learner, "record_receipt", None)
+            if callable(record_fn):
+                record_fn(receipt, source_stream=source_stream, tenant_id=eff_tenant)
         return tx if res.is_committed else None

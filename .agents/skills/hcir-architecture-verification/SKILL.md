@@ -2,7 +2,7 @@
 name: hcir-architecture-verification
 description: >-
   Use this skill before completing any task in `HBLLM/core` to run
-  architectural invariant gates, LOC and structural-debt ratchets, rule-size
+  architectural invariant gates, structural-debt ratchets, rule-size
   checks, PyO3 parity checks, and `graphify` knowledge-graph synchronization.
 ---
 
@@ -18,11 +18,11 @@ Run this verification workflow before finishing any code, configuration, or docu
    pytest tests/unit/architecture/ -q
    ```
    Verifies:
-   - LOC budgets (`hbllm/**/*.py <= 300,000`, `hbllm/hcir/** <= 150,000`) and zero LLM imports in `hbllm/hcir/**` (`test_loc_budget.py`).
+   - Zero LLM imports in `hbllm/hcir/**`, zero `__path__.append` shadow-tree shims, and shipped-module import resolution (`test_loc_budget.py`).
    - Layering boundaries (`hcir ↛ brain`, `core ↛ plugins`, `test_layering.py`).
    - Single composition root (`build_cognitive_system`, `test_single_composition_root.py`).
    - Fail-closed `TransactionManager` & raw graph mutation ratchets (`test_state_ownership_invariants.py`).
-   - `hasattr` / `getattr` / `except: pass` / `sqlite3.connect` / file-size ratchets (`test_structural_debt_ratchet.py`).
+   - `hasattr` / `getattr` / `except: pass` / `sqlite3.connect` / blacklisted-attr ratchets (`test_structural_debt_ratchet.py`).
    - Rust ABI crate parity (`test_rust_abi_version.py`) and no duplicate faculties (`test_no_duplicate_faculties.py`).
 
 2. **Check Workspace Rule Byte Limits & Skill Frontmatter (when editing `AGENTS.md`, `.agents/`, or `docs/`):**

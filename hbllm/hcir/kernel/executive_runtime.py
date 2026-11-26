@@ -98,6 +98,22 @@ class ExecutiveRuntime:
     def is_idle_consolidated(self) -> bool:
         return self._is_idle_consolidated
 
+    def _record_journal_event(self, *, author: str, session_id: str, data: dict[str, Any]) -> None:
+        journal = self._services.cognitive_journal
+        if journal is None:
+            return
+        from hbllm.hcir.cognitive_journal import CognitiveEvent
+        from hbllm.hcir.semantic_normalizer import CognitiveEventKind
+
+        journal.record(
+            CognitiveEvent(
+                kind=CognitiveEventKind.COGNITIVE_STATE_CHANGED,
+                author=author,
+                session_id=session_id,
+                data=data,
+            )
+        )
+
     async def start(self) -> None:
         """Start the executive runtime lifecycle daemon."""
         if self._is_running:
@@ -140,24 +156,15 @@ class ExecutiveRuntime:
         self._state.active_cycle_id = f"cycle_{self._state.cycle_count}"
         self._state.branch_mode = branch_mode
 
-        # Log cycle start to journal if available
-        journal = self._services.cognitive_journal
-        if journal is not None:
-            from hbllm.hcir.cognitive_journal import CognitiveEvent
-            from hbllm.hcir.semantic_normalizer import CognitiveEventKind
-
-            journal.record(
-                CognitiveEvent(
-                    kind=CognitiveEventKind.COGNITIVE_STATE_CHANGED,
-                    author="executive_runtime",
-                    session_id=self._session_id,
-                    data={
-                        "cycle_id": self._state.active_cycle_id,
-                        "cycle_count": self._state.cycle_count,
-                        "branch_mode": branch_mode.value,
-                    },
-                )
-            )
+        self._record_journal_event(
+            author="executive_runtime",
+            session_id=self._session_id,
+            data={
+                "cycle_id": self._state.active_cycle_id,
+                "cycle_count": self._state.cycle_count,
+                "branch_mode": branch_mode.value,
+            },
+        )
 
         result = await self._controller.run_cycle(candidate_actions=candidate_actions)
 
@@ -200,49 +207,21 @@ class ExecutiveRuntime:
         if tiered is not None:
             tiered.create_task_frame(f"session_{session_id}")
 
-        journal = self._services.cognitive_journal
-        if journal is not None:
-            from hbllm.hcir.cognitive_journal import CognitiveEvent
-            from hbllm.hcir.semantic_normalizer import CognitiveEventKind
-
-            journal.record(
-                CognitiveEvent(
-                    kind=CognitiveEventKind.COGNITIVE_STATE_CHANGED,
-                    author="executive_runtime",
-                    session_id=session_id,
-                    data={"event": "session_started"},
-                )
-            )
+        self._record_journal_event(
+            author="executive_runtime", session_id=session_id, data={"event": "session_started"}
+        )
 
         logger.info("Session started: %s", session_id)
 
     async def end_session(self) -> int:
-        """End the current cognitive session.
-
-        Archives brain workspace contents to persistent storage
-        and closes active task frames.
-
-        Returns:
-            Number of nodes archived from brain to persistent.
-        """
-        archived = 0
+        """End the current cognitive session and archive brain workspace to persistent storage."""
         tiered = self._services.tiered_workspace
-        if tiered is not None:
-            archived = tiered.archive_brain()
-
-        journal = self._services.cognitive_journal
-        if journal is not None:
-            from hbllm.hcir.cognitive_journal import CognitiveEvent
-            from hbllm.hcir.semantic_normalizer import CognitiveEventKind
-
-            journal.record(
-                CognitiveEvent(
-                    kind=CognitiveEventKind.COGNITIVE_STATE_CHANGED,
-                    author="executive_runtime",
-                    session_id=self._session_id,
-                    data={"event": "session_ended", "archived_count": archived},
-                )
-            )
+        archived = tiered.archive_brain() if tiered is not None else 0
+        self._record_journal_event(
+            author="executive_runtime",
+            session_id=self._session_id,
+            data={"event": "session_ended", "archived_count": archived},
+        )
 
         logger.info("Session ended: %s (archived %d nodes)", self._session_id, archived)
         self._session_id = ""
@@ -292,6 +271,12 @@ class ExecutiveRuntime:
         """Bind the DreamCoder LibraryLearner instance."""
         self._library_learner = learner
 
+    def _run_guarded(self, label: str, fn: Any) -> None:
+        try:
+            fn()
+        except Exception as exc:
+            logger.debug("%s error during offline consolidation: %s", label, exc)
+
     async def run_offline_consolidation(self) -> Any | None:
         """Execute an offline idle consolidation cycle.
 
@@ -299,7 +284,9 @@ class ExecutiveRuntime:
         1. Hippocampal replay of recent episodic traces
         2. Concept maintenance (splits/merges) in ConceptLearner
         3. Schema and hypothesis pruning in HCIRSymbolicWorldTheory
-        4. State snapshotting and persistent tier commit under author='offline_consolidation'
+        4. Procedural skill & wake-sleep DreamCoder anti-unification consolidation
+        5. Memory hygiene & principled forgetting (decay and interference pruning)
+        6. State snapshotting and persistent tier commit under author='offline_consolidation'
         """
         from hbllm.hcir.kernel.protocols import (
             ConceptMaintainable,
@@ -311,67 +298,70 @@ class ExecutiveRuntime:
 
         # 1. Hippocampal replay & mPFC schema consolidation (CLS)
         if isinstance(self._episodic_cortex, Replayable):
-            try:
-                trajectories = getattr(self._episodic_cortex, "successful_trajectories", [])
-                if not trajectories:
-                    trajectories = getattr(self._episodic_cortex, "past_episodes", [])
-                for traj in trajectories[-3:]:
+
+            def _replay_step() -> None:
+                trajs = getattr(self._episodic_cortex, "successful_trajectories", []) or getattr(
+                    self._episodic_cortex, "past_episodes", []
+                )
+                mpfc = getattr(self._engine, "mpfc_schema_engine", None)
+                for traj in trajs[-3:]:
                     if traj:
                         self._episodic_cortex.replay_forward_and_reverse(traj, terminal_reward=1.0)
-                        mpfc = getattr(self._engine, "mpfc_schema_engine", None)
                         if mpfc is not None:
                             mpfc.consolidate_replayed_trajectory(traj, terminal_reward=1.0)
-            except Exception as exc:
-                logger.debug("Hippocampal replay error during offline consolidation: %s", exc)
+
+            self._run_guarded("Hippocampal replay", _replay_step)
 
         # 2. Concept maintenance
         if isinstance(self._concept_learner, ConceptMaintainable):
-            try:
-                self._concept_learner.maintain()
-            except Exception as exc:
-                logger.debug("Concept maintenance error during offline consolidation: %s", exc)
+            self._run_guarded("Concept maintenance", self._concept_learner.maintain)
 
         # 3. Schema pruning
         theory = getattr(self._engine, "symbolic_theory", None)
         if isinstance(theory, Prunable):
-            try:
-                theory.prune_stale_hypotheses()
-            except Exception as exc:
-                logger.debug("Schema pruning error during offline consolidation: %s", exc)
+            self._run_guarded("Schema pruning", theory.prune_stale_hypotheses)
 
-        # 4. Procedural skill & option consolidation (working_memory.procedural_library + option_discovery)
+        # 4. Procedural skill, option consolidation, & DreamCoder sleep library learning
         if self._engine is not None:
             wm = getattr(self._engine, "working_memory", None)
             opt_eng = getattr(self._engine, "option_discovery", None)
             discovered = getattr(opt_eng, "discovered_options", None)
             if wm is not None and isinstance(discovered, dict):
-                try:
-                    for opt_id, opt in discovered.items():
-                        if opt_id not in getattr(wm, "procedural_library", {}):
-                            to_skill = getattr(opt, "to_declarative_skill", None)
-                            if callable(to_skill):
-                                wm.register_procedural_skill(opt_id, to_skill())
-                except Exception as exc:
-                    logger.debug("Procedural skill consolidation error: %s", exc)
 
-        learner = self._library_learner
-        if learner is None and self._engine is not None:
-            learner = getattr(self._engine, "library_learner", None)
+                def _proc_step() -> None:
+                    for oid, opt in discovered.items():
+                        if oid not in getattr(wm, "procedural_library", {}) and callable(
+                            fn := getattr(opt, "to_declarative_skill", None)
+                        ):
+                            wm.register_procedural_skill(oid, fn())
+
+                self._run_guarded("Procedural skill consolidation", _proc_step)
+
+        learner = self._library_learner or (
+            getattr(self._engine, "library_learner", None) if self._engine else None
+        )
         if isinstance(learner, SleepConsolidatable):
-            try:
+
+            def _sleep_step() -> None:
+                if self._episodic_cortex is not None and callable(
+                    ingest_fn := getattr(learner, "ingest_episodic_trajectories", None)
+                ):
+                    ingest_fn(
+                        getattr(self._episodic_cortex, "successful_trajectories", None) or [],
+                        abstract_surface=True,
+                    )
                 learner.sleep_consolidation(
-                    self._services.tiered_workspace,
+                    self._services.tiered_workspace or self._services.workspace,
                     tenant_id=self._state.tenant_id,
                 )
-            except Exception as exc:
-                logger.debug("Library learning sleep consolidation error: %s", exc)
 
-        # 5. Memory hygiene & principled forgetting (decay and interference pruning)
+            self._run_guarded("Library learning sleep consolidation", _sleep_step)
+
+        # 5. Memory hygiene & principled forgetting
         if self._services.tiered_workspace is not None:
-            try:
-                self._services.tiered_workspace.run_memory_hygiene_cycle()
-            except Exception as exc:
-                logger.debug("Memory hygiene error during offline consolidation: %s", exc)
+            self._run_guarded(
+                "Memory hygiene", self._services.tiered_workspace.run_memory_hygiene_cycle
+            )
 
         # 6. Propose and commit consolidation state
         dest_ws = None
@@ -391,12 +381,14 @@ class ExecutiveRuntime:
 
             from hbllm.hcir.nodes import ConceptNode
             from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+            from hbllm.hcir.types import Scope
 
             marker = ConceptNode(
                 id=f"consolidation_marker_{self._consolidation_count + 1}",
                 label=f"consolidation_{self._consolidation_count + 1}",
                 definition="Offline idle consolidation snapshot",
                 domain="cognitive_maintenance",
+                scope=Scope(tenant_id=self._state.tenant_id),
                 properties={
                     "timestamp": time.time(),
                     "consolidation_index": self._consolidation_count + 1,
@@ -419,10 +411,21 @@ class ExecutiveRuntime:
             filter_fn = getattr(self._engine, "_filter_unchanged_upserts", None)
             if callable(filter_fn):
                 ops = filter_fn(dest_ws, ops)
+            if self._state.tenant_id and self._state.tenant_id != "default":
+                target_scope = Scope(tenant_id=self._state.tenant_id).model_dump()
+                for op in ops:
+                    nd = getattr(op, "node_data", None)
+                    if isinstance(nd, dict):
+                        sc = nd.get("scope")
+                        if not isinstance(sc, dict) or sc.get("tenant_id", "default") == "default":
+                            nd["scope"] = dict(target_scope)
             batch_size = 400
             for i in range(0, len(ops), batch_size):
                 tx = dest_ws.commit_operations(
-                    ops[i : i + batch_size], author="offline_consolidation", grant=grant
+                    ops[i : i + batch_size],
+                    author="offline_consolidation",
+                    grant=grant,
+                    tenant_id=self._state.tenant_id,
                 )
             if tiered is not None:
                 tiered.notify_commit()
@@ -430,24 +433,15 @@ class ExecutiveRuntime:
         self._consolidation_count += 1
         self._is_idle_consolidated = True
 
-        # Log to journal
-        journal = self._services.cognitive_journal
-        if journal is not None:
-            from hbllm.hcir.cognitive_journal import CognitiveEvent
-            from hbllm.hcir.semantic_normalizer import CognitiveEventKind
-
-            journal.record(
-                CognitiveEvent(
-                    kind=CognitiveEventKind.COGNITIVE_STATE_CHANGED,
-                    author="offline_consolidation",
-                    session_id=self._session_id,
-                    data={
-                        "event": "offline_consolidation_completed",
-                        "consolidation_count": self._consolidation_count,
-                        "transaction_id": getattr(tx, "id", ""),
-                    },
-                )
-            )
+        self._record_journal_event(
+            author="offline_consolidation",
+            session_id=self._session_id,
+            data={
+                "event": "offline_consolidation_completed",
+                "consolidation_count": self._consolidation_count,
+                "transaction_id": getattr(tx, "id", ""),
+            },
+        )
 
         logger.info(
             "Offline consolidation #%d committed (author='offline_consolidation')",

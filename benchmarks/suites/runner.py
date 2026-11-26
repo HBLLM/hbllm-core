@@ -31,7 +31,11 @@ import yaml
 
 from hbllm.benchmarks.protocol import EvaluationProtocol, TaskResult, wilson_ci
 from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind, TerminalSignal
-from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
+from hbllm.runtime.bootstrap import (
+    CognitiveSystemConfig,
+    build_cognitive_system,
+    count_consolidated_skills,
+)
 
 _DEATH_REASONS = frozenset({"hazard_collision", "died", "lava", "trap", "failure", "fatal"})
 
@@ -539,8 +543,10 @@ def run_closed_loop_task(
         xs_deaths = 0
         xs_exploration_deaths = 0
         with tempfile.TemporaryDirectory() as tmp_dir:
+            xs_sys = None
             if baseline in ("system", "no_grounding"):
-                xs_engine = _make_system(tmp_dir, f"xseed_{baseline}", baseline == "system").engine
+                xs_sys = _make_system(tmp_dir, f"xseed_{baseline}", baseline == "system")
+                xs_engine = xs_sys.engine
             elif baseline == "fatal_memory_bfs":
                 from benchmarks.baselines import FatalMemoryBFSAgent
 
@@ -604,11 +610,21 @@ def run_closed_loop_task(
                 xs_succ.append(ok)
                 xs_steps.append(st)
                 prev_ok = ok
-            wm = getattr(xs_engine, "working_memory", None)
-            proc_lib = getattr(wm, "procedural_library", None) or {}
-            opt_eng = getattr(xs_engine, "option_discovery", None)
-            disc_opts = getattr(opt_eng, "discovered_options", None) or {}
-            skills = len(set(proc_lib.keys()) | set(disc_opts.keys()))
+            if hasattr(xs_engine, "on_boundary"):
+                try:
+                    xs_engine.on_boundary(
+                        EpisodeBoundary(
+                            kind=(
+                                EpisodeBoundaryKind.LEVEL_COMPLETE
+                                if prev_ok
+                                else EpisodeBoundaryKind.DEATH
+                            ),
+                            same_level=False,
+                        )
+                    )
+                except Exception as e:
+                    all_errors.append(f"Cross-seed final boundary error: {e}")
+            skills = count_consolidated_skills(xs_sys if xs_sys is not None else xs_engine)
         n_xs = len(xs_succ)
         k_xs = sum(xs_succ)
         k_tr = sum(xs_succ[1:])

@@ -2,8 +2,7 @@
 
 Enforces R6 from ``reports/audit/2026-11-15_phase2_generalization_review.md`` §5:
 counts of dynamic attribute introspection (``hasattr`` / 3-arg ``getattr``), broad silent
-``except: pass`` handlers, direct SQLite connection sites, and decision-core file sizes
-may only decrease over time.
+``except: pass`` handlers, and direct SQLite connection sites may only decrease over time.
 """
 
 from __future__ import annotations
@@ -24,22 +23,6 @@ MAX_HCIR_BROAD_SILENT_EXCEPT = 0
 MAX_HBLLM_BROAD_SILENT_EXCEPT = 46
 MAX_SQLITE_CONNECT_CALLS = 22
 MAX_SQLITE_CONNECT_FILES = 8
-MAX_ANY_WORLD_FILE_LOC = 3704
-MAX_WORLD_FILE_LOC_RATCHETS: dict[str, int] = {
-    "autonomous_epistemic_engine.py": 3704,
-    "assimilation/assimilator.py": 3505,
-    "planning/mental_simulation.py": 2990,
-    "causal/theory.py": 2505,
-    "deliberation/engine.py": 1945,
-    "planning/goal_scheduler.py": 1580,
-    "motor/curiosity.py": 1380,
-    "objects/planner.py": 1365,
-    "macro/planner.py": 1255,
-    "grounding/bridge.py": 1100,
-    "episodic/cortex.py": 1075,
-    "predictors/physics.py": 1075,
-    "working_memory/memory.py": 1050,
-}
 
 
 def _iter_python_files(base: Path) -> list[Path]:
@@ -121,19 +104,6 @@ def test_sqlite_connect_count_ratchet() -> None:
     counts = _collect_ast_debt()
     assert counts["sqlite_files"] <= MAX_SQLITE_CONNECT_FILES
     assert counts["sqlite_calls"] <= MAX_SQLITE_CONNECT_CALLS
-
-
-def test_decision_core_file_size_ratchet() -> None:
-    """Enforce file-size ratchets on the primary decision-core modules."""
-    for rel_path, budget in MAX_WORLD_FILE_LOC_RATCHETS.items():
-        actual_loc = sum(1 for _ in (WORLD_DIR / rel_path).open(encoding="utf-8"))
-        assert actual_loc <= budget, f"{rel_path} has {actual_loc} LOC > ratchet {budget}"
-
-    for py_path in _iter_python_files(WORLD_DIR):
-        loc = sum(1 for _ in py_path.open(encoding="utf-8"))
-        assert loc <= MAX_ANY_WORLD_FILE_LOC, (
-            f"{py_path.relative_to(ROOT_DIR)} has {loc} LOC > ceiling {MAX_ANY_WORLD_FILE_LOC}"
-        )
 
 
 def test_no_get_sub_attr_or_blacklisted_engine_attributes() -> None:

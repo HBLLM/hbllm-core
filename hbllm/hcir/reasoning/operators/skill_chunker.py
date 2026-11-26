@@ -20,17 +20,24 @@ Independence Level: L1 (100% deterministic, 0 LLM tokens).
 from __future__ import annotations
 
 import logging
+import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import Field
 
+from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.graph import (
     ActionModality,
     ActionNode,
     CognitiveCategory,
     HCIRNodeType,
+    SkillNode,
 )
+from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.types import Provenance, Scope
 
 logger = logging.getLogger(__name__)
 
@@ -82,13 +89,22 @@ class SkillTrace:
     success: bool
 
 
+_ARG_RE = re.compile(r"^([a-zA-Z0-9_]+)\(([^)]+)\)$")
+
+
+def _parse_intent(intent: str) -> tuple[str, str]:
+    m = _ARG_RE.match(intent.strip())
+    return (m.group(1), m.group(2).strip()) if m else (intent.strip(), "")
+
+
 class SkillMacroChunker:
-    """Discovers, composes, and registers MacroActionNodes from successful cognitive traces."""
+    """Discovers, composes, and registers MacroActionNodes and homoiconic SkillNodes."""
 
     def __init__(self, min_trace_occurrences: int = 2) -> None:
         self.min_trace_occurrences = min_trace_occurrences
         self.recorded_traces: list[SkillTrace] = []
         self.compiled_macros: dict[str, MacroActionNode] = {}
+        self.compiled_skill_nodes: dict[str, SkillNode] = {}
 
     def record_trace(
         self,
@@ -194,3 +210,99 @@ class SkillMacroChunker:
                     )
 
         return newly_compiled
+
+    def compile_to_skill_node(
+        self,
+        macro: MacroActionNode,
+        *,
+        tenant_id: str = "default",
+        support_count: int = 2,
+    ) -> SkillNode:
+        """Compile a `MacroActionNode` into a parameterized homoiconic `SkillNode`."""
+        arg_memo: dict[str, str] = {}
+        params_meta: list[dict[str, Any]] = []
+        instructions: list[Instruction] = []
+        for act in macro.sub_actions:
+            verb, raw_arg = _parse_intent(act.intent)
+            if raw_arg:
+                var = arg_memo.setdefault(raw_arg, f"?target_{len(arg_memo)}")
+                if len(params_meta) < len(arg_memo):
+                    params_meta.append({"name": var[1:], "required": False, "default": None})
+            else:
+                var = "?target_0"
+            reg = f"$r{min(7, max(0, len(params_meta) - 1))}"
+            cap = (
+                "motor.navigate" if act.modality == ActionModality.LOCOMOTION else "motor.interact"
+            )
+            if not instructions:
+                instructions.append(
+                    Instruction(
+                        opcode=Opcode.UNIFY,
+                        params={"pattern": {"id": var}, "bind": reg},
+                        cost_estimate=5,
+                    )
+                )
+            instructions.append(
+                Instruction(
+                    opcode=Opcode.EXECUTE,
+                    params={"capability": cap, "params": {"target": var, "verb": verb}},
+                    cost_estimate=15,
+                )
+            )
+        instructions.append(Instruction(opcode=Opcode.RETURN, params={"yield": ["$r0"]}))
+        stream = InstructionStream(
+            author="skill_chunker", description=macro.intent, instructions=instructions
+        )
+        node = SkillNode(
+            id=f"skill_{macro.macro_id}",
+            skill_name=macro.intent,
+            description=f"Parameterized macro skill '{macro.intent}'",
+            parameters=params_meta,
+            precondition_pattern={"requirements": list(macro.requirements)},
+            postcondition_pattern={"produces": list(macro.produces), "skill_name": macro.intent},
+            bytecode_stream=stream.model_dump(),
+            alpha_success=1.0 + float(support_count),
+            beta_failure=1.0,
+            invocation_count=support_count,
+            provenance=Provenance(created_by="skill_chunker"),
+            scope=Scope(tenant_id=tenant_id),
+            tags=["macro_chunker", macro.intent],
+        )
+        self.compiled_skill_nodes[node.id] = node
+        return node
+
+    def discover_homoiconic_skills(self, tenant_id: str = "default") -> list[SkillNode]:
+        """Anti-unify repeated traces ignoring concrete entity args and return homoiconic SkillNodes."""
+        grouped_traces: dict[tuple[str, ...], list[list[ActionNode]]] = {}
+        for trace in self.recorded_traces:
+            if trace.success and len(trace.actions) >= 2:
+                verbs = tuple(_parse_intent(act.intent)[0] for act in trace.actions)
+                grouped_traces.setdefault(verbs, []).append(trace.actions)
+        discovered: list[SkillNode] = []
+        for verbs, group in grouped_traces.items():
+            key = f"skill_chunk_{' -> '.join(verbs)}"
+            if len(group) < self.min_trace_occurrences or key in self.compiled_skill_nodes:
+                continue
+            macro = self.compile_sequence(group[0], macro_name=f"Skill({verbs[0]}..{verbs[-1]})")
+            node = self.compile_to_skill_node(macro, tenant_id=tenant_id, support_count=len(group))
+            self.compiled_skill_nodes[key] = node
+            discovered.append(node)
+        return discovered
+
+    def propose_skill_transactions(
+        self, skills: Sequence[SkillNode] | None = None, *, tenant_id: str = "default"
+    ) -> list[TransactionOperation]:
+        """Emit atomic HCIR transactions for discovered homoiconic SkillNodes."""
+        nodes = (
+            list(skills)
+            if skills is not None
+            else self.discover_homoiconic_skills(tenant_id=tenant_id)
+        )
+        return [
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE,
+                node_id=node.id,
+                node_data=node.model_dump(),
+            )
+            for node in nodes
+        ]

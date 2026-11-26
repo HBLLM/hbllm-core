@@ -31,7 +31,33 @@ __all__ = [
     "DialogueService",
     "_format_capability_result",
     "build_cognitive_system",
+    "count_consolidated_skills",
 ]
+
+
+def count_consolidated_skills(source: Any) -> int:
+    """Count distinct consolidated homoiconic skills across workspace tiers and engine stores."""
+    if source is None:
+        return 0
+    tiered = getattr(source, "tiered_workspace", None)
+    engine = getattr(source, "engine", source)
+    skill_ids: set[str] = set()
+    if tiered is not None:
+        for tier_ws in (tiered.persistent, tiered.brain, tiered.working_state):
+            for node in tier_ws.graph.all_nodes():
+                if str(getattr(node, "node_type", "")) == "skill" and (
+                    getattr(node, "bytecode_stream", None) is not None
+                    or node.id.startswith("procedural_skill_")
+                ):
+                    skill_ids.add(str(node.id))
+    learner = getattr(engine, "library_learner", None)
+    if learner is not None:
+        skill_ids.update((getattr(learner, "promoted_skills", None) or {}).keys())
+    wm = getattr(engine, "working_memory", None)
+    skill_ids.update((getattr(wm, "procedural_library", None) or {}).keys())
+    opt_eng = getattr(engine, "option_discovery", None)
+    skill_ids.update((getattr(opt_eng, "discovered_options", None) or {}).keys())
+    return len(skill_ids)
 
 
 @dataclass
@@ -101,6 +127,10 @@ class CognitiveSystem:
             dialogue, speaker_id=speaker_id, language=language
         )
 
+    def consolidated_skills_count(self) -> int:
+        """Return total distinct consolidated skills stored across TieredWorkspace and engine."""
+        return count_consolidated_skills(self)
+
 
 def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> CognitiveSystem:
     """Build and wire the single, canonical cognitive runtime.
@@ -143,10 +173,14 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
     workspace = tiered_workspace.working_state
 
     # 2. Constitutional verification pipeline
+    from hbllm.hcir.types import Scope
+
     authority_registry = CommitAuthorityRegistry()
     verifier = ConstitutionalVerifier(authority_registry=authority_registry)
+    default_scope = Scope(tenant_id=cfg.tenant_id) if cfg.tenant_id else None
     pipeline = cfg.custom_verification_stages or create_default_pipeline(
-        constitutional_verifier=verifier
+        default_scope=default_scope,
+        constitutional_verifier=verifier,
     )
 
     # 3. Provision kernel services container (Single composition root)
@@ -235,6 +269,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
                     impl.executor._curiosity_controller = curiosity_ctrl
 
     runtime = ExecutiveRuntime(services=services)
+    runtime._state.tenant_id = cfg.tenant_id or "default"
     runtime.controller.attach_reasoning_runtime(reasoning_rt)
     runtime.attach_engine(engine)
     if bridge is not None:
@@ -245,6 +280,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         runtime.attach_episodic_cortex(engine.episodic_cortex)
     if getattr(engine, "library_learner", None):
         runtime.attach_library_learner(engine.library_learner)
+        services.extensions["library_learner"] = engine.library_learner
 
     logger.info(
         "Cognitive system booted successfully (world_id=%s, seed=%s, verifier=ConstitutionalVerifier)",
