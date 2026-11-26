@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from hbllm.hcir.language.core.epistemic_policy import (
@@ -42,6 +43,14 @@ class UniversalLanguageParser:
         self.lexicon = lexicon
         self._ontology_store = ontology_store
         self._dynamic_vocab: set[str] = set()
+        self._dynamic_command_verbs: dict[str, str] = {}
+
+    def register_command_verbs(self, verbs: Iterable[str]) -> None:
+        """Register dynamically learned command verbs from graph constructions."""
+        for v in verbs:
+            clean = str(v).strip().lower()
+            if clean:
+                self._dynamic_command_verbs.setdefault(clean, clean)
 
     def set_dynamic_vocabulary(self, words: set[str]) -> None:
         """Update active entities and concepts for vocabulary matching."""
@@ -291,7 +300,7 @@ class UniversalLanguageParser:
     def _try_parse_command(
         self, tokens: list[str], meta: LanguageMetadata, raw_text: str
     ) -> SemanticFrame | None:
-        cmd_verbs = self.profile.closed_class.command_verbs
+        cmd_verbs = {**self.profile.closed_class.command_verbs, **self._dynamic_command_verbs}
         clean_tokens = [t for t in tokens if t not in ("?", ".", "!", ",")]
         if not clean_tokens:
             return None

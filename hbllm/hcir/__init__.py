@@ -14,7 +14,7 @@ from __future__ import annotations
 from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
 from hbllm.hcir.compiler import HCIRCompiler, IntentType, SemanticAST
 from hbllm.hcir.counterfactual_planner import CounterfactualPlanner
-from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIRNode, HCIRNodeType
+from hbllm.hcir.graph import CognitiveGraph, ConstructionNode, HCIREdge, HCIRNode, HCIRNodeType
 from hbllm.hcir.interpreter import HCIRInterpreter, SyscallAllowlist
 from hbllm.hcir.optimizer import HCIROptimizer
 from hbllm.hcir.registers import (
@@ -59,6 +59,7 @@ __all__ = [
     "UncertaintyVector",
     # --- Graph & State ---
     "CognitiveGraph",
+    "ConstructionNode",
     "HCIRNode",
     "HCIREdge",
     "HCIRNodeType",

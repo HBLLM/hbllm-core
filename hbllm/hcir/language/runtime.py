@@ -19,9 +19,11 @@ from typing import Any
 from hbllm.hcir.graph import (
     CognitiveGraph,
     ConceptNode,
+    ConstructionNode,
     GroundedConceptNode,
     HCIRNodeType,
     PhysicalEntityNode,
+    SkillNode,
 )
 from hbllm.hcir.language.core.discourse import DiscourseSegmenter
 from hbllm.hcir.language.core.epistemic_policy import (
@@ -244,17 +246,29 @@ class MultilingualLanguageRuntime:
         self._dyn_vocab_sig = sig
 
         vocab: list[str] = []
+        learned_verbs: set[str] = set()
         for node in self._graph.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
             if isinstance(node, PhysicalEntityNode) and node.entity_type:
                 vocab.append(node.entity_type)
         for node in self._graph.nodes_by_type(HCIRNodeType.GROUNDED_CONCEPT):
             if isinstance(node, GroundedConceptNode) and node.concept_name:
                 vocab.append(node.concept_name)
-        if p_graph is not None:
-            for node in p_graph.nodes_by_type(HCIRNodeType.CONCEPT):
+        for g_src in (self._graph, p_graph):
+            if g_src is None:
+                continue
+            for node in g_src.nodes_by_type(HCIRNodeType.CONCEPT):
                 if isinstance(node, ConceptNode) and node.label:
                     vocab.append(node.label)
+            for node in g_src.nodes_by_type(HCIRNodeType.CONSTRUCTION):
+                if isinstance(node, ConstructionNode):
+                    learned_verbs.update(node.trigger_tokens)
+            for node in g_src.nodes_by_type(HCIRNodeType.SKILL):
+                if isinstance(node, SkillNode) and node.skill_name:
+                    learned_verbs.add(node.skill_name)
+        vocab.extend(sorted(learned_verbs))
         parser.set_dynamic_vocabulary(vocab)
+        if learned_verbs and isinstance(parser, (EnglishParser, UniversalLanguageParser)):
+            parser.register_command_verbs(learned_verbs)
 
     def process_discourse(
         self,

@@ -68,6 +68,14 @@ class EnglishParser:
         self._lexicon = lexicon or EnglishLexicon()
         self._morphology = morphology or EnglishMorphology(self._lexicon)
         self._syntax = syntax or EnglishSyntaxParser()
+        self._dynamic_command_verbs: set[str] = set()
+
+    def register_command_verbs(self, verbs: Iterable[str]) -> None:
+        """Register dynamically learned action verbs (e.g. from reading/constructions)."""
+        for v in verbs:
+            clean = str(v).strip().lower()
+            if clean:
+                self._dynamic_command_verbs.add(clean)
 
     def set_dynamic_vocabulary(self, words: Iterable[str]) -> None:
         """Update active world/persistent entity & concept vocabulary for typo recovery."""
@@ -158,6 +166,7 @@ class EnglishParser:
                 return None
             if (
                 first.lemma not in _PRIORITY_IMPERATIVE_VERBS
+                and first.lemma not in self._dynamic_command_verbs
                 and "noun" in first.features.get("alt_pos", "")
                 and any(t.pos in (EnglishPOS.AUX, EnglishPOS.VERB) for t in content[1:])
             ):
@@ -195,6 +204,7 @@ class EnglishParser:
                 }
             )
             | COMMAND_VERB_VOCAB
+            | self._dynamic_command_verbs
         )
         is_verb = first.pos == EnglishPOS.VERB or first.lemma in _KNOWN_COMMAND_VERBS
         if not is_verb:

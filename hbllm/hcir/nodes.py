@@ -81,6 +81,7 @@ __all__ = [
     "ResourceNode",
     # Memory nodes
     "ConceptNode",
+    "ConstructionNode",
     "EpisodeNode",
     "ExternalKnowledgeNode",
     "ProcedureNode",
@@ -144,6 +145,7 @@ class HCIRNodeType(StrEnum):
     # --- Memory classes ---
     EPISODE = "episode"
     CONCEPT = "concept"
+    CONSTRUCTION = "construction"
     SKILL = "skill"
     PROCEDURE = "procedure"
     VALUE = "value"
@@ -915,6 +917,29 @@ class ProcedureNode(_HomoiconicProgramFields, HCIRNode):
             self.procedure_name = self.name
 
 
+class ConstructionNode(_HomoiconicProgramFields, HCIRNode):
+    """Embodied Construction Grammar mapping surface templates to executable HCIR programs."""
+
+    node_type: HCIRNodeType = HCIRNodeType.CONSTRUCTION
+    category: CognitiveCategory = CognitiveCategory.MEMORY
+    name: str = ""
+    construction_name: str = ""
+    language: str = "en"
+    intent_type: str = "query"
+    syntactic_template: str = ""
+    trigger_tokens: list[str] = Field(default_factory=list)
+    slot_constraints: dict[str, Any] = Field(default_factory=dict)
+    semantic_mapping: dict[str, Any] = Field(default_factory=dict)
+    compiled_hcir_template: list[dict[str, Any]] = Field(default_factory=list)
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        if not self.construction_name and self.name:
+            self.construction_name = self.name
+        elif not self.name and self.construction_name:
+            self.name = self.construction_name
+
+
 # ── A14: Prediction-Error-Centered Learning Nodes ────────────────────────
 
 
@@ -1487,6 +1512,7 @@ NODE_TYPE_REGISTRY: dict[HCIRNodeType, type[HCIRNode]] = {
     # --- Memory classes ---
     HCIRNodeType.EPISODE: EpisodeNode,
     HCIRNodeType.CONCEPT: ConceptNode,
+    HCIRNodeType.CONSTRUCTION: ConstructionNode,
     HCIRNodeType.SKILL: SkillNode,
     HCIRNodeType.PROCEDURE: ProcedureNode,
     HCIRNodeType.VALUE: ValueNode,

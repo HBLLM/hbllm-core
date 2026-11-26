@@ -1,0 +1,100 @@
+language: ta
+lexical_rules:
+  articles: ["அந்த ", "இந்த "]
+  directions: ["இடது", "வலது", "மேல்", "கீழ்"]
+  question_starters: ["என்ன", "எங்கே", "ஏன்", "எப்படி", "யார்", "எப்போது"]
+  target_slot_names: ["target", "target_entity", "entity", "object"]
+  spatial_relations:
+    இடதுபுறம்: LEFT_OF
+    வலதுபுறம்: RIGHT_OF
+    மேலே: ABOVE
+    கீழே: BELOW
+    உள்ளே: INSIDE
+  causal_connectives:
+    - [" தேவை ", "requires"]
+    - [" ஏற்படுத்துகிறது ", "causes"]
+    - [" திறக்கிறது ", "unlocks"]
+  if_then: ["என்றால் ", " பின்னர் ", "implies"]
+  perceptual_color_defaults: {}
+  role_hints: {}
+  definitional_patterns: []
+
+constructions:
+  - id: cxn_ta_act
+    construction_name: ta_imperative_act
+    language: ta
+    intent_type: act
+    syntactic_template: "{target} {action}"
+    trigger_tokens: ["தள்ளு", "நகர்த்து", "எடு", "திற", "மூடு", "அழுத்து", "செல்", "தொடு"]
+    slot_constraints:
+      target: entity
+    semantic_mapping:
+      default_action: act
+      description_template: "Act(ta): {action} on {target_ref}"
+    compiled_hcir_template:
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{act_id}"
+            node_type: action_intent
+            action: "{action}"
+            target_ref: "{target_ref}"
+            priority: "{priority}"
+          author: "{author}"
+      - opcode: EXECUTE
+        cost_estimate: 50
+        params:
+          capability: "motor_{action}"
+          target_entity_id: "{target_ref}"
+          target_ref: "{target_ref}"
+          params:
+            action: "{action}"
+            target: "{target_ref}"
+
+  - id: cxn_ta_learn
+    construction_name: ta_learn
+    language: ta
+    intent_type: learn
+    syntactic_template: "{subject} {trigger}"
+    trigger_tokens: ["நினைவில் கொள்", "கற்றுக்கொள்", "குறித்துக்கொள்"]
+    semantic_mapping:
+      default_action: learn_fact
+      description_template: "Learn(ta): {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject}"
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{belief_id}"
+            node_type: belief
+            claim: "{subject}"
+            belief_type: learned
+          author: "{author}"
+      - opcode: EXECUTE
+        cost_estimate: 50
+        params:
+          capability: skill_extraction
+          params:
+            subject: "{subject}"
+
+  - id: cxn_ta_query
+    construction_name: ta_query
+    language: ta
+    intent_type: query
+    syntactic_template: "{subject}"
+    trigger_tokens: []
+    semantic_mapping:
+      default_action: evaluate_prompt
+      description_template: "Query(ta): {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject?}"
+          node_type: "{slot.node_type?}"
+

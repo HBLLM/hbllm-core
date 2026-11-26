@@ -18,14 +18,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from hbllm.hcir.graph import HCIREdge
+from hbllm.hcir.bytecode import Instruction, InstructionStream, Opcode
+from hbllm.hcir.graph import ConstructionNode, HCIREdge, SkillNode
 from hbllm.hcir.language.english.morphology import (
     INVARIANT_S_NOUNS,
     singularize_noun,
 )
 from hbllm.hcir.language.ontology_bootstrap import LexicalOntologyRecord
-from hbllm.hcir.nodes import BeliefNode, ConceptNode, HCIREdgeType
+from hbllm.hcir.nodes import BeliefNode, ConceptNode, HCIREdgeType, NodeLifecycle
+from hbllm.hcir.seed.loader import load_constructions_spec
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
+from hbllm.hcir.types import Provenance, Scope
 
 logger = logging.getLogger(__name__)
 
@@ -52,28 +55,7 @@ _HEDGE_RE = re.compile(
     re.IGNORECASE,
 )
 _GARBAGE_OBJ = frozenset(
-    {
-        "the",
-        "a",
-        "an",
-        "if",
-        "when",
-        "must",
-        "determines",
-        "requiring",
-        "every",
-        "only",
-        "no",
-        "is",
-        "are",
-        "deep",
-        "neural",
-        "level",
-        "high",
-        "type",
-        "kind",
-        "form",
-    }
+    "the a an if when must determines requiring every only no is are deep neural level high type kind form".split()
 )
 _INTRO_STRIP_RE = re.compile(
     r"^(?:however|furthermore|moreover|therefore|consequently|additionally|"
@@ -105,59 +87,10 @@ _REL_CLAUSE_ENABLES_RE = re.compile(
     r"(?:the\s+|a\s+|an\s+|their\s+|its\s+)?([a-zA-Z][a-zA-Z0-9_-]{2,28})\b",
     re.IGNORECASE,
 )
-
 _SKIP_SUBJECTS = frozenset(
-    {
-        "this",
-        "that",
-        "there",
-        "here",
-        "which",
-        "what",
-        "when",
-        "where",
-        "they",
-        "these",
-        "those",
-        "it",
-        "he",
-        "she",
-        "we",
-        "you",
-        "who",
-        "whom",
-        "whose",
-        "i",
-        "me",
-        "him",
-        "her",
-        "us",
-        "them",
-        "and",
-        "or",
-        "but",
-        "with",
-        "from",
-        "for",
-        "to",
-        "at",
-        "by",
-        "about",
-        "more",
-        "some",
-        "many",
-        "such",
-        "each",
-        "every",
-        "all",
-        "both",
-        "either",
-        "neither",
-        "very",
-        "also",
-        "then",
-        "thus",
-    }
+    "this that there here which what when where they these those it he she we you who whom "
+    "whose i me him her us them and or but with from for to at by about more some many such "
+    "each every all both either neither very also then thus".split()
 )
 
 
@@ -441,33 +374,18 @@ def _extract_object_label(ref: Any, *, preserve_head: bool = False) -> str:
     return _singularize_basic(cleaned)
 
 
+_INTRO_PREPS = frozenset(
+    "in on at by for with during while when because since although though if unless".split()
+)
+
+
 def _strip_intro_clause(sent: str) -> str:
     """Strip single leading adverb/PP or subordinate clause before the first comma."""
     stripped = _INTRO_STRIP_RE.sub("", sent).strip()
     if "," in stripped:
         prefix, rest = stripped.split(",", 1)
         first_word = prefix.strip().split()[0].lower() if prefix.strip() else ""
-        if (
-            first_word
-            in {
-                "in",
-                "on",
-                "at",
-                "by",
-                "for",
-                "with",
-                "during",
-                "while",
-                "when",
-                "because",
-                "since",
-                "although",
-                "though",
-                "if",
-                "unless",
-            }
-            and len(rest.strip().split()) >= 3
-        ):
+        if first_word in _INTRO_PREPS and len(rest.strip().split()) >= 3:
             return rest.strip()
     return stripped
 
@@ -479,28 +397,7 @@ _NOISY_FRONTMATTER_RE = re.compile(
     re.IGNORECASE,
 )
 _ISA_SUBJ_NOISE_WORDS = frozenset(
-    {
-        "i",
-        "me",
-        "my",
-        "myself",
-        "you",
-        "your",
-        "we",
-        "our",
-        "he",
-        "she",
-        "they",
-        "where",
-        "when",
-        "why",
-        "how",
-        "who",
-        "but",
-        "and",
-        "said",
-        "know",
-    }
+    "i me my myself you your we our he she they where when why how who but and said know".split()
 )
 
 
@@ -659,163 +556,68 @@ def extract_propositions_from_text(
                     added_any = True
             return added_any
 
+        def _emit(s: str, r: str, o: str, mods: tuple[tuple[str, str], ...] = ()) -> bool:
+            return _add(
+                s,
+                r,
+                o,
+                orig_sent,
+                polarity=polarity,
+                modifiers=mods,
+                paragraph_idx=paragraph_idx,
+                sentence_idx=sentence_idx,
+            )
+
         if frame.predicate == "is_property" and loc_ref is not None:
             prop_val = loc_ref.concept_name or (
                 str(next(iter(loc_ref.properties.values()))) if loc_ref.properties else ""
             )
             prop_clean = _clean_term(prop_val)
             if prop_clean and prop_clean not in _GARBAGE_OBJ:
-                if _add(
-                    subj,
-                    "has_property",
-                    prop_clean,
-                    orig_sent,
-                    polarity=polarity,
-                    paragraph_idx=paragraph_idx,
-                    sentence_idx=sentence_idx,
-                ):
-                    added_any = True
+                added_any |= _emit(subj, "has_property", prop_clean)
             return added_any
 
         if frame.predicate in ("causes", "requires", "enables") and pat_ref is not None:
             obj = _extract_object_label(pat_ref, preserve_head=not is_non_english)
             inf_verb = str(pat_ref.properties.get("infinitive_verb", "")).strip().lower()
             if inf_verb and frame.predicate == "causes":
-                if obj:
-                    added_any |= _add(
-                        subj,
-                        "causes",
-                        f"{obj}_{inf_verb}",
-                        orig_sent,
-                        polarity=polarity,
-                        paragraph_idx=paragraph_idx,
-                        sentence_idx=sentence_idx,
-                    )
-                added_any |= _add(
-                    subj,
-                    "causes",
-                    inf_verb,
-                    orig_sent,
-                    polarity=polarity,
-                    paragraph_idx=paragraph_idx,
-                    sentence_idx=sentence_idx,
-                )
-                if subj_ref and subj_ref.raw_text:
-                    raw_subj_clean = _clean_term(subj_ref.raw_text)
-                    if raw_subj_clean and raw_subj_clean != subj:
-                        if obj:
-                            added_any |= _add(
-                                raw_subj_clean,
-                                "causes",
-                                f"{obj}_{inf_verb}",
-                                orig_sent,
-                                polarity=polarity,
-                                paragraph_idx=paragraph_idx,
-                                sentence_idx=sentence_idx,
-                            )
-                        added_any |= _add(
-                            raw_subj_clean,
-                            "causes",
-                            inf_verb,
-                            orig_sent,
-                            polarity=polarity,
-                            paragraph_idx=paragraph_idx,
-                            sentence_idx=sentence_idx,
-                        )
+                raw_sc = _clean_term(subj_ref.raw_text) if (subj_ref and subj_ref.raw_text) else ""
+                for s_lbl in (subj, *([raw_sc] if raw_sc and raw_sc != subj else [])):
+                    if obj:
+                        added_any |= _emit(s_lbl, "causes", f"{obj}_{inf_verb}")
+                    added_any |= _emit(s_lbl, "causes", inf_verb)
             elif obj:
-                added_any |= _add(
-                    subj,
-                    frame.predicate,
-                    obj,
-                    orig_sent,
-                    polarity=polarity,
-                    modifiers=tuple(mod_list),
-                    paragraph_idx=paragraph_idx,
-                    sentence_idx=sentence_idx,
-                )
+                added_any |= _emit(subj, frame.predicate, obj, tuple(mod_list))
             return added_any
 
-        if frame.predicate.startswith("located_") or frame.predicate in (
-            "below",
-            "above",
-            "near",
-        ):
-            if loc_ref is not None:
-                loc_obj = _extract_object_label(loc_ref)
-                if loc_obj:
-                    added_any |= _add(
-                        subj,
-                        frame.predicate,
-                        loc_obj,
-                        orig_sent,
-                        polarity=polarity,
-                        modifiers=tuple(mod_list),
-                        paragraph_idx=paragraph_idx,
-                        sentence_idx=sentence_idx,
-                    )
+        if frame.predicate.startswith("located_") or frame.predicate in ("below", "above", "near"):
+            if loc_ref is not None and (loc_obj := _extract_object_label(loc_ref)):
+                added_any |= _emit(subj, frame.predicate, loc_obj, tuple(mod_list))
             return added_any
 
         verb_rel = _clean_term(frame.predicate or "")
         if not verb_rel or verb_rel in ("be", "do", "have"):
             return False
 
+        mods_tup = tuple(mod_list)
         if pat_ref is not None:
             pat_raw = pat_ref.raw_text or ""
             if " and " in pat_raw.lower():
-                obj_parts = [
+                for op in (
                     p.strip() for p in re.split(r"\band\b", pat_raw, flags=re.I) if p.strip()
-                ]
-                for op in obj_parts:
-                    op_head = _extract_head_from_np(op)
-                    if op_head:
-                        added_any |= _add(
-                            subj,
-                            verb_rel,
-                            op_head,
-                            orig_sent,
-                            polarity=polarity,
-                            modifiers=tuple(mod_list),
-                            paragraph_idx=paragraph_idx,
-                            sentence_idx=sentence_idx,
-                        )
+                ):
+                    if op_head := _extract_head_from_np(op):
+                        added_any |= _emit(subj, verb_rel, op_head, mods_tup)
             else:
                 obj = _extract_object_label(pat_ref, preserve_head=not is_non_english)
                 if obj and obj not in _GARBAGE_OBJ:
-                    added_any |= _add(
-                        subj,
-                        verb_rel,
-                        obj,
-                        orig_sent,
-                        polarity=polarity,
-                        modifiers=tuple(mod_list),
-                        paragraph_idx=paragraph_idx,
-                        sentence_idx=sentence_idx,
-                    )
+                    added_any |= _emit(subj, verb_rel, obj, mods_tup)
             for prep, tgt in mod_list:
                 if prep == "into" and verb_rel in ("convert", "turn", "transform"):
-                    added_any |= _add(
-                        subj,
-                        "produce",
-                        tgt,
-                        orig_sent,
-                        polarity=polarity,
-                        paragraph_idx=paragraph_idx,
-                        sentence_idx=sentence_idx,
-                    )
+                    added_any |= _emit(subj, "produce", tgt)
         elif loc_ref is not None or dest_ref is not None:
-            obl = loc_ref or dest_ref
-            obl_obj = _extract_object_label(obl)
-            if obl_obj:
-                added_any |= _add(
-                    subj,
-                    verb_rel,
-                    obl_obj,
-                    orig_sent,
-                    polarity=polarity,
-                    modifiers=tuple(mod_list),
-                    paragraph_idx=paragraph_idx,
-                    sentence_idx=sentence_idx,
-                )
+            if obl_obj := _extract_object_label(loc_ref or dest_ref):
+                added_any |= _emit(subj, verb_rel, obl_obj, mods_tup)
 
         return added_any
 
@@ -1061,8 +863,7 @@ def extract_propositions_from_text(
                 continue
 
             if not clause_matched:
-                m_rel = _REL_CLAUSE_ENABLES_RE.search(sent_clean)
-                if m_rel:
+                if (m_rel := _REL_CLAUSE_ENABLES_RE.search(sent_clean)) is not None:
                     _add(
                         m_rel.group(1),
                         "enables",
@@ -1071,70 +872,50 @@ def extract_propositions_from_text(
                         paragraph_idx=p_idx,
                         sentence_idx=s_idx,
                     )
-                else:
-                    m_en = _ENABLES_RE.match(sent_clean)
-                    if m_en:
-                        _add(
-                            m_en.group(1),
-                            "enables",
-                            m_en.group(2),
-                            sent,
-                            paragraph_idx=p_idx,
-                            sentence_idx=s_idx,
-                        )
-
-            for m_ex in _EXEMPLIFY_RE.finditer(sent_clean):
-                raw_head = m_ex.group(1).strip()
-                head_words = [
-                    w
-                    for w in raw_head.split()
-                    if w.lower()
-                    not in {"many", "several", "various", "some", "these", "those", "the", "other"}
-                ]
-                if not head_words:
-                    continue
-                head_singular = _singularize_basic("_".join(head_words).lower())
-                head_tail = _singularize_basic(head_words[-1].lower())
-                items_chunk = re.split(r",|\band\b|\bor\b", m_ex.group(2), flags=re.IGNORECASE)
-                for item_raw in items_chunk:
-                    item_clean = item_raw.strip().strip(".,;:")
-                    item_words = [
-                        w
-                        for w in item_clean.split()
-                        if w.lower() not in {"a", "an", "the", "both", "such", "other"}
-                    ]
-                    if not item_words or len(item_words) > 4:
-                        continue
-                    item_term = "_".join(item_words).lower()
+                elif (m_en := _ENABLES_RE.match(sent_clean)) is not None:
                     _add(
-                        item_term,
-                        "is_a",
-                        head_singular,
+                        m_en.group(1),
+                        "enables",
+                        m_en.group(2),
                         sent,
                         paragraph_idx=p_idx,
                         sentence_idx=s_idx,
                     )
+
+            for m_ex in _EXEMPLIFY_RE.finditer(sent_clean):
+                ex_skip = {"many", "several", "various", "some", "these", "those", "the", "other"}
+                head_words = [w for w in m_ex.group(1).strip().split() if w.lower() not in ex_skip]
+                if not head_words:
+                    continue
+                head_singular = _singularize_basic("_".join(head_words).lower())
+                head_tail = _singularize_basic(head_words[-1].lower())
+                for item_raw in re.split(r",|\band\b|\bor\b", m_ex.group(2), flags=re.IGNORECASE):
+                    iw = [
+                        w
+                        for w in item_raw.strip().strip(".,;:").split()
+                        if w.lower() not in {"a", "an", "the", "both", "such", "other"}
+                    ]
+                    if not iw or len(iw) > 4:
+                        continue
+                    iterm = "_".join(iw).lower()
+                    _add(
+                        iterm, "is_a", head_singular, sent, paragraph_idx=p_idx, sentence_idx=s_idx
+                    )
                     if head_tail != head_singular:
                         _add(
-                            item_term,
-                            "is_a",
-                            head_tail,
-                            sent,
-                            paragraph_idx=p_idx,
-                            sentence_idx=s_idx,
+                            iterm, "is_a", head_tail, sent, paragraph_idx=p_idx, sentence_idx=s_idx
                         )
 
             for m_purp in _PURPOSE_RE.finditer(sent_clean):
-                mech_words = [
+                mw = [
                     w
                     for w in m_purp.group(1).strip().split()
                     if w.lower()
                     not in {"a", "an", "the", "many", "several", "design", "use", "apply"}
                 ]
-                if mech_words:
-                    mech_term = _singularize_basic("_".join(mech_words).lower())
+                if mw:
                     _add(
-                        mech_term,
+                        _singularize_basic("_".join(mw).lower()),
                         "enables",
                         m_purp.group(2),
                         sent,
@@ -1142,26 +923,24 @@ def extract_propositions_from_text(
                         sentence_idx=s_idx,
                     )
 
-            m_bec = re.match(r"^because\s+([^,]+),\s*(.+)$", sent.strip(), flags=re.IGNORECASE)
-            if m_bec:
-                c1_words = [
+            if m_bec := re.match(r"^because\s+([^,]+),\s*(.+)$", sent.strip(), flags=re.IGNORECASE):
+                stop_b = {"can", "may", "will", "be", "is", "are"}
+                c1w = [
                     w.lower()
                     for w in re.findall(r"[a-zA-Z]+", m_bec.group(1))
-                    if w.lower() not in _SKIP_SUBJECTS
-                    and w.lower() not in {"can", "may", "will", "be", "is", "are"}
+                    if w.lower() not in _SKIP_SUBJECTS and w.lower() not in stop_b
                 ]
-                c2_words = [
+                c2w = [
                     w.lower()
                     for w in re.findall(r"[a-zA-Z]+", m_bec.group(2))
                     if w.lower() not in _SKIP_SUBJECTS
-                    and w.lower()
-                    not in {"can", "may", "will", "be", "is", "are", "to", "like", "and"}
+                    and w.lower() not in (stop_b | {"to", "like", "and"})
                 ]
-                if c1_words and len(c2_words) >= 2:
+                if c1w and len(c2w) >= 2:
                     _add(
-                        c1_words[0],
+                        c1w[0],
                         "causes",
-                        c2_words[1] if len(c2_words) > 2 else c2_words[0],
+                        c2w[1] if len(c2w) > 2 else c2w[0],
                         sent,
                         paragraph_idx=p_idx,
                         sentence_idx=s_idx,
@@ -1209,6 +988,13 @@ def commit_propositions(
             getattr(workspace, "_system_grant", None) or getattr(target_ws, "_system_grant", None)
         )
     )
+
+    def _qnode(nd: Any) -> None:
+        node_ops.append(
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE, node_id=nd.id, node_data=nd.model_dump()
+            )
+        )
 
     def _queue_edge(eid: str, edge: HCIREdge, *, force_upsert: bool = False) -> None:
         if eid in seen_edge_ids:
@@ -1268,18 +1054,13 @@ def commit_propositions(
                 )
                 if existing_node is not None and not defn and existing_def:
                     continue
-                cnode = ConceptNode(
-                    id=cid,
-                    label=display,
-                    definition=defn,
-                    domain="t4_reading_curriculum",
-                    tags=["t4_reading", display],
-                )
-                node_ops.append(
-                    TransactionOperation(
-                        op=TransactionOp.UPSERT_NODE,
-                        node_id=cnode.id,
-                        node_data=cnode.model_dump(),
+                _qnode(
+                    ConceptNode(
+                        id=cid,
+                        label=display,
+                        definition=defn,
+                        domain="t4_reading_curriculum",
+                        tags=["t4_reading", display],
                     )
                 )
 
@@ -1305,95 +1086,88 @@ def commit_propositions(
                 "modifiers": mod_dict,
             },
         )
-        node_ops.append(
-            TransactionOperation(
-                op=TransactionOp.UPSERT_NODE,
-                node_id=belief.id,
-                node_data=belief.model_dump(),
+        _qnode(belief)
+
+        def _make_edge(
+            eid: str, etype: HCIREdgeType, src: str, dst: str, w: float, props_d: dict[str, Any]
+        ) -> HCIREdge:
+            return HCIREdge(
+                id=eid, edge_type=etype, sources=[src], targets=[dst], weight=w, properties=props_d
             )
-        )
 
         is_neg = (not prop.polarity) or prop.relation.startswith("not_")
+        base_props = {
+            "source_file": prop.source_file,
+            "relation": prop.relation,
+            "polarity": not is_neg,
+            "modifiers": mod_dict,
+            "sentence": prop.sentence[:160],
+        }
         if is_neg:
             pos_rel = prop.relation[4:] if prop.relation.startswith("not_") else prop.relation
-            pos_edge_id = f"t4_{pos_rel}_{src_id}__{dst_id}"
-            if pos_edge_id in existing_edges and pos_edge_id not in seen_edge_ids:
-                seen_edge_ids.add(pos_edge_id)
-                edge_ops.append(
-                    TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=pos_edge_id)
-                )
-            neg_edge_id = f"t4_contradicts_{src_id}__{dst_id}__{prop.relation}"
-            edge = HCIREdge(
-                id=neg_edge_id,
-                edge_type=HCIREdgeType.CONTRADICTS,
-                sources=[src_id],
-                targets=[dst_id],
-                weight=0.95,
-                properties={
-                    "source_file": prop.source_file,
-                    "relation": prop.relation,
-                    "polarity": False,
-                    "modifiers": mod_dict,
-                    "sentence": prop.sentence[:160],
-                },
+            pos_eid = f"t4_{pos_rel}_{src_id}__{dst_id}"
+            if pos_eid in existing_edges and pos_eid not in seen_edge_ids:
+                seen_edge_ids.add(pos_eid)
+                edge_ops.append(TransactionOperation(op=TransactionOp.REMOVE_EDGE, edge_id=pos_eid))
+            _queue_edge(
+                f"t4_contradicts_{src_id}__{dst_id}__{prop.relation}",
+                _make_edge(
+                    f"t4_contradicts_{src_id}__{dst_id}__{prop.relation}",
+                    HCIREdgeType.CONTRADICTS,
+                    src_id,
+                    dst_id,
+                    0.95,
+                    base_props,
+                ),
+                force_upsert=True,
             )
-            _queue_edge(edge.id, edge, force_upsert=True)
         else:
             edge_id = f"t4_{prop.relation}_{src_id}__{dst_id}"
             if edge_id not in existing_edges or mod_dict:
-                edge = HCIREdge(
-                    id=edge_id,
-                    edge_type=edge_type_map.get(prop.relation, HCIREdgeType.SUPPORTS),
-                    sources=[src_id],
-                    targets=[dst_id],
-                    weight=0.82,
-                    properties={
-                        "source_file": prop.source_file,
-                        "relation": prop.relation,
-                        "polarity": True,
-                        "modifiers": mod_dict,
-                        "sentence": prop.sentence[:160],
-                    },
+                _queue_edge(
+                    edge_id,
+                    _make_edge(
+                        edge_id,
+                        edge_type_map.get(prop.relation, HCIREdgeType.SUPPORTS),
+                        src_id,
+                        dst_id,
+                        0.82,
+                        base_props,
+                    ),
                 )
-                _queue_edge(edge.id, edge)
 
-        recipient_term = str(mod_dict.get("recipient", "")).strip()
-        if recipient_term and not is_neg:
+        if (recipient_term := str(mod_dict.get("recipient", "")).strip()) and not is_neg:
             rec_id = f"t4_concept_{recipient_term}"
             if rec_id not in created_concepts:
                 created_concepts.add(rec_id)
                 rec_display = recipient_term.replace("_", " ")
-                existing_rec = ws_graph.get_node(rec_id) if ws_graph is not None else None
-                if existing_rec is None:
-                    rec_node = ConceptNode(
-                        id=rec_id,
-                        label=rec_display,
-                        definition="",
-                        domain="t4_reading_curriculum",
-                        tags=["t4_reading", rec_display],
-                    )
-                    node_ops.append(
-                        TransactionOperation(
-                            op=TransactionOp.UPSERT_NODE,
-                            node_id=rec_node.id,
-                            node_data=rec_node.model_dump(),
+                if ws_graph is None or ws_graph.get_node(rec_id) is None:
+                    _qnode(
+                        ConceptNode(
+                            id=rec_id,
+                            label=rec_display,
+                            definition="",
+                            domain="t4_reading_curriculum",
+                            tags=["t4_reading", rec_display],
                         )
                     )
-            rec_edge_id = f"t4_{prop.relation}_recipient_{src_id}__{rec_id}"
-            rec_edge = HCIREdge(
-                id=rec_edge_id,
-                edge_type=HCIREdgeType.SUPPORTS,
-                sources=[src_id],
-                targets=[rec_id],
-                weight=0.82,
-                properties={
-                    "source_file": prop.source_file,
-                    "relation": f"{prop.relation}_recipient",
-                    "polarity": True,
-                    "sentence": prop.sentence[:160],
-                },
+            rec_eid = f"t4_{prop.relation}_recipient_{src_id}__{rec_id}"
+            _queue_edge(
+                rec_eid,
+                _make_edge(
+                    rec_eid,
+                    HCIREdgeType.SUPPORTS,
+                    src_id,
+                    rec_id,
+                    0.82,
+                    {
+                        "source_file": prop.source_file,
+                        "relation": f"{prop.relation}_recipient",
+                        "polarity": True,
+                        "sentence": prop.sentence[:160],
+                    },
+                ),
             )
-            _queue_edge(rec_edge.id, rec_edge)
 
         if (
             link_temporal_events
@@ -1402,36 +1176,37 @@ def commit_propositions(
             and prop.relation not in _STATIC_RELATIONS
         ):
             para_key = (prop.source_file, prop.paragraph_idx)
-            prev_event = last_event_by_para.get(para_key)
-            if prev_event is not None:
-                prev_s_idx, prev_bid = prev_event
-                if prop.sentence_idx > prev_s_idx and prev_bid != belief.id:
-                    before_eid = f"t4_before_{prev_bid}__{belief.id}"
-                    before_edge = HCIREdge(
-                        id=before_eid,
-                        edge_type=HCIREdgeType.BEFORE,
-                        sources=[prev_bid],
-                        targets=[belief.id],
-                        weight=0.78,
-                        properties={
+            if (
+                (prev_ev := last_event_by_para.get(para_key)) is not None
+                and prop.sentence_idx > prev_ev[0]
+                and prev_ev[1] != belief.id
+            ):
+                beid = f"t4_before_{prev_ev[1]}__{belief.id}"
+                _queue_edge(
+                    beid,
+                    _make_edge(
+                        beid,
+                        HCIREdgeType.BEFORE,
+                        prev_ev[1],
+                        belief.id,
+                        0.78,
+                        {
                             "relation": "before",
                             "source_file": prop.source_file,
                             "paragraph_idx": prop.paragraph_idx,
                         },
-                    )
-                    _queue_edge(before_edge.id, before_edge)
+                    ),
+                )
             last_event_by_para[para_key] = (prop.sentence_idx, belief.id)
 
         if prop.relation == "is_a" and prop.polarity:
-            subj_display = prop.subject.replace("_", " ")
-            obj_display = prop.obj.replace("_", " ")
             store_records.append(
                 LexicalOntologyRecord(
-                    lemma=subj_display,
+                    lemma=prop.subject.replace("_", " "),
                     pos="noun",
                     language="en",
                     definition=prop.sentence[:200],
-                    hypernyms=(obj_display,),
+                    hypernyms=(prop.obj.replace("_", " "),),
                     domain="t4_reading",
                 )
             )
@@ -1442,21 +1217,244 @@ def commit_propositions(
             store_records, source=author, preserve_existing=True
         )
 
-    nodes_committed = 0
-    for i in range(0, len(node_ops), batch_size):
-        batch = node_ops[i : i + batch_size]
-        receipt = target_ws.commit_operations(batch, author=author, grant=effective_grant)
-        if getattr(receipt, "is_committed", False):
-            nodes_committed += len(batch)
+    def _commit_batches(ops_list: list[TransactionOperation]) -> int:
+        cnt = 0
+        for i in range(0, len(ops_list), batch_size):
+            batch = ops_list[i : i + batch_size]
+            if getattr(
+                target_ws.commit_operations(batch, author=author, grant=effective_grant),
+                "is_committed",
+                False,
+            ):
+                cnt += len(batch)
+        return cnt
 
-    edges_committed = 0
-    for i in range(0, len(edge_ops), batch_size):
-        batch = edge_ops[i : i + batch_size]
-        receipt = target_ws.commit_operations(batch, author=author, grant=effective_grant)
-        if getattr(receipt, "is_committed", False):
-            edges_committed += len(batch)
+    return _commit_batches(node_ops), _commit_batches(edge_ops), store_hypernyms_added
 
-    return nodes_committed, edges_committed, store_hypernyms_added
+
+@dataclass(frozen=True)
+class ProceduralDefinition:
+    """Structured procedural/definitional instruction extracted from reading prose."""
+
+    verb: str
+    param_noun: str
+    step_clauses: list[str]
+    source_file: str
+    sentence: str
+
+
+def extract_procedural_definitions(
+    text: str, source_file: str = "reading"
+) -> list[ProceduralDefinition]:
+    """Extract definitional/procedural rules (e.g. 'To X a Y means to A and then B')."""
+    rules = load_constructions_spec("en").get("lexical_rules", {})
+    patterns = [re.compile(str(p), re.IGNORECASE) for p in rules.get("definitional_patterns", ())]
+    if not patterns:
+        return []
+    out: list[ProceduralDefinition] = []
+    seen: set[str] = set()
+    for sent in _SENT_SPLIT_RE.split(text):
+        clean = sent.strip().rstrip(".!?")
+        if not clean:
+            continue
+        for pat in patterns:
+            if (m := pat.match(clean)) is None:
+                continue
+            verb = _clean_term(m.group(1))
+            param_noun = _clean_term(m.group(2))
+            rhs = m.group(3).strip()
+            if not verb or verb in seen or not rhs:
+                break
+            raw_steps = re.split(
+                r"\s*,?\s*\b(?:and\s+then|then|and)\b\s*,?\s*", rhs, flags=re.IGNORECASE
+            )
+            steps = [s.strip() for s in raw_steps if s.strip()]
+            if steps:
+                seen.add(verb)
+                out.append(ProceduralDefinition(verb, param_noun, steps, source_file, clean))
+            break
+    return out
+
+
+def _ins(op: Opcode, cost: int, **params: Any) -> Instruction:
+    return Instruction(opcode=op, params=params, cost_estimate=cost)
+
+
+def compile_procedural_definitions_to_ops(
+    defs: Sequence[ProceduralDefinition],
+    existing_graph: Any | None = None,
+    *,
+    tenant_id: str | None = "default",
+    author: str = "t4_reading_curriculum",
+) -> list[TransactionOperation]:
+    """Compile `ProceduralDefinition`s into homoiconic `SkillNode` + `ConstructionNode` ops."""
+    articles = list(load_constructions_spec("en").get("lexical_rules", {}).get("articles", ()))
+    known_skills: dict[str, str] = {}
+    if existing_graph is not None:
+        for n in existing_graph.nodes_by_type("skill"):
+            if isinstance(n, SkillNode) and n.skill_name:
+                known_skills[n.skill_name.lower()] = n.id
+    for d in defs:
+        known_skills.setdefault(d.verb.lower(), f"t4_skill_{d.verb.lower()}")
+
+    ops: list[TransactionOperation] = []
+    prov, scope = Provenance(created_by=author), Scope(tenant_id=tenant_id or "default")
+    for d in defs:
+        v = d.verb.lower()
+        skill_id = known_skills[v]
+        ins_list: list[Instruction] = [_ins(Opcode.UNIFY, 5, pattern={"id": "?target"}, bind="$r0")]
+        for clause in d.step_clauses:
+            parts = clause.strip().lower().split(None, 1)
+            sv = _clean_term(parts[0])
+            sobj = parts[1].strip() if len(parts) > 1 else ""
+            for art in articles:
+                if sobj.startswith(art):
+                    sobj = sobj[len(art) :].strip()
+                    break
+            tsk = known_skills.get(sv)
+            if tsk and tsk != skill_id:
+                ins_list.append(
+                    _ins(
+                        Opcode.CALL,
+                        15,
+                        skill_id=tsk,
+                        args={"target": "$r0", "subject": sobj or d.param_noun},
+                        bind="$r1",
+                    )
+                )
+            else:
+                ins_list.append(
+                    _ins(
+                        Opcode.EXECUTE,
+                        25,
+                        capability=f"motor.{sv}",
+                        params={"action": sv, "target": "$r0", "subject": sobj},
+                        bind="$r1",
+                    )
+                )
+        ins_list.append(_ins(Opcode.RETURN, 0, **{"yield": ["$r1"]}))
+        stream_dump = InstructionStream(
+            author=author, description=d.sentence, instructions=ins_list
+        ).model_dump()
+        tpl: list[dict[str, Any]] = [
+            {
+                "opcode": "UNIFY",
+                "cost_estimate": 5,
+                "params": {"pattern": {"id": "{target_ref}"}, "bind": "$r0"},
+            },
+            {
+                "opcode": "CALL",
+                "cost_estimate": 15,
+                "params": {
+                    "skill_id": skill_id,
+                    "args": {"target": "$r0", "target_ref": "{target_ref}", "subject": "{subject}"},
+                    "bind": "$r1",
+                },
+            },
+            {"opcode": "RETURN", "params": {"yield": ["$r1"]}},
+        ]
+        nodes = (
+            SkillNode(
+                id=skill_id,
+                skill_name=v,
+                description=d.sentence,
+                parameters=[
+                    {"name": "target", "role": d.param_noun, "required": False, "default": None}
+                ],
+                precondition_pattern={"intent": v, "param": d.param_noun},
+                postcondition_pattern={"intent": v, "target": "?target"},
+                bytecode_stream=stream_dump,
+                alpha_success=3.0,
+                beta_failure=1.0,
+                lifecycle=NodeLifecycle.ACTIVE,
+                provenance=prov,
+                scope=scope,
+                tags=["t4_skill", v],
+            ),
+            ConstructionNode(
+                id=f"t4_cxn_en_{v}",
+                construction_name=f"learned_{v}",
+                language="en",
+                intent_type="act",
+                syntactic_template="{action} {target}",
+                trigger_tokens=[v],
+                slot_constraints={"target": d.param_noun},
+                semantic_mapping={
+                    "default_action": v,
+                    "description_template": f"Execute {v} on {{target_ref}}",
+                },
+                compiled_hcir_template=tpl,
+                bytecode_stream=stream_dump,
+                alpha_success=3.0,
+                beta_failure=1.0,
+                lifecycle=NodeLifecycle.ACTIVE,
+                provenance=prov,
+                scope=scope,
+                tags=["t4_construction", v],
+            ),
+        )
+        ops.extend(
+            TransactionOperation(
+                op=TransactionOp.UPSERT_NODE, node_id=nd.id, node_data=nd.model_dump()
+            )
+            for nd in nodes
+        )
+    return ops
+
+
+def commit_procedural_definitions(
+    raw_text: str,
+    workspace: Any,
+    *,
+    grant: Any | None = None,
+    author: str = "t4_reading_curriculum",
+    source_label: str = "reading",
+    tenant_id: str | None = None,
+) -> int:
+    """Extract and transactionally commit procedural definitions as `SkillNode` + `ConstructionNode`."""
+    from hbllm.hcir.workspace_tiers import TieredWorkspace
+
+    defs = extract_procedural_definitions(raw_text, source_file=source_label)
+    if not defs:
+        return 0
+    is_tw = isinstance(workspace, TieredWorkspace)
+    target_ws = workspace.persistent if is_tw else workspace
+    tid = tenant_id or getattr(target_ws, "tenant_id", None) or "default"
+    ops = compile_procedural_definitions_to_ops(
+        defs, existing_graph=target_ws.graph, tenant_id=tid, author=author
+    )
+    if not ops:
+        return 0
+    effective_grant = grant if grant is not None else (workspace._system_grant if is_tw else None)
+    res = target_ws.commit_operations(ops, author=author, grant=effective_grant, tenant_id=tid)
+    return len(ops) if res.is_committed else 0
+
+
+def _record_prop_tally(prop: ExtractedProposition, stats: ReadingCurriculumStats) -> None:
+    if not prop.polarity or prop.relation.startswith("not_"):
+        stats.relational_extracted += 1
+    elif prop.relation == "is_a":
+        stats.taxonomic_extracted += 1
+    elif prop.relation in ("causes", "enables"):
+        stats.causal_extracted += 1
+    elif prop.relation == "requires":
+        stats.dependency_extracted += 1
+    else:
+        stats.relational_extracted += 1
+
+
+def _finalize_sample_props(
+    props: Sequence[ExtractedProposition], stats: ReadingCurriculumStats
+) -> None:
+    for prop in props[:10]:
+        stats.sample_propositions.append(
+            {
+                "subject": prop.subject,
+                "relation": prop.relation,
+                "object": prop.obj,
+                "source": prop.source_file,
+            }
+        )
 
 
 class ReadingCurriculumIngestor:
@@ -1477,6 +1475,7 @@ class ReadingCurriculumIngestor:
         stats = ReadingCurriculumStats()
         propositions: list[ExtractedProposition] = []
         seen_global: set[tuple[str, str, str]] = set()
+        raw_texts: list[tuple[str, str]] = []
 
         for raw_dir in directories:
             root = Path(raw_dir)
@@ -1493,6 +1492,7 @@ class ReadingCurriculumIngestor:
                     continue
                 stats.files_read += 1
                 stats.sentences_scanned += len(_SENT_SPLIT_RE.split(text))
+                raw_texts.append((path.name, text))
                 for prop in extract_propositions_from_text(
                     text,
                     source_file=path.name,
@@ -1504,16 +1504,7 @@ class ReadingCurriculumIngestor:
                         continue
                     seen_global.add(key)
                     propositions.append(prop)
-                    if not prop.polarity or prop.relation.startswith("not_"):
-                        stats.relational_extracted += 1
-                    elif prop.relation == "is_a":
-                        stats.taxonomic_extracted += 1
-                    elif prop.relation in ("causes", "enables"):
-                        stats.causal_extracted += 1
-                    elif prop.relation == "requires":
-                        stats.dependency_extracted += 1
-                    else:
-                        stats.relational_extracted += 1
+                    _record_prop_tally(prop, stats)
                     if len(propositions) >= max_propositions:
                         break
 
@@ -1525,20 +1516,15 @@ class ReadingCurriculumIngestor:
             author="t4_reading_curriculum",
             batch_size=batch_size,
         )
-        stats.nodes_committed = nodes_committed
-        stats.edges_committed = edges_committed
-        stats.store_hypernyms_added = store_hypernyms_added
-
-        for idx, prop in enumerate(propositions[:10]):
-            stats.sample_propositions.append(
-                {
-                    "subject": prop.subject,
-                    "relation": prop.relation,
-                    "object": prop.obj,
-                    "source": prop.source_file,
-                }
+        proc_nodes = sum(
+            commit_procedural_definitions(
+                txt, workspace, grant=grant, author="t4_reading_curriculum", source_label=fname
             )
-
+            for fname, txt in raw_texts
+        )
+        stats.nodes_committed = nodes_committed + proc_nodes
+        stats.edges_committed, stats.store_hypernyms_added = edges_committed, store_hypernyms_added
+        _finalize_sample_props(propositions, stats)
         stats.elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
         return stats
 
@@ -1557,33 +1543,27 @@ class ReadingCurriculumIngestor:
         t0 = time.perf_counter()
         stats = ReadingCurriculumStats()
 
-        if isinstance(text_or_path, Path):
-            raw_text = text_or_path.read_text(encoding="utf-8", errors="ignore")
-            label = source_name or text_or_path.name
-            stats.files_read = 1
-        elif (
+        if isinstance(text_or_path, Path) or (
             isinstance(text_or_path, str)
             and "\n" not in text_or_path
             and len(text_or_path) < 512
             and Path(text_or_path).is_file()
         ):
             book_file = Path(text_or_path)
-            raw_text = book_file.read_text(encoding="utf-8", errors="ignore")
-            label = source_name or book_file.name
-            stats.files_read = 1
+            raw_text, label, stats.files_read = (
+                book_file.read_text(encoding="utf-8", errors="ignore"),
+                source_name or book_file.name,
+                1,
+            )
         else:
-            raw_text = str(text_or_path)
-            label = source_name or "book_text"
+            raw_text, label = str(text_or_path), source_name or "book_text"
             stats.files_read = 1 if raw_text.strip() else 0
 
         stats.sentences_scanned = len(_SENT_SPLIT_RE.split(raw_text))
         all_props: list[ExtractedProposition] = []
         seen_global: set[tuple[str, str, str]] = set()
         for prop in extract_propositions_from_text(
-            raw_text,
-            source_file=label,
-            include_extended=True,
-            ontology_store=ontology_store,
+            raw_text, source_file=label, include_extended=True, ontology_store=ontology_store
         ):
             key = (prop.subject, prop.relation, prop.obj)
             if key not in seen_global:
@@ -1593,38 +1573,29 @@ class ReadingCurriculumIngestor:
         selected = all_props
         if len(all_props) > max_propositions:
             deg: dict[str, int] = {}
-            for prop_item in all_props:
-                deg[prop_item.subject] = deg.get(prop_item.subject, 0) + 1
-                deg[prop_item.obj] = deg.get(prop_item.obj, 0) + 1
+            for p_it in all_props:
+                deg[p_it.subject] = deg.get(p_it.subject, 0) + 1
+                deg[p_it.obj] = deg.get(p_it.obj, 0) + 1
 
             def _score(idx_prop: tuple[int, ExtractedProposition]) -> tuple[float, int]:
-                idx, prop_el = idx_prop
-                entity_score = float(deg.get(prop_el.subject, 0) + deg.get(prop_el.obj, 0))
-                if prop_el.relation in ("causes", "requires", "enables"):
-                    rel_w = 3.0
-                elif prop_el.relation == "is_a":
-                    rel_w = 2.5
-                elif prop_el.modifiers:
-                    rel_w = 1.5
-                else:
-                    rel_w = 1.0
-                return (entity_score + rel_w, -idx)
+                idx, pel = idx_prop
+                rel_w = (
+                    3.0
+                    if pel.relation in ("causes", "requires", "enables")
+                    else 2.5
+                    if pel.relation == "is_a"
+                    else 1.5
+                    if pel.modifiers
+                    else 1.0
+                )
+                return (float(deg.get(pel.subject, 0) + deg.get(pel.obj, 0)) + rel_w, -idx)
 
             ranked = sorted(enumerate(all_props), key=_score, reverse=True)[:max_propositions]
             ranked.sort(key=lambda item: item[0])
-            selected = [prop_el for _, prop_el in ranked]
+            selected = [pel for _, pel in ranked]
 
         for prop in selected:
-            if not prop.polarity or prop.relation.startswith("not_"):
-                stats.relational_extracted += 1
-            elif prop.relation == "is_a":
-                stats.taxonomic_extracted += 1
-            elif prop.relation in ("causes", "enables"):
-                stats.causal_extracted += 1
-            elif prop.relation == "requires":
-                stats.dependency_extracted += 1
-            else:
-                stats.relational_extracted += 1
+            _record_prop_tally(prop, stats)
 
         nodes_committed, edges_committed, store_hypernyms_added = commit_propositions(
             selected,
@@ -1635,20 +1606,12 @@ class ReadingCurriculumIngestor:
             batch_size=batch_size,
             link_temporal_events=True,
         )
-        stats.nodes_committed = nodes_committed
-        stats.edges_committed = edges_committed
-        stats.store_hypernyms_added = store_hypernyms_added
-
-        for prop in selected[:10]:
-            stats.sample_propositions.append(
-                {
-                    "subject": prop.subject,
-                    "relation": prop.relation,
-                    "object": prop.obj,
-                    "source": prop.source_file,
-                }
-            )
-
+        proc_nodes = commit_procedural_definitions(
+            raw_text, workspace, grant=grant, author="t4_reading_curriculum", source_label=label
+        )
+        stats.nodes_committed = nodes_committed + proc_nodes
+        stats.edges_committed, stats.store_hypernyms_added = edges_committed, store_hypernyms_added
+        _finalize_sample_props(selected, stats)
         stats.elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
         return stats
 
@@ -1663,67 +1626,48 @@ class ReadingCurriculumIngestor:
     def evaluate_extraction_recall(
         self, annotated_samples: Sequence[dict[str, Any]]
     ) -> dict[str, Any]:
-        """Compute precision, recall, and F1 against annotated ground-truth triples.
-
-        Each item in ``annotated_samples`` maps ``"text"`` to prose and ``"expected"``
-        to a sequence of ``(subject, relation, object)`` tuples or dicts.
-        """
-        total_expected = 0
-        total_extracted = 0
-        total_matched = 0
+        """Compute precision, recall, and F1 against annotated ground-truth triples."""
+        tot_exp = tot_ext = tot_match = 0
         per_sample: list[dict[str, Any]] = []
-
         for idx, sample in enumerate(annotated_samples):
-            text = str(sample.get("text", ""))
-            raw_expected = sample.get("expected") or ()
-            expected_set: set[tuple[str, str, str]] = set()
-            for item in raw_expected:
-                if isinstance(item, dict):
-                    s = str(item.get("subject", ""))
-                    r = str(item.get("relation", ""))
-                    o = str(item.get("object", item.get("obj", "")))
-                else:
-                    s, r, o = str(item[0]), str(item[1]), str(item[2])
-                expected_set.add(self._normalize_triple(s, r, o))
-
-            extracted_props = extract_propositions_from_text(
-                text, source_file=str(sample.get("id", f"sample_{idx}"))
-            )
-            extracted_set = {
-                self._normalize_triple(p.subject, p.relation, p.obj) for p in extracted_props
+            sid = str(sample.get("id", f"sample_{idx}"))
+            expected = {
+                self._normalize_triple(
+                    str(it["subject"]) if isinstance(it, dict) else str(it[0]),
+                    str(it["relation"]) if isinstance(it, dict) else str(it[1]),
+                    str(it.get("object", it.get("obj", "")))
+                    if isinstance(it, dict)
+                    else str(it[2]),
+                )
+                for it in (sample.get("expected") or ())
             }
-
-            matched_set = expected_set & extracted_set
-            n_exp = len(expected_set)
-            n_ext = len(extracted_set)
-            n_match = len(matched_set)
-            total_expected += n_exp
-            total_extracted += n_ext
-            total_matched += n_match
-
-            s_prec = n_match / max(1, n_ext)
-            s_rec = n_match / max(1, n_exp)
+            extracted = {
+                self._normalize_triple(p.subject, p.relation, p.obj)
+                for p in extract_propositions_from_text(
+                    str(sample.get("text", "")), source_file=sid
+                )
+            }
+            n_exp, n_ext, n_m = len(expected), len(extracted), len(expected & extracted)
+            tot_exp, tot_ext, tot_match = tot_exp + n_exp, tot_ext + n_ext, tot_match + n_m
             per_sample.append(
                 {
-                    "id": sample.get("id", f"sample_{idx}"),
+                    "id": sid,
                     "expected": n_exp,
                     "extracted": n_ext,
-                    "matched": n_match,
-                    "precision": round(s_prec, 4),
-                    "recall": round(s_rec, 4),
-                    "missed": sorted(expected_set - extracted_set),
+                    "matched": n_m,
+                    "precision": round(n_m / max(1, n_ext), 4),
+                    "recall": round(n_m / max(1, n_exp), 4),
+                    "missed": sorted(expected - extracted),
                 }
             )
-
-        precision = total_matched / max(1, total_extracted)
-        recall = total_matched / max(1, total_expected)
-        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        prec, rec = tot_match / max(1, tot_ext), tot_match / max(1, tot_exp)
+        f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
         return {
-            "precision": round(precision, 4),
-            "recall": round(recall, 4),
+            "precision": round(prec, 4),
+            "recall": round(rec, 4),
             "f1": round(f1, 4),
-            "matched": total_matched,
-            "expected_count": total_expected,
-            "extracted_count": total_extracted,
+            "matched": tot_match,
+            "expected_count": tot_exp,
+            "extracted_count": tot_ext,
             "per_sample": per_sample,
         }

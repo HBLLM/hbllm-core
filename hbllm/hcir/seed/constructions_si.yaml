@@ -1,0 +1,100 @@
+language: si
+lexical_rules:
+  articles: ["ඒ ", "මේ ", "අර ", "එක "]
+  directions: ["වම", "දකුණ", "ඉහළ", "පහළ"]
+  question_starters: ["මොකක්ද", "කොහෙද", "ඇයි", "කොහොමද", "කවුද", "කවදාද"]
+  target_slot_names: ["target", "target_entity", "entity", "object"]
+  spatial_relations:
+    වමේ: LEFT_OF
+    දකුණේ: RIGHT_OF
+    උඩ: ABOVE
+    යට: BELOW
+    ඇතුළේ: INSIDE
+  causal_connectives:
+    - [" අවශ්‍යයි ", "requires"]
+    - [" ඇති කරයි ", "causes"]
+    - [" විවෘත කරයි ", "unlocks"]
+  if_then: ["නම් ", " එවිට ", "implies"]
+  perceptual_color_defaults: {}
+  role_hints: {}
+  definitional_patterns: []
+
+constructions:
+  - id: cxn_si_act
+    construction_name: si_imperative_act
+    language: si
+    intent_type: act
+    syntactic_template: "{target} {action}"
+    trigger_tokens: ["තල්ලු කරන්න", "ගෙන යන්න", "ගන්න", "අරින්න", "වහන්න", "ඔබන්න", "යන්න", "අල්ලන්න"]
+    slot_constraints:
+      target: entity
+    semantic_mapping:
+      default_action: act
+      description_template: "Act(si): {action} on {target_ref}"
+    compiled_hcir_template:
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{act_id}"
+            node_type: action_intent
+            action: "{action}"
+            target_ref: "{target_ref}"
+            priority: "{priority}"
+          author: "{author}"
+      - opcode: EXECUTE
+        cost_estimate: 50
+        params:
+          capability: "motor_{action}"
+          target_entity_id: "{target_ref}"
+          target_ref: "{target_ref}"
+          params:
+            action: "{action}"
+            target: "{target_ref}"
+
+  - id: cxn_si_learn
+    construction_name: si_learn
+    language: si
+    intent_type: learn
+    syntactic_template: "{subject} {trigger}"
+    trigger_tokens: ["මතක තබා ගන්න", "ඉගෙන ගන්න", "සටහන් කරන්න"]
+    semantic_mapping:
+      default_action: learn_fact
+      description_template: "Learn(si): {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject}"
+      - opcode: ASSERT
+        cost_estimate: 5
+        params:
+          node_data:
+            id: "{belief_id}"
+            node_type: belief
+            claim: "{subject}"
+            belief_type: learned
+          author: "{author}"
+      - opcode: EXECUTE
+        cost_estimate: 50
+        params:
+          capability: skill_extraction
+          params:
+            subject: "{subject}"
+
+  - id: cxn_si_query
+    construction_name: si_query
+    language: si
+    intent_type: query
+    syntactic_template: "{subject}"
+    trigger_tokens: []
+    semantic_mapping:
+      default_action: evaluate_prompt
+      description_template: "Query(si): {subject}"
+    compiled_hcir_template:
+      - opcode: QUERY
+        cost_estimate: 10
+        params:
+          text_contains: "{subject?}"
+          node_type: "{slot.node_type?}"
+

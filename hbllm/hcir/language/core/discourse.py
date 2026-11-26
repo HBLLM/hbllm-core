@@ -14,6 +14,7 @@ from typing import Any
 from hbllm.hcir.language.english.normalizer import CLOSED_CLASS_VOCAB, COMMAND_VERB_VOCAB
 from hbllm.hcir.language.reading_curriculum import (
     ExtractedProposition,
+    commit_procedural_definitions,
     commit_propositions,
     extract_propositions_from_text,
 )
@@ -194,17 +195,26 @@ class ExpositoryProseProcessor:
             parser=parser,
             ontology_store=ontology_store,
         )
-        if not props:
-            return ExpositoryIngestionSummary()
-
         target_ws = (
-            getattr(tiered_workspace, "persistent", None)
-            if tiered_workspace is not None
-            else workspace
+            tiered_workspace.persistent if tiered_workspace is not None else workspace
         ) or workspace
-        grant = getattr(tiered_workspace, "_system_grant", None) or getattr(
-            workspace, "_system_grant", None
+        grant = (
+            tiered_workspace._system_grant
+            if tiered_workspace is not None
+            else getattr(workspace, "_system_grant", None)
         )
+        proc_committed = commit_procedural_definitions(
+            text, target_ws, grant=grant, author="discourse_expository", source_label=source_label
+        )
+        if not props:
+            if tiered_workspace is not None and proc_committed > 0:
+                tiered_workspace.notify_commit()
+            return ExpositoryIngestionSummary(
+                nodes_committed=proc_committed,
+                summary_text=f"Learned {proc_committed // 2} procedural constructions."
+                if proc_committed
+                else "",
+            )
 
         nodes_committed, edges_committed, _ = commit_propositions(
             props,
@@ -213,6 +223,7 @@ class ExpositoryProseProcessor:
             grant=grant,
             author="discourse_expository",
         )
+        nodes_committed += proc_committed
         if tiered_workspace is not None and hasattr(tiered_workspace, "notify_commit"):
             tiered_workspace.notify_commit()
 
