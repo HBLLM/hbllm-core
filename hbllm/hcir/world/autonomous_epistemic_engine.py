@@ -1099,6 +1099,22 @@ class AutonomousEpistemicEngine:
             ntype = getattr(node, "node_type", "")
             props = getattr(node, "properties", {}) or {}
 
+            if ntype == "learned_rule" and getattr(node, "domain", "") == "tool_barrier_posterior":
+                t_f, b_f = props.get("tool_feat"), props.get("barrier_feat")
+                if t_f is not None and b_f is not None:
+                    alpha = float(props.get("alpha_unlock", 1.0))
+                    beta = float(props.get("beta_fail", 1.0))
+                    self.symbolic_theory._tool_barrier_posteriors[(t_f, b_f)] = (alpha, beta)
+                    mean = alpha / max(1e-9, alpha + beta)
+                    if mean > 0.55:
+                        self.symbolic_theory.tool_barrier_affinities.setdefault(t_f, set()).add(b_f)
+                    elif mean < 0.45:
+                        self.symbolic_theory.tool_barrier_incompatibilities.setdefault(
+                            t_f, set()
+                        ).add(b_f)
+                    hydrated_count += 1
+                continue
+
             # 1. Restore Procedural Skills
             if nid.startswith("procedural_skill_") or ntype == "skill":
                 schema_name = (

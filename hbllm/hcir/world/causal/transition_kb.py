@@ -52,6 +52,56 @@ class TransitionEdgeEvaluation:
     confidence: float
 
 
+@dataclass(frozen=True)
+class DirichletOutcomePosterior:
+    """Four-parameter conjugate Dirichlet posterior over empirical transition outcomes."""
+
+    alpha_pass: float
+    beta_block: float
+    gamma_lethal: float
+    delta_goal: float
+
+    @property
+    def total_concentration(self) -> float:
+        return max(1e-9, self.alpha_pass + self.beta_block + self.gamma_lethal + self.delta_goal)
+
+    @property
+    def p_pass(self) -> float:
+        return float(self.alpha_pass / self.total_concentration)
+
+    @property
+    def p_block(self) -> float:
+        return float(self.beta_block / self.total_concentration)
+
+    @property
+    def p_lethal(self) -> float:
+        return float(self.gamma_lethal / self.total_concentration)
+
+    @property
+    def p_goal(self) -> float:
+        return float(self.delta_goal / self.total_concentration)
+
+    @property
+    def epistemic_uncertainty(self) -> float:
+        prior_mass = 1.1
+        obs = max(0.0, self.total_concentration - prior_mass)
+        return float(1.0 / (1.0 + obs))
+
+    def expected_free_energy(self, risk_weight: float = 50.0) -> float:
+        """Return utility + epistemic exploration bonus minus lethality penalty."""
+        return float(
+            self.p_goal + 0.5 * self.epistemic_uncertainty - float(risk_weight) * self.p_lethal
+        )
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "alpha_pass": float(self.alpha_pass),
+            "beta_block": float(self.beta_block),
+            "gamma_lethal": float(self.gamma_lethal),
+            "delta_goal": float(self.delta_goal),
+        }
+
+
 def _encode_context_key(key: Any) -> tuple[Any, str, str]:
     """Encode an arbitrary context key into (json_value, key_kind, safe_id_token)."""
     if isinstance(key, tuple):
@@ -177,6 +227,21 @@ class TransitionBelief:
         """Return epistemic confidence in [0, 1)."""
         return float(1.0 - self.epistemic_uncertainty())
 
+    def dirichlet_posterior(
+        self,
+        alpha0: float = 0.5,
+        beta0: float = 0.5,
+        gamma0: float = 0.05,
+        delta0: float = 0.05,
+    ) -> DirichletOutcomePosterior:
+        """Return 4-parameter conjugate Dirichlet posterior over pass/block/lethal/goal."""
+        return DirichletOutcomePosterior(
+            alpha_pass=float(alpha0) + self.counts.get(_OUT_TRAVERSED, 0.0),
+            beta_block=float(beta0) + self.counts.get(_OUT_BLOCKED, 0.0),
+            gamma_lethal=float(gamma0) + self.counts.get(_OUT_TERMINAL_FAIL, 0.0),
+            delta_goal=float(delta0) + self.counts.get(_OUT_TERMINAL_WIN, 0.0),
+        )
+
     def to_belief_node(self) -> BeliefNode:
         """Serialize this transition belief as a canonical HCIR ``BeliefNode``."""
         serialized_key, key_kind, node_id = _belief_node_id(self.scope, self.context_key)
@@ -197,6 +262,7 @@ class TransitionBelief:
                 "context_key": serialized_key,
                 "key_kind": key_kind,
                 "counts": dict(self.counts),
+                "dirichlet_posterior": self.dirichlet_posterior().to_dict(),
                 "observed_effects": dict(self.observed_effects),
                 "verified_epoch": self.verified_epoch,
                 "outcome_epochs": dict(self.outcome_epochs),
@@ -287,6 +353,9 @@ class TransitionKnowledgeBase:
 
     _feature_beliefs: dict[Any, TransitionBelief] = field(default_factory=dict)
     _locus_beliefs: dict[tuple[int, int], TransitionBelief] = field(default_factory=dict)
+    _pos_action_beliefs: dict[tuple[tuple[int, int], Any], TransitionBelief] = field(
+        default_factory=dict
+    )
     _causal_rules: dict[tuple[str, str], CausalEffectRule] = field(default_factory=dict)
     _context_epoch: int = 0
     _version: int = field(default=0, init=False, repr=False)
@@ -342,6 +411,38 @@ class TransitionKnowledgeBase:
         )
         self._invalidate_caches()
         return belief
+
+    def record_action_outcome(
+        self,
+        pos: tuple[int, int],
+        action: Any,
+        outcome: TransitionOutcome,
+        *,
+        weight: float = 1.0,
+        effect_signature: str = "",
+        evidence: str = "",
+        mark_verified: bool = True,
+    ) -> TransitionBelief:
+        """Record an empirical transition outcome under a directional `(pos, action)` pair."""
+        locus = (int(pos[0]), int(pos[1]))
+        key = (locus, action)
+        belief = self._pos_action_beliefs.get(key)
+        if belief is None:
+            belief = TransitionBelief(scope="pos_action", context_key=(locus[0], locus[1], action))
+            self._pos_action_beliefs[key] = belief
+        belief.record(
+            outcome,
+            weight=weight,
+            effect_signature=effect_signature,
+            evidence=evidence,
+            epoch=self._context_epoch if mark_verified else None,
+        )
+        self._invalidate_caches()
+        return belief
+
+    def get_action_belief(self, pos: tuple[int, int], action: Any) -> TransitionBelief | None:
+        """Return stored directional `(pos, action)` belief, if present."""
+        return self._pos_action_beliefs.get(((int(pos[0]), int(pos[1])), action))
 
     def retract_outcome(
         self,
@@ -502,6 +603,82 @@ class TransitionKnowledgeBase:
             self._feature_eval_cache[cache_key] = res
         return res
 
+    def evaluate_action_transition(
+        self,
+        pos: tuple[int, int],
+        action: Any,
+        *,
+        feature_id: Any = None,
+        locus: tuple[int, int] | None = None,
+        active_state_tokens: frozenset[str] | set[str] | None = None,
+        unknown_traversable: bool = True,
+        unknown_cost_penalty: float = 0.0,
+        risk_weight: float = 50.0,
+    ) -> TransitionEdgeEvaluation:
+        """Evaluate directional `(pos, action)` transition fused with feature/locus posteriors."""
+        act_belief = self.get_action_belief(pos, action)
+        base_ev = (
+            self.evaluate_transition(
+                feature_id,
+                locus=locus,
+                active_state_tokens=active_state_tokens,
+                unknown_traversable=unknown_traversable,
+                unknown_cost_penalty=unknown_cost_penalty,
+                risk_weight=risk_weight,
+            )
+            if feature_id is not None
+            else None
+        )
+        if act_belief is None or act_belief._total_obs <= 0.0:
+            if base_ev is not None:
+                return base_ev
+            return TransitionEdgeEvaluation(
+                traversable=unknown_traversable,
+                step_cost=(1.0 + max(0.0, unknown_cost_penalty))
+                if unknown_traversable
+                else math.inf,
+                risk_cost=0.0,
+                goal_value=0.0,
+                info_gain=1.0,
+                mutates_state=False,
+                confidence=0.0,
+            )
+        post = act_belief.dirichlet_posterior()
+        act_trav = (post.p_goal > 0.0 or act_belief.traversability_posterior() >= 0.5) and (
+            act_belief._outcome_prob_key(_OUT_TERMINAL_FAIL) < 0.5
+        )
+        act_risk = float(risk_weight) * act_belief._outcome_prob_key(_OUT_TERMINAL_FAIL)
+        act_cost = (
+            (1.0 + max(0.0, 1.0 - act_belief.traversability_posterior())) if act_trav else math.inf
+        )
+        act_info = post.epistemic_uncertainty
+        act_mut = (
+            act_belief._outcome_prob_key(_OUT_MUTATED_STATE)
+            + act_belief._outcome_prob_key(_OUT_DISPLACED_OTHER)
+        ) > 0.0
+        if base_ev is None:
+            return TransitionEdgeEvaluation(
+                traversable=act_trav,
+                step_cost=float(act_cost),
+                risk_cost=act_risk,
+                goal_value=float(act_belief._outcome_prob_key(_OUT_TERMINAL_WIN)),
+                info_gain=act_info,
+                mutates_state=act_mut,
+                confidence=float(1.0 - act_info),
+            )
+        fused_trav = act_trav and base_ev.traversable
+        return TransitionEdgeEvaluation(
+            traversable=fused_trav,
+            step_cost=max(float(act_cost), base_ev.step_cost) if fused_trav else math.inf,
+            risk_cost=max(act_risk, base_ev.risk_cost),
+            goal_value=max(
+                float(act_belief._outcome_prob_key(_OUT_TERMINAL_WIN)), base_ev.goal_value
+            ),
+            info_gain=min(act_info, base_ev.info_gain),
+            mutates_state=act_mut or base_ev.mutates_state,
+            confidence=max(float(1.0 - act_info), base_ev.confidence),
+        )
+
     def has_feature_outcome(self, feature_id: Any, outcome: TransitionOutcome) -> bool:
         """Return True if ``feature_id`` has recorded observations of ``outcome``."""
         belief = self._feature_beliefs.get(feature_id)
@@ -591,11 +768,13 @@ class TransitionKnowledgeBase:
         """Advance context epoch and drop episode-local coordinate beliefs."""
         self._context_epoch = (self._context_epoch + 1) if epoch is None else int(epoch)
         self._locus_beliefs.clear()
+        self._pos_action_beliefs.clear()
         self._invalidate_caches()
 
     def clear_context_beliefs(self, *, preserve_current_epoch: bool = False) -> None:
         """Drop locus beliefs and unverified feature beliefs across context shifts."""
         self._locus_beliefs.clear()
+        self._pos_action_beliefs.clear()
         if not preserve_current_epoch:
             self._feature_beliefs.clear()
             self._invalidate_caches()
@@ -620,12 +799,14 @@ class TransitionKnowledgeBase:
     def clear_locus_beliefs(self) -> None:
         """Clear coordinate-scoped locus transition beliefs without clearing feature beliefs."""
         self._locus_beliefs.clear()
+        self._pos_action_beliefs.clear()
         self._invalidate_caches()
 
     def clear(self) -> None:
         """Reset all stored beliefs, causal rules, and context epoch counters."""
         self._feature_beliefs.clear()
         self._locus_beliefs.clear()
+        self._pos_action_beliefs.clear()
         self._causal_rules.clear()
         self._context_epoch = 0
         self._invalidate_caches()
@@ -633,11 +814,11 @@ class TransitionKnowledgeBase:
     def exported_node_ids(self) -> list[str]:
         """Return deterministic HCIR node IDs for all non-empty beliefs and causal rules."""
         node_ids: list[str] = []
-        for belief in self._feature_beliefs.values():
-            if belief._total_obs > 0.0:
-                _, _, nid = _belief_node_id(belief.scope, belief.context_key)
-                node_ids.append(nid)
-        for belief in self._locus_beliefs.values():
+        for belief in (
+            *self._feature_beliefs.values(),
+            *self._locus_beliefs.values(),
+            *self._pos_action_beliefs.values(),
+        ):
             if belief._total_obs > 0.0:
                 _, _, nid = _belief_node_id(belief.scope, belief.context_key)
                 node_ids.append(nid)
@@ -651,18 +832,11 @@ class TransitionKnowledgeBase:
         if self._cached_tx_ops is not None and self._cached_tx_version == self._version:
             return list(self._cached_tx_ops)
         ops: list[TransactionOperation] = []
-        for belief in self._feature_beliefs.values():
-            if belief._total_obs <= 0.0:
-                continue
-            node = belief.to_belief_node()
-            ops.append(
-                TransactionOperation(
-                    op=TransactionOp.UPSERT_NODE,
-                    node_id=node.id,
-                    node_data=node.model_dump(),
-                )
-            )
-        for belief in self._locus_beliefs.values():
+        for belief in (
+            *self._feature_beliefs.values(),
+            *self._locus_beliefs.values(),
+            *self._pos_action_beliefs.values(),
+        ):
             if belief._total_obs <= 0.0:
                 continue
             node = belief.to_belief_node()
@@ -699,6 +873,13 @@ class TransitionKnowledgeBase:
                     self._locus_beliefs[
                         (int(belief.context_key[0]), int(belief.context_key[1]))
                     ] = belief
+                elif (
+                    belief.scope == "pos_action"
+                    and isinstance(belief.context_key, tuple)
+                    and len(belief.context_key) >= 3
+                ):
+                    loc = (int(belief.context_key[0]), int(belief.context_key[1]))
+                    self._pos_action_beliefs[(loc, belief.context_key[2])] = belief
                 else:
                     self._feature_beliefs[belief.context_key] = belief
                     hydrated_feature_keys.add(belief.context_key)
@@ -722,6 +903,7 @@ class TransitionKnowledgeBase:
 
 __all__ = [
     "CausalEffectRule",
+    "DirichletOutcomePosterior",
     "TransitionBelief",
     "TransitionEdgeEvaluation",
     "TransitionKnowledgeBase",

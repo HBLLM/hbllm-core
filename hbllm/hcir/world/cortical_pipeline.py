@@ -69,10 +69,7 @@ class CorticalPipeline:
         self.last_duration_ms: float = 0.0
         if self.engine is not None:
             for stage in self.stages:
-                if hasattr(stage, "bind_engine"):
-                    stage.bind_engine(self.engine)
-                elif hasattr(stage, "engine"):
-                    stage.engine = self.engine
+                stage.bind_engine(self.engine)
 
     def run(self, ctx: CognitiveContext) -> PipelineResult:
         """Run the active inference cycle across all stages.
@@ -87,7 +84,7 @@ class CorticalPipeline:
         all_ops: list[Any] = []
         final_action: Any = None
         bridge = self.grounding_bridge
-        if self.engine is not None and hasattr(self.engine, "grounding_bridge"):
+        if self.engine is not None:
             eng_bridge = getattr(self.engine, "grounding_bridge", None)
             if eng_bridge is not None:
                 bridge = eng_bridge
@@ -100,14 +97,13 @@ class CorticalPipeline:
         if self.engine is not None and grid_data is not None:
             theory = getattr(self.engine, "symbolic_theory", None)
             wm = getattr(self.engine, "working_memory", None)
-            if theory is not None and hasattr(theory, "observe_grid_structure"):
+            observe_fn = getattr(theory, "observe_grid_structure", None)
+            if theory is not None and callable(observe_fn):
                 bg_feat = getattr(self.engine, "bg_feature", 0)
                 av_feats = set(getattr(self.engine, "avatar_features", ()) or ())
                 if getattr(self.engine, "avatar_feature", None) is not None:
                     av_feats.add(self.engine.avatar_feature)
-                shifted = theory.observe_grid_structure(
-                    grid_data, bg_feature=bg_feat, avatar_features=av_feats
-                )
+                shifted = observe_fn(grid_data, bg_feature=bg_feat, avatar_features=av_feats)
                 if shifted:
                     from hbllm.hcir.world.cortex_causal import (
                         invalidate_stale_context_ontology,
@@ -197,24 +193,14 @@ class CorticalPipeline:
                             elif clean_hint not in wm_ref.compiled_linguistic_hints:
                                 import numpy as np
 
-                                from hbllm.hcir.compiler import HCIRCompiler
+                                from hbllm.hcir.compiler import HCIRCompiler, IntentType
 
-                                comp = HCIRCompiler()
+                                comp = HCIRCompiler(
+                                    tiered_workspace=getattr(self.engine, "tiered_workspace", None)
+                                )
                                 th = self.engine.symbolic_theory
-                                low_h = clean_hint.lower()
-                                g_verbs = (
-                                    "go ",
-                                    "reach ",
-                                    "navigate ",
-                                    "move ",
-                                    "find ",
-                                    "touch ",
-                                    "select ",
-                                    "collect ",
-                                )
-                                is_g = low_h.startswith(g_verbs) or any(
-                                    f" {v}" in low_h for v in g_verbs
-                                )
+                                parsed_ast = comp.parse_utterance(clean_hint)
+                                is_g = parsed_ast.intent == IntentType.ACT
                                 tf = (
                                     comp._resolve_feature_for_label(clean_hint, th)
                                     if is_g

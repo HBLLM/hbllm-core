@@ -7,6 +7,12 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.capabilities.cortical_alus import (
+    compute_bayesian_posterior_update,
+    compute_bellman_risk_backup,
+    compute_collision_cone,
+    compute_geodesic_field,
+)
 from hbllm.hcir.primitives import detect_background_color, segment_entities
 from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
 
@@ -15,6 +21,10 @@ MATH_CAPABILITIES: tuple[str, ...] = (
     "math.topology_cuts",
     "math.symmetry_score",
     "math.set_cardinality",
+    "math.geodesic_field",
+    "math.bellman_risk_backup",
+    "math.collision_cone",
+    "math.bayesian_posterior_update",
 )
 
 
@@ -166,4 +176,58 @@ class MathCapabilityExecutor:
             )
         if cap == "math.set_cardinality":
             return compute_set_cardinality(params.get("items_a", ()), params.get("items_b"))
+        if cap == "math.geodesic_field":
+            return compute_geodesic_field(
+                params.get("grid"),
+                params.get("goal_cells", ()),
+                impassable_cells=params.get("impassable_cells", ()),
+                step_costs=params.get("step_costs"),
+                start_cell=params.get("start_cell"),
+                step_size=int(params.get("step_size", 1)),
+            )
+        if cap == "math.bellman_risk_backup":
+            return compute_bellman_risk_backup(
+                params["grid_shape"],
+                params.get("goal_cells", ()),
+                lethal_cells=params.get("lethal_cells", ()),
+                blocked_cells=params.get("blocked_cells", ()),
+                transition_noise=float(params.get("transition_noise", 0.0)),
+                gamma=float(params.get("gamma", 0.95)),
+                goal_reward=float(params.get("goal_reward", 10.0)),
+                step_penalty=float(params.get("step_penalty", 0.1)),
+                risk_penalty=float(params.get("risk_penalty", 50.0)),
+                horizon=int(params.get("horizon", 24)),
+                start_cell=params.get("start_cell"),
+            )
+        if cap == "math.collision_cone":
+            return compute_collision_cone(
+                params["grid_shape"],
+                params.get("avatar_trajectory", ()),
+                params.get("threat_states", ()),
+                blocked_cells=params.get("blocked_cells", ()),
+                step_size=int(params.get("step_size", 1)),
+            )
+        if cap == "math.bayesian_posterior_update":
+            return compute_bayesian_posterior_update(
+                alpha_pass=float(params.get("alpha_pass", 0.5)),
+                beta_block=float(params.get("beta_block", 0.5)),
+                gamma_lethal=float(params.get("gamma_lethal", 0.05)),
+                delta_goal=float(params.get("delta_goal", 0.05)),
+                observations=params.get("observations", ()),
+                risk_weight=float(params.get("risk_weight", 50.0)),
+            )
         return {"error": f"Unknown math capability: {cap}"}
+
+
+__all__ = [
+    "MATH_CAPABILITIES",
+    "MathCapabilityExecutor",
+    "compute_bayesian_posterior_update",
+    "compute_bellman_risk_backup",
+    "compute_collision_cone",
+    "compute_connected_components",
+    "compute_geodesic_field",
+    "compute_set_cardinality",
+    "compute_symmetry_score",
+    "compute_topology_cuts",
+]

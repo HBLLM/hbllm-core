@@ -51,6 +51,15 @@ class PrefrontalDeliberationEngine:
         self.basal_ganglia = basal_ganglia or BasalGangliaGatingCircuit()
         self.neuromodulation = neuromodulation or AdaptiveNeuromodulationGovernor()
 
+    @staticmethod
+    def _set_state_field(view: Any, field: str, value: Any) -> None:
+        from hbllm.hcir.world.engine_state import JournaledEngineView
+
+        if isinstance(view, JournaledEngineView):
+            view.apply_wm_delta(WorkingMemoryDelta(f"state.{field}", value))
+        else:
+            setattr(view.state, field, value)
+
     def arbitrate_basal_ganglia_action(
         self,
         view: Any,
@@ -153,7 +162,7 @@ class PrefrontalDeliberationEngine:
             view.inhibited_actions[focus_switches[0]] = max(
                 view.inhibited_actions.get(focus_switches[0], 0), 8
             )
-            view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            self._set_state_field(view, "phase", EpistemicPhase.EPISTEMIC_EXPLORATION)
             return focus_switches[0], None
 
         # Faculty: Dial / State-Cycler Interleaved Deliberation (Norman Parameter Space Navigation)
@@ -172,12 +181,12 @@ class PrefrontalDeliberationEngine:
             if mut_streak < 2:
                 chosen = value_mutators[view.step_counter % len(value_mutators)]
                 view.working_memory.dial_mutation_streak = mut_streak + 1
-                view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                self._set_state_field(view, "phase", EpistemicPhase.EPISTEMIC_EXPLORATION)
                 return chosen, None
             else:
                 chosen = index_selectors[view.step_counter % len(index_selectors)]
                 view.working_memory.dial_mutation_streak = 0
-                view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                self._set_state_field(view, "phase", EpistemicPhase.EPISTEMIC_EXPLORATION)
                 return chosen, None
 
         # Modal Select-Then-Direct Gating: In pure effector domains without displacement, reach for interactive entities
@@ -198,7 +207,7 @@ class PrefrontalDeliberationEngine:
                 chosen_eff = spatial_effector_actions[0]
                 eff_data = view.ground_effector_action(curr_grid, chosen_eff)
                 if eff_data is not None:
-                    view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                    self._set_state_field(view, "phase", EpistemicPhase.EPISTEMIC_EXPLORATION)
                     return chosen_eff, eff_data
 
         is_stuck_or_looping = (
@@ -261,7 +270,7 @@ class PrefrontalDeliberationEngine:
                 view.inhibited_actions[chosen_action] = max(
                     view.inhibited_actions.get(chosen_action, 0), 4
                 )
-                view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                self._set_state_field(view, "phase", EpistemicPhase.EPISTEMIC_EXPLORATION)
                 return chosen_action, None
 
         return None
@@ -281,7 +290,7 @@ class PrefrontalDeliberationEngine:
         """
         view.consecutive_pacing_steps += 1
         if view.consecutive_pacing_steps > 2:
-            view.state.consecutive_pacing_steps = 0
+            self._set_state_field(view, "consecutive_pacing_steps", 0)
             view.mental_plan.clear()
             view.transition_to_phase(
                 EpistemicPhase.REPLANNING,
@@ -291,7 +300,7 @@ class PrefrontalDeliberationEngine:
             return act, data, None
 
         view.mental_plan.appendleft(next_step)
-        view.state.pending_phase_wait_steps = wait_steps
+        self._set_state_field(view, "pending_phase_wait_steps", wait_steps)
         undo_acts = get_engine_state_attr(view, "undo_actions", set())
         non_disp = [
             a
@@ -405,7 +414,7 @@ class PrefrontalDeliberationEngine:
 
         # Invariant fallback: Invalidate plan and replan if no safe pacing candidate exists
         view.mental_plan.clear()
-        view.state.phase = EpistemicPhase.REPLANNING
+        self._set_state_field(view, "phase", EpistemicPhase.REPLANNING)
         act, data = view.plan_epistemic_probe(curr_grid, available_actions)
         return act, data, None
 
@@ -459,7 +468,7 @@ class PrefrontalDeliberationEngine:
             view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
 
         # 1. Update background & assimilate sensory feedback from previous action
-        view.state.bg_feature = view.estimate_background(curr_grid)
+        self._set_state_field(view, "bg_feature", view.estimate_background(curr_grid))
         if view.prev_grid is not None and not view.state.feedback_assimilated:
             view.assimilate_feedback(
                 curr_grid,
@@ -471,7 +480,7 @@ class PrefrontalDeliberationEngine:
                 action_data=view.last_action_data,
                 **kwargs,
             )
-        view.state.feedback_assimilated = False
+        self._set_state_field(view, "feedback_assimilated", False)
         return curr_grid, terminal
 
     def decide(
@@ -538,7 +547,7 @@ class PrefrontalDeliberationEngine:
         """Post-assimilation deliberation body."""
         # When confirmed goals are known, exploit them directly
         if self.has_confirmed_goal(view):
-            view.state.phase = EpistemicPhase.EXPLOITATION
+            self._set_state_field(view, "phase", EpistemicPhase.EXPLOITATION)
 
         # VTA-LC Coupled Neuromodulatory Dynamics: Step dopamine & noradrenaline dynamics
         try:
@@ -744,7 +753,7 @@ class PrefrontalDeliberationEngine:
                             )
                         )
                         sim_pos = next_pos
-                    view.state.phase = self._target_phase(view)
+                    self._set_state_field(view, "phase", self._target_phase(view))
                     view.apply_wm_delta(WorkingMemoryDelta("mental_plan", deque(rel_plan)))
                     next_step = view.mental_plan.popleft()
                     logger.info(
@@ -839,7 +848,7 @@ class PrefrontalDeliberationEngine:
                                 view.phase == EpistemicPhase.MOTOR_GROUNDING
                                 and view.is_motor_grounded()
                             ):
-                                view.state.phase = self._target_phase(view)
+                                self._set_state_field(view, "phase", self._target_phase(view))
                             pred_pos = getattr(
                                 synthesized.current_action, "next_predicted_pos", None
                             )
@@ -862,10 +871,12 @@ class PrefrontalDeliberationEngine:
             view.apply_wm_delta(WorkingMemoryDelta("simulation_cooldown", 0))
             view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
             view.mental_plan.clear()
-            view.state.phase = (
+            self._set_state_field(
+                view,
+                "phase",
                 EpistemicPhase.MENTAL_SIMULATION
                 if view.is_motor_grounded()
-                else EpistemicPhase.EPISTEMIC_EXPLORATION
+                else EpistemicPhase.EPISTEMIC_EXPLORATION,
             )
 
         has_temporal = bool(view.hazard_tracker.periodic_cells) or bool(view.mobile_threat_features)
@@ -1005,7 +1016,7 @@ class PrefrontalDeliberationEngine:
                                 pr, pc = step_s.predicted_avatar_pos
                                 if math.hypot(pr - cl.center_r, pc - cl.center_c) <= c_radius:
                                     view.mental_plan.clear()
-                                    view.state.current_simulated_goal = None
+                                    self._set_state_field(view, "current_simulated_goal", None)
                                     break
                             if not view.mental_plan:
                                 break
@@ -1113,14 +1124,14 @@ class PrefrontalDeliberationEngine:
                 and view.avatar_feature is None
                 and view.prior_avatar_feature is not None
             ):
-                view.state.avatar_feature = view.prior_avatar_feature
+                self._set_state_field(view, "avatar_feature", view.prior_avatar_feature)
                 view.avatar_features.add(view.prior_avatar_feature)
 
         # Faculty: Active Manipulandum Localization
         if view.avatar_pos is None and view.working_memory.body_schema.has_manipulandum():
             manip = view.working_memory.body_schema.active_manipulandum
             if manip is not None and getattr(manip, "pos", None) is not None:
-                view.state.avatar_pos = manip.pos
+                self._set_state_field(view, "avatar_pos", manip.pos)
 
         # Observe creature motion
         view._observe_oriented_threat_motion(curr_grid, available_actions, known_av_feats)
@@ -1211,7 +1222,7 @@ class PrefrontalDeliberationEngine:
                 "Anterior Cingulate Cortex (ACC): Breaking limit cycle oscillation with orthogonal perturbation action %s",
                 forced_acc_perturbation,
             )
-            view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+            self._set_state_field(view, "phase", EpistemicPhase.EPISTEMIC_EXPLORATION)
             chosen_action = forced_acc_perturbation
             chosen_data = None
             branch = "acc_perturbation"
@@ -1286,7 +1297,7 @@ class PrefrontalDeliberationEngine:
             if view.consecutive_stuck_steps > 0:
                 view.mental_plan.clear()
                 view.working_memory.active_plan_step = None
-                view.state.phase = EpistemicPhase.REPLANNING
+                self._set_state_field(view, "phase", EpistemicPhase.REPLANNING)
                 simulated_plan = view.simulate_in_mind(curr_grid, available_actions)
                 if simulated_plan:
                     view.apply_wm_delta(WorkingMemoryDelta("consecutive_simulation_failures", 0))
@@ -1350,7 +1361,7 @@ class PrefrontalDeliberationEngine:
                     view.working_memory.active_plan_step = next_step
 
             if not view.mental_plan and view.working_memory.active_plan_step is None:
-                view.state.phase = EpistemicPhase.REPLANNING
+                self._set_state_field(view, "phase", EpistemicPhase.REPLANNING)
                 if view.object_planner.active_target_object_id:
                     view.object_planner.ledger.record_interaction(
                         view.object_planner.active_target_object_id,
@@ -1370,10 +1381,10 @@ class PrefrontalDeliberationEngine:
                 )
                 branch = "temporal_pacing"
             elif not plan_safe:
-                view.state.consecutive_pacing_steps = 0
+                self._set_state_field(view, "consecutive_pacing_steps", 0)
                 view.mental_plan.clear()
                 view.working_memory.active_plan_step = None
-                view.state.phase = EpistemicPhase.REPLANNING
+                self._set_state_field(view, "phase", EpistemicPhase.REPLANNING)
 
                 danger_cells = (
                     {next_step.predicted_avatar_pos}
@@ -1423,7 +1434,7 @@ class PrefrontalDeliberationEngine:
                 ):
                     if is_action_trigger:
                         view.inhibited_actions[next_step.action] = 0
-                    view.state.consecutive_pacing_steps = 0
+                    self._set_state_field(view, "consecutive_pacing_steps", 0)
                     chosen_action = next_step.action
                     chosen_data = next_step.action_data
                     predicted_pos = next_step.predicted_avatar_pos
@@ -1432,7 +1443,7 @@ class PrefrontalDeliberationEngine:
                 else:
                     view.mental_plan.clear()
                     view.working_memory.active_plan_step = None
-                    view.state.phase = EpistemicPhase.REPLANNING
+                    self._set_state_field(view, "phase", EpistemicPhase.REPLANNING)
                     simulated_plan = view.simulate_in_mind(curr_grid, available_actions)
                     if simulated_plan:
                         view.apply_wm_delta(
@@ -1526,7 +1537,7 @@ class PrefrontalDeliberationEngine:
                         else:
                             view.mental_plan.clear()
                             view.working_memory.active_plan_step = None
-                            view.state.phase = EpistemicPhase.REPLANNING
+                            self._set_state_field(view, "phase", EpistemicPhase.REPLANNING)
                             chosen_action, chosen_data = view.plan_epistemic_probe(
                                 curr_grid, available_actions
                             )
@@ -1573,7 +1584,7 @@ class PrefrontalDeliberationEngine:
                     predicted_pos = next_step.predicted_avatar_pos
                     branch = "macro_plan"
                     if not view.mental_plan:
-                        view.state.phase = EpistemicPhase.REPLANNING
+                        self._set_state_field(view, "phase", EpistemicPhase.REPLANNING)
                         if view.object_planner.active_target_object_id:
                             view.object_planner.ledger.record_interaction(
                                 view.object_planner.active_target_object_id,
@@ -1585,7 +1596,7 @@ class PrefrontalDeliberationEngine:
             if chosen_action is None:
                 if view.exploration_cooldown > 0:
                     view.exploration_cooldown -= 1
-                view.state.phase = EpistemicPhase.EPISTEMIC_EXPLORATION
+                self._set_state_field(view, "phase", EpistemicPhase.EPISTEMIC_EXPLORATION)
                 chosen_action, chosen_data = view.plan_epistemic_probe(curr_grid, available_actions)
                 branch = "epistemic_probe"
 
@@ -1881,11 +1892,11 @@ class PrefrontalDeliberationEngine:
             chosen_action,
             chosen_data,
         )
-        view.state.prev_grid = curr_grid.copy()
+        cls._set_state_field(view, "prev_grid", curr_grid.copy())
         view.grid_history.append(curr_grid.copy())
-        view.state.last_action = chosen_action
-        view.state.last_action_data = chosen_data
-        view.state.last_predicted_pos = predicted_pos
+        cls._set_state_field(view, "last_action", chosen_action)
+        cls._set_state_field(view, "last_action_data", chosen_data)
+        cls._set_state_field(view, "last_predicted_pos", predicted_pos)
         return chosen_action, chosen_data
 
     def to_causal_predicate(self: Any = None) -> CausalPredicate:

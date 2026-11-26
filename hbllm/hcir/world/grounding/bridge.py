@@ -155,6 +155,7 @@ class CorticalGroundingBridge:
         self.state.cached_entity_concepts.clear()
         self.state.cached_entity_priors.clear()
         self.state.adapted_role_pairs.clear()
+        self.state.promoted_concept_ids.clear()
         self.relation_learner.reset()
         self.tracker.reset()
         self._committed_beliefs.clear()
@@ -540,7 +541,7 @@ class CorticalGroundingBridge:
         # Run concept maintenance (split/merge detection) periodically
         split_count = 0
         merge_count = 0
-        if self.state.step_counter % 5 == 0 and self.state.step_counter > 0:
+        if self.state.step_counter % 12 == 0 and self.state.step_counter > 0:
             try:
                 splits, merges = self.concept_learner.maintain()
                 split_count = len(splits)
@@ -554,19 +555,24 @@ class CorticalGroundingBridge:
         # Promote eligible concepts to authoritative HCIR state (WP3: grounded concept promotion)
         promoted_concepts: list[str] = []
         for concept in self.concept_store.get_all():
+            cid = concept.concept_ref.id
+            if cid in self.state.promoted_concept_ids:
+                continue
             if self.concept_store.lifecycle_manager.should_propose_promotion(concept):
-                cid = concept.concept_ref.id
-                if not self.workspace.graph.has_node(cid):
-                    prop_id = f"prop_{cid}_{uuid.uuid4().hex[:6]}"
-                    proposal = self.concept_store.lifecycle_manager.create_promotion_proposal(
-                        concept=concept,
-                        proposal_id=prop_id,
-                    )
-                    try:
-                        self.committer.commit_concept_promotion(proposal, concept)
-                        promoted_concepts.append(cid)
-                    except Exception as exc:
-                        logger.debug("Failed to commit concept promotion for %s: %s", cid, exc)
+                if self.workspace.graph.has_node(cid):
+                    self.state.promoted_concept_ids.add(cid)
+                    continue
+                prop_id = f"prop_{cid}_{uuid.uuid4().hex[:6]}"
+                proposal = self.concept_store.lifecycle_manager.create_promotion_proposal(
+                    concept=concept,
+                    proposal_id=prop_id,
+                )
+                try:
+                    self.committer.commit_concept_promotion(proposal, concept)
+                    promoted_concepts.append(cid)
+                    self.state.promoted_concept_ids.add(cid)
+                except Exception as exc:
+                    logger.debug("Failed to commit concept promotion for %s: %s", cid, exc)
 
         self.state.last_feature_vectors = feature_vectors
         self.state.last_concept_assignments = concept_assignments

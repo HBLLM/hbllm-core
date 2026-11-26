@@ -42,6 +42,31 @@ def get_engine_state_attr(target: Any, attr: str, default: Any = None) -> Any:
     return default
 
 
+def _apply_target_mutation(
+    prefix: str,
+    target: Any,
+    sub_field: str,
+    val: Any,
+    op: str,
+    before_recorder: Callable[[str, Any], None] | None,
+) -> bool:
+    if target is None:
+        return False
+    try:
+        prev = getattr(target, sub_field)
+    except AttributeError:
+        return False
+    if before_recorder is not None:
+        before_recorder(f"{prefix}{sub_field}", prev)
+    if op == "set":
+        setattr(target, sub_field, val)
+    elif op == "append" and isinstance(prev, list):
+        prev.append(val)
+    elif op == "add" and isinstance(prev, set):
+        prev.add(val)
+    return True
+
+
 def apply_wm_field_delta(
     host: Any,
     working_memory: Any,
@@ -52,27 +77,17 @@ def apply_wm_field_delta(
     before_recorder: Callable[[str, Any], None] | None = None,
 ) -> None:
     """Apply a declarative field mutation (`set`/`append`/`add`) to the canonical owner."""
-    candidates: tuple[tuple[str, Any], ...] = (
-        ("", host),
-        ("working_memory.", working_memory),
-        ("state.", state),
-    )
-    for prefix, target in candidates:
-        if target is None or not hasattr(target, field):
-            continue
-        if before_recorder is not None:
-            before_recorder(f"{prefix}{field}", getattr(target, field, None))
-        if op == "set":
-            setattr(target, field, val)
-        elif op == "append":
-            cur = getattr(target, field)
-            if isinstance(cur, list):
-                cur.append(val)
-        elif op == "add":
-            cur = getattr(target, field)
-            if isinstance(cur, set):
-                cur.add(val)
+    if field.startswith("state."):
+        _apply_target_mutation("state.", state, field[6:], val, op, before_recorder)
         return
+    if field.startswith("working_memory."):
+        _apply_target_mutation(
+            "working_memory.", working_memory, field[15:], val, op, before_recorder
+        )
+        return
+    for prefix, target in (("", host), ("working_memory.", working_memory), ("state.", state)):
+        if _apply_target_mutation(prefix, target, field, val, op, before_recorder):
+            return
 
 
 @dataclass(frozen=True)
@@ -87,6 +102,9 @@ class FrozenSymbolicTheory:
     receptacle_features: frozenset[int] = frozenset()
     actuator_features: frozenset[int] = frozenset()
     transition_kb: Any | None = None
+    tool_barrier_posteriors: MappingProxyType[tuple[Any, Any], tuple[float, float]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     def is_barrier(self, feat: int) -> bool:
         return feat in self.barrier_features
@@ -142,11 +160,19 @@ class FrozenSymbolicTheory:
             confidence=(1.0 if known else 0.0),
         )
 
-    def is_tool_barrier_incompatible(self, tool_feat: int, barrier_feat: int) -> bool:
-        return False
+    def is_tool_barrier_incompatible(self, tool_feat: Any, barrier_feat: Any) -> bool:
+        pair = self.tool_barrier_posteriors.get((tool_feat, barrier_feat))
+        if pair is None:
+            return False
+        alpha, beta = pair
+        return beta > alpha
 
-    def has_tool_barrier_affinity(self, tool_feat: int, barrier_feat: int) -> bool:
-        return False
+    def has_tool_barrier_affinity(self, tool_feat: Any, barrier_feat: Any) -> bool:
+        pair = self.tool_barrier_posteriors.get((tool_feat, barrier_feat))
+        if pair is None:
+            return False
+        alpha, beta = pair
+        return alpha > beta
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ from typing import Any, ClassVar, Literal
 
 import numpy as np
 
-from hbllm.hcir.graph import ConceptNode
+from hbllm.hcir.graph import ConceptNode, LearnedRuleNode
 from hbllm.hcir.spatial_planner import EntityRole, SpatialEntity
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal.affordances import AffordanceType, ConditionalAffordance
@@ -159,9 +159,12 @@ class HCIRSymbolicWorldTheory:
     # Elizabeth Spelke's Core Knowledge physical axioms
     spelke_axioms: dict[SpelkePhysicalAxiom, CausalPredicate] = field(default_factory=dict)
 
-    # Tool-barrier empirical affinities and distal actuation ledger
+    # Tool-barrier empirical affinities, conjugate Beta posteriors, and distal actuation ledger
     tool_barrier_affinities: dict[Any, set[Any]] = field(default_factory=dict)
     tool_barrier_incompatibilities: dict[Any, set[Any]] = field(default_factory=dict)
+    _tool_barrier_posteriors: dict[tuple[Any, Any], tuple[float, float]] = field(
+        default_factory=dict
+    )
     distal_actuations: list[dict[str, Any]] = field(default_factory=list)
     relational_confidence_map: dict[str, float] = field(default_factory=dict)
     transition_kb: TransitionKnowledgeBase = field(default_factory=TransitionKnowledgeBase)
@@ -917,16 +920,51 @@ class HCIRSymbolicWorldTheory:
             self._domain_predicate_keys.add(key)
             self.domain_predicates.append(predicate)
 
+    def record_tool_barrier_observation(
+        self,
+        tool_feat: Any,
+        barrier_feat: Any,
+        *,
+        unlocked: bool,
+        weight: float = 1.0,
+    ) -> tuple[float, float]:
+        """Update conjugate Beta posterior `(alpha_unlock, beta_fail)` for `(tool_feat, barrier_feat)`."""
+        key = (tool_feat, barrier_feat)
+        alpha, beta = self._tool_barrier_posteriors.get(key, (1.0, 1.0))
+        inc = max(0.0, float(weight))
+        if unlocked:
+            alpha += inc
+        else:
+            beta += inc
+        self._tool_barrier_posteriors[key] = (alpha, beta)
+        mean = alpha / max(1e-9, alpha + beta)
+        if mean > 0.55:
+            self.tool_barrier_affinities.setdefault(tool_feat, set()).add(barrier_feat)
+            if tool_feat in self.tool_barrier_incompatibilities:
+                self.tool_barrier_incompatibilities[tool_feat].discard(barrier_feat)
+        elif mean < 0.45:
+            self.tool_barrier_incompatibilities.setdefault(tool_feat, set()).add(barrier_feat)
+            if tool_feat in self.tool_barrier_affinities:
+                self.tool_barrier_affinities[tool_feat].discard(barrier_feat)
+        return (alpha, beta)
+
+    def tool_barrier_posterior(
+        self, tool_feat: Any, barrier_feat: Any
+    ) -> tuple[float, float, float]:
+        """Return `(alpha_unlock, beta_fail, mean_prob)` for `(tool_feat, barrier_feat)`."""
+        alpha, beta = self._tool_barrier_posteriors.get((tool_feat, barrier_feat), (1.0, 1.0))
+        return (alpha, beta, float(alpha / max(1e-9, alpha + beta)))
+
     def record_tool_barrier_affinity(self, tool_feat: Any, barrier_feat: Any) -> None:
         """Record empirical causal resonance where tool_feat cleared barrier_feat."""
-        self.tool_barrier_affinities.setdefault(tool_feat, set()).add(barrier_feat)
+        self.record_tool_barrier_observation(tool_feat, barrier_feat, unlocked=True)
         self.transition_kb.record_causal_rule(
             tool_feat, f"unlocks:{barrier_feat}", evidence="tool_barrier_affinity"
         )
 
     def record_tool_barrier_incompatibility(self, tool_feat: Any, barrier_feat: Any) -> None:
         """Record empirical causal failure where tool_feat failed to clear barrier_feat."""
-        self.tool_barrier_incompatibilities.setdefault(tool_feat, set()).add(barrier_feat)
+        self.record_tool_barrier_observation(tool_feat, barrier_feat, unlocked=False)
 
     def has_tool_barrier_affinity(
         self, tool_feat: Any | None, barrier_feat: Any | None = None
@@ -2233,6 +2271,32 @@ class HCIRSymbolicWorldTheory:
                 )
             )
 
+        for (t_feat, b_feat), (alpha, beta) in self._tool_barrier_posteriors.items():
+            node_id = f"kb_tool_posterior_{t_feat}_{b_feat}"
+            mean = alpha / max(1e-9, alpha + beta)
+            rule_node = LearnedRuleNode(
+                id=node_id,
+                condition=f"tool={t_feat}&barrier={b_feat}",
+                prediction=f"unlocks:{b_feat}" if mean >= 0.5 else f"blocked:{b_feat}",
+                confidence=float(mean),
+                source_error_count=int(round(max(0.0, (alpha - 1.0) + (beta - 1.0)))),
+                domain="tool_barrier_posterior",
+                properties={
+                    "tool_feat": t_feat,
+                    "barrier_feat": b_feat,
+                    "alpha_unlock": float(alpha),
+                    "beta_fail": float(beta),
+                    "mean": float(mean),
+                },
+            )
+            ops.append(
+                TransactionOperation(
+                    op=TransactionOp.UPSERT_NODE,
+                    node_id=node_id,
+                    node_data=rule_node.model_dump(),
+                )
+            )
+
         ops.extend(self.transition_kb.to_transaction_operations())
         return ops
 
@@ -2240,6 +2304,20 @@ class HCIRSymbolicWorldTheory:
         """Reconstruct symbolic world theory from stored HCIR ConceptNodes and TransitionKB nodes."""
         _, kb_hydrated_feats = self.transition_kb.hydrate_from_nodes_with_keys(nodes)
         for node in nodes:
+            if isinstance(node, LearnedRuleNode) and node.domain == "tool_barrier_posterior":
+                r_props = node.properties or {}
+                t_f = r_props.get("tool_feat")
+                b_f = r_props.get("barrier_feat")
+                if t_f is not None and b_f is not None:
+                    alpha = float(r_props.get("alpha_unlock", 1.0))
+                    beta = float(r_props.get("beta_fail", 1.0))
+                    self._tool_barrier_posteriors[(t_f, b_f)] = (alpha, beta)
+                    mean = alpha / max(1e-9, alpha + beta)
+                    if mean > 0.55:
+                        self.tool_barrier_affinities.setdefault(t_f, set()).add(b_f)
+                    elif mean < 0.45:
+                        self.tool_barrier_incompatibilities.setdefault(t_f, set()).add(b_f)
+                continue
             if not isinstance(node, ConceptNode):
                 continue
             props = node.properties or {}
@@ -2378,6 +2456,9 @@ class HCIRSymbolicWorldTheory:
         self._current_context_verified.clear()
         self._current_entity_distribution_stats.clear()
         self._prior_entity_distribution_stats.clear()
+        self._tool_barrier_posteriors.clear()
+        self.tool_barrier_affinities.clear()
+        self.tool_barrier_incompatibilities.clear()
         self.transition_kb.clear()
         self._syncing_predicates = False
 
@@ -2404,6 +2485,8 @@ def invalidate_stale_context_ontology(
         bg_feature=bg_feature, preserve_current_context=preserve_current_context
     )
     theory.tool_barrier_affinities.clear()
+    theory.tool_barrier_incompatibilities.clear()
+    theory._tool_barrier_posteriors.clear()
 
     keep_lethal = theory.context_verified_features("lethal") if preserve_current_context else set()
     if hazard_tracker is not None:

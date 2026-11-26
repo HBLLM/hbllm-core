@@ -297,6 +297,112 @@ skills:
             yield: ["$r1"]
           label: inquiry_done
 
+  - id: prior_skill_geodesic_field
+    skill_name: innate_geodesic_field
+    description: Compute multi-source geodesic distance field over a spatial manifold via Layer-0 ALU.
+    parameters:
+      - name: grid
+        required: true
+      - name: goal_cells
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: geodesic_field
+      target: "?grid"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.geodesic_field ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.geodesic_field
+            params:
+              grid: "$r0"
+              goal_cells: "$r1"
+            bind: "$r2"
+        - opcode: RETURN
+          params:
+            yield: ["$r2"]
+
+  - id: prior_skill_bellman_risk_backup
+    skill_name: innate_bellman_risk_backup
+    description: Evaluate risk-sensitive finite-horizon expected utility over stochastic dynamics via Layer-0 ALU.
+    parameters:
+      - name: grid_shape
+        required: true
+      - name: goal_cells
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: bellman_risk_backup
+      target: "?grid_shape"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.bellman_risk_backup ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.bellman_risk_backup
+            params:
+              grid_shape: "$r0"
+              goal_cells: "$r1"
+            bind: "$r2"
+        - opcode: RETURN
+          params:
+            yield: ["$r2"]
+
+  - id: prior_skill_collision_cone
+    skill_name: innate_collision_cone
+    description: Project dynamic threat trajectories forward to detect collisions and swap hazards via Layer-0 ALU.
+    parameters:
+      - name: grid_shape
+        required: true
+      - name: avatar_trajectory
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: collision_cone
+      target: "?avatar_trajectory"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.collision_cone ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.collision_cone
+            params:
+              grid_shape: "$r0"
+              avatar_trajectory: "$r1"
+            bind: "$r2"
+        - opcode: RETURN
+          params:
+            yield: ["$r2"]
+
+  - id: prior_skill_bayesian_posterior
+    skill_name: innate_bayesian_posterior_update
+    description: Update conjugate Dirichlet outcome posteriors and Expected Free Energy via Layer-0 ALU.
+    parameters:
+      - name: observations
+        required: false
+        default: []
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: bayesian_posterior_update
+      observations: "?observations"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.bayesian_posterior_update ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.bayesian_posterior_update
+            params:
+              observations: "$r0"
+            bind: "$r1"
+        - opcode: RETURN
+          params:
+            yield: ["$r1"]
+
 edges:
   - id: prior_edge_cohesion_continuity
     edge_type: supports
@@ -322,3 +428,19 @@ edges:
     edge_type: supports
     sources: [prior_concept_pearl_do]
     targets: [prior_skill_counterfactual_probe]
+  - id: prior_edge_metric_geodesic
+    edge_type: supports
+    sources: [prior_concept_metric_space]
+    targets: [prior_skill_geodesic_field]
+  - id: prior_edge_metric_bellman
+    edge_type: supports
+    sources: [prior_concept_expected_free_energy]
+    targets: [prior_skill_bellman_risk_backup]
+  - id: prior_edge_collision_cone
+    edge_type: supports
+    sources: [prior_concept_collision_avoidance]
+    targets: [prior_skill_collision_cone]
+  - id: prior_edge_efe_bayesian
+    edge_type: supports
+    sources: [prior_concept_expected_free_energy]
+    targets: [prior_skill_bayesian_posterior]

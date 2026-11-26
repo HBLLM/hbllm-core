@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from hbllm.hcir.capabilities.cortical_alus import compute_collision_cone
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.world.causal_discovery import CausalPredicate
 from hbllm.hcir.world.cortex_perception import PerceptionEngine
@@ -86,7 +87,8 @@ class StaticLethalHazardPredicate(PlanSafetyPredicate):
         available_actions: Sequence[Any],
     ) -> SafetyGateResult:
         H, W = curr_grid.shape
-        for future_step in future_steps:
+        kb = view.symbolic_theory.transition_kb
+        for idx, future_step in enumerate(future_steps):
             pos = future_step.predicted_avatar_pos
             if (
                 not isinstance(pos, tuple)
@@ -101,7 +103,13 @@ class StaticLethalHazardPredicate(PlanSafetyPredicate):
                 if feat in view.mobile_threat_features:
                     continue
                 ev = view.symbolic_theory.evaluate_transition(feat, locus=(fr, fc))
-                if feat in view.hazard_tracker.known_lethal_features or ev.risk_cost >= 40.0:
+                risk_cost = ev.risk_cost
+                if idx == 0 and view.avatar_pos is not None and kb is not None:
+                    act_ev = kb.evaluate_action_transition(
+                        view.avatar_pos, next_step.action, feature_id=feat, locus=(fr, fc)
+                    )
+                    risk_cost = max(risk_cost, act_ev.risk_cost)
+                if feat in view.hazard_tracker.known_lethal_features or risk_cost >= 40.0:
                     return SafetyGateResult(
                         is_safe=False, reason=f"Lethal feature {feat} at ({fr}, {fc})"
                     )
@@ -192,7 +200,6 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
             if not live_patrols:
                 return SafetyGateResult(is_safe=True)
 
-            half_step = max(1, step_size // 2)
             walkable_and_safe = view.symbolic_theory.walkable_features
             bg_is_void = len(walkable_and_safe) > 0 and bg not in walkable_and_safe
             patrol_walls: set[tuple[int, int]] = set(view.learned_barriers)
@@ -211,59 +218,42 @@ class DynamicPatrolTrajectoryPredicate(PlanSafetyPredicate):
                     ):
                         patrol_walls.discard((rr, cc))
 
-            def _blocked(p: tuple[int, int], f: tuple[int, int]) -> bool:
-                probe = (p[0] + f[0] * half_step, p[1] + f[1] * half_step)
-                dest = (p[0] + f[0] * step_size, p[1] + f[1] * step_size)
-                for q in (probe, dest):
-                    if not (0 <= q[0] < H and 0 <= q[1] < W) or q in patrol_walls:
-                        return True
-                return False
-
-            sim_patrols = frozenset(live_patrols)
-            cur_av_pos = view.avatar_pos
-            for future_step in future_steps:
-                avatar_dest = future_step.predicted_avatar_pos
-                new_patrol_set: set[tuple[tuple[int, int], tuple[int, int]]] = set()
-                collision = False
-                for pat_pos, pat_facing in sim_patrols:
-                    dest = (
-                        pat_pos[0] + pat_facing[0] * step_size,
-                        pat_pos[1] + pat_facing[1] * step_size,
+            threat_states = [
+                {"pos": [int(p[0]), int(p[1])], "facing": [int(f[0]), int(f[1])]}
+                for p, f in live_patrols
+            ]
+            av_origin = (
+                view.avatar_pos
+                if view.avatar_pos is not None
+                else next_step.predicted_avatar_pos or (0, 0)
+            )
+            steps_to_check = (
+                future_steps[:1]
+                if next_step.expected_mutation == "oscillatory_return_step"
+                else future_steps
+            )
+            av_traj = [
+                [int(av_origin[0]), int(av_origin[1])],
+                *[
+                    [int(fs.predicted_avatar_pos[0]), int(fs.predicted_avatar_pos[1])]
+                    for fs in steps_to_check
+                    if isinstance(fs.predicted_avatar_pos, tuple)
+                    and len(fs.predicted_avatar_pos) >= 2
+                ],
+            ]
+            if len(av_traj) > 1:
+                cone = compute_collision_cone(
+                    (H, W),
+                    av_traj,
+                    threat_states,
+                    blocked_cells=list(patrol_walls),
+                    step_size=step_size,
+                )
+                if not cone["is_safe"] and cone["first_collision_step"] == 0:
+                    return SafetyGateResult(
+                        is_safe=False,
+                        reason="Immediate collision with simulated patrol threat: space-time replanning required",
                     )
-                    if not (0 <= dest[0] < H and 0 <= dest[1] < W) or dest in patrol_walls:
-                        new_f = (-pat_facing[0], -pat_facing[1])
-                        new_patrol_set.add((pat_pos, new_f))
-                        if pat_pos == avatar_dest:
-                            collision = True
-                            break
-                        continue
-                    if dest == avatar_dest:
-                        collision = True
-                        break
-                    # Physical head-on swap collision: entities cross each other on the corridor edge
-                    if cur_av_pos is not None and pat_pos == avatar_dest and dest == cur_av_pos:
-                        collision = True
-                        break
-                    new_f = pat_facing
-                    if _blocked(dest, pat_facing):
-                        new_f = (-pat_facing[0], -pat_facing[1])
-                    new_patrol_set.add((dest, new_f))
-                if collision:
-                    if (
-                        next_step.expected_mutation == "oscillatory_return_step"
-                        and future_step != next_step
-                    ):
-                        continue
-                    if future_step == next_step:
-                        return SafetyGateResult(
-                            is_safe=False,
-                            reason="Immediate collision with simulated patrol threat: space-time replanning required",
-                        )
-                    # Distal collision along trajectory: the immediate next_step does not collide with the threat.
-                    # Allow next_step to proceed toward the corridor while re-evaluating each step online.
-                    continue
-                sim_patrols = frozenset(new_patrol_set)
-                cur_av_pos = avatar_dest
 
         except Exception as e:
             logger.debug("Dynamic patrol trajectory simulation error: %s", e)
