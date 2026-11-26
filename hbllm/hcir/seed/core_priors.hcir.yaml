@@ -1,0 +1,324 @@
+version: "2.0.0"
+authority: "docs/architecture/priors.md"
+description: >-
+  Minimal Spelke Core Knowledge and Active Inference innate bootstrap seed
+  (Layer 1). Strictly domain-agnostic and task-agnostic: zero surface colors,
+  game mechanics, puzzle shapes, bespoke action IDs, or linguistic aliases.
+
+concepts:
+  # §2.1 Spatiotemporal Objectness
+  - id: prior_concept_cohesion
+    label: spatiotemporal_cohesion
+    domain: spelke_objectness
+    definition: Bounded contiguous regions persist and move as cohesive wholes.
+    confidence: 0.99
+  - id: prior_concept_continuity
+    label: spatiotemporal_continuity
+    domain: spelke_objectness
+    definition: Entities traverse continuous connected paths across time steps.
+    confidence: 0.99
+  - id: prior_concept_solidity
+    label: solidity_and_occlusion
+    domain: spelke_objectness
+    definition: Distinct solid entities cannot co-occupy coordinates; disappearance behind an occluder preserves identity.
+    confidence: 0.99
+  - id: prior_concept_coord_invariance
+    label: coordinate_translation_invariance
+    domain: spelke_objectness
+    definition: Entity identity and category membership are invariant under spatial translation.
+    confidence: 0.99
+
+  # §2.2 Elementary Spatial Physics & Topology
+  - id: prior_concept_metric_space
+    label: metric_manifold
+    domain: spatial_topology
+    definition: Space is equipped with L1 and L2 distance metrics over relative offsets.
+    confidence: 0.99
+  - id: prior_concept_adjacent
+    label: relation_adjacent
+    domain: spatial_topology
+    definition: Two regions sharing an edge or boundary cell stand in an adjacency relation.
+    confidence: 0.99
+  - id: prior_concept_contained_in
+    label: relation_contained_in
+    domain: spatial_topology
+    definition: An entity enclosed by a closed boundary stands in a containment relation.
+    confidence: 0.99
+  - id: prior_concept_separated
+    label: relation_separated
+    domain: spatial_topology
+    definition: Regions partitioned by topological cut-sets have non-zero path separation.
+    confidence: 0.99
+  - id: prior_concept_inertia
+    label: kinematic_inertia
+    domain: spatial_topology
+    definition: Moving entities maintain momentum vector until acted upon by collision or actuation.
+    confidence: 0.95
+
+  # §2.3 Agency & Intention
+  - id: prior_concept_self_agency
+    label: self_agency_attribution
+    domain: agency_intention
+    definition: Emitted motor commands correlate temporally and proximally with self-entity state deltas.
+    confidence: 0.98
+  - id: prior_concept_goal_agency
+    label: intentional_agency_detection
+    domain: agency_intention
+    definition: Trajectories systematically curving away from passive inertia toward attractors indicate intentional agents.
+    confidence: 0.95
+  - id: prior_concept_collision_avoidance
+    label: hazard_collision_avoidance
+    domain: agency_intention
+    definition: Agents avoid terminal transitions and intersecting lethal trajectory cones.
+    confidence: 0.98
+
+  # §2.4 Discrete Numerosity & Counting
+  - id: prior_concept_numerosity
+    label: discrete_numerosity_comparison
+    domain: discrete_numerosity
+    definition: Cardinality equality, subset, and difference relations compare finite discrete entity sets.
+    confidence: 0.99
+  - id: prior_concept_correspondence
+    label: bijective_correspondence
+    domain: discrete_numerosity
+    definition: Entity identities persist across successive frames via minimal-cost bipartite assignment.
+    confidence: 0.98
+
+  # §2.5 Causal Structure & Active Inference
+  - id: prior_concept_temporal_precedence
+    label: causal_temporal_precedence
+    domain: causal_active_inference
+    definition: Causes strictly precede their physical effects with positive temporal delta.
+    confidence: 0.99
+  - id: prior_concept_pearl_do
+    label: pearl_interventional_do_calculus
+    domain: causal_active_inference
+    definition: Active intervention do(action) differs from passive correlation and reveals structural mechanism.
+    confidence: 0.99
+  - id: prior_concept_expected_free_energy
+    label: expected_free_energy_minimization
+    domain: causal_active_inference
+    definition: Policy selection balances expected subgoal utility against epistemic surprise reduction.
+    confidence: 0.98
+
+rules:
+  - id: prior_rule_permanence_under_occlusion
+    condition: "visible(entity) == False and neighbor_contiguous(occluder)"
+    prediction: "state(entity) == occluded_persistent"
+    domain: spelke_objectness
+    confidence: 0.92
+  - id: prior_rule_boundary_collision
+    condition: "projected_coord == occupied_solid"
+    prediction: "kinematic_velocity == deflected_or_blocked"
+    domain: spatial_topology
+    confidence: 0.95
+  - id: prior_rule_cut_set_subgoal
+    condition: "separated(ego, target) and partition_count >= 2"
+    prediction: "require_intervening_boundary_traversal"
+    domain: spatial_topology
+    confidence: 0.94
+  - id: prior_rule_motor_self_attribution
+    condition: "do(motor_action) precedes proximal_delta(dt=1)"
+    prediction: "entity_attribution == self_agent"
+    domain: agency_intention
+    confidence: 0.95
+  - id: prior_rule_epistemic_probe_on_uncertainty
+    condition: "epistemic_entropy > curiosity_threshold"
+    prediction: "emit_counterfactual_fork_or_safe_probe"
+    domain: causal_active_inference
+    confidence: 0.90
+
+skills:
+  - id: prior_skill_count_entities
+    skill_name: innate_count_entities
+    description: Count connected entities and measure background distribution via Layer-0 ALU.
+    parameters:
+      - name: grid
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: count_entities
+      target: "?grid"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.connected_components ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.connected_components
+            params:
+              grid: "$r0"
+            bind: "$r1"
+        - opcode: RETURN
+          params:
+            yield: ["$r1"]
+
+  - id: prior_skill_detect_topology_cuts
+    skill_name: innate_detect_topology_cuts
+    description: Compute topological component separation via Layer-0 cut-set ALU.
+    parameters:
+      - name: grid
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: detect_topology_cuts
+      target: "?grid"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.topology_cuts ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.topology_cuts
+            params:
+              grid: "$r0"
+            bind: "$r1"
+        - opcode: RETURN
+          params:
+            yield: ["$r1"]
+
+  - id: prior_skill_detect_symmetry
+    skill_name: innate_detect_symmetry
+    description: Evaluate bilateral entity centroid symmetry via Layer-0 ALU.
+    parameters:
+      - name: grid
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: detect_symmetry
+      target: "?grid"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.symmetry_score ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.symmetry_score
+            params:
+              grid: "$r0"
+            bind: "$r1"
+        - opcode: RETURN
+          params:
+            yield: ["$r1"]
+
+  - id: prior_skill_compare_cardinality
+    skill_name: innate_compare_cardinality
+    description: Compare cardinality and set membership between two entity sets.
+    parameters:
+      - name: items_a
+        required: true
+      - name: items_b
+        required: false
+        default: []
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: compare_cardinality
+      items_a: "?items_a"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.set_cardinality ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.set_cardinality
+            params:
+              items_a: "$r0"
+              items_b: "$r1"
+            bind: "$r2"
+        - opcode: RETURN
+          params:
+            yield: ["$r2"]
+
+  - id: prior_skill_counterfactual_probe
+    skill_name: innate_counterfactual_probe
+    description: Fork an isolated simulation branch to evaluate an interventional do(a) probe and roll back.
+    parameters:
+      - name: scenario
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: counterfactual_probe
+      scenario: "?scenario"
+    bytecode_stream:
+      author: core_priors
+      description: Pearl do(a) safe counterfactual rollout
+      instructions:
+        - opcode: FORK
+          params:
+            branch_name: prior_cf_probe
+        - opcode: EXECUTE
+          params:
+            capability: world.predict_outcome
+            params:
+              scenario: "$r0"
+              branch: prior_cf_probe
+            bind: "$r1"
+        - opcode: ROLLBACK
+          params:
+            branch_name: prior_cf_probe
+        - opcode: RETURN
+          params:
+            yield: ["$r1"]
+
+  - id: prior_skill_active_epistemic_inquiry
+    skill_name: innate_active_epistemic_inquiry
+    description: Query unresolved unknowns in graph memory or dispatch curiosity exploration.
+    parameters:
+      - name: topic
+        required: false
+        default: ""
+    precondition_pattern:
+      node_type: unknown
+    postcondition_pattern:
+      intent: resolve_uncertainty
+      topic: "?topic"
+    bytecode_stream:
+      author: core_priors
+      description: Unify unknowns and yield target for inquiry
+      instructions:
+        - opcode: UNIFY
+          params:
+            pattern:
+              node_type: unknown
+            bind: "$r0"
+        - opcode: BRANCH
+          params:
+            condition: if_empty
+            register: "$r0"
+            target_label: inquiry_done
+        - opcode: EXECUTE
+          params:
+            capability: world.assess_metacognitive_agency
+            params:
+              target: "$r0"
+            bind: "$r1"
+        - opcode: RETURN
+          params:
+            yield: ["$r1"]
+          label: inquiry_done
+
+edges:
+  - id: prior_edge_cohesion_continuity
+    edge_type: supports
+    sources: [prior_concept_cohesion]
+    targets: [prior_concept_continuity]
+  - id: prior_edge_solidity_permanence
+    edge_type: supports
+    sources: [prior_concept_solidity]
+    targets: [prior_rule_permanence_under_occlusion]
+  - id: prior_edge_separated_cut_set
+    edge_type: supports
+    sources: [prior_concept_separated]
+    targets: [prior_rule_cut_set_subgoal]
+  - id: prior_edge_agency_attribution
+    edge_type: supports
+    sources: [prior_concept_self_agency]
+    targets: [prior_rule_motor_self_attribution]
+  - id: prior_edge_efe_inquiry
+    edge_type: supports
+    sources: [prior_concept_expected_free_energy]
+    targets: [prior_skill_active_epistemic_inquiry]
+  - id: prior_edge_do_cf
+    edge_type: supports
+    sources: [prior_concept_pearl_do]
+    targets: [prior_skill_counterfactual_probe]

@@ -258,40 +258,78 @@ class TestStdlib:
 
     def test_reasoning_compare(self):
         stream = stdlib.reasoning.compare("Python", "Rust")
-        assert stream.length == 3  # QUERY + QUERY + EXECUTE
-        assert stream.instructions[2].params["capability"] == "reasoning.compare"
+        assert [ins.opcode.value for ins in stream.instructions] == [
+            "QUERY",
+            "QUERY",
+            "UNIFY",
+            "ASSERT",
+            "RETURN",
+        ]
 
     def test_reasoning_evaluate(self):
         stream = stdlib.reasoning.evaluate("hypothesis_42", criteria=["accuracy"])
-        assert stream.length == 3
+        assert [ins.opcode.value for ins in stream.instructions] == [
+            "UNIFY",
+            "QUERY",
+            "BRANCH",
+            "ASSERT",
+            "RETURN",
+        ]
 
     def test_planning_decompose(self):
         stream = stdlib.planning.decompose("Build solar dehydrator")
-        assert stream.length == 3  # ASSERT + QUERY + EXECUTE
-        assert stream.instructions[0].opcode.value == "ASSERT"
+        assert [ins.opcode.value for ins in stream.instructions] == [
+            "ASSERT",
+            "QUERY",
+            "UNIFY",
+            "BRANCH",
+            "CALL",
+            "RETURN",
+        ]
 
     def test_planning_prioritize(self):
         stream = stdlib.planning.prioritize(["g1", "g2", "g3"])
-        assert stream.length == 2
+        assert [ins.opcode.value for ins in stream.instructions] == ["QUERY", "UNIFY", "RETURN"]
 
     def test_learning_extract_skill(self):
         stream = stdlib.learning.extract_skill("ep_session_42")
-        assert stream.length == 2
+        assert [ins.opcode.value for ins in stream.instructions] == [
+            "QUERY",
+            "BRANCH",
+            "ASSERT",
+            "RETURN",
+        ]
 
     def test_learning_consolidate(self):
         stream = stdlib.learning.consolidate(memory_type="episodic")
-        assert stream.length == 2
+        assert [ins.opcode.value for ins in stream.instructions] == [
+            "QUERY",
+            "BRANCH",
+            "ASSERT",
+            "RETURN",
+        ]
 
     def test_simulation_hypothesize(self):
         stream = stdlib.simulation.hypothesize("Copper is more efficient")
-        assert stream.length == 4  # FORK + ASSERT + EXECUTE + MERGE
-        assert stream.instructions[0].opcode.value == "FORK"
-        assert stream.instructions[3].opcode.value == "MERGE"
+        assert [ins.opcode.value for ins in stream.instructions] == [
+            "FORK",
+            "ASSERT",
+            "EXECUTE",
+            "MERGE",
+            "RETURN",
+        ]
+        assert stream.instructions[2].params["capability"] == "world.predict_outcome"
 
     def test_simulation_counterfactual(self):
         stream = stdlib.simulation.counterfactual("What if we used aluminum")
-        assert stream.length == 3  # FORK + EXECUTE + ROLLBACK
-        assert stream.instructions[2].opcode.value == "ROLLBACK"
+        assert [ins.opcode.value for ins in stream.instructions] == [
+            "FORK",
+            "ASSERT",
+            "EXECUTE",
+            "ROLLBACK",
+            "RETURN",
+        ]
+        assert stream.instructions[2].params["capability"] == "world.predict_outcome"
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -584,16 +584,19 @@ class HCIRInterpreter:
                 if goal_b is None:
                     continue
                 if isinstance(pre := getattr(node, "precondition_pattern", None), Mapping):
-                    pre_matches = unify_pattern(
-                        active_ws.graph,
-                        pre,
-                        initial_bindings=goal_b,
-                        registers=frame.registers,
-                        limit=1,
-                    )
-                    if not pre_matches:
-                        continue
-                    goal_b = pre_matches[0]
+                    if pre and not (
+                        set(pre.keys()) <= {"symbolic_expr", "capabilities", "signature"}
+                    ):
+                        pre_matches = unify_pattern(
+                            active_ws.graph,
+                            pre,
+                            initial_bindings=goal_b,
+                            registers=frame.registers,
+                            limit=1,
+                        )
+                        if not pre_matches:
+                            continue
+                        goal_b = pre_matches[0]
                 ranked.append((self._skill_rank_key(node), node, goal_b))
             if ranked:
                 ranked.sort(key=lambda item: item[0])

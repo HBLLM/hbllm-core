@@ -142,12 +142,13 @@ def test_subgoal_compilation_to_bytecode() -> None:
     instructions = subgoal.compile_to_instructions(author="test_skill")
 
     assert len(instructions) == 3
-    assert instructions[0].opcode == Opcode.QUERY
-    assert instructions[0].params["query"] == {"color": 9, "panel": "right"}
+    assert instructions[0].opcode == Opcode.UNIFY
+    assert instructions[0].params["pattern"] == {"color": 9, "panel": "right"}
+    assert instructions[0].params["bind"] == "$r0"
     assert instructions[1].opcode == Opcode.ASSERT
-    assert instructions[1].params["intent"] == "ACTIVATE"
+    assert instructions[1].params["node_data"]["properties"]["intent"] == "ACTIVATE"
     assert instructions[2].opcode == Opcode.EXECUTE
-    assert instructions[2].params["capability"] == "spatial.activate"
+    assert instructions[2].params["capability"] == "motor.activate"
 
     # Sequence compilation
     seq = SubgoalSequence(

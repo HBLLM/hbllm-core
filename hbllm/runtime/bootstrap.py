@@ -50,6 +50,7 @@ class CognitiveSystemConfig:
     perception_mode: str = "handcrafted"  # handcrafted | snn | learned
     enable_brain_llm: bool = False
     enable_autonomous_curiosity: bool = False
+    load_core_priors: bool = True
     custom_verification_stages: list[Any] | None = None
     max_events_per_store: int | None = 2000
 
@@ -68,6 +69,7 @@ class CognitiveSystem:
     reasoning_runtime: Any | None = None  # UnifiedReasoningRuntime
     brain: Any | None = None
     hydrated_count: int = 0
+    innate_priors_count: int = 0
     dialogue_service: DialogueService = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -155,6 +157,16 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         commit_authority_registry=authority_registry,
     )
     services.commit_authority_registry = authority_registry
+
+    innate_priors_count = 0
+    if cfg.load_core_priors:
+        from hbllm.hcir.seed.loader import hydrate_core_priors
+
+        innate_priors_count = hydrate_core_priors(
+            tiered_workspace,
+            grant=getattr(tiered_workspace, "_system_grant", None),
+            tenant_id=cfg.tenant_id,
+        )
 
     # 4. Instantiate Autonomous Epistemic Engine with shared KernelServices
     engine = AutonomousEpistemicEngine(
@@ -250,6 +262,7 @@ def build_cognitive_system(config: CognitiveSystemConfig | None = None) -> Cogni
         runtime=runtime,
         reasoning_runtime=runtime.controller.reasoning_runtime,
         hydrated_count=hydrated_count,
+        innate_priors_count=innate_priors_count,
     )
     if cfg.seed_ontology_path is not None:
         from hbllm.hcir.stores.ontology_store import LexicalOntologyStore
