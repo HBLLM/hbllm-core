@@ -24,6 +24,8 @@ config = CognitiveSystemConfig(
     enable_logging=True,
     memory_dir=Path("./data/worlds/prod_world"),
     enable_grounding=True,
+    enable_fuzzy_grounding=False,  # Set True for F1 multi-concept & adaptive relation SGE
+    enable_fuzzy_reasoning=False,  # Set True for F2/F3 soft VM unification & composition policy
     perception_mode="handcrafted",  # "handcrafted" | "snn" | "learned"
     enable_brain_llm=False,  # Keep False for Pure-HCIR
     enable_autonomous_curiosity=False,
@@ -39,6 +41,8 @@ system = build_cognitive_system(config)
 | `exploration_budget` | `150` | Epistemic probing step budget |
 | `memory_dir` | `~/.hbllm/worlds/<world_id>` | Persistent `SQLiteEventStore` directory (`None` for in-memory) |
 | `enable_grounding` | `True` | Attach `CorticalGroundingBridge` (SGE) |
+| `enable_fuzzy_grounding` | `False` | Enable ADR 006 Phase `F1` graded concepts and adaptive relations |
+| `enable_fuzzy_reasoning` | `False` | Enable ADR 006 Phase `F2`/`F3` soft VM unification, `ALPHA_CUT`, and `RelationCompositionPolicy` |
 | `perception_mode` | `"handcrafted"` | `FeatureExtractor` backend (`handcrafted`, `snn`, `learned`) |
 | `enable_brain_llm` | `False` | Allow optional external LLM scaffold outside `hcir/` |
 | `enable_autonomous_curiosity` | `False` | Enable `EpistemicCuriosityController` web fallback on unknown queries |

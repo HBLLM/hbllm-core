@@ -88,7 +88,7 @@ The runtime establishes complete LLM independence over structured problem classe
 
 ## The 14 Default Composable Reasoning Operators
 
-`create_default_operator_registry()` (`hbllm.hcir.reasoning.operators.registry`) registers **14 specialized operators** executing over immutable `FrozenGraphView` snapshots, alongside auxiliary structural engines (`RelationalSchemaInducer`, `SkillMacroChunker`, `TemporalVelocityModel`, `SourceVerifier`):
+`create_default_operator_registry(enable_fuzzy_reasoning=...)` (`hbllm.hcir.reasoning.operators.registry`) registers **14 specialized operators** executing over immutable `FrozenGraphView` snapshots, alongside auxiliary structural engines (`RelationalSchemaInducer`, `SkillMacroChunker`, `TemporalVelocityModel`, `SourceVerifier`). When `enable_fuzzy_reasoning=True`, `DeductionOperator` propagates graded degrees via residuated fuzzy modus ponens (`FuzzyProfileId.LUKASIEWICZ`) and `SpatialOperator` enforces declarative `RelationCompositionPolicy` rules (seeded in `core_priors.hcir.yaml` as `prior_policy_relation_composition`) with `max_scale_ratio` guards (permitting scale-bounded `INSIDE ∘ NEAR` while blocking transitive `NEAR ∘ NEAR` drift and large-container `NEAR ∘ INSIDE`):
 
 ```mermaid
 graph TB

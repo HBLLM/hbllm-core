@@ -32,7 +32,7 @@ Most AI frameworks bolt prompts and vector databases onto an external LLM and tr
 <div class="feature-grid">
 <div class="feature-card">
 <h3>🧠 HCIR Cognitive OS Kernel</h3>
-<p>12-opcode ISA v2 register-unification VM (<code>$r0..$r7</code>, <code>CallStack</code>, strict <code>SyscallAllowlist</code>), 4-tier <code>TieredWorkspace</code>, <code>SQLiteEventStore</code>, homoiconic <code>SkillNode</code> / <code>ConstructionNode</code> programs, <code>ConstitutionalVerifier</code>, and <code>ExecutiveRuntime</code>. <a href="architecture/hcir-kernel-os.md">Architecture &rarr;</a></p>
+<p>12-opcode ISA v2 register-unification VM (<code>$r0..$r7</code>, <code>CallStack</code>, strict <code>SyscallAllowlist</code>), graded <code>UNIFY</code> / <code>ALPHA_CUT</code> <code>BRANCH</code>, 4-tier <code>TieredWorkspace</code>, <code>SQLiteEventStore</code>, <code>ConstitutionalVerifier</code>, and <code>ExecutiveRuntime</code>. <a href="architecture/hcir-kernel-os.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>🌍 5-Stage Cortical World Model</h3>
@@ -40,15 +40,15 @@ Most AI frameworks bolt prompts and vector databases onto an external LLM and tr
 </div>
 <div class="feature-card">
 <h3>👁️ Symbol Grounding Engine (SGE)</h3>
-<p><code>handcrafted</code>, <code>snn</code>, and <code>learned</code> feature extractors, bipartite spatiotemporal tracking, concept induction, and <code>CorticalGroundingBridge</code>. <a href="architecture/grounding.md">Architecture &rarr;</a></p>
+<p><code>handcrafted</code>, <code>snn</code>, and <code>learned</code> feature extractors, multi-prototype <code>ConceptLearner</code> (<code>mahalanobis_rbf</code>), scale-normalized adaptive relations, dual-channel <code>HCIRCommitter</code>, and <code>CorticalGroundingBridge</code>. <a href="architecture/grounding.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>🗣️ Non-LLM Language &amp; Reading</h3>
-<p><code>MultilingualLanguageRuntime</code> (<code>en</code>, <code>si</code>, <code>ta</code>), <code>ConstructionNode</code> embodied construction grammar, 4-step unknown-instruction resolution, SymSpell normalizer, and Track T4 <code>ReadingCurriculumIngestor</code>. <a href="architecture/language-and-reading.md">Architecture &rarr;</a></p>
+<p><code>MultilingualLanguageRuntime</code> (<code>en</code>, <code>si</code>, <code>ta</code>), declarative <code>ConstructionNode</code> hedges and referent ranking, 2D epistemic verbalization, SymSpell normalizer, and Track T4 <code>ReadingCurriculumIngestor</code>. <a href="architecture/language-and-reading.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>🧩 14 Composable Reasoning Operators</h3>
-<p>Deduction, induction, abduction, spatial (RCC-8), temporal (Allen), causal, analogy, counterfactual, contradiction, simulation, active inference, embodied causal, SNN. <a href="architecture/cognitive-execution-runtime.md">Architecture &rarr;</a></p>
+<p>Fuzzy modus ponens deduction, induction, abduction, declarative <code>RelationCompositionPolicy</code> spatial inference, temporal (Allen), causal, analogy, counterfactual, contradiction, simulation, active inference, embodied causal, SNN. <a href="architecture/cognitive-execution-runtime.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>⚡ Neuromorphic SNN Engine</h3>
@@ -56,7 +56,7 @@ Most AI frameworks bolt prompts and vector databases onto an external LLM and tr
 </div>
 <div class="feature-card">
 <h3>🛠️ Governed Capabilities &amp; Curiosity</h3>
-<p><code>CommandDispatcher</code>, <code>ConceptExplainer</code>, <code>EpistemicCuriosityController</code>, <code>BeliefConflictResolver</code>, two-tier sandboxing, and <code>AutonomyTracker</code>. <a href="architecture/capabilities-and-curiosity.md">Architecture &rarr;</a></p>
+<p><code>CommandDispatcher</code>, <code>ConceptExplainer</code>, <code>EpistemicCuriosityController</code>, bipolar <code>BeliefConflictResolver</code>, stateless <code>math.*</code> / <code>math.fuzzy.*</code> ALUs, two-tier sandboxing, and <code>AutonomyTracker</code>. <a href="architecture/capabilities-and-curiosity.md">Architecture &rarr;</a></p>
 </div>
 <div class="feature-card">
 <h3>🦀 13 Native Rust Crates</h3>

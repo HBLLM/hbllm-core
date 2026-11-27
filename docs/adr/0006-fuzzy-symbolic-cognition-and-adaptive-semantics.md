@@ -5,7 +5,7 @@ description: "Architectural contract unifying perception, crisp/fuzzy symbolic r
 
 # ADR 006: Fuzzy Symbolic Cognition & Adaptive Semantics
 
-- **Status**: Accepted (Contracts Frozen — Phase 4 Target Architecture `F0`–`F3`)
+- **Status**: Implemented (Phases `F0`–`F3` Verified — 2026-11-27, see `reports/ablation/2026-11-26_adr006_fuzzy_2x2_ablation.md`)
 - **Deciders**: HBLLM Core Architecture Team
 - **Date**: 2026-11-26
 - **Technical Area**: Symbol Grounding (`hbllm/hcir/grounding/`), Core Types & Algebras (`hbllm/hcir/`), Reasoning Operators (`hbllm/hcir/reasoning/`), Language Grounding (`hbllm/hcir/language/`), Layer-0 Math ALUs (`hbllm/hcir/capabilities/`, `rust/`)
@@ -279,8 +279,16 @@ To prove causally where improvements originate without confounding grounding cha
 ## 7. Consequences & Rollout
 
 - **Positive:** Resolves Audit `H-3` by giving SGE continuous, scale-invariant semantics consumed natively by the graph; prevents Sorites drift and false contradiction math; preserves deterministic replay via immutable `AdaptiveMembershipModel` versioning; retires legacy LLM/SFT-coupled `FuzzyNode`.
-- **Trade-offs & Risks:** Adds schema and serialization discipline (`FuzzyAssertion`, `AdaptiveMembershipModel`, `RelationCompositionRule`); if poorly cached, continuous scoring on every entity pair could erode the `45ms` budget — mitigated via unmoved-entity caching in `CorticalGroundingBridge` and Rust `compute_kernel` / `structure_matcher` parity.
-- **Execution Plan:** Detailed phase-by-phase file targets, exit gates, and rollback rules are frozen in the [Fuzzy Symbolic Cognition Migration Plan (`F0`–`F3`)](../architecture/fuzzy-cognition-migration-plan.md).
+- **Trade-offs & Risks:** Adds schema and serialization discipline (`FuzzyAssertion`, `AdaptiveMembershipModel`, `RelationCompositionRule`); unmoved-entity caching and node-before-edge batching keep end-to-end `32×32` `CPU p95 <= 43.72 ms` (`<= 45.0 ms` gate) alongside Rust `compute_kernel` and `hbllm_structure_matcher` parity.
+- **Verified Rollout Summary (`F0`–`F3`, `reports/ablation/2026-11-26_adr006_fuzzy_2x2_ablation.md`):**
+  - **2×2 Experimental Matrix (`0` LLM tokens, `0` false-positive compositions):**
+    - **A (Crisp / Crisp):** dev ZS `19/20 (0.9500)`, dev CS `16/16 (1.0000)`, scale/appearance shift `0/20`, soft unification/composition `0/20`, `32×32` CPU `p50=24.73 ms / p95=34.36 ms`.
+    - **B (Fuzzy / Crisp, `α=0.65`):** scale/appearance shift **`20/20 (1.0000)`**, `32×32` CPU `p50=30.78 ms / p95=41.92 ms`.
+    - **C (Crisp / Fuzzy):** soft unification/composition **`20/20 (1.0000)`**, `32×32` CPU `p50=25.55 ms / p95=32.53 ms`.
+    - **D (Fuzzy / Fuzzy):** scale/appearance shift **`20/20 (1.0000)`**, soft unification/composition **`20/20 (1.0000)`**, `32×32` CPU `p50=30.01 ms / p95=43.72 ms`.
+  - **Separated Layer-0 ALU / VM Latency (`µs`, p50 / p95):** `math.fuzzy.membership` `4.96 / 5.33`, `math.fuzzy.eval` `19.65 / 26.41`, `math.fuzzy.compose` `55.85 / 112.76`, `math.fuzzy.bipolar` `40.00 / 70.83`, `HCIRInterpreter` `Opcode.EXECUTE` dispatch `79.81 / 149.56`.
+  - **Retirement Verified:** Legacy `hbllm/actions/fuzzy_node.py` and `scikit-fuzzy` dependency removed and guarded by `test_legacy_fuzzy_node_and_skfuzzy_retired` in `tests/unit/architecture/test_homoiconic_invariants.py`.
+- **Execution Plan:** Detailed phase-by-phase file targets, exit gates, and verified results are documented in the [Fuzzy Symbolic Cognition Migration Plan (`F0`–`F3`)](../architecture/fuzzy-cognition-migration-plan.md).
 
 ---
 

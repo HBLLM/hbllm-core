@@ -3,10 +3,10 @@
 > **Primary Directive for AI Agents:**
 > This file is the authoritative reference for working on the HBLLM codebase. Read and uphold all architectural invariants, neuro-symbolic design rules, directory conventions, and engineering standards defined herein.
 
-> [!WARNING]
-> **Active Phase: Phase 4 — Fuzzy Symbolic Cognition & Adaptive Semantics (`F0`–`F3`, [ADR 006](docs/adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md) & [Fuzzy Migration Plan](docs/architecture/fuzzy-cognition-migration-plan.md)).**
-> - **Completed Phase 3 Architecture ([ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) & [Migration Plan](docs/architecture/homoiconic-vm-migration-plan.md), `M0`–`M6`):** *"Code = CPU/ALU & Constitutional Kernel; Graph = Symbolic Mind."* Python and Rust implement strictly the deterministic Layer-0 substrate (12-opcode register-unification VM, strict `SyscallAllowlist`, sensory/SNN encoders, math/topology/Bellman/Dirichlet ALUs, two-tier plugin/process sandboxing, constitutional transactions). Concepts, `ConstructionNode` grammar, causal posteriors, and `SkillNode` (`bytecode_stream`) programs live in `TieredWorkspace`, exposed through per-tenant `CognitiveSystemRegistry` and `CognitiveBlackbox`.
-> - **Phase 3 Verified Baseline (`eval-phase3-final` on `072b4cb1`, 2026-11-26, `n=120`, `reports/heldout/LEDGER.md`):** `zero_shot=0.9417` (`113/120`, CI `[0.8845, 0.9715]`, generality `0.8359`, `2` deaths / `1.67%`), `cross_seed transfer=0.9035` (`114` eps, CI `[0.8354, 0.9453]`, `skills_consolidated=28,330`), `same_layout_replay=0.8979` (`6/6` tasks `5/5`, `0` LLM tokens); `widened_dev` (`9fbbf52e`): `zero_shot=0.7750` (`generality=0.7503`), `cross_seed transfer=0.9474`. Open audit history: `reports/audit/2026-11-24_full_project_audit.md`.
+> [!NOTE]
+> **Completed Phase 4 — Fuzzy Symbolic Cognition & Adaptive Semantics (`F0`–`F3`, [ADR 006](docs/adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md) & [Fuzzy Migration Plan](docs/architecture/fuzzy-cognition-migration-plan.md)).**
+> - **Implemented `F0`–`F3` on Phase 3 Foundation ([ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md), `M0`–`M6`):** *"Code = CPU/ALU & Constitutional Kernel; Graph = Symbolic Mind."* Layer-0 executes `math.fuzzy.*` ALUs (`FuzzyLogicProfile`: `godel`/`product`/`lukasiewicz`), dual-mode Python/Rust (`hbllm_structure_matcher`) `UNIFY` & `ALPHA_CUT` `BRANCH`, `SymbolicExpr.evaluate_degree`, and `BipolarEvidenceState`; SGE & language commit/consume versioned `AdaptiveMembershipModel`, `FuzzyAssertion` (`degree` separate from epistemic `posterior_belief`), declarative `RelationCompositionPolicy`, and multilingual hedges (`en`/`si`/`ta`) without `FuzzyNode`/`scikit-fuzzy` (`enable_fuzzy_grounding` / `enable_fuzzy_reasoning` in `CognitiveSystemConfig`, `reports/ablation/2026-11-26_adr006_fuzzy_2x2_ablation.md`, `32×32` `CPU p95 <= 43.72 ms`).
+> - **Phase 3 Sealed Baseline (`eval-phase3-final` on `072b4cb1`, 2026-11-26, `n=120`, `reports/heldout/LEDGER.md`):** `zero_shot=0.9417` (`113/120`, CI `[0.8845, 0.9715]`, generality `0.8359`, `2` deaths / `1.67%`), `cross_seed transfer=0.9035` (`114` eps, CI `[0.8354, 0.9453]`, `skills_consolidated=28,330`), `same_layout_replay=0.8979` (`6/6` tasks `5/5`, `0` LLM tokens); `widened_dev` (`9fbbf52e`): `zero_shot=0.7750` (`generality=0.7503`), `cross_seed transfer=0.9474`. Open audit history: `reports/audit/2026-11-24_full_project_audit.md`.
 
 ---
 
@@ -83,10 +83,10 @@ HBLLM enforces a strict boundary between fixed substrate hardware and learned ho
 
 | Layer | Role | Implementation Substrate | Examples |
 | :--- | :--- | :--- | :--- |
-| **Layer 0: Hardware & ALUs** | Tight math, sensory lifting, graph hashing, unification VM | **Rust / SNN / Python CPU** | `hcir_graph` (BLAKE3), `hbllm_structure_matcher`, `hbllm_simulation_engine`, SNN encoders, geodesic/Bellman/Dirichlet math, `ConstitutionalVerifier` |
-| **Layer 0: ISA v2 VM** | Register-unification virtual machine & allowlisted syscalls | **HCIR VM** (`bytecode.py`, `interpreter.py`) | Registers `$r0..$r7`, `CallStack`, 12 opcodes: `ASSERT`, `RETRACT`, `QUERY`, `EXECUTE` (hardware-only), `WAIT`, `FORK`, `MERGE`, `ROLLBACK`, `UNIFY`, `BRANCH`, `CALL`, `RETURN` |
-| **Layer 1: Innate Seed** | Minimal Spelke & active-inference priors at genesis | **Declarative `.hcir` Seed** (`hbllm/hcir/seed/`) | Object permanence, adjacency/containment, Pearl's *do(a)*, curiosity/active inquiry (~25–35 seed rules bounded by `priors.md`) |
-| **Layer 2: Symbolic Mind** | Concepts, grammar, causal laws, skills, macro consolidation | **Homoiconic Graph Nodes** (`TieredWorkspace`) | `ConstructionNode` (language ↔ program), parameterized `SkillNode` (`bytecode_stream`), `LearnedRuleNode`, Wake–Sleep anti-unification |
+| **Layer 0: Hardware & ALUs** | Tight math, sensory lifting, graph hashing, unification VM | **Rust / SNN / Python CPU** | `hcir_graph` (BLAKE3), `hbllm_structure_matcher`, `hbllm_simulation_engine`, SNN encoders, `math.fuzzy.*` / `FuzzyLogicProfile` ALUs, geodesic/Bellman/Dirichlet math, `ConstitutionalVerifier` |
+| **Layer 0: ISA v2 VM** | Register-unification virtual machine & allowlisted syscalls | **HCIR VM** (`bytecode.py`, `interpreter.py`) | Registers `$r0..$r7`, `CallStack`, 12 opcodes: `ASSERT`, `RETRACT`, `QUERY`, `EXECUTE`, `WAIT`, `FORK`, `MERGE`, `ROLLBACK`, dual-mode `UNIFY`, `BRANCH` (`ALPHA_CUT`), `CALL`, `RETURN` |
+| **Layer 1: Innate Seed** | Minimal Spelke & active-inference priors at genesis | **Declarative `.hcir` Seed** (`hbllm/hcir/seed/`) | Object permanence, adjacency/containment, Pearl's *do(a)*, `RelationCompositionPolicy`, curiosity/inquiry (~25–35 seed rules bounded by `priors.md`) |
+| **Layer 2: Symbolic Mind** | Concepts, grammar, causal laws, skills, macro consolidation | **Homoiconic Graph Nodes** (`TieredWorkspace`) | `ConstructionNode` (with hedges/gradables), `GroundedConceptNode`, `AdaptiveMembershipNode`, `SkillNode` (`bytecode_stream`), `LearnedRuleNode` |
 
 ### Role of LLMs in the Architecture
 - **Never** call LLMs inside `hbllm/hcir/**` or real-time sensory-motor/reasoning loops.
@@ -241,7 +241,7 @@ HBLLM/core/
 │   └── skills/                      # On-demand skills (hcir-symbolic-vm, embodied-construction-grammar, ...)
 ├── hbllm/
 │   ├── hcir/                        # Pure-HCIR Cognitive OS (0 LLM imports)
-│   │   ├── bytecode.py, interpreter.py, stdlib.py, compiler.py, nodes.py, graph.py
+│   │   ├── bytecode.py, interpreter.py, stdlib.py, compiler.py, fuzzy.py, nodes.py, graph.py
 │   │   ├── workspace_tiers.py, learning_loop.py, seed/, kernel/, stores/, adapters/, algorithms/
 │   │   ├── skills/                  # Declarative skill ASTs, induction & wake-sleep library learning
 │   │   ├── world/                   # 5-stage CorticalPipeline & 17 subpackages + TransitionKB
@@ -284,7 +284,7 @@ HBLLM/core/
   pytest tests/unit/hcir/ tests/unit/architecture/ -q
   pytest tests/unit/ -k "epistemic or cortex or hcir" -q
   python -m hbllm diagnostics
-  python -m hbllm bench dev && python -m hbllm bench profile
+  python -m hbllm bench dev --fuzzy-grounding --fuzzy-reasoning && python -m hbllm bench profile --strict
   python -m hbllm kernel status
   ```
 - **Ecosystem Context:** Multi-tenant admin web app (Laravel + Filament), cross-platform mobile (Flutter), Sentra adapters (`plugins/`).
@@ -298,6 +298,6 @@ Before completing any task, verify:
 2. [ ] **Migration Alignment:** Does the change move toward [ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) and [`M0`–`M6`](docs/architecture/homoiconic-vm-migration-plan.md)?
 3. [ ] **State Ownership & Tenancy:** Are all mutations committed via `TransactionManager` / `commit_operations` with proper `tenant_id` scoping?
 4. [ ] **Homoiconic Skills:** Do learned/induced `SkillNode`s carry parameterized executable `bytecode_stream`s?
-5. [ ] **LLM-Free & Domain-Agnostic Core:** Zero LLM imports, zero single-task hacks, only `priors.md` innate priors?
+5. [ ] **LLM-Free & Semantic Orthogonality:** Zero LLM/skfuzzy imports, zero `FuzzyNode`, zero `confidence` inside `FuzzyAssertion`, only `priors.md` innate priors?
 6. [ ] **Internal Memory Governance:** No ad-hoc `_last_*` or `view.state` attributes?
 7. [ ] **Verified & Synced:** Relevant `pytest` + architecture tests passed, `AGENTS.md` `< 24 KB`, and `graphify update .` run after `.py` edits?

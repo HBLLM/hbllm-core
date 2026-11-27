@@ -29,7 +29,7 @@ Discovered at runtime by `NativeAccelerationRegistry` (`hbllm.native.registry`) 
 | **`network_utils`** | `rust/network_utils/` | `hbllm_network_utils` | High-throughput binary message framing & serialization | 15–30× |
 | **`hcir_graph`** | `rust/hcir_graph/` | `hbllm_hcir_graph` | Persistent chunked structural-sharing HCIR GraphState with BLAKE3 canonical hashing | 40–100× |
 | **`simulation_engine`** | `rust/simulation_engine/` | `hbllm_simulation_engine` | Resident state multi-branch counterfactual simulation & DAG transition cache | 25–80× |
-| **`structure_matcher`** | `rust/structure_matcher/` | `hbllm_structure_matcher` | Analogical constraint satisfaction mapping & systematicity scoring | 30–60× |
+| **`structure_matcher`** | `rust/structure_matcher/` | `hbllm_structure_matcher` | Analogical & graded (`godel`/`product`/`lukasiewicz`) constraint satisfaction returning `(structure_valid, binding_valid, semantic_degree)` | 30–60× |
 
 ---
 
@@ -220,7 +220,7 @@ results = runtime.evaluate_rollout_branches(
 
 ## 13. Structure Matcher (`hbllm_structure_matcher`)
 
-Analogical constraint-satisfaction graph isomorphism engine. Discovers systematic variable-to-entity mappings and structural alignment scores between source schemas and target domains with backtracking search:
+Analogical and graded constraint-satisfaction graph isomorphism engine (`min_degree`, `degree`, `profile_id` across `godel`, `product`, and `lukasiewicz`). Enforces crisp `structure_valid` and `binding_valid` while computing continuous `semantic_degree` rankings between pattern schemas and target graphs:
 
 ```python
 from hbllm_structure_matcher import match_structures
