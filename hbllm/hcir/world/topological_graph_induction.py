@@ -544,16 +544,54 @@ class GeodesicManifoldRouter:
         theory = engine.symbolic_theory
         lethal = engine.hazard_tracker.known_lethal_features
         shroud_f = wm.shroud_feature
-        allowed_feats = (set(theory.walkable_features) | {int(bg)}) - (
+        bg_ev = theory.evaluate_transition(bg, bg_feature=bg)
+        allowed_feats = set(theory.walkable_features) - (
             set(theory.barrier_features) | set(lethal) | prior_hazard_feats
         )
+        if (
+            bg_ev.traversable
+            and bg_ev.risk_cost < 40.0
+            and bg not in lethal
+            and bg not in prior_hazard_feats
+        ):
+            allowed_feats.add(int(bg))
         if shroud_f is not None:
             allowed_feats.discard(int(shroud_f))
         passable_mask = np.isin(curr_grid, list(allowed_feats))
+        for br, bc in engine.learned_barriers:
+            if 0 <= br < H and 0 <= bc < W:
+                passable_mask[br, bc] = False
+        for hr, hc in engine.current_context_hazards:
+            if 0 <= hr < H and 0 <= hc < W:
+                passable_mask[hr, hc] = False
+        for locus_pos in theory.transition_kb._locus_beliefs:
+            lr_l, lc_l = int(locus_pos[0]), int(locus_pos[1])
+            if not (0 <= lr_l < H and 0 <= lc_l < W):
+                continue
+            lev = theory.evaluate_transition(
+                int(curr_grid[lr_l, lc_l]), locus=(lr_l, lc_l), bg_feature=bg
+            )
+            if not lev.traversable or lev.risk_cost >= 40.0:
+                passable_mask[lr_l, lc_l] = False
+            elif lev.traversable and lev.confidence > 0.0:
+                passable_mask[lr_l, lc_l] = True
         passable_mask[avatar_pos[0], avatar_pos[1]] = True
-        labeled_reach, _ = scipy_label_fn(passable_mask)
-        av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
-        reach_mask = labeled_reach == av_lbl
+        cal_deltas = engine.get_calibrated_transition_deltas()
+        if not cal_deltas or set(cal_deltas) == {(-1, 0), (1, 0), (0, -1), (0, 1)}:
+            labeled_reach, _ = scipy_label_fn(passable_mask)
+            av_lbl = int(labeled_reach[avatar_pos[0], avatar_pos[1]])
+            reach_mask = labeled_reach == av_lbl
+        else:
+            from hbllm.hcir.topological_cut_set import TopologicalCutSetAnalyzer
+
+            br_rs, br_cs = np.nonzero(~passable_mask)
+            blocked_set = set(zip(br_rs.tolist(), br_cs.tolist(), strict=False))
+            comp = TopologicalCutSetAnalyzer.get_reachable_component(
+                avatar_pos, blocked_set, (H, W), transition_deltas=cal_deltas
+            )
+            reach_mask = np.zeros((H, W), dtype=bool)
+            for rr, cc in comp:
+                reach_mask[rr, cc] = True
 
         visited_mask = np.zeros((H, W), dtype=bool)
         for vr, vc in visited:

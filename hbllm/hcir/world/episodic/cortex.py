@@ -836,6 +836,7 @@ class HippocampalEpisodicCortex:
             delta.set("last_surprise_eval", None)
         elif new_context:
             # Level transition: advance/point episodic spatial memory to the target level epoch
+            view.working_memory.body_schema.clear_context_state()
             view.symbolic_theory.begin_context_epoch()
             delta.set("_context_epoch", _epoch)
             _lft = delta.mutate("context_failed_transitions", view.context_failed_transitions)
@@ -880,6 +881,18 @@ class HippocampalEpisodicCortex:
             delta.mutate("mental_plan", view.mental_plan).clear()
             delta.set("prev_oriented_threats", [])
             delta.mutate("recent_positions", view.recent_positions).clear()
+            bs = view.working_memory.body_schema
+            if bs.transformer_state_transitions:
+                for tr_b in bs.initial_state_blocked_transitions:
+                    view.failed_transitions.add(tr_b)
+                    view.working_memory.habenular_ior.failed_transitions.add(tr_b)
+                    bs.state_conditioned_transitions.setdefault(0, set()).add(tr_b)
+                for loc_b in bs.initial_state_blocked_loci:
+                    view.exhausted_candidate_goals.add(loc_b)
+                    bs.state_conditioned_loci.setdefault(0, set()).add(loc_b)
+                for trig_p in bs.transformer_state_transitions:
+                    view.exhausted_candidate_goals.discard(trig_p)
+                    view.symbolic_theory.unmark_locus_explored(trig_p)
             if hasattr(view, "acc_conflict_monitor"):
                 view.acc_conflict_monitor.reset()
 

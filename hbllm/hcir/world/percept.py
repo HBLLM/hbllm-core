@@ -486,9 +486,33 @@ class DefaultPerceptionAdapter(BasePerceptionAdapter):
                         e.role = EntityRole.GOAL
 
         passable = np.ones((H, W), dtype=bool)
+        th = None
+        if context is not None:
+            try:
+                th = context.symbolic_theory
+            except AttributeError:
+                th = None
+        if th is not None:
+            bg_ev = th.evaluate_transition(bg, bg_feature=bg)
+            if not bg_ev.traversable or bg_ev.risk_cost >= 40.0:
+                passable[grid == bg] = False
+            kb = th.transition_kb
+            for locus_pos in kb._locus_beliefs:
+                lr, lc = int(locus_pos[0]), int(locus_pos[1])
+                if 0 <= lr < H and 0 <= lc < W:
+                    lev = th.evaluate_transition(int(grid[lr, lc]), locus=(lr, lc), bg_feature=bg)
+                    if not lev.traversable or lev.risk_cost >= 40.0:
+                        passable[lr, lc] = False
+                    elif lev.traversable and lev.confidence > 0.0:
+                        passable[lr, lc] = True
         for r, c in barriers | lethal_cells:
             if 0 <= r < H and 0 <= c < W:
                 passable[r, c] = False
+        if avatar_pos is not None and 0 <= avatar_pos[0] < H and 0 <= avatar_pos[1] < W:
+            passable[avatar_pos[0], avatar_pos[1]] = True
+        for gr, gc in candidate_goals:
+            if 0 <= gr < H and 0 <= gc < W and (gr, gc) not in lethal_cells:
+                passable[gr, gc] = True
 
         return PerceptionFrame(
             entities=entities,

@@ -12,6 +12,7 @@ lifted to formal CausalPredicates, ActionAffordances, and atomic TransactionOper
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -695,3 +696,100 @@ def disambiguate_stochastic_motor_basis(
         action_affordances[primary_action].is_displacement = p_dyn.is_displacement_action()
         action_affordances[primary_action].delta = (p_dr, p_dc)
     return changed
+
+
+def resolve_calibrated_transition_deltas(
+    action_deltas: Mapping[Any, tuple[int, int]],
+    *,
+    available_actions: Sequence[Any] | None = None,
+    has_displacement: bool = True,
+    has_declared_affordances: bool = False,
+    inhibited_actions: Mapping[Any, int] | Collection[Any] | None = None,
+    action_dynamics: Mapping[Any, ActionDynamicsModel] | None = None,
+) -> tuple[tuple[int, int], ...]:
+    """Derive deduplicated non-zero operator displacement deltas from calibrated dynamics."""
+    if not has_displacement and (available_actions is not None or has_declared_affordances):
+        return ()
+
+    acts = list(available_actions) if available_actions is not None else list(action_deltas.keys())
+    if inhibited_actions:
+        if isinstance(inhibited_actions, Mapping):
+            uninhibited = [a for a in acts if inhibited_actions.get(a, 0) <= 0]
+        else:
+            uninhibited = [a for a in acts if a not in inhibited_actions]
+        if uninhibited:
+            acts = uninhibited
+
+    # Prefer empirically verified dynamics first when present, else declared action_deltas.
+    observed_deltas: list[tuple[int, int]] = []
+    fallback_deltas: list[tuple[int, int]] = []
+    seen_obs: set[tuple[int, int]] = set()
+    seen_fb: set[tuple[int, int]] = set()
+    for act in acts:
+        d = action_deltas.get(act)
+        if d is None or len(d) < 2:
+            continue
+        pair = (int(d[0]), int(d[1]))
+        if pair == (0, 0):
+            continue
+        dyn = action_dynamics.get(act) if action_dynamics is not None else None
+        if dyn is not None and dyn.probes_tested > 0 and dyn.is_displacement_action():
+            if pair not in seen_obs:
+                seen_obs.add(pair)
+                observed_deltas.append(pair)
+        elif pair not in seen_fb:
+            seen_fb.add(pair)
+            fallback_deltas.append(pair)
+
+    combined = observed_deltas if observed_deltas else fallback_deltas
+    if combined:
+        # Preserve any fallback axes only when no observed axes were found, or add unprobed axes
+        if observed_deltas and fallback_deltas:
+            for pair in fallback_deltas:
+                if pair not in seen_obs:
+                    seen_obs.add(pair)
+                    combined.append(pair)
+        return tuple(combined)
+    return (
+        ((-1, 0), (1, 0), (0, -1), (0, 1))
+        if (has_displacement or not has_declared_affordances)
+        else ()
+    )
+
+
+def resolve_effector_coupling_offsets(
+    action_deltas: Mapping[Any, tuple[int, int]],
+    *,
+    available_actions: Sequence[Any] | None = None,
+    has_displacement: bool = True,
+    has_spatial_effector: bool = False,
+    has_discrete_local_interact: bool = False,
+    has_declared_affordances: bool = False,
+    inhibited_actions: Mapping[Any, int] | Collection[Any] | None = None,
+    action_dynamics: Mapping[Any, ActionDynamicsModel] | None = None,
+) -> tuple[tuple[int, int], ...]:
+    """Derive predecessor interaction offsets {target - delta_a} from calibrated operators."""
+    if has_spatial_effector and not has_displacement:
+        return ()
+
+    disp_deltas = resolve_calibrated_transition_deltas(
+        action_deltas,
+        available_actions=available_actions,
+        has_displacement=has_displacement,
+        has_declared_affordances=has_declared_affordances,
+        inhibited_actions=inhibited_actions,
+        action_dynamics=action_dynamics,
+    )
+    offsets: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for dr, dc in disp_deltas:
+        pred = (-int(dr), -int(dc))
+        if pred != (0, 0) and pred not in seen:
+            seen.add(pred)
+            offsets.append(pred)
+    if has_discrete_local_interact:
+        for card in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            if card not in seen:
+                seen.add(card)
+                offsets.append(card)
+    return tuple(offsets)

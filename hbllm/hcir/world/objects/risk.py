@@ -158,8 +158,7 @@ def estimate_entity_risk(
 
     # Confirmed safe roles
     if (
-        feature_id == bg
-        or th.is_walkable(feature_id)
+        th.is_cell_feasible(feature_id, bg_feature=bg)
         or feature_id in th.goal_features
         or th.is_avatar_feature(feature_id)
         or any(c in engine.learned_goal_positions for c in cells)
@@ -245,16 +244,23 @@ def compute_stance_priority(
         )
     )
 
+    coupling_offsets = engine.get_effector_coupling_offsets()
+
     def _walk_deg(pt: tuple[int, int]) -> int:
         return sum(
             1
-            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1))
+            for dr, dc in coupling_offsets
             if 0 <= pt[0] + dr < H
             and 0 <= pt[1] + dc < W
             and (
-                curr_grid[pt[0] + dr, pt[1] + dc] == bg
-                or th.is_walkable(int(curr_grid[pt[0] + dr, pt[1] + dc]))
-                or (pt[0] + dr, pt[1] + dc) == avatar_pos
+                (pt[0] + dr, pt[1] + dc) == avatar_pos
+                or th.is_cell_feasible(
+                    int(curr_grid[pt[0] + dr, pt[1] + dc]),
+                    locus=(pt[0] + dr, pt[1] + dc),
+                    bg_feature=bg,
+                    learned_barriers=engine.learned_barriers,
+                    hazard_loci=engine.current_context_hazards,
+                )
             )
         )
 

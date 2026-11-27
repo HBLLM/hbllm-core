@@ -170,19 +170,40 @@ class SpatialAffordanceModel:
                     passable_coords.add(coord)
                     continue
 
+                if coord in engine.learned_barriers:
+                    ev_lb = (
+                        theory.evaluate_transition(val, locus=coord, bg_feature=bg)
+                        if theory is not None
+                        else None
+                    )
+                    has_open_locus = (
+                        theory is not None
+                        and ev_lb is not None
+                        and ev_lb.traversable
+                        and ev_lb.confidence > 0.0
+                        and ev_lb.risk_cost < 40.0
+                        and theory.transition_kb.get_belief(coord, scope="locus") is not None
+                    )
+                    if not has_open_locus:
+                        solid_barriers.add(coord)
+                        continue
+
                 ev_cell = (
-                    theory.evaluate_transition(val, locus=coord) if theory is not None else None
+                    theory.evaluate_transition(val, locus=coord, bg_feature=bg)
+                    if theory is not None
+                    else None
                 )
-                if val == bg or val in walkable_feats:
-                    passable_coords.add(coord)
-                elif (
-                    ev_cell is not None
-                    and ev_cell.traversable
-                    and ev_cell.confidence > 0.0
-                    and ev_cell.risk_cost < 40.0
-                ):
-                    passable_coords.add(coord)
-                elif theory is not None and theory.is_walkable(val, agent_state=agent_state):
+                if theory is not None:
+                    if theory.is_cell_feasible(
+                        val,
+                        locus=coord,
+                        bg_feature=bg,
+                        learned_barriers=engine.learned_barriers,
+                        hazard_loci=lethal_coords,
+                        agent_state=agent_state,
+                    ):
+                        passable_coords.add(coord)
+                elif val == bg or val in walkable_feats:
                     passable_coords.add(coord)
 
                 is_bar_cell = (

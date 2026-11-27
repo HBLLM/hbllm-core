@@ -82,6 +82,9 @@ class ObjectStateLedger:
         bg: int,
         walkable_feats: set[int],
         av_feats: set[int],
+        *,
+        bg_passable: bool = True,
+        learned_barriers: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
     ) -> None:
         """Track compartment connectivity so post-unlock reachable regions are flagged causally."""
         if grid is None or avatar_pos is None or grid.ndim != 2:
@@ -92,8 +95,13 @@ class ObjectStateLedger:
         ar, ac = avatar_pos
         if not (0 <= ar < H and 0 <= ac < W):
             return
-        passable_feats = set(walkable_feats) | set(av_feats) | {int(bg)}
+        passable_feats = set(walkable_feats) | set(av_feats)
+        if bg_passable:
+            passable_feats.add(int(bg))
         passable_mask = np.isin(grid, list(passable_feats))
+        for br, bc in learned_barriers:
+            if 0 <= br < H and 0 <= bc < W:
+                passable_mask[br, bc] = False
         passable_mask[ar, ac] = True
         sig = ((H, W), (ar, ac), passable_mask.tobytes())
         if self._baseline_reach_initialized and self._last_connectivity_sig == sig:

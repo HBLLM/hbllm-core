@@ -194,9 +194,13 @@ class MentalSimulationPlanner:
         for r, c in engine.learned_barriers:
             if 0 <= r < H and 0 <= c < W:
                 val = int(curr_grid[r, c])
-                ev_lb = engine.symbolic_theory.evaluate_transition(val, locus=(r, c))
-                if (r, c) in engine.hazard_tracker.static_lethal_positions or (
-                    val != bg and not (ev_lb.traversable and ev_lb.confidence > 0.0)
+                ev_lb = engine.symbolic_theory.evaluate_transition(val, locus=(r, c), bg_feature=bg)
+                locus_b = engine.symbolic_theory.transition_kb.get_belief((r, c), scope="locus")
+                if (r, c) in engine.hazard_tracker.static_lethal_positions or not (
+                    locus_b is not None
+                    and locus_b.total_observations() > 0.0
+                    and ev_lb.traversable
+                    and ev_lb.risk_cost < 40.0
                 ):
                     static_barriers.add((r, c))
 
@@ -1064,15 +1068,13 @@ class MentalSimulationPlanner:
                     next_is_open = False
                     if 0 <= next_p[0] < H and 0 <= next_p[1] < W:
                         next_feat = int(curr_grid[next_p[0], next_p[1]])
-                        if next_feat == bg or next_p in goals:
-                            next_is_open = True
-                        else:
-                            ev_n = engine.symbolic_theory.evaluate_transition(
-                                next_feat, locus=next_p
-                            )
-                            next_is_open = bool(
-                                ev_n.traversable and ev_n.confidence > 0.0 and ev_n.risk_cost < 40.0
-                            )
+                        next_is_open = next_p in goals or engine.symbolic_theory.is_cell_feasible(
+                            next_feat,
+                            locus=next_p,
+                            bg_feature=bg,
+                            learned_barriers=engine.learned_barriers,
+                            hazard_loci=engine.current_context_hazards,
+                        )
                     is_failed = (curr_p, act) in engine.failed_transitions and (
                         not next_is_open or engine.working_memory.reference_frame is not None
                     )
@@ -2342,7 +2344,7 @@ class MentalSimulationPlanner:
                 else:
                     adj_cells = {
                         (tr_pos[0] + dr, tr_pos[1] + dc)
-                        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                        for dr, dc in engine.get_effector_coupling_offsets(available_actions)
                         if 0 <= tr_pos[0] + dr < H
                         and 0 <= tr_pos[1] + dc < W
                         and (tr_pos[0] + dr, tr_pos[1] + dc) not in effective_barriers
@@ -2411,7 +2413,7 @@ class MentalSimulationPlanner:
                     else:
                         adj_cells = {
                             (t_pos[0] + dr, t_pos[1] + dc)
-                            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]
+                            for dr, dc in engine.get_effector_coupling_offsets(available_actions)
                             if 0 <= t_pos[0] + dr < H
                             and 0 <= t_pos[1] + dc < W
                             and (t_pos[0] + dr, t_pos[1] + dc) in reachable_cells

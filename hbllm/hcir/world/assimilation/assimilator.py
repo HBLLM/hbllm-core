@@ -759,16 +759,34 @@ class EpistemicFeedbackAssimilator:
                     if 0 <= r < view.prev_grid.shape[0] and 0 <= c < view.prev_grid.shape[1]:
                         target_feat = int(view.prev_grid[r, c])
                         view.effective_features.add(target_feat)
+                mut_cells: list[tuple[int, int]] = []
                 if diff.changed_mask is not None:
                     mut_cells = [(int(r), int(c)) for r, c in zip(*np.where(diff.changed_mask))]
                     view.actuation_affordances[target_coord] = mut_cells
                     view.working_memory.visuospatial.record_diff_stencil(
                         target_coord, set(mut_cells)
                     )
+                non_exog_mut_cells = [
+                    (r, c)
+                    for r, c in mut_cells
+                    if not view.working_memory.is_exogenous_locus(
+                        (r, c),
+                        lattice=curr_grid,
+                        bg=view.bg_feature or 0,
+                        include_outer_edge=True,
+                    )
+                ]
 
-                if is_effector_action and diff.changed_pixel_count > 0:
+                if is_effector_action and non_exog_mut_cells:
                     has_known_avatar = view.avatar_feature is not None or bool(view.avatar_features)
-                    if not view.has_displacement_capabilities() and not has_known_avatar:
+                    near_target = any(
+                        abs(r - tr) <= 4 and abs(c - tc) <= 4 for r, c in non_exog_mut_cells
+                    )
+                    if (
+                        not view.has_displacement_capabilities()
+                        and not has_known_avatar
+                        and near_target
+                    ):
                         view.state.avatar_pos = target_coord
 
                     # Active Inference: Discover effector kinetics mode (attraction/pull vs repulsion/push)
@@ -789,7 +807,11 @@ class EpistemicFeedbackAssimilator:
                             elif dot < -0.5:
                                 view.state.effector_kinetics_mode = -1
 
-                    if not view.has_displacement_capabilities() and not has_known_avatar:
+                    if (
+                        not view.has_displacement_capabilities()
+                        and not has_known_avatar
+                        and near_target
+                    ):
                         actuated_feats = {
                             int(f)
                             for f in np.unique(
@@ -1273,6 +1295,27 @@ class EpistemicFeedbackAssimilator:
                 bb1[2] <= bb2[3] and bb2[2] <= bb1[3] and r_gap == 0
             )
 
+        def _expand_compound_pairs(
+            base_pairs: list[tuple[SpatialEntity, SpatialEntity]],
+            group_pairs: list[tuple[SpatialEntity, SpatialEntity]],
+        ) -> list[tuple[SpatialEntity, SpatialEntity]]:
+            expanded = list(base_pairs)
+            added = bool(expanded)
+            while added:
+                added = False
+                for pe_o, ce_o in group_pairs:
+                    if ce_o.feature_id == bg or ce_o.feature_id == view.bg_feature:
+                        continue
+                    if any(ce_o.id == c_k.id and pe_o.id == p_k.id for p_k, c_k in expanded):
+                        continue
+                    if any(
+                        _are_adjacent(pe_o, p_k) and _are_adjacent(ce_o, c_k)
+                        for p_k, c_k in expanded
+                    ):
+                        expanded.append((pe_o, ce_o))
+                        added = True
+            return expanded
+
         av_moved: list[Any] = []
         if (
             not is_success
@@ -1359,12 +1402,23 @@ class EpistemicFeedbackAssimilator:
                             last_a, last_d = view._avatar_controllability_evidence[best_cand_fresh][
                                 -1
                             ]
-                            avatar_pairs_f = [
+                            same_delta_pairs = delta_groups.get(last_d, [])
+                            direct_pairs_f = [
                                 (pe, ce)
-                                for dg_p in delta_groups.values()
-                                for pe, ce in dg_p
+                                for pe, ce in same_delta_pairs
                                 if ce.feature_id == best_cand_fresh
                             ]
+                            if direct_pairs_f:
+                                avatar_pairs_f = _expand_compound_pairs(
+                                    direct_pairs_f, same_delta_pairs
+                                )
+                            else:
+                                avatar_pairs_f = [
+                                    (pe, ce)
+                                    for dg_p in delta_groups.values()
+                                    for pe, ce in dg_p
+                                    if ce.feature_id == best_cand_fresh
+                                ]
                             if avatar_pairs_f:
                                 EpistemicFeedbackAssimilator._commit_avatar_identity(
                                     view,
@@ -1442,10 +1496,15 @@ class EpistemicFeedbackAssimilator:
                         last_obs = view._avatar_controllability_evidence[best_candidate][-1]
                         obs_action, obs_delta = last_obs
                         matching_pairs = delta_groups.get(obs_delta, [])
-                        # Filter to only the confirmed feature
-                        avatar_pairs = [
+                        # Filter to confirmed rigid component (including adjacent co-moving body parts)
+                        direct_pairs = [
                             (pe, ce) for pe, ce in matching_pairs if ce.feature_id == best_candidate
                         ]
+                        avatar_pairs = (
+                            _expand_compound_pairs(direct_pairs, matching_pairs)
+                            if direct_pairs
+                            else []
+                        )
                         if not avatar_pairs:
                             # Feature was confirmed by prior frame, find it now
                             for dg_pairs in delta_groups.values():
@@ -2137,7 +2196,76 @@ class EpistemicFeedbackAssimilator:
                             WorkingMemoryDelta("consecutive_simulation_failures", 0)
                         )
 
-            if diff.changed_pixel_count == 0 and not is_success and not is_failure:
+        if avatar_moved:
+            has_endogenous_change = True
+            exog_trk = view.working_memory.exogenous_tracker
+            if view.avatar_pos is not None and not exog_trk.is_partitioned_or_enclosing(
+                view.avatar_pos,
+                lattice=curr_grid,
+                bg=bg,
+                tracker=exog_trk,
+            ):
+                exog_trk.exogenous_loci.discard(view.avatar_pos)
+            if prev_avatar_pos is not None and not exog_trk.is_partitioned_or_enclosing(
+                prev_avatar_pos,
+                lattice=curr_grid,
+                bg=bg,
+                tracker=exog_trk,
+            ):
+                exog_trk.exogenous_loci.discard(prev_avatar_pos)
+        elif diff.changed_pixel_count == 0:
+            has_endogenous_change = False
+        elif diff.mutated_pixels:
+            has_endogenous_change = any(
+                not view.working_memory.is_exogenous_locus(
+                    (int(mr), int(mc)),
+                    lattice=curr_grid,
+                    bg=bg,
+                    include_outer_edge=False,
+                )
+                for mr, mc, _, _ in diff.mutated_pixels
+            )
+        else:
+            has_endogenous_change = True
+
+        if not has_endogenous_change and not is_success and not is_failure:
+            if continuous_moved or leading_cell_mutated:
+                view.working_memory.consecutive_stuck_steps = 0
+            else:
+                view.working_memory.consecutive_stuck_steps += 1
+                if (
+                    view.last_action is not None
+                    and view.is_displacement_action(view.last_action)
+                    and not possible_orthogonal_wall_slip
+                ):
+                    prev_inh = view.inhibited_actions.get(view.last_action, 0)
+                    view.inhibited_actions[view.last_action] = min(prev_inh + 2, 3)
+                    if prev_avatar_pos is not None:
+                        view.failed_transitions.add((prev_avatar_pos, view.last_action))
+                        view.working_memory.habenular_ior.failed_transitions.add(
+                            (prev_avatar_pos, view.last_action)
+                        )
+                        EpistemicFeedbackAssimilator._record_conditioned_block_if_gate(
+                            view, curr_grid, prev_avatar_pos, view.last_action, bg, H, W
+                        )
+                elif (
+                    view.last_action is not None
+                    and not is_effector_action
+                    and not view.is_displacement_action(view.last_action)
+                ):
+                    prev_inh = view.inhibited_actions.get(view.last_action, 0)
+                    view.inhibited_actions[view.last_action] = min(prev_inh + 2, 4)
+                    if prev_avatar_pos is not None:
+                        view.tested_action_positions.add((view.last_action, prev_avatar_pos))
+                        view.failed_transitions.add((prev_avatar_pos, view.last_action))
+                        view.working_memory.habenular_ior.failed_transitions.add(
+                            (prev_avatar_pos, view.last_action)
+                        )
+                        view.working_memory.body_schema.record_conditioned_block(
+                            prev_avatar_pos, view.last_action
+                        )
+        elif prev_avatar_pos is not None and view.avatar_pos is not None:
+            if view.avatar_pos == prev_avatar_pos and not is_success and not is_failure:
                 if continuous_moved or leading_cell_mutated:
                     view.working_memory.consecutive_stuck_steps = 0
                 else:
@@ -2149,42 +2277,22 @@ class EpistemicFeedbackAssimilator:
                     ):
                         prev_inh = view.inhibited_actions.get(view.last_action, 0)
                         view.inhibited_actions[view.last_action] = min(prev_inh + 2, 3)
-                        if prev_avatar_pos is not None:
-                            view.failed_transitions.add((prev_avatar_pos, view.last_action))
-                            view.working_memory.habenular_ior.failed_transitions.add(
-                                (prev_avatar_pos, view.last_action)
-                            )
-                            EpistemicFeedbackAssimilator._record_conditioned_block_if_gate(
-                                view, curr_grid, prev_avatar_pos, view.last_action, bg, H, W
-                            )
-            elif prev_avatar_pos is not None and view.avatar_pos is not None:
-                if view.avatar_pos == prev_avatar_pos and not is_success and not is_failure:
-                    if continuous_moved or leading_cell_mutated:
-                        view.working_memory.consecutive_stuck_steps = 0
-                    else:
-                        view.working_memory.consecutive_stuck_steps += 1
-                        if (
-                            view.last_action is not None
-                            and view.is_displacement_action(view.last_action)
-                            and not possible_orthogonal_wall_slip
-                        ):
-                            prev_inh = view.inhibited_actions.get(view.last_action, 0)
-                            view.inhibited_actions[view.last_action] = min(prev_inh + 2, 3)
-                            view.failed_transitions.add((prev_avatar_pos, view.last_action))
-                            view.working_memory.habenular_ior.failed_transitions.add(
-                                (prev_avatar_pos, view.last_action)
-                            )
-                            EpistemicFeedbackAssimilator._record_conditioned_block_if_gate(
-                                view, curr_grid, prev_avatar_pos, view.last_action, bg, H, W
-                            )
-                else:
-                    view.working_memory.consecutive_stuck_steps = 0
-                    for inh_act in list(view.inhibited_actions.keys()):
-                        if view.is_displacement_action(inh_act):
-                            view.inhibited_actions.pop(inh_act, None)
+                        view.failed_transitions.add((prev_avatar_pos, view.last_action))
+                        view.working_memory.habenular_ior.failed_transitions.add(
+                            (prev_avatar_pos, view.last_action)
+                        )
+                        EpistemicFeedbackAssimilator._record_conditioned_block_if_gate(
+                            view, curr_grid, prev_avatar_pos, view.last_action, bg, H, W
+                        )
             else:
                 view.working_memory.consecutive_stuck_steps = 0
+                for inh_act in list(view.inhibited_actions.keys()):
+                    if view.is_displacement_action(inh_act):
+                        view.inhibited_actions.pop(inh_act, None)
+        else:
+            view.working_memory.consecutive_stuck_steps = 0
 
+        if is_known_displacement and prev_avatar_pos is not None:
             # 2. Predictive coding efference copy divergence check & surprise computation
             expected_dr = (
                 view.last_predicted_pos[0] - prev_avatar_pos[0]
@@ -2237,7 +2345,13 @@ class EpistemicFeedbackAssimilator:
                     pr_p, pc_p = view.last_predicted_pos
                     if 0 <= pr_p < H and 0 <= pc_p < W:
                         pv_p = int(curr_grid[pr_p, pc_p])
-                        pred_open = pv_p == bg or view.symbolic_theory.is_walkable(pv_p)
+                        pred_open = view.symbolic_theory.is_cell_feasible(
+                            pv_p,
+                            locus=(pr_p, pc_p),
+                            bg_feature=bg,
+                            learned_barriers=view.learned_barriers,
+                            hazard_loci=view.current_context_hazards,
+                        )
                 is_orthogonal_slip = bool(avatar_moved and not did_displace_correctly) or bool(
                     not avatar_moved
                     and pred_open
@@ -2632,7 +2746,13 @@ class EpistemicFeedbackAssimilator:
                         )
                     mutated_set = {(int(mr), int(mc)) for mr, mc, _, _ in distant_mutations}
                     for mr_e, mc_e in mutated_set:
-                        _wm_exog.exogenous_tracker.exogenous_loci.discard((mr_e, mc_e))
+                        if not _wm_exog.exogenous_tracker.is_partitioned_or_enclosing(
+                            (mr_e, mc_e),
+                            lattice=curr_grid,
+                            bg=bg,
+                            tracker=_wm_exog.exogenous_tracker,
+                        ):
+                            _wm_exog.exogenous_tracker.exogenous_loci.discard((mr_e, mc_e))
                     state_sig = hash(
                         tuple(
                             (int(mr), int(mc), int(curr_grid[mr, mc]))
@@ -2683,6 +2803,7 @@ class EpistemicFeedbackAssimilator:
                         view.working_memory.habenular_ior.failed_transitions.discard(
                             (from_p, act_p)
                         )
+                        view.tested_action_positions.discard((act_p, from_p))
                         view.exhausted_candidate_goals.discard(from_p)
                         _sym_theory.unmark_locus_explored(from_p)
                     for b_loc in reopened_loci:

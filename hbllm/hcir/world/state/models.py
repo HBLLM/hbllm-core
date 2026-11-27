@@ -118,25 +118,47 @@ class FrozenSymbolicTheory:
         *,
         locus: tuple[int, int] | None = None,
         active_state_tokens: frozenset[str] | set[str] | None = None,
+        bg_feature: Any | None = None,
+        modality: str = "locomote",
+        is_ambient_prior: bool | None = None,
         unknown_traversable: bool = True,
         unknown_cost_penalty: float = 0.0,
         risk_weight: float = 50.0,
     ) -> Any:
         """Evaluate edge traversability from embedded TransitionKB or frozen feature sets."""
+        eff_ambient = (
+            is_ambient_prior
+            if is_ambient_prior is not None
+            else (bg_feature is not None and feature_id == bg_feature)
+        )
         if self.transition_kb is not None:
             return self.transition_kb.evaluate_transition(
                 feature_id,
                 locus=locus,
                 active_state_tokens=active_state_tokens,
+                modality=modality,
+                is_ambient_prior=eff_ambient,
                 unknown_traversable=unknown_traversable,
                 unknown_cost_penalty=unknown_cost_penalty,
                 risk_weight=risk_weight,
             )
         from hbllm.hcir.world.causal.transition_kb import TransitionEdgeEvaluation
 
+        if str(modality or "locomote") in ("distal", "point", "effector", "symbolic"):
+            return TransitionEdgeEvaluation(
+                traversable=True,
+                step_cost=1.0,
+                risk_cost=0.0,
+                goal_value=(1.0 if feature_id in self.goal_features else 0.0),
+                info_gain=0.0,
+                mutates_state=(feature_id in self.actuator_features),
+                confidence=1.0,
+                prior_pass=0.65,
+            )
         is_goal = feature_id in self.goal_features
         is_blocked = (feature_id in self.barrier_features) and not is_goal
         is_walk = feature_id in self.walkable_features
+        prior = 0.65 if eff_ambient else 0.5
         is_trav = not is_blocked and (is_goal or is_walk or unknown_traversable)
         known = (
             is_goal
@@ -158,7 +180,57 @@ class FrozenSymbolicTheory:
             info_gain=(0.0 if known else 1.0),
             mutates_state=(feature_id in self.actuator_features),
             confidence=(1.0 if known else 0.0),
+            prior_pass=(0.0 if is_blocked else (1.0 if (is_goal or is_walk) else prior)),
         )
+
+    def is_cell_feasible(
+        self,
+        feature_id: Any,
+        *,
+        locus: tuple[int, int] | None = None,
+        bg_feature: Any | None = None,
+        modality: str = "locomote",
+        allow_unverified: bool = False,
+        learned_barriers: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        hazard_loci: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        max_risk_cost: float = 40.0,
+    ) -> bool:
+        """Unified locus-, modality-, and prior-aware feasibility query on FrozenSymbolicTheory."""
+        norm_locus = (int(locus[0]), int(locus[1])) if locus is not None else None
+        if norm_locus is not None and norm_locus in hazard_loci:
+            return False
+        ev = self.evaluate_transition(
+            feature_id,
+            locus=norm_locus,
+            bg_feature=bg_feature,
+            modality=modality,
+        )
+        if str(modality or "locomote") in ("distal", "point", "effector", "symbolic"):
+            return bool(ev.traversable and ev.risk_cost < max_risk_cost)
+        locus_b = (
+            self.transition_kb.get_belief(norm_locus, scope="locus")
+            if self.transition_kb is not None and norm_locus is not None
+            else None
+        )
+        has_verified_open_locus = bool(
+            locus_b is not None
+            and locus_b.total_observations() > 0.0
+            and ev.traversable
+            and ev.risk_cost < max_risk_cost
+        )
+        if (
+            norm_locus is not None
+            and norm_locus in learned_barriers
+            and not has_verified_open_locus
+        ):
+            return False
+        if not has_verified_open_locus and self.is_barrier(feature_id):
+            return False
+        if not ev.traversable or ev.risk_cost >= max_risk_cost:
+            return False
+        if allow_unverified:
+            return True
+        return bool(ev.confidence > 0.0 or ev.prior_pass > 0.5 or self.is_walkable(feature_id))
 
     def is_tool_barrier_incompatible(self, tool_feat: Any, barrier_feat: Any) -> bool:
         pair = self.tool_barrier_posteriors.get((tool_feat, barrier_feat))

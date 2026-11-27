@@ -1635,20 +1635,36 @@ class PrefrontalDeliberationEngine:
             ):
                 chosen_data = view.ground_effector_action(curr_grid, chosen_action)
                 if chosen_data is None:
-                    view.inhibited_actions[chosen_action] = max(
-                        view.inhibited_actions.get(chosen_action, 0), 6
-                    )
                     non_eff = [
                         a
                         for a in available_actions
                         if not view.is_spatial_effector(a) and view.inhibited_actions.get(a, 0) == 0
                     ]
-                    chosen_action = (
-                        non_eff[0]
-                        if non_eff
-                        else (available_actions[0] if available_actions else 1)
-                    )
-                    chosen_data = None
+                    if non_eff:
+                        view.inhibited_actions[chosen_action] = max(
+                            view.inhibited_actions.get(chosen_action, 0), 6
+                        )
+                        chosen_action = non_eff[0]
+                        chosen_data = None
+                    else:
+                        # Pure spatial-effector world: cycle quiescent targets and guarantee valid coords.
+                        if view.quiescent_actuation_targets:
+                            view.quiescent_actuation_targets.clear()
+                            chosen_data = view.ground_effector_action(curr_grid, chosen_action)
+                        if chosen_data is None:
+                            H_g, W_g = int(curr_grid.shape[0]), int(curr_grid.shape[1])
+                            chosen_data = {
+                                k: (
+                                    W_g // 2
+                                    if k in ("x", "col", "c", "column", "azimuth")
+                                    else (
+                                        H_g // 2
+                                        if k in ("y", "row", "r", "elevation", "distance")
+                                        else 0
+                                    )
+                                )
+                                for k in req_keys
+                            }
         return chosen_action, chosen_data
 
     @classmethod

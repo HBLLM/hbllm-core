@@ -50,6 +50,7 @@ class TransitionEdgeEvaluation:
     info_gain: float
     mutates_state: bool
     confidence: float
+    prior_pass: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -105,8 +106,14 @@ class DirichletOutcomePosterior:
 def _encode_context_key(key: Any) -> tuple[Any, str, str]:
     """Encode an arbitrary context key into (json_value, key_kind, safe_id_token)."""
     if isinstance(key, tuple):
-        vals = [int(x) if isinstance(x, int) and not isinstance(x, bool) else x for x in key]
-        token = "tuple_" + "_".join(str(v) for v in vals)
+        vals = [
+            [int(y) if isinstance(y, int) and not isinstance(y, bool) else y for y in x]
+            if isinstance(x, (tuple, list))
+            else (int(x) if isinstance(x, int) and not isinstance(x, bool) else x)
+            for x in key
+        ]
+        tok_parts = ["_".join(str(y) for y in v) if isinstance(v, list) else str(v) for v in vals]
+        token = "tuple_" + "_".join(tok_parts)
         return vals, "tuple", token
     if isinstance(key, list):
         token = "tuple_" + "_".join(str(v) for v in key)
@@ -368,12 +375,13 @@ class TransitionKnowledgeBase:
     _pos_action_beliefs: dict[tuple[tuple[int, int], Any], TransitionBelief] = field(
         default_factory=dict
     )
+    _modality_beliefs: dict[tuple[str, Any], TransitionBelief] = field(default_factory=dict)
     _causal_rules: dict[tuple[str, str], CausalEffectRule] = field(default_factory=dict)
     _context_epoch: int = 0
     _version: int = field(default=0, init=False, repr=False)
-    _feature_eval_cache: dict[tuple[Any, bool, float, float], TransitionEdgeEvaluation] = field(
-        default_factory=dict, init=False, repr=False
-    )
+    _feature_eval_cache: dict[
+        tuple[Any, str, bool, bool, float, float], TransitionEdgeEvaluation
+    ] = field(default_factory=dict, init=False, repr=False)
     _outcome_features_cache: dict[tuple[str, float], frozenset[Any]] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -455,6 +463,39 @@ class TransitionKnowledgeBase:
     def get_action_belief(self, pos: tuple[int, int], action: Any) -> TransitionBelief | None:
         """Return stored directional `(pos, action)` belief, if present."""
         return self._pos_action_beliefs.get(((int(pos[0]), int(pos[1])), action))
+
+    def record_modality_outcome(
+        self,
+        modality: str,
+        context_key: Any,
+        outcome: TransitionOutcome,
+        *,
+        weight: float = 1.0,
+        effect_signature: str = "",
+        evidence: str = "",
+        mark_verified: bool = True,
+    ) -> TransitionBelief:
+        """Record an empirical transition outcome scoped by effector ``modality``."""
+        mod = str(modality or "locomote")
+        norm_key = (
+            (int(context_key[0]), int(context_key[1]))
+            if isinstance(context_key, tuple) and len(context_key) == 2
+            else context_key
+        )
+        m_key = (mod, norm_key)
+        belief = self._modality_beliefs.get(m_key)
+        if belief is None:
+            belief = TransitionBelief(scope="modality_feature", context_key=m_key)
+            self._modality_beliefs[m_key] = belief
+        belief.record(
+            outcome,
+            weight=weight,
+            effect_signature=effect_signature,
+            evidence=evidence,
+            epoch=self._context_epoch if mark_verified else None,
+        )
+        self._invalidate_caches()
+        return belief
 
     def retract_outcome(
         self,
@@ -543,19 +584,114 @@ class TransitionKnowledgeBase:
         *,
         locus: tuple[int, int] | None = None,
         active_state_tokens: frozenset[str] | set[str] | None = None,
+        modality: str = "locomote",
+        is_ambient_prior: bool = False,
         unknown_traversable: bool = True,
         unknown_cost_penalty: float = 0.0,
         risk_weight: float = 50.0,
     ) -> TransitionEdgeEvaluation:
-        """Evaluate edge traversability, cost, risk, goal value, and uncertainty."""
+        """Evaluate edge feasibility, cost, risk, goal value, and uncertainty."""
+        norm_mod = str(modality or "locomote")
+        is_distal = norm_mod in ("distal", "point", "effector", "symbolic")
+        norm_locus = (int(locus[0]), int(locus[1])) if locus is not None else None
+
+        if is_distal:
+            distal_belief: TransitionBelief | None = None
+            if norm_locus is not None and self._modality_beliefs:
+                lb = self._modality_beliefs.get((norm_mod, norm_locus))
+                if lb is not None and lb._total_obs > 0.0:
+                    distal_belief = lb
+            if distal_belief is None and self._modality_beliefs:
+                fb = self._modality_beliefs.get((norm_mod, feature_id))
+                if fb is not None and fb._total_obs > 0.0:
+                    distal_belief = fb
+
+            if distal_belief is not None:
+                p_trav = distal_belief.traversability_posterior(prior=0.65)
+                p_fatal = distal_belief._outcome_prob_key(_OUT_TERMINAL_FAIL)
+                p_win = distal_belief._outcome_prob_key(_OUT_TERMINAL_WIN)
+                p_mut = distal_belief._outcome_prob_key(
+                    _OUT_MUTATED_STATE
+                ) + distal_belief._outcome_prob_key(_OUT_DISPLACED_OTHER)
+                traversable = (p_win > 0.0 or p_trav >= 0.5) and p_fatal < 0.5
+                info_gain = distal_belief.epistemic_uncertainty()
+                return TransitionEdgeEvaluation(
+                    traversable=traversable,
+                    step_cost=1.0 if traversable else math.inf,
+                    risk_cost=float(risk_weight * p_fatal),
+                    goal_value=float(p_win),
+                    info_gain=info_gain,
+                    mutates_state=p_mut > 0.0,
+                    confidence=float(1.0 - info_gain),
+                    prior_pass=float(p_trav),
+                )
+
+            base_belief: TransitionBelief | None = None
+            if norm_locus is not None and self._locus_beliefs:
+                lb = self._locus_beliefs.get(norm_locus)
+                if lb is not None and lb._total_obs > 0.0:
+                    base_belief = lb
+            if base_belief is None:
+                fb = self._feature_beliefs.get(feature_id)
+                if fb is not None and fb._total_obs > 0.0:
+                    base_belief = fb
+            if base_belief is None:
+                return TransitionEdgeEvaluation(
+                    traversable=unknown_traversable,
+                    step_cost=(1.0 + max(0.0, unknown_cost_penalty))
+                    if unknown_traversable
+                    else math.inf,
+                    risk_cost=0.0,
+                    goal_value=0.0,
+                    info_gain=1.0,
+                    mutates_state=False,
+                    confidence=0.0,
+                    prior_pass=0.65 if unknown_traversable else 0.0,
+                )
+            p_fatal = base_belief._outcome_prob_key(_OUT_TERMINAL_FAIL)
+            p_win = base_belief._outcome_prob_key(_OUT_TERMINAL_WIN)
+            p_mut = base_belief._outcome_prob_key(
+                _OUT_MUTATED_STATE
+            ) + base_belief._outcome_prob_key(_OUT_DISPLACED_OTHER)
+            # Locomotor BLOCKED does not block distal targeting; only lethality blocks it.
+            traversable = p_fatal < 0.5
+            info_gain = base_belief.epistemic_uncertainty()
+            return TransitionEdgeEvaluation(
+                traversable=traversable,
+                step_cost=1.0 if traversable else math.inf,
+                risk_cost=float(risk_weight * p_fatal),
+                goal_value=float(p_win),
+                info_gain=info_gain,
+                mutates_state=p_mut > 0.0,
+                confidence=float(1.0 - info_gain),
+                prior_pass=0.65 if traversable else 0.0,
+            )
+
+        prior = 0.65 if is_ambient_prior else 0.5
         belief: TransitionBelief | None = None
-        if locus is not None and self._locus_beliefs:
-            locus_belief = self._locus_beliefs.get((int(locus[0]), int(locus[1])))
+        if norm_mod != "locomote" and self._modality_beliefs:
+            if norm_locus is not None:
+                mb = self._modality_beliefs.get((norm_mod, norm_locus))
+                if mb is not None and mb._total_obs > 0.0:
+                    belief = mb
+            if belief is None:
+                mb = self._modality_beliefs.get((norm_mod, feature_id))
+                if mb is not None and mb._total_obs > 0.0:
+                    belief = mb
+        if belief is None and norm_locus is not None and self._locus_beliefs:
+            locus_belief = self._locus_beliefs.get(norm_locus)
             if locus_belief is not None and locus_belief._total_obs > 0.0:
                 belief = locus_belief
         use_cache = belief is None and not active_state_tokens
         cache_key = (
-            (feature_id, unknown_traversable, unknown_cost_penalty, risk_weight)
+            (
+                feature_id,
+                norm_mod,
+                is_ambient_prior,
+                unknown_traversable,
+                unknown_cost_penalty,
+                risk_weight,
+            )
             if use_cache
             else None
         )
@@ -580,12 +716,13 @@ class TransitionKnowledgeBase:
                 info_gain=1.0,
                 mutates_state=False,
                 confidence=0.0,
+                prior_pass=prior if unknown_traversable else 0.0,
             )
             if cache_key is not None:
                 self._feature_eval_cache[cache_key] = res
             return res
 
-        p_trav = belief.traversability_posterior()
+        p_trav = belief.traversability_posterior(prior=prior)
         p_fatal = belief._outcome_prob_key(_OUT_TERMINAL_FAIL)
         p_win = belief._outcome_prob_key(_OUT_TERMINAL_WIN)
         p_mut = belief._outcome_prob_key(_OUT_MUTATED_STATE) + belief._outcome_prob_key(
@@ -594,8 +731,8 @@ class TransitionKnowledgeBase:
 
         if active_state_tokens:
             unlock_tokens = {f"unlocks:{feature_id}"}
-            if locus is not None:
-                unlock_tokens.add(f"unlocks:{(int(locus[0]), int(locus[1]))}")
+            if norm_locus is not None:
+                unlock_tokens.add(f"unlocks:{norm_locus}")
             if not unlock_tokens.isdisjoint(active_state_tokens):
                 p_trav = max(p_trav, 0.9)
 
@@ -610,6 +747,7 @@ class TransitionKnowledgeBase:
             info_gain=info_gain,
             mutates_state=p_mut > 0.0,
             confidence=float(1.0 - info_gain),
+            prior_pass=float(p_trav),
         )
         if cache_key is not None:
             self._feature_eval_cache[cache_key] = res
@@ -789,6 +927,7 @@ class TransitionKnowledgeBase:
         self._pos_action_beliefs.clear()
         if not preserve_current_epoch:
             self._feature_beliefs.clear()
+            self._modality_beliefs.clear()
             self._invalidate_caches()
             return
         retained: dict[Any, TransitionBelief] = {}
@@ -806,6 +945,21 @@ class TransitionKnowledgeBase:
             if b.total_observations() > 0.0:
                 retained[k] = b
         self._feature_beliefs = retained
+        retained_mod: dict[tuple[str, Any], TransitionBelief] = {}
+        for mk, b in self._modality_beliefs.items():
+            stale_keys = [
+                ok
+                for ok in b.counts
+                if b.outcome_epochs.get(ok, b.verified_epoch) != self._context_epoch
+            ]
+            for ok in stale_keys:
+                b.counts.pop(ok, None)
+                b.outcome_epochs.pop(ok, None)
+            if stale_keys:
+                b._total_obs = float(sum(b.counts.values()))
+            if b.total_observations() > 0.0:
+                retained_mod[mk] = b
+        self._modality_beliefs = retained_mod
         self._invalidate_caches()
 
     def clear_locus_beliefs(self) -> None:
@@ -819,6 +973,7 @@ class TransitionKnowledgeBase:
         self._feature_beliefs.clear()
         self._locus_beliefs.clear()
         self._pos_action_beliefs.clear()
+        self._modality_beliefs.clear()
         self._causal_rules.clear()
         self._context_epoch = 0
         self._invalidate_caches()
@@ -830,6 +985,7 @@ class TransitionKnowledgeBase:
             *self._feature_beliefs.values(),
             *self._locus_beliefs.values(),
             *self._pos_action_beliefs.values(),
+            *self._modality_beliefs.values(),
         ):
             if belief._total_obs > 0.0:
                 _, _, nid = _belief_node_id(belief.scope, belief.context_key)
@@ -848,6 +1004,7 @@ class TransitionKnowledgeBase:
             *self._feature_beliefs.values(),
             *self._locus_beliefs.values(),
             *self._pos_action_beliefs.values(),
+            *self._modality_beliefs.values(),
         ):
             if belief._total_obs <= 0.0:
                 continue
@@ -892,6 +1049,20 @@ class TransitionKnowledgeBase:
                 ):
                     loc = (int(belief.context_key[0]), int(belief.context_key[1]))
                     self._pos_action_beliefs[(loc, belief.context_key[2])] = belief
+                elif (
+                    belief.scope == "modality_feature"
+                    and isinstance(belief.context_key, tuple)
+                    and len(belief.context_key) >= 2
+                ):
+                    mod_name = str(belief.context_key[0])
+                    raw_inner = belief.context_key[1]
+                    inner_key = (
+                        tuple(int(x) for x in raw_inner)
+                        if isinstance(raw_inner, (list, tuple))
+                        else raw_inner
+                    )
+                    belief.context_key = (mod_name, inner_key)
+                    self._modality_beliefs[(mod_name, inner_key)] = belief
                 else:
                     self._feature_beliefs[belief.context_key] = belief
                     hydrated_feature_keys.add(belief.context_key)

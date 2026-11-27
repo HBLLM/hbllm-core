@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 
 try:
@@ -78,21 +78,51 @@ class TopologicalCutSetAnalyzer:
     """Performs graph cut-set analysis on spatial grids to find partition bottlenecks."""
 
     @staticmethod
+    def _normalize_transition_deltas(
+        step_size: int,
+        transition_deltas: Sequence[tuple[int, int]] | None,
+    ) -> list[tuple[int, int]]:
+        step = max(1, int(step_size))
+        if transition_deltas is None:
+            return [(-step, 0), (step, 0), (0, -step), (0, step)]
+        seen: set[tuple[int, int]] = set()
+        normalized: list[tuple[int, int]] = []
+        for delta in transition_deltas:
+            if len(delta) < 2:
+                continue
+            dr, dc = int(delta[0]), int(delta[1])
+            if dr == 0 and dc == 0:
+                continue
+            pair = (dr, dc)
+            if pair not in seen:
+                seen.add(pair)
+                normalized.append(pair)
+        return normalized
+
+    @staticmethod
     def get_reachable_component(
         start: tuple[int, int],
         barrier_cells: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
         grid_shape: tuple[int, int] = (64, 64),
         step_size: int = 1,
         blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+        transition_deltas: Sequence[tuple[int, int]] | None = None,
     ) -> set[tuple[int, int]]:
-        """Compute the flood-fill reachable connected component from start."""
+        """Compute the flood-fill reachable connected component from start under calibrated operators."""
         H, W = grid_shape
         sr, sc = int(round(start[0])), int(round(start[1]))
         effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         if (sr, sc) in effective_barriers or not (0 <= sr < H and 0 <= sc < W):
             return set()
 
-        if step_size == 1 and _rust_graph is not None:
+        deltas = TopologicalCutSetAnalyzer._normalize_transition_deltas(
+            step_size, transition_deltas
+        )
+        if transition_deltas is not None and not deltas:
+            return {(sr, sc)}
+
+        is_unit_cardinal = step_size == 1 and set(deltas) == {(-1, 0), (1, 0), (0, -1), (0, 1)}
+        if is_unit_cardinal and _rust_graph is not None:
             try:
                 rust_comps = _rust_graph.topological_connected_components(
                     H,
@@ -109,8 +139,6 @@ class TopologicalCutSetAnalyzer:
 
         visited = {(sr, sc)}
         queue: deque[tuple[int, int]] = deque([(sr, sc)])
-        step = max(1, int(step_size))
-        deltas = [(-step, 0), (step, 0), (0, -step), (0, step)]
 
         while queue:
             r, c = queue.popleft()
@@ -133,18 +161,27 @@ class TopologicalCutSetAnalyzer:
         movable_barriers: set[tuple[int, int]] | None = None,
         occupied_cells: set[tuple[int, int]] | None = None,
         blocked_nodes: set[tuple[int, int]] | frozenset[tuple[int, int]] | None = None,
+        transition_deltas: Sequence[tuple[int, int]] | None = None,
     ) -> CutSetResult:
         """Analyze whether start and goal are in disjoint components and locate the barrier cut-set."""
         H, W = grid_shape
         effective_barriers = set(blocked_nodes if blocked_nodes is not None else barrier_cells)
         c_start = TopologicalCutSetAnalyzer.get_reachable_component(
-            start, effective_barriers, grid_shape, step_size
+            start,
+            effective_barriers,
+            grid_shape,
+            step_size,
+            transition_deltas=transition_deltas,
         )
         barriers_for_goal = set(effective_barriers)
         if goal in barriers_for_goal:
             barriers_for_goal.remove(goal)
         c_goal = TopologicalCutSetAnalyzer.get_reachable_component(
-            goal, barriers_for_goal, grid_shape, step_size
+            goal,
+            barriers_for_goal,
+            grid_shape,
+            step_size,
+            transition_deltas=transition_deltas,
         )
 
         # If goal is in start component or within step tolerance, they are mutually reachable
@@ -161,28 +198,25 @@ class TopologicalCutSetAnalyzer:
                 approach_cell=None,
             )
 
-        # Find barrier cells adjacent to c_start
-        deltas = [(-step_size, 0), (step_size, 0), (0, -step_size), (0, step_size)]
+        # Find barrier cells adjacent/coupled to c_start under active operators
+        deltas = TopologicalCutSetAnalyzer._normalize_transition_deltas(
+            step_size, transition_deltas
+        )
+        if not deltas:
+            deltas = [(-step_size, 0), (step_size, 0), (0, -step_size), (0, step_size)]
         cut_set: set[tuple[int, int]] = set()
         barrier_to_approach: dict[tuple[int, int], tuple[int, int]] = {}
+        rev_deltas = list(
+            dict.fromkeys(
+                [*((-dr, -dc) for dr, dc in deltas), *deltas, (-1, 0), (1, 0), (0, -1), (0, 1)]
+            )
+        )
 
         for r, c in c_start:
             for dr, dc in deltas:
                 nr, nc = r + dr, c + dc
                 if (nr, nc) in barrier_cells:
-                    adj_to_goal = any(
-                        (nr + gdr, nc + gdc) in c_goal
-                        for gdr, gdc in [
-                            (-step_size, 0),
-                            (step_size, 0),
-                            (0, -step_size),
-                            (0, step_size),
-                            (-1, 0),
-                            (1, 0),
-                            (0, -1),
-                            (0, 1),
-                        ]
-                    )
+                    adj_to_goal = any((nr + gdr, nc + gdc) in c_goal for gdr, gdc in rev_deltas)
                     if adj_to_goal:
                         cut_set.add((nr, nc))
                         if (nr, nc) not in barrier_to_approach:

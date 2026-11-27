@@ -11,6 +11,10 @@ from typing import Any
 
 import numpy as np
 
+from hbllm.hcir.world.motor_calibration import (
+    resolve_calibrated_transition_deltas,
+    resolve_effector_coupling_offsets,
+)
 from hbllm.hcir.world.percept import EpistemicPhase
 from hbllm.hcir.world.state.models import (
     _LEGACY_ENGINE_STATE_FIELDS,
@@ -228,12 +232,68 @@ class CognitiveContext:
 
     def has_displacement_capabilities(self, available_actions: Sequence[Any] | None = None) -> bool:
         """Returns True if the environment/agent possesses physical displacement actions."""
-        actions = (
-            available_actions
-            if available_actions is not None
-            else list(self.action_dynamics.keys())
+        if available_actions is not None:
+            return any(self.is_displacement_action(a) for a in available_actions)
+        actions = list(
+            dict.fromkeys([*self.action_affordances.keys(), *self.action_dynamics.keys()])
         )
         return any(self.is_displacement_action(a) for a in actions)
+
+    def _context_action_deltas(self) -> dict[Any, tuple[int, int]]:
+        deltas: dict[Any, tuple[int, int]] = {}
+        for act, aff in self.action_affordances.items():
+            if aff.is_displacement and aff.delta and len(aff.delta) >= 2:
+                deltas[act] = (int(round(float(aff.delta[0]))), int(round(float(aff.delta[1]))))
+        for act, dyn in self.action_dynamics.items():
+            dr = int(dyn.delta_r)
+            dc = int(dyn.delta_c)
+            if dr != 0 or dc != 0:
+                deltas[act] = (dr, dc)
+        return deltas
+
+    def get_calibrated_transition_deltas(
+        self, available_actions: Sequence[Any] | None = None
+    ) -> tuple[tuple[int, int], ...]:
+        """Return deduplicated non-zero displacement vectors from calibrated motor dynamics."""
+        deltas = self._context_action_deltas()
+        return resolve_calibrated_transition_deltas(
+            deltas,
+            available_actions=available_actions,
+            has_displacement=self.has_displacement_capabilities(available_actions),
+            has_declared_affordances=bool(self.action_affordances),
+            inhibited_actions=self.inhibited_actions,
+            action_dynamics=self.action_dynamics,
+        )
+
+    def get_effector_coupling_offsets(
+        self, available_actions: Sequence[Any] | None = None
+    ) -> tuple[tuple[int, int], ...]:
+        """Return predecessor coupling offsets {target - delta_a} for active effectors."""
+        acts = (
+            list(available_actions)
+            if available_actions is not None
+            else (
+                list(self.action_affordances.keys())
+                if self.action_affordances
+                else list(self.action_dynamics.keys())
+            )
+        )
+        deltas = self._context_action_deltas()
+        has_disp = self.has_displacement_capabilities(acts if acts else None)
+        has_spatial = any(self.is_spatial_effector(a) for a in acts)
+        has_disc = any(
+            not self.is_displacement_action(a) and not self.is_spatial_effector(a) for a in acts
+        )
+        return resolve_effector_coupling_offsets(
+            deltas,
+            available_actions=available_actions,
+            has_displacement=has_disp,
+            has_spatial_effector=has_spatial,
+            has_discrete_local_interact=has_disc,
+            has_declared_affordances=bool(self.action_affordances),
+            inhibited_actions=self.inhibited_actions,
+            action_dynamics=self.action_dynamics,
+        )
 
     def estimate_background(self, curr_grid: np.ndarray) -> int:
         from hbllm.hcir.world.cortex_perception import PerceptionEngine

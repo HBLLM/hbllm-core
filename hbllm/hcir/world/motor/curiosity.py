@@ -185,18 +185,24 @@ class EpistemicCuriosityExplorer:
                             if 0 <= nr < H and 0 <= nc < W:
                                 cell_val = int(curr_grid[nr, nc])
                                 ev_c = engine.symbolic_theory.evaluate_transition(
-                                    cell_val, locus=(nr, nc)
+                                    cell_val, locus=(nr, nc), bg_feature=bg
                                 )
-                                if cell_val == bg:
-                                    score += 2.0
-                                elif (
+                                if (
                                     cell_val in engine.hazard_tracker.known_lethal_features
                                     or (nr, nc) in engine.current_context_hazards
                                     or ev_c.risk_cost >= 40.0
                                 ):
                                     score -= 10.0
-                                elif not ev_c.traversable:
+                                elif (nr, nc) in engine.learned_barriers or not ev_c.traversable:
                                     score -= 5.0
+                                elif engine.symbolic_theory.is_cell_feasible(
+                                    cell_val,
+                                    locus=(nr, nc),
+                                    bg_feature=bg,
+                                    learned_barriers=engine.learned_barriers,
+                                    hazard_loci=engine.current_context_hazards,
+                                ):
+                                    score += 2.0
                                 else:
                                     score -= 1.0
                             else:
@@ -223,11 +229,12 @@ class EpistemicCuriosityExplorer:
                         tr, tc = av_r + dr, av_c + dc
                         if 0 <= tr < H and 0 <= tc < W:
                             val = int(curr_grid[tr, tc])
-                            ev_t = engine.symbolic_theory.evaluate_transition(val, locus=(tr, tc))
-                            if (
-                                val == bg
-                                or val == 0
-                                or (ev_t.traversable and ev_t.confidence > 0.0)
+                            if engine.symbolic_theory.is_cell_feasible(
+                                val,
+                                locus=(tr, tc),
+                                bg_feature=bg,
+                                learned_barriers=engine.learned_barriers,
+                                hazard_loci=engine.current_context_hazards,
                             ):
                                 open_space_acts.append(a)
                             else:
@@ -261,45 +268,56 @@ class EpistemicCuriosityExplorer:
     ) -> EpistemicProbeProposal | None:
         """Motor babbling for self-identification and agency discovery."""
         if displacement_actions and not engine.avatar_features and engine.avatar_feature is None:
-            # If curr_grid is provided, evaluate displacement actions across candidate
-            # avatar features to prioritize stepping into free background space rather
-            # than stepping blindly into walls, hazards, or out of bounds.
+            babble_pool = [
+                a for a in displacement_actions if engine.inhibited_actions.get(a, 0) == 0
+            ] or list(displacement_actions)
+            recent_tail = list(engine.recent_actions)[-6:]
+            # If curr_grid is provided, evaluate displacement actions across cohesive
+            # candidate entities to prioritize stepping into open walkable/bg space.
             if curr_grid is not None and curr_grid.ndim >= 2:
                 bg = engine.estimate_background(curr_grid)
                 H, W = curr_grid.shape
-                vals, counts = np.unique(curr_grid, return_counts=True)
-                candidates: list[tuple[int, int]] = []
-                for v, c in zip(vals, counts):
-                    vf = int(v)
-                    ev_f = engine.symbolic_theory.evaluate_transition(vf)
-                    if vf != bg and c <= 2 and ev_f.traversable and ev_f.risk_cost < 40.0:
-                        coords = np.argwhere(curr_grid == vf)
-                        for r, c_idx in coords:
-                            candidates.append((int(r), int(c_idx)))
+                ents = engine.extract_entities(curr_grid, bg)
+                max_body_area = max(25, int(H * W * 0.06))
+                candidates: list[tuple[int, int]] = [
+                    ent.grid_pos
+                    for ent in ents
+                    if ent.feature_id != bg
+                    and 1 <= ent.area <= max_body_area
+                    and not engine.working_memory.is_exogenous_locus(
+                        ent.grid_pos, lattice=curr_grid, bg=bg, include_outer_edge=True
+                    )
+                ][:12]
 
                 if candidates:
                     deltas = engine.action_deltas
                     scored_actions: list[tuple[int, float]] = []
-                    for act in displacement_actions:
+                    for act in babble_pool:
                         dr, dc = deltas.get(act, (0, 0))
-                        score = 0.0
+                        score = -6.0 * float(recent_tail.count(act))
                         for r, c_idx in candidates:
                             nr, nc = r + dr, c_idx + dc
                             if 0 <= nr < H and 0 <= nc < W:
                                 cell_val = int(curr_grid[nr, nc])
                                 ev_c = engine.symbolic_theory.evaluate_transition(
-                                    cell_val, locus=(nr, nc)
+                                    cell_val, locus=(nr, nc), bg_feature=bg
                                 )
-                                if cell_val == bg:
-                                    score += 2.0
-                                elif (
+                                if (
                                     cell_val in engine.hazard_tracker.known_lethal_features
                                     or (nr, nc) in engine.current_context_hazards
                                     or ev_c.risk_cost >= 40.0
                                 ):
                                     score -= 10.0
-                                elif not ev_c.traversable:
+                                elif (nr, nc) in engine.learned_barriers or not ev_c.traversable:
                                     score -= 5.0
+                                elif engine.symbolic_theory.is_cell_feasible(
+                                    cell_val,
+                                    locus=(nr, nc),
+                                    bg_feature=bg,
+                                    learned_barriers=engine.learned_barriers,
+                                    hazard_loci=engine.current_context_hazards,
+                                ):
+                                    score += 2.0
                                 else:
                                     score -= 1.0
                             else:
@@ -313,9 +331,9 @@ class EpistemicCuriosityExplorer:
                         exploration_mode="motor_babbling",
                     )
 
-            babble_idx = engine.context_epistemic_probes % len(displacement_actions)
+            babble_idx = engine.context_epistemic_probes % len(babble_pool)
             return EpistemicProbeProposal(
-                action=displacement_actions[babble_idx],
+                action=babble_pool[babble_idx],
                 exploration_mode="motor_babbling",
             )
         return None

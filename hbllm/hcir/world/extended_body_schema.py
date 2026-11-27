@@ -93,6 +93,8 @@ class ExtendedBodySchema:
         self.seen_state_signatures: set[int] = {0}
         self.state_conditioned_transitions: dict[int, set[tuple[tuple[int, int], Any]]] = {}
         self.state_conditioned_loci: dict[int, set[tuple[int, int]]] = {}
+        self.initial_state_blocked_transitions: set[tuple[tuple[int, int], Any]] = set()
+        self.initial_state_blocked_loci: set[tuple[int, int]] = set()
         self.transformer_state_transitions: dict[tuple[int, int], set[int]] = {}
         self.exhausted_transformers: set[tuple[int, int]] = set()
 
@@ -108,6 +110,13 @@ class ExtendedBodySchema:
 
         return RetentionPolicy.EPISODE_LOCAL
 
+    def clear_context_state(self) -> None:
+        """Clear context/level-specific state transformers and conditioned lock memory."""
+        self.transformer_state_transitions.clear()
+        self.initial_state_blocked_transitions.clear()
+        self.initial_state_blocked_loci.clear()
+        self.exhausted_transformers.clear()
+
     def reset_episode(self, retain_dynamics: bool = True) -> None:
         """Reset currently held tools while optionally preserving cross-trial tool affinities."""
         self.held_tools.clear()
@@ -119,7 +128,7 @@ class ExtendedBodySchema:
         self.exhausted_transformers.clear()
         if not retain_dynamics:
             self.tool_barrier_affinities.clear()
-            self.transformer_state_transitions.clear()
+            self.clear_context_state()
         else:
             self.transformer_state_transitions = {
                 k: set() for k in self.transformer_state_transitions
@@ -135,10 +144,14 @@ class ExtendedBodySchema:
         self.state_conditioned_transitions.setdefault(self.latent_state_signature, set()).add(
             (from_pos, action)
         )
+        if self.latent_state_signature == 0:
+            self.initial_state_blocked_transitions.add((from_pos, action))
         if target_pos is not None:
             self.state_conditioned_loci.setdefault(self.latent_state_signature, set()).add(
                 target_pos
             )
+            if self.latent_state_signature == 0:
+                self.initial_state_blocked_loci.add(target_pos)
 
     def advance_latent_state(
         self,

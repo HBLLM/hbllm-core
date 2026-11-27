@@ -179,25 +179,30 @@ class MotorCortexEffector:
             name = str(spec.get("name", aid))
             params = spec.get("parameters") or spec.get("params") or {}
             param_keys = tuple(params.keys()) if isinstance(params, dict) else ("x", "y")
-            req_spatial = bool(
-                isinstance(params, dict)
-                and any(
-                    k in params
-                    for k in (
-                        "x",
-                        "y",
-                        "col",
-                        "row",
-                        "lat",
-                        "lon",
-                        "azimuth",
-                        "elevation",
-                        "distance",
-                        "c",
-                        "r",
-                    )
-                )
+            is_point_kind = str(spec.get("kind", "")).lower() in (
+                "point",
+                "spatial",
+                "coord",
+                "coordinate",
             )
+            spatial_coord_keys = (
+                "x",
+                "y",
+                "col",
+                "row",
+                "lat",
+                "lon",
+                "azimuth",
+                "elevation",
+                "distance",
+                "c",
+                "r",
+            )
+            req_spatial = is_point_kind or bool(
+                isinstance(params, dict) and any(k in params for k in spatial_coord_keys)
+            )
+            if req_spatial and not any(k in spatial_coord_keys for k in param_keys):
+                param_keys = ("x", "y")
             name_upper = name.upper()
             is_disp = any(
                 k in name_upper
@@ -561,9 +566,10 @@ class MotorCortexEffector:
                     coords[k] = 0
             return coords
 
-        # Ventral Stream Invariant: When an avatar is present and all targeted actuation candidates are exhausted / quiescent,
-        # inhibit targeted actuation action and return None so deliberation and exploration switch to locomotion.
-        if engine.avatar_pos is not None:
+        # Ventral Stream Invariant: When an embodied displacement avatar is present and all
+        # targeted actuation candidates are exhausted / quiescent, inhibit targeted actuation
+        # and return None so deliberation and exploration switch back to locomotion.
+        if engine.avatar_pos is not None and engine.has_displacement_capabilities():
             if action is not None:
                 engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 6)
             return None

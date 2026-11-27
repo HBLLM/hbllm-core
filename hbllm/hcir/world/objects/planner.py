@@ -225,21 +225,29 @@ class ObjectStateGraphPlanner:
             )
             stances: set[tuple[int, int]] = set()
             adj_stances: set[tuple[int, int]] = set()
-            if category == ObjectCategory.EXIT or not is_solid:
-                for cr, cc in entity_cells:
-                    if percept.is_passable(cr, cc):
-                        stances.add((cr, cc))
-
-            for cr, cc in entity_cells:
-                for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    ar, ac = cr + dr, cc + dc
-                    if percept.is_passable(ar, ac) and (ar, ac) not in entity_cells:
-                        adj_stances.add((ar, ac))
-            if is_solid or not stances:
-                stances.update(adj_stances)
-
-            if not stances:
+            is_non_disp = (
+                bool(engine.action_affordances or engine.action_dynamics)
+                and not engine.has_displacement_capabilities()
+            )
+            if is_non_disp:
                 stances = {e.grid_pos}
+            else:
+                if category == ObjectCategory.EXIT or not is_solid:
+                    for cr, cc in entity_cells:
+                        if percept.is_passable(cr, cc):
+                            stances.add((cr, cc))
+
+                coupling_offsets = engine.get_effector_coupling_offsets()
+                for cr, cc in entity_cells:
+                    for dr, dc in coupling_offsets:
+                        ar, ac = cr + dr, cc + dc
+                        if percept.is_passable(ar, ac) and (ar, ac) not in entity_cells:
+                            adj_stances.add((ar, ac))
+                if is_solid or not stances:
+                    stances.update(adj_stances)
+
+                if not stances:
+                    stances = {e.grid_pos}
 
             centroid = (int(round(e.centroid[0])), int(round(e.centroid[1])))
             anchor = (

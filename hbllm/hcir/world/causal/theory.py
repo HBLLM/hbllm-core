@@ -142,6 +142,7 @@ class HCIRSymbolicWorldTheory:
     _feature_evidence: dict[tuple[str, Any], tuple[int, str]] = field(default_factory=dict)
     _barrier_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
     _walkable_eval_cache: dict[Any, bool] = field(default_factory=dict, repr=False)
+    _bg_feature: Any | None = None
 
     # Functional action categorization
     undo_actions: set[Any] = field(default_factory=set)
@@ -511,11 +512,14 @@ class HCIRSymbolicWorldTheory:
         *,
         locus: tuple[int, int] | None = None,
         active_state_tokens: frozenset[str] | set[str] | None = None,
+        bg_feature: Any | None = None,
+        modality: str = "locomote",
+        is_ambient_prior: bool | None = None,
         unknown_traversable: bool = True,
         unknown_cost_penalty: float = 0.0,
         risk_weight: float = 50.0,
     ) -> TransitionEdgeEvaluation:
-        """Evaluate transition traversability and risk from the unified transition KB."""
+        """Evaluate transition feasibility and risk from the unified transition KB."""
         if feature_id in self._avatar_features:
             return TransitionEdgeEvaluation(
                 traversable=True,
@@ -525,14 +529,81 @@ class HCIRSymbolicWorldTheory:
                 info_gain=0.0,
                 mutates_state=False,
                 confidence=1.0,
+                prior_pass=1.0,
             )
+        eff_bg = self._bg_feature if bg_feature is None else bg_feature
+        eff_ambient = (
+            is_ambient_prior
+            if is_ambient_prior is not None
+            else (eff_bg is not None and feature_id == eff_bg)
+        )
         return self.transition_kb.evaluate_transition(
             feature_id,
             locus=locus,
             active_state_tokens=active_state_tokens,
+            modality=modality,
+            is_ambient_prior=eff_ambient,
             unknown_traversable=unknown_traversable,
             unknown_cost_penalty=unknown_cost_penalty,
             risk_weight=risk_weight,
+        )
+
+    def is_cell_feasible(
+        self,
+        feature_id: Any,
+        *,
+        locus: tuple[int, int] | None = None,
+        bg_feature: Any | None = None,
+        modality: str = "locomote",
+        allow_unverified: bool = False,
+        learned_barriers: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        hazard_loci: set[tuple[int, int]] | frozenset[tuple[int, int]] = frozenset(),
+        max_risk_cost: float = 40.0,
+        agent_state: dict[str, Any] | None = None,
+    ) -> bool:
+        """Unified locus-, modality-, and prior-aware feasibility query without bg bypasses."""
+        norm_locus = (int(locus[0]), int(locus[1])) if locus is not None else None
+        if norm_locus is not None and norm_locus in hazard_loci:
+            return False
+        if feature_id in self._avatar_features:
+            return True
+        if self.is_lethal(feature_id):
+            return False
+        ev = self.evaluate_transition(
+            feature_id,
+            locus=norm_locus,
+            bg_feature=bg_feature,
+            modality=modality,
+        )
+        if str(modality or "locomote") in ("distal", "point", "effector", "symbolic"):
+            return bool(ev.traversable and ev.risk_cost < max_risk_cost)
+        locus_b = (
+            self.transition_kb.get_belief(norm_locus, scope="locus")
+            if norm_locus is not None
+            else None
+        )
+        has_verified_open_locus = bool(
+            locus_b is not None
+            and locus_b.total_observations() > 0.0
+            and ev.traversable
+            and ev.risk_cost < max_risk_cost
+        )
+        if (
+            norm_locus is not None
+            and norm_locus in learned_barriers
+            and not has_verified_open_locus
+        ):
+            return False
+        if not has_verified_open_locus and self.is_barrier(feature_id, agent_state=agent_state):
+            return False
+        if not ev.traversable or ev.risk_cost >= max_risk_cost:
+            return False
+        if allow_unverified:
+            return True
+        return bool(
+            ev.confidence > 0.0
+            or ev.prior_pass > 0.5
+            or self.is_walkable(feature_id, agent_state=agent_state)
         )
 
     def begin_context_epoch(self) -> None:
@@ -839,7 +910,7 @@ class HCIRSymbolicWorldTheory:
         target_action: str = "traverse",
     ) -> None:
         """Induce conditional affordance for feature governed by condition predicate."""
-        bg = getattr(self, "_bg_feature", None)
+        bg = self._bg_feature
         if (bg is not None and feature == bg) or self._is_kb_walkable(feature):
             return
         prereq = prerequisite_feature if prerequisite_feature is not None else condition.value
