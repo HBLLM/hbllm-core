@@ -1,0 +1,324 @@
+(hcir
+  :version 1
+  :type seed-bundle
+  (seed-bundle
+    :kind constructions
+    :language "en"
+    (lexical-rules
+      ("articles" (list "the " "a " "an " "this " "that " "all "))
+      ("causal_connectives"
+        (list
+          (list " need " "requires")
+          (list " needs " "requires")
+          (list " require " "requires")
+          (list " requires " "requires")
+          (list " unlock " "unlocks")
+          (list " unlocks " "unlocks")
+          (list " clear " "clears")
+          (list " clears " "clears")
+          (list " cause " "causes")
+          (list " causes " "causes")
+          (list " enable " "enables")
+          (list " enables " "enables")))
+      ("definitional_patterns"
+        (list "^(?:to\\s+)([a-z][a-z0-9_-]{2,24})\\s+(?:a\\s+|an\\s+|the\\s+)?([a-z][a-z0-9_\\s-]{1,28}?)\\s+(?:means\\s+to|is\\s+to)\\s+(.+)$"
+          "^([a-z][a-z0-9_-]{2,24})ing\\s+(?:a\\s+|an\\s+|the\\s+)?([a-z][a-z0-9_\\s-]{1,28}?)\\s+means\\s+(?:to\\s+)?(.+)$"))
+      ("degree_realization"
+        (map
+          ("extremely" "extremely")
+          ("slightly" "slightly")
+          ("somewhat" "somewhat")
+          ("very" "very")))
+      ("directions" (list "left" "right" "up" "down" "north" "south" "east" "west"))
+      ("gradable_adjectives"
+        (map
+          ("big" (map ("dimension" "size") ("polarity" "high")))
+          ("close" (map ("dimension" "distance") ("polarity" "low")))
+          ("far" (map ("dimension" "distance") ("polarity" "high")))
+          ("huge"
+            (map ("default_hedge" "very") ("dimension" "size") ("polarity" "high")))
+          ("large" (map ("dimension" "size") ("polarity" "high")))
+          ("small" (map ("dimension" "size") ("polarity" "low")))
+          ("tiny"
+            (map ("default_hedge" "very") ("dimension" "size") ("polarity" "low")))))
+      ("hedges"
+        (map
+          ("extremely" "extremely")
+          ("quite" "intensify")
+          ("slightly" "slightly")
+          ("somewhat" "somewhat")
+          ("very" "very")))
+      ("if_then" (list "if " " then " "implies"))
+      ("perceptual_color_defaults"
+        (map
+          ("black" 0)
+          ("blue" 1)
+          ("brown" 9)
+          ("cyan" 8)
+          ("gray" 5)
+          ("green" 3)
+          ("grey" 5)
+          ("magenta" 6)
+          ("orange" 7)
+          ("red" 2)
+          ("yellow" 4)))
+      ("question_starters"
+        (list "what"
+          "where"
+          "when"
+          "why"
+          "how"
+          "who"
+          "which"
+          "is"
+          "are"
+          "was"
+          "were"
+          "do"
+          "does"
+          "did"
+          "can"
+          "could"
+          "would"
+          "will"
+          "should"))
+      ("role_hints"
+        (map
+          ("barrier" (list "door" "barrier"))
+          ("goal" (list "goal"))
+          ("tool" (list "key"))))
+      ("spatial_relations"
+        (map
+          ("above" "ABOVE")
+          ("adjacent to" "ADJACENT")
+          ("below" "BELOW")
+          ("beside" "NEAR")
+          ("close to" "NEAR")
+          ("contains" "CONTAINS")
+          ("inside" "INSIDE")
+          ("left of" "LEFT_OF")
+          ("near" "NEAR")
+          ("right of" "RIGHT_OF")))
+      ("target_slot_names"
+        (list "target" "target_entity" "entity" "object" "noun" "item")))
+    (constructions
+      (construction "en_imperative_act"
+        :id "cxn_en_act"
+        :language "en"
+        :intent-type "act"
+        :template "{action} {target} {direction?}"
+        (triggers "push"
+          "move"
+          "grab"
+          "pick up"
+          "pull"
+          "open"
+          "close"
+          "press"
+          "navigate to"
+          "go to"
+          "reach"
+          "touch")
+        (slot-constraints
+          ("target" "entity"))
+        (semantic-mapping
+          ("default_action" "act")
+          ("description_template" "Act: {action} on {target_ref}"))
+        (compiled-template
+          (assert
+            :node (map
+              ("action" "{action}")
+              ("id" "{act_id}")
+              ("node_type" "action_intent")
+              ("priority" "{priority}")
+              ("target_ref" "{target_ref}"))
+            :author "{author}"
+            :cost 5)
+          (execute "motor_{action}"
+            :params (("action" "{action}") ("target" "{target_ref}"))
+            :cost 50
+            :extra (("target_entity_id" "{target_ref}") ("target_ref" "{target_ref}"))))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_investigate"
+        :id "cxn_en_investigate"
+        :language "en"
+        :intent-type "investigate"
+        :template "{trigger} {subject}"
+        (triggers "find why" "investigate" "analyze" "why did" "diagnose")
+        (semantic-mapping
+          ("default_action" "find_cause")
+          ("description_template" "Investigate: {subject}"))
+        (compiled-template
+          (assert
+            :node (map
+              ("description" "Investigate: {subject} ({action})")
+              ("id" "{goal_id}")
+              ("node_type" "goal")
+              ("priority" "{priority}"))
+            :author "{author}"
+            :cost 5)
+          (query :node-type "observation" :text-contains "{subject}" :cost 10)
+          (query :node-type "procedure" :text-contains "{action_or_subject}" :cost 10)
+          (execute causal_analysis
+            :params (("action" "{action}") ("goal_id" "{goal_id}") ("subject" "{subject}"))
+            :cost 100))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_plan"
+        :id "cxn_en_plan"
+        :language "en"
+        :intent-type "plan"
+        :template "{trigger} {subject}"
+        (triggers "plan" "how to" "design" "steps for")
+        (semantic-mapping
+          ("default_action" "plan_steps")
+          ("description_template" "Plan: {subject}"))
+        (compiled-template
+          (assert
+            :node (map
+              ("description" "Plan: {subject}")
+              ("id" "{goal_id}")
+              ("node_type" "goal")
+              ("priority" "{priority}"))
+            :author "{author}"
+            :cost 5)
+          (query :node-type "constraint" :cost 10)
+          (execute planning
+            :params (("goal_id" "{goal_id}") ("subject" "{subject}"))
+            :cost 150))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_create"
+        :id "cxn_en_create"
+        :language "en"
+        :intent-type "create"
+        :template "{trigger} {subject}"
+        (triggers "create" "build" "generate" "write" "make")
+        (semantic-mapping
+          ("default_action" "create_item")
+          ("description_template" "Create: {subject}"))
+        (compiled-template
+          (assert
+            :node (map
+              ("description" "Create: {subject}")
+              ("id" "{goal_id}")
+              ("node_type" "goal")
+              ("priority" "{priority}"))
+            :author "{author}"
+            :cost 5)
+          (execute content_generation
+            :params (("action" "{action}") ("subject" "{subject}"))
+            :cost 200))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_modify"
+        :id "cxn_en_modify"
+        :language "en"
+        :intent-type "modify"
+        :template "{trigger} {subject}"
+        (triggers "modify" "change" "update" "fix")
+        (semantic-mapping
+          ("default_action" "modify_item")
+          ("description_template" "Modify: {subject}"))
+        (compiled-template
+          (query :text-contains "{subject}" :cost 10)
+          (execute content_modification
+            :params (("action" "{action}") ("subject" "{subject}"))
+            :cost 100))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_delete"
+        :id "cxn_en_delete"
+        :language "en"
+        :intent-type "delete"
+        :template "{trigger} {subject}"
+        (triggers "remove" "delete" "clean up")
+        (semantic-mapping
+          ("default_action" "delete_item")
+          ("description_template" "Delete: {subject}"))
+        (compiled-template
+          (query :text-contains "{subject}" :cost 10)
+          (retract :node-id "{subject}" :cost 5))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_simulate"
+        :id "cxn_en_simulate"
+        :language "en"
+        :intent-type "simulate"
+        :template "{trigger} {subject}"
+        (triggers "simulate" "what if" "imagine" "try")
+        (semantic-mapping
+          ("default_action" "simulate_scenario")
+          ("description_template" "Simulate: {subject}"))
+        (compiled-template
+          (fork :branch "{branch}" :cost 20)
+          (execute simulation
+            :params (("branch" "{branch}") ("scenario" "{subject}"))
+            :cost 200)
+          (merge :branch "{branch}" :cost 20))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_learn"
+        :id "cxn_en_learn"
+        :language "en"
+        :intent-type "learn"
+        :template "{trigger} {subject}"
+        (triggers "remember" "learn" "note")
+        (semantic-mapping
+          ("default_action" "learn_fact")
+          ("description_template" "Learn: {subject}"))
+        (compiled-template
+          (query :text-contains "{subject}" :cost 10)
+          (assert
+            :node (map
+              ("belief_type" "learned")
+              ("claim" "{subject}")
+              ("id" "{belief_id}")
+              ("node_type" "belief"))
+            :author "{author}"
+            :cost 5)
+          (execute skill_extraction :params (("subject" "{subject}")) :cost 50))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_monitor"
+        :id "cxn_en_monitor"
+        :language "en"
+        :intent-type "monitor"
+        :template "{trigger} {subject}"
+        (triggers "watch" "alert me" "track" "monitor")
+        (semantic-mapping
+          ("default_action" "monitor_state")
+          ("description_template" "Monitor: {subject}"))
+        (compiled-template
+          (assert
+            :node (map
+              ("description" "Monitor: {subject}")
+              ("id" "{goal_id}")
+              ("node_type" "goal")
+              ("priority" "{priority}"))
+            :author "{author}"
+            :cost 5)
+          (wait :condition "{subject}" :timeout-ms 60000 :cost 5))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_fuzzy_hedge_eval"
+        :id "cxn_en_fuzzy_hedge"
+        :language "en"
+        :intent-type "query"
+        :template "fuzzy degree {hedge} {subject}"
+        (triggers "fuzzy degree" "membership degree" "degree of")
+        (semantic-mapping
+          ("default_action" "evaluate_fuzzy_hedge")
+          ("description_template" "Fuzzy Hedge Query: {subject}"))
+        (compiled-template
+          (execute math.fuzzy.hedge
+            :params (("degree" "{priority}") ("hedge" "{hedge}"))
+            :bind $r0
+            :cost 5)
+          (branch :when (degree-gte? $r0 0.5) :goto "fuzzy_high" :cost 2)
+          (return $r0 :cost 1)
+          (label fuzzy_high (return $r0 :cost 1)))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "en_query"
+        :id "cxn_en_query"
+        :language "en"
+        :intent-type "query"
+        :template "{subject}"
+        (semantic-mapping
+          ("default_action" "evaluate_prompt")
+          ("description_template" "Query: {subject}"))
+        (compiled-template
+          (query :node-type "{slot.node_type?}" :text-contains "{subject?}" :cost 10))
+        (reliability :alpha 5.0 :beta 1.0)))))

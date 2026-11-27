@@ -18,6 +18,7 @@ hbllm [command] [options]
 | Command Group / Command | Purpose |
 |---|---|
 | [`hbllm kernel`](#hbllm-kernel) | `boot`, `status`, and `replay` for the HCIR Cognitive OS kernel |
+| [`hbllm hcir`](#hbllm-hcir) | `inspect`, `print`, `validate`, and `roundtrip` canonical `.hcir` artifacts |
 | [`hbllm mind`](#hbllm-mind) | `run` active inference loop or `step` a single JSON observation |
 | [`hbllm bench`](#hbllm-bench) | Run `dev`, `heldout`, `local-suite`, `sge`, `ablation`, and `profile` suites |
 | [`hbllm plugin`](#hbllm-plugin) | `list` discovered plugins or scaffold a `new` plugin |
@@ -44,6 +45,24 @@ hbllm kernel status
 
 # Replay transactions from an event log
 hbllm kernel replay --log path/to/events.log
+```
+
+### `hbllm hcir`
+
+Inspect cognitive nodes and execution traces, validate `.hcir` files, and verify canonical round-trips:
+
+```bash
+# Inspect a SkillNode from the workspace in canonical .hcir with BLAKE3 digests
+hbllm hcir inspect skill prior_skill_geodesic_field --digest
+
+# Print an executable InstructionStream trace from a node or receipt JSON
+hbllm hcir print trace prior_skill_collision_cone
+
+# Validate syntax, Rule-0 compliance, and core_priors domain purity
+hbllm hcir validate hbllm/hcir/seed/core_priors.hcir
+
+# Verify canonical idempotence and semantic digest stability
+hbllm hcir roundtrip hbllm/hcir/seed/core_priors.hcir
 ```
 
 ### `hbllm mind`

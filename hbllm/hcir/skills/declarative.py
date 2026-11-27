@@ -383,6 +383,18 @@ class SymbolicExpr(BaseModel):
             return max(0.0, 1.0 - gap / scale)
         return 1.0 if self.evaluate(ctx) else 0.0
 
+    def semantic_digest(self) -> str:
+        """Compute canonical BLAKE3 semantic identity digest."""
+        from hbllm.hcir.sexpr import semantic_digest as _semantic_digest
+
+        return _semantic_digest(self)
+
+    def exact_digest(self) -> str:
+        """Compute exact BLAKE3 digest."""
+        from hbllm.hcir.sexpr import exact_digest as _exact_digest
+
+        return _exact_digest(self)
+
 
 class SymbolicPredicate(ABC):
     """Base contract for declarative predicates (serializable via `to_expr()`)."""

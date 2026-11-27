@@ -115,3 +115,15 @@ class InstructionStream(BaseModel):
             default=str,
         )
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+    def semantic_digest(self) -> str:
+        """Compute canonical BLAKE3 semantic identity digest (independent of id/author)."""
+        from hbllm.hcir.sexpr import semantic_digest as _semantic_digest
+
+        return _semantic_digest(self)
+
+    def exact_digest(self) -> str:
+        """Compute exact BLAKE3 digest preserving stream and instruction IDs."""
+        from hbllm.hcir.sexpr import exact_digest as _exact_digest
+
+        return _exact_digest(self)

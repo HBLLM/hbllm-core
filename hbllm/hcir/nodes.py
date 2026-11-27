@@ -377,6 +377,18 @@ class HCIRNode(BaseModel):
         if self.confidence is not None:
             self.uncertainty.confidence = self.confidence
 
+    def semantic_digest(self) -> str:
+        """Compute canonical BLAKE3 semantic identity digest independent of ephemeral IDs/timestamps."""
+        from hbllm.hcir.sexpr import semantic_digest as _semantic_digest
+
+        return _semantic_digest(self)
+
+    def exact_digest(self) -> str:
+        """Compute exact BLAKE3 digest preserving IDs, timestamps, and runtime counters."""
+        from hbllm.hcir.sexpr import exact_digest as _exact_digest
+
+        return _exact_digest(self)
+
 
 # ── Directive Nodes ──────────────────────────────────────────────────────
 

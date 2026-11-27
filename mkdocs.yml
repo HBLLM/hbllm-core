@@ -127,7 +127,9 @@ nav:
       - ADR 004 (Pure-HCIR Cognitive OS): adr/0004-pure-hcir-cognitive-os.md
       - ADR 005 (Homoiconic Symbolic VM): adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md
       - ADR 006 (Fuzzy Symbolic Cognition): adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md
+      - ADR 007 (Canonical .hcir Format): adr/0007-canonical-hcir-textual-representation.md
       - HCIR Cognitive OS Kernel: architecture/hcir-kernel-os.md
+      - Canonical .hcir Format Spec: architecture/hcir-canonical-format.md
       - Homoiconic VM Migration Plan: architecture/homoiconic-vm-migration-plan.md
       - Fuzzy Cognition Migration Plan: architecture/fuzzy-cognition-migration-plan.md
       - Cortical World Model: architecture/cortical-world-model.md

@@ -1,0 +1,132 @@
+(hcir
+  :version 1
+  :type seed-bundle
+  (seed-bundle
+    :kind constructions
+    :language "si"
+    (lexical-rules
+      ("articles" (list "ඒ " "මේ " "අර " "එක "))
+      ("causal_connectives"
+        (list
+          (list " අවශ්‍යයි " "requires")
+          (list " ඇති කරයි " "causes")
+          (list " විවෘත කරයි " "unlocks")))
+      ("definitional_patterns" (list))
+      ("degree_realization"
+        (map
+          ("extremely" "අතිශයින්")
+          ("slightly" "ටිකක්")
+          ("somewhat" "තරමක්")
+          ("very" "ඉතා")))
+      ("directions" (list "වම" "දකුණ" "ඉහළ" "පහළ"))
+      ("gradable_adjectives"
+        (map
+          ("කුඩා" (map ("dimension" "size") ("polarity" "low")))
+          ("දුර" (map ("dimension" "distance") ("polarity" "high")))
+          ("ලොකු" (map ("dimension" "size") ("polarity" "high")))
+          ("විශාල" (map ("dimension" "size") ("polarity" "high")))
+          ("ළඟ" (map ("dimension" "distance") ("polarity" "low")))))
+      ("hedges"
+        (map
+          ("අතිශයින්" "extremely")
+          ("ඉතා" "very")
+          ("ටිකක්" "slightly")
+          ("තරමක්" "somewhat")))
+      ("if_then" (list "නම් " " එවිට " "implies"))
+      ("perceptual_color_defaults" (map))
+      ("question_starters" (list "මොකක්ද" "කොහෙද" "ඇයි" "කොහොමද" "කවුද" "කවදාද"))
+      ("role_hints" (map))
+      ("spatial_relations"
+        (map
+          ("අසල" "NEAR")
+          ("ඇතුළේ" "INSIDE")
+          ("උඩ" "ABOVE")
+          ("දකුණේ" "RIGHT_OF")
+          ("යට" "BELOW")
+          ("වමේ" "LEFT_OF")
+          ("ළඟ" "NEAR")))
+      ("target_slot_names" (list "target" "target_entity" "entity" "object")))
+    (constructions
+      (construction "si_imperative_act"
+        :id "cxn_si_act"
+        :language "si"
+        :intent-type "act"
+        :template "{target} {action}"
+        (triggers "තල්ලු කරන්න"
+          "ගෙන යන්න"
+          "ගන්න"
+          "අරින්න"
+          "වහන්න"
+          "ඔබන්න"
+          "යන්න"
+          "අල්ලන්න")
+        (slot-constraints
+          ("target" "entity"))
+        (semantic-mapping
+          ("default_action" "act")
+          ("description_template" "Act(si): {action} on {target_ref}"))
+        (compiled-template
+          (assert
+            :node (map
+              ("action" "{action}")
+              ("id" "{act_id}")
+              ("node_type" "action_intent")
+              ("priority" "{priority}")
+              ("target_ref" "{target_ref}"))
+            :author "{author}"
+            :cost 5)
+          (execute "motor_{action}"
+            :params (("action" "{action}") ("target" "{target_ref}"))
+            :cost 50
+            :extra (("target_entity_id" "{target_ref}") ("target_ref" "{target_ref}"))))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "si_learn"
+        :id "cxn_si_learn"
+        :language "si"
+        :intent-type "learn"
+        :template "{subject} {trigger}"
+        (triggers "මතක තබා ගන්න" "ඉගෙන ගන්න" "සටහන් කරන්න")
+        (semantic-mapping
+          ("default_action" "learn_fact")
+          ("description_template" "Learn(si): {subject}"))
+        (compiled-template
+          (query :text-contains "{subject}" :cost 10)
+          (assert
+            :node (map
+              ("belief_type" "learned")
+              ("claim" "{subject}")
+              ("id" "{belief_id}")
+              ("node_type" "belief"))
+            :author "{author}"
+            :cost 5)
+          (execute skill_extraction :params (("subject" "{subject}")) :cost 50))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "si_fuzzy_hedge_eval"
+        :id "cxn_si_fuzzy_hedge"
+        :language "si"
+        :intent-type "query"
+        :template "{subject} තරමක් {hedge}"
+        (triggers "තරම" "අංශකය" "නොපැහැදිලි")
+        (semantic-mapping
+          ("default_action" "evaluate_fuzzy_hedge")
+          ("description_template" "Fuzzy Hedge Query(si): {subject}"))
+        (compiled-template
+          (execute math.fuzzy.hedge
+            :params (("degree" "{priority}") ("hedge" "{hedge}"))
+            :bind $r0
+            :cost 5)
+          (branch :when (degree-gte? $r0 0.5) :goto "fuzzy_high" :cost 2)
+          (return $r0 :cost 1)
+          (label fuzzy_high (return $r0 :cost 1)))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "si_query"
+        :id "cxn_si_query"
+        :language "si"
+        :intent-type "query"
+        :template "{subject}"
+        (semantic-mapping
+          ("default_action" "evaluate_prompt")
+          ("description_template" "Query(si): {subject}"))
+        (compiled-template
+          (query :node-type "{slot.node_type?}" :text-contains "{subject?}" :cost 10))
+        (reliability :alpha 5.0 :beta 1.0)))))

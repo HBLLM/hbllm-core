@@ -1,0 +1,457 @@
+(hcir
+  :version 1
+  :type seed-bundle
+  (seed-bundle
+    :kind core-priors
+    :seed-version "2.0.0"
+    :authority "docs/architecture/priors.md"
+    :description "Minimal Spelke Core Knowledge and Active Inference innate bootstrap seed (Layer 1). Strictly domain-agnostic and task-agnostic: zero surface colors, game mechanics, puzzle shapes, bespoke action IDs, or linguistic aliases."
+    (concepts
+      (concept "prior_concept_cohesion"
+        :label "spatiotemporal_cohesion"
+        :domain "spelke_objectness"
+        :definition "Bounded contiguous regions persist and move as cohesive wholes."
+        :confidence 0.99)
+      (concept "prior_concept_continuity"
+        :label "spatiotemporal_continuity"
+        :domain "spelke_objectness"
+        :definition "Entities traverse continuous connected paths across time steps."
+        :confidence 0.99)
+      (concept "prior_concept_solidity"
+        :label "solidity_and_occlusion"
+        :domain "spelke_objectness"
+        :definition "Distinct solid entities cannot co-occupy coordinates; disappearance behind an occluder preserves identity."
+        :confidence 0.99)
+      (concept "prior_concept_coord_invariance"
+        :label "coordinate_translation_invariance"
+        :domain "spelke_objectness"
+        :definition "Entity identity and category membership are invariant under spatial translation."
+        :confidence 0.99)
+      (concept "prior_concept_metric_space"
+        :label "metric_manifold"
+        :domain "spatial_topology"
+        :definition "Space is equipped with L1 and L2 distance metrics over relative offsets."
+        :confidence 0.99)
+      (concept "prior_concept_adjacent"
+        :label "relation_adjacent"
+        :domain "spatial_topology"
+        :definition "Two regions sharing an edge or boundary cell stand in an adjacency relation."
+        :confidence 0.99)
+      (concept "prior_concept_contained_in"
+        :label "relation_contained_in"
+        :domain "spatial_topology"
+        :definition "An entity enclosed by a closed boundary stands in a containment relation."
+        :confidence 0.99)
+      (concept "prior_concept_separated"
+        :label "relation_separated"
+        :domain "spatial_topology"
+        :definition "Regions partitioned by topological cut-sets have non-zero path separation."
+        :confidence 0.99)
+      (concept "prior_concept_inertia"
+        :label "kinematic_inertia"
+        :domain "spatial_topology"
+        :definition "Moving entities maintain momentum vector until acted upon by collision or actuation."
+        :confidence 0.95)
+      (concept "prior_concept_self_agency"
+        :label "self_agency_attribution"
+        :domain "agency_intention"
+        :definition "Emitted motor commands correlate temporally and proximally with self-entity state deltas."
+        :confidence 0.98)
+      (concept "prior_concept_goal_agency"
+        :label "intentional_agency_detection"
+        :domain "agency_intention"
+        :definition "Trajectories systematically curving away from passive inertia toward attractors indicate intentional agents."
+        :confidence 0.95)
+      (concept "prior_concept_collision_avoidance"
+        :label "hazard_collision_avoidance"
+        :domain "agency_intention"
+        :definition "Agents avoid terminal transitions and intersecting lethal trajectory cones."
+        :confidence 0.98)
+      (concept "prior_concept_numerosity"
+        :label "discrete_numerosity_comparison"
+        :domain "discrete_numerosity"
+        :definition "Cardinality equality, subset, and difference relations compare finite discrete entity sets."
+        :confidence 0.99)
+      (concept "prior_concept_correspondence"
+        :label "bijective_correspondence"
+        :domain "discrete_numerosity"
+        :definition "Entity identities persist across successive frames via minimal-cost bipartite assignment."
+        :confidence 0.98)
+      (concept "prior_concept_temporal_precedence"
+        :label "causal_temporal_precedence"
+        :domain "causal_active_inference"
+        :definition "Causes strictly precede their physical effects with positive temporal delta."
+        :confidence 0.99)
+      (concept "prior_concept_pearl_do"
+        :label "pearl_interventional_do_calculus"
+        :domain "causal_active_inference"
+        :definition "Active intervention do(action) differs from passive correlation and reveals structural mechanism."
+        :confidence 0.99)
+      (concept "prior_concept_expected_free_energy"
+        :label "expected_free_energy_minimization"
+        :domain "causal_active_inference"
+        :definition "Policy selection balances expected subgoal utility against epistemic surprise reduction."
+        :confidence 0.98))
+    (rules
+      (rule "prior_rule_permanence_under_occlusion"
+        :condition "visible(entity) == False and neighbor_contiguous(occluder)"
+        :prediction "state(entity) == occluded_persistent"
+        :domain "spelke_objectness"
+        :confidence 0.92)
+      (rule "prior_rule_boundary_collision"
+        :condition "projected_coord == occupied_solid"
+        :prediction "kinematic_velocity == deflected_or_blocked"
+        :domain "spatial_topology"
+        :confidence 0.95)
+      (rule "prior_rule_cut_set_subgoal"
+        :condition "separated(ego, target) and partition_count >= 2"
+        :prediction "require_intervening_boundary_traversal"
+        :domain "spatial_topology"
+        :confidence 0.94)
+      (rule "prior_rule_motor_self_attribution"
+        :condition "do(motor_action) precedes proximal_delta(dt=1)"
+        :prediction "entity_attribution == self_agent"
+        :domain "agency_intention"
+        :confidence 0.95)
+      (rule "prior_rule_epistemic_probe_on_uncertainty"
+        :condition "epistemic_entropy > curiosity_threshold"
+        :prediction "emit_counterfactual_fork_or_safe_probe"
+        :domain "causal_active_inference"
+        :confidence 0.9))
+    (skills
+      (skill "innate_count_entities"
+        :id "prior_skill_count_entities"
+        :description "Count connected entities and measure background distribution via Layer-0 ALU."
+        (params
+          (param "grid" :required true))
+        (postcondition (pattern-map ("intent" "count_entities") ("target" ?grid)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.connected_components ALU"
+          (execute math.connected_components :params (("grid" $r0)) :bind $r1)
+          (return $r1)))
+      (skill "innate_detect_topology_cuts"
+        :id "prior_skill_detect_topology_cuts"
+        :description "Compute topological component separation via Layer-0 cut-set ALU."
+        (params
+          (param "grid" :required true))
+        (postcondition (pattern-map ("intent" "detect_topology_cuts") ("target" ?grid)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.topology_cuts ALU"
+          (execute math.topology_cuts :params (("grid" $r0)) :bind $r1)
+          (return $r1)))
+      (skill "innate_detect_symmetry"
+        :id "prior_skill_detect_symmetry"
+        :description "Evaluate bilateral entity centroid symmetry via Layer-0 ALU."
+        (params
+          (param "grid" :required true))
+        (postcondition (pattern-map ("intent" "detect_symmetry") ("target" ?grid)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.symmetry_score ALU"
+          (execute math.symmetry_score :params (("grid" $r0)) :bind $r1)
+          (return $r1)))
+      (skill "innate_compare_cardinality"
+        :id "prior_skill_compare_cardinality"
+        :description "Compare cardinality and set membership between two entity sets."
+        (params
+          (param "items_a" :required true)
+          (param "items_b" :required false :default (list)))
+        (postcondition
+          (pattern-map ("intent" "compare_cardinality") ("items_a" ?items_a)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.set_cardinality ALU"
+          (execute math.set_cardinality
+            :params (("items_a" $r0) ("items_b" $r1))
+            :bind $r2)
+          (return $r2)))
+      (skill "innate_counterfactual_probe"
+        :id "prior_skill_counterfactual_probe"
+        :description "Fork an isolated simulation branch to evaluate an interventional do(a) probe and roll back."
+        (params
+          (param "scenario" :required true))
+        (postcondition
+          (pattern-map ("intent" "counterfactual_probe") ("scenario" ?scenario)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Pearl do(a) safe counterfactual rollout"
+          (fork :branch "prior_cf_probe")
+          (execute world.predict_outcome
+            :params (("branch" "prior_cf_probe") ("scenario" $r0))
+            :bind $r1)
+          (rollback :branch "prior_cf_probe")
+          (return $r1)))
+      (skill "innate_active_epistemic_inquiry"
+        :id "prior_skill_active_epistemic_inquiry"
+        :description "Query unresolved unknowns in graph memory or dispatch curiosity exploration."
+        (params
+          (param "topic" :required false :default ""))
+        (precondition (pattern-map ("node_type" "unknown")))
+        (postcondition (pattern-map ("intent" "resolve_uncertainty") ("topic" ?topic)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Unify unknowns and yield target for inquiry"
+          (unify (pattern-map ("node_type" "unknown")) :bind $r0)
+          (branch :when (empty? $r0) :goto "inquiry_done")
+          (execute world.assess_metacognitive_agency :params (("target" $r0)) :bind $r1)
+          (label inquiry_done (return $r1))))
+      (skill "innate_geodesic_field"
+        :id "prior_skill_geodesic_field"
+        :description "Compute multi-source geodesic distance field over a spatial manifold via Layer-0 ALU."
+        (params
+          (param "grid" :required true)
+          (param "goal_cells" :required true))
+        (postcondition (pattern-map ("intent" "geodesic_field") ("target" ?grid)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.geodesic_field ALU"
+          (execute math.geodesic_field
+            :params (("goal_cells" $r1) ("grid" $r0))
+            :bind $r2)
+          (return $r2)))
+      (skill "innate_bellman_risk_backup"
+        :id "prior_skill_bellman_risk_backup"
+        :description "Evaluate risk-sensitive finite-horizon expected utility over stochastic dynamics via Layer-0 ALU."
+        (params
+          (param "grid_shape" :required true)
+          (param "goal_cells" :required true))
+        (postcondition
+          (pattern-map ("intent" "bellman_risk_backup") ("target" ?grid_shape)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.bellman_risk_backup ALU"
+          (execute math.bellman_risk_backup
+            :params (("goal_cells" $r1) ("grid_shape" $r0))
+            :bind $r2)
+          (return $r2)))
+      (skill "innate_collision_cone"
+        :id "prior_skill_collision_cone"
+        :description "Project dynamic threat trajectories forward to detect collisions and swap hazards via Layer-0 ALU."
+        (params
+          (param "grid_shape" :required true)
+          (param "avatar_trajectory" :required true))
+        (postcondition
+          (pattern-map ("intent" "collision_cone") ("target" ?avatar_trajectory)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.collision_cone ALU"
+          (execute math.collision_cone
+            :params (("avatar_trajectory" $r1) ("grid_shape" $r0))
+            :bind $r2)
+          (return $r2)))
+      (skill "innate_bayesian_posterior_update"
+        :id "prior_skill_bayesian_posterior"
+        :description "Update conjugate Dirichlet outcome posteriors and Expected Free Energy via Layer-0 ALU."
+        (params
+          (param "observations" :required false :default (list)))
+        (postcondition
+          (pattern-map
+            ("intent" "bayesian_posterior_update")
+            ("observations" ?observations)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.bayesian_posterior_update ALU"
+          (execute math.bayesian_posterior_update
+            :params (("observations" $r0))
+            :bind $r1)
+          (return $r1)))
+      (skill "innate_fuzzy_evaluate"
+        :id "prior_skill_fuzzy_evaluate"
+        :description "Evaluate a FuzzyExpr AST under an explicit FuzzyLogicProfile via Layer-0 ALU."
+        (params
+          (param "expr" :required true)
+          (param "bindings" :required false :default (map))
+          (param "profile_id" :required false :default "product"))
+        (postcondition (pattern-map ("expr" ?expr) ("intent" "fuzzy_evaluate")))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.fuzzy.eval ALU"
+          (execute math.fuzzy.eval
+            :params (("bindings" $r1) ("expr" $r0) ("profile_id" $r2))
+            :bind $r3)
+          (return $r3)))
+      (skill "innate_fuzzy_compose"
+        :id "prior_skill_fuzzy_compose"
+        :description "Compose two graded spatial relations via declarative RelationCompositionPolicy ALU."
+        (params
+          (param "first_relation" :required true)
+          (param "second_relation" :required true)
+          (param "degree_ab" :required true)
+          (param "degree_bc" :required true))
+        (postcondition
+          (pattern-map
+            ("first_relation" ?first_relation)
+            ("intent" "fuzzy_compose")
+            ("second_relation" ?second_relation)))
+        (reliability :alpha 5.0 :beta 1.0)
+        (body
+          :author "core_priors"
+          :description "Invoke math.fuzzy.compose ALU"
+          (execute math.fuzzy.compose
+            :params (("degree_ab" $r2)
+              ("degree_bc" $r3)
+              ("first_relation" $r0)
+              ("second_relation" $r1))
+            :bind $r4)
+          (return $r4))))
+    (composition-policy "default_spatial_policy"
+      (compose-rule "inside"
+        "inside"
+        ->
+        "inside"
+        :directionality forward
+        :guard topological_closure
+        :operator godel
+        :attenuation 1.0)
+      (compose-rule "contains"
+        "contains"
+        ->
+        "contains"
+        :directionality forward
+        :guard topological_closure
+        :operator godel
+        :attenuation 1.0)
+      (compose-rule "above"
+        "above"
+        ->
+        "above"
+        :directionality directional_axis
+        :guard directional_alignment
+        :operator product
+        :attenuation 1.0)
+      (compose-rule "below"
+        "below"
+        ->
+        "below"
+        :directionality directional_axis
+        :guard directional_alignment
+        :operator product
+        :attenuation 1.0)
+      (compose-rule "left_of"
+        "left_of"
+        ->
+        "left_of"
+        :directionality directional_axis
+        :guard directional_alignment
+        :operator product
+        :attenuation 1.0)
+      (compose-rule "right_of"
+        "right_of"
+        ->
+        "right_of"
+        :directionality directional_axis
+        :guard directional_alignment
+        :operator product
+        :attenuation 1.0)
+      (compose-rule "supports"
+        "supports"
+        ->
+        "supports"
+        :directionality forward
+        :guard none
+        :operator product
+        :attenuation 0.95)
+      (compose-rule "supported_by"
+        "supported_by"
+        ->
+        "supported_by"
+        :directionality forward
+        :guard none
+        :operator product
+        :attenuation 0.95)
+      (compose-rule "on_top_of"
+        "on_top_of"
+        ->
+        "above"
+        :directionality directional_axis
+        :guard directional_alignment
+        :operator product
+        :attenuation 0.95)
+      (compose-rule "inside"
+        "near"
+        ->
+        "near"
+        :directionality forward
+        :guard triangle_inequality_bound
+        :max-scale-ratio 0.5
+        :operator attenuated_product
+        :attenuation 0.85)
+      (compose-rule "near"
+        "inside"
+        ->
+        nil
+        :directionality forward
+        :guard extent_bounded
+        :max-scale-ratio 1.5
+        :operator attenuated_product
+        :attenuation 0.5)
+      (compose-rule "near"
+        "near"
+        ->
+        nil
+        :directionality symmetric
+        :guard none
+        :operator godel
+        :attenuation 0.0)
+      (compose-rule "adjacent_to"
+        "adjacent_to"
+        ->
+        nil
+        :directionality symmetric
+        :guard none
+        :operator godel
+        :attenuation 0.0))
+    (edges
+      (edge-def "prior_edge_cohesion_continuity"
+        :type supports
+        :sources ("prior_concept_cohesion")
+        :targets ("prior_concept_continuity"))
+      (edge-def "prior_edge_solidity_permanence"
+        :type supports
+        :sources ("prior_concept_solidity")
+        :targets ("prior_rule_permanence_under_occlusion"))
+      (edge-def "prior_edge_separated_cut_set"
+        :type supports
+        :sources ("prior_concept_separated")
+        :targets ("prior_rule_cut_set_subgoal"))
+      (edge-def "prior_edge_agency_attribution"
+        :type supports
+        :sources ("prior_concept_self_agency")
+        :targets ("prior_rule_motor_self_attribution"))
+      (edge-def "prior_edge_efe_inquiry"
+        :type supports
+        :sources ("prior_concept_expected_free_energy")
+        :targets ("prior_skill_active_epistemic_inquiry"))
+      (edge-def "prior_edge_do_cf"
+        :type supports
+        :sources ("prior_concept_pearl_do")
+        :targets ("prior_skill_counterfactual_probe"))
+      (edge-def "prior_edge_metric_geodesic"
+        :type supports
+        :sources ("prior_concept_metric_space")
+        :targets ("prior_skill_geodesic_field"))
+      (edge-def "prior_edge_metric_bellman"
+        :type supports
+        :sources ("prior_concept_expected_free_energy")
+        :targets ("prior_skill_bellman_risk_backup"))
+      (edge-def "prior_edge_collision_cone"
+        :type supports
+        :sources ("prior_concept_collision_avoidance")
+        :targets ("prior_skill_collision_cone"))
+      (edge-def "prior_edge_efe_bayesian"
+        :type supports
+        :sources ("prior_concept_expected_free_energy")
+        :targets ("prior_skill_bayesian_posterior")))))

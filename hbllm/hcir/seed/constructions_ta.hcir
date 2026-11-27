@@ -1,0 +1,124 @@
+(hcir
+  :version 1
+  :type seed-bundle
+  (seed-bundle
+    :kind constructions
+    :language "ta"
+    (lexical-rules
+      ("articles" (list "அந்த " "இந்த "))
+      ("causal_connectives"
+        (list
+          (list " தேவை " "requires")
+          (list " ஏற்படுத்துகிறது " "causes")
+          (list " திறக்கிறது " "unlocks")))
+      ("definitional_patterns" (list))
+      ("degree_realization"
+        (map
+          ("extremely" "மிக")
+          ("slightly" "சற்று")
+          ("somewhat" "ஓரளவு")
+          ("very" "மிகவும்")))
+      ("directions" (list "இடது" "வலது" "மேல்" "கீழ்"))
+      ("gradable_adjectives"
+        (map
+          ("அருகில்" (map ("dimension" "distance") ("polarity" "low")))
+          ("சிறிய" (map ("dimension" "size") ("polarity" "low")))
+          ("தூரம்" (map ("dimension" "distance") ("polarity" "high")))
+          ("பெரிய" (map ("dimension" "size") ("polarity" "high")))))
+      ("hedges"
+        (map
+          ("ஓரளவு" "somewhat")
+          ("சற்று" "slightly")
+          ("மிக" "extremely")
+          ("மிகவும்" "very")))
+      ("if_then" (list "என்றால் " " பின்னர் " "implies"))
+      ("perceptual_color_defaults" (map))
+      ("question_starters" (list "என்ன" "எங்கே" "ஏன்" "எப்படி" "யார்" "எப்போது"))
+      ("role_hints" (map))
+      ("spatial_relations"
+        (map
+          ("அருகில்" "NEAR")
+          ("இடதுபுறம்" "LEFT_OF")
+          ("உள்ளே" "INSIDE")
+          ("கீழே" "BELOW")
+          ("பக்கத்தில்" "NEAR")
+          ("மேலே" "ABOVE")
+          ("வலதுபுறம்" "RIGHT_OF")))
+      ("target_slot_names" (list "target" "target_entity" "entity" "object")))
+    (constructions
+      (construction "ta_imperative_act"
+        :id "cxn_ta_act"
+        :language "ta"
+        :intent-type "act"
+        :template "{target} {action}"
+        (triggers "தள்ளு" "நகர்த்து" "எடு" "திற" "மூடு" "அழுத்து" "செல்" "தொடு")
+        (slot-constraints
+          ("target" "entity"))
+        (semantic-mapping
+          ("default_action" "act")
+          ("description_template" "Act(ta): {action} on {target_ref}"))
+        (compiled-template
+          (assert
+            :node (map
+              ("action" "{action}")
+              ("id" "{act_id}")
+              ("node_type" "action_intent")
+              ("priority" "{priority}")
+              ("target_ref" "{target_ref}"))
+            :author "{author}"
+            :cost 5)
+          (execute "motor_{action}"
+            :params (("action" "{action}") ("target" "{target_ref}"))
+            :cost 50
+            :extra (("target_entity_id" "{target_ref}") ("target_ref" "{target_ref}"))))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "ta_learn"
+        :id "cxn_ta_learn"
+        :language "ta"
+        :intent-type "learn"
+        :template "{subject} {trigger}"
+        (triggers "நினைவில் கொள்" "கற்றுக்கொள்" "குறித்துக்கொள்")
+        (semantic-mapping
+          ("default_action" "learn_fact")
+          ("description_template" "Learn(ta): {subject}"))
+        (compiled-template
+          (query :text-contains "{subject}" :cost 10)
+          (assert
+            :node (map
+              ("belief_type" "learned")
+              ("claim" "{subject}")
+              ("id" "{belief_id}")
+              ("node_type" "belief"))
+            :author "{author}"
+            :cost 5)
+          (execute skill_extraction :params (("subject" "{subject}")) :cost 50))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "ta_fuzzy_hedge_eval"
+        :id "cxn_ta_fuzzy_hedge"
+        :language "ta"
+        :intent-type "query"
+        :template "{subject} ஓரளவு {hedge}"
+        (triggers "அளவு" "படி" "தெளிவற்ற")
+        (semantic-mapping
+          ("default_action" "evaluate_fuzzy_hedge")
+          ("description_template" "Fuzzy Hedge Query(ta): {subject}"))
+        (compiled-template
+          (execute math.fuzzy.hedge
+            :params (("degree" "{priority}") ("hedge" "{hedge}"))
+            :bind $r0
+            :cost 5)
+          (branch :when (degree-gte? $r0 0.5) :goto "fuzzy_high" :cost 2)
+          (return $r0 :cost 1)
+          (label fuzzy_high (return $r0 :cost 1)))
+        (reliability :alpha 5.0 :beta 1.0))
+      (construction "ta_query"
+        :id "cxn_ta_query"
+        :language "ta"
+        :intent-type "query"
+        :template "{subject}"
+        (semantic-mapping
+          ("default_action" "evaluate_prompt")
+          ("description_template" "Query(ta): {subject}"))
+        (compiled-template
+          (query :node-type "{slot.node_type?}" :text-contains "{subject?}" :cost 10))
+        (reliability :alpha 5.0 :beta 1.0)))))

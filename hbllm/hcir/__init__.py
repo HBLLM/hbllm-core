@@ -26,6 +26,15 @@ from hbllm.hcir.registers import (
     SymbolicVar,
 )
 from hbllm.hcir.replay_debugger import CognitiveBreakpoint, ReplayDebugger
+from hbllm.hcir.sexpr import (
+    HCIRParseError,
+    blake3_hex,
+    canonical_digest,
+    exact_digest,
+    format_hcir,
+    parse_hcir,
+    semantic_digest,
+)
 from hbllm.hcir.spatial_planner import (
     EntityGraph,
     EntityRole,
@@ -104,6 +113,14 @@ __all__ = [
     "WorldKernel",
     "ReplayDebugger",
     "CognitiveBreakpoint",
+    # --- Canonical .hcir Codec & BLAKE3 Digests ---
+    "HCIRParseError",
+    "blake3_hex",
+    "canonical_digest",
+    "exact_digest",
+    "format_hcir",
+    "parse_hcir",
+    "semantic_digest",
 ]
 
 

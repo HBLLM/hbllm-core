@@ -20,6 +20,8 @@ from typing import Any
 
 import typer
 
+from hbllm.cli.hcir_cli import hcir_app
+
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
@@ -51,6 +53,7 @@ plugin_app = typer.Typer(
 )
 
 app.add_typer(kernel_app, name="kernel")
+app.add_typer(hcir_app, name="hcir")
 app.add_typer(mind_app, name="mind")
 app.add_typer(bench_app, name="bench")
 app.add_typer(plugin_app, name="plugin")

@@ -62,6 +62,18 @@ class GraphPattern(BaseModel):
     none_of: list[GraphPattern] = Field(default_factory=list)
     distinct_nodes: bool = True
 
+    def semantic_digest(self) -> str:
+        """Compute canonical BLAKE3 semantic identity digest."""
+        from hbllm.hcir.sexpr import semantic_digest as _semantic_digest
+
+        return _semantic_digest(self)
+
+    def exact_digest(self) -> str:
+        """Compute exact BLAKE3 digest."""
+        from hbllm.hcir.sexpr import exact_digest as _exact_digest
+
+        return _exact_digest(self)
+
 
 class MatchResult(BaseModel):
     """Dual-mode unification result preserving crisp validity and graded fit (ADR 006 §5)."""

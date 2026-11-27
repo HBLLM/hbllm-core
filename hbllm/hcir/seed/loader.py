@@ -1,4 +1,4 @@
-"""Transactional loader for `core_priors.hcir.yaml` and multilingual `constructions_*.yaml`."""
+"""Transactional loader for `.hcir` and YAML genesis priors, skills, and constructions."""
 
 from __future__ import annotations
 
@@ -25,50 +25,100 @@ from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance, Scope, SecurityLevel
 
 _SEED_DIR: Path = Path(__file__).resolve().parent
-DEFAULT_CORE_PRIORS_PATH: Path = _SEED_DIR / "core_priors.hcir.yaml"
-CONSTRUCTION_SEED_PATHS: dict[str, Path] = {
+DEFAULT_CORE_PRIORS_HCIR_PATH: Path = _SEED_DIR / "core_priors.hcir"
+DEFAULT_CORE_PRIORS_YAML_PATH: Path = _SEED_DIR / "core_priors.hcir.yaml"
+DEFAULT_CORE_PRIORS_PATH: Path = (
+    DEFAULT_CORE_PRIORS_HCIR_PATH
+    if DEFAULT_CORE_PRIORS_HCIR_PATH.exists()
+    else DEFAULT_CORE_PRIORS_YAML_PATH
+)
+CONSTRUCTION_HCIR_SEED_PATHS: dict[str, Path] = {
+    lang: _SEED_DIR / f"constructions_{lang}.hcir" for lang in ("en", "si", "ta")
+}
+CONSTRUCTION_YAML_SEED_PATHS: dict[str, Path] = {
     lang: _SEED_DIR / f"constructions_{lang}.yaml" for lang in ("en", "si", "ta")
 }
+CONSTRUCTION_SEED_PATHS: dict[str, Path] = {
+    lang: (
+        CONSTRUCTION_HCIR_SEED_PATHS[lang]
+        if CONSTRUCTION_HCIR_SEED_PATHS[lang].exists()
+        else CONSTRUCTION_YAML_SEED_PATHS[lang]
+    )
+    for lang in ("en", "si", "ta")
+}
 _FORBIDDEN_RE = re.compile(
-    r"\b(?:lava|key|door)\b|color\s+\d+\s+is|action\s+\d+\s*=", re.IGNORECASE
+    r"(?<!:)\b(?:lava|key|door)\b|color\s+\d+\s+is|action\s+\d+\s*=", re.IGNORECASE
 )
 
 
 def _assert_domain_purity(raw_text: str) -> None:
     if match := _FORBIDDEN_RE.search(raw_text):
         raise ValueError(
-            f"core_priors.hcir.yaml violates docs/architecture/priors.md §3: {match.group(0)!r}"
+            f"core_priors seed violates docs/architecture/priors.md §3: {match.group(0)!r}"
         )
 
 
-def load_core_priors_spec(path: Path | None = None) -> dict[str, Any]:
-    """Load and validate the declarative `.hcir` Spelke/active-inference seed YAML."""
-    seed_path = Path(path) if path is not None else DEFAULT_CORE_PRIORS_PATH
+def _normalize_seed_bundle_dict(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert parsed `.hcir` seed-bundle Pydantic items into plain dicts."""
+    out: dict[str, Any] = {}
+    for k, v in parsed.items():
+        if k in ("concepts", "rules", "skills", "constructions", "edges") and isinstance(
+            v, Sequence
+        ):
+            out[k] = [
+                item.model_dump() if hasattr(item, "model_dump") else dict(item) for item in v
+            ]
+        elif hasattr(v, "model_dump"):
+            out[k] = v.model_dump()
+        else:
+            out[k] = v
+    return out
+
+
+def _load_seed_file(seed_path: Path, *, check_purity: bool = False) -> dict[str, Any]:
     raw_text = seed_path.read_text(encoding="utf-8")
-    _assert_domain_purity(raw_text)
+    if check_purity:
+        _assert_domain_purity(raw_text)
+    if seed_path.suffix == ".hcir":
+        from hbllm.hcir.sexpr import parse_hcir
+
+        parsed = parse_hcir(raw_text, expected_type="seed-bundle")
+        if not isinstance(parsed, Mapping):
+            raise ValueError(f"Invalid .hcir seed bundle in {seed_path}")
+        return _normalize_seed_bundle_dict(parsed)
     loaded = yaml.safe_load(raw_text)
     if not isinstance(loaded, Mapping):
         raise ValueError(f"Invalid seed format in {seed_path}: expected mapping")
     return dict(loaded)
 
 
+def load_core_priors_spec(path: Path | None = None) -> dict[str, Any]:
+    """Load and validate the declarative `.hcir` / `.hcir.yaml` Spelke/active-inference seed."""
+    seed_path = (
+        Path(path)
+        if path is not None
+        else (
+            DEFAULT_CORE_PRIORS_HCIR_PATH
+            if DEFAULT_CORE_PRIORS_HCIR_PATH.exists()
+            else DEFAULT_CORE_PRIORS_YAML_PATH
+        )
+    )
+    return _load_seed_file(seed_path, check_purity=True)
+
+
 @functools.lru_cache(maxsize=8)
-def _load_cached_constructions_yaml(language: str) -> dict[str, Any]:
-    seed_path = CONSTRUCTION_SEED_PATHS.get(language, CONSTRUCTION_SEED_PATHS["en"])
-    loaded = yaml.safe_load(seed_path.read_text(encoding="utf-8"))
-    if not isinstance(loaded, Mapping):
-        raise ValueError(f"Invalid construction seed format in {seed_path}: expected mapping")
-    return dict(loaded)
+def _load_cached_constructions_spec(language: str) -> dict[str, Any]:
+    hcir_path = CONSTRUCTION_HCIR_SEED_PATHS.get(language, CONSTRUCTION_HCIR_SEED_PATHS["en"])
+    yaml_path = CONSTRUCTION_YAML_SEED_PATHS.get(language, CONSTRUCTION_YAML_SEED_PATHS["en"])
+    seed_path = hcir_path if hcir_path.exists() else yaml_path
+    return _load_seed_file(seed_path, check_purity=False)
 
 
 def load_constructions_spec(language: str = "en", path: Path | None = None) -> dict[str, Any]:
-    """Load multilingual Embodied Construction Grammar seed YAML (cached on default paths)."""
+    """Load multilingual Embodied Construction Grammar seed (`.hcir` or `.yaml`)."""
     if path is None:
-        return _load_cached_constructions_yaml(language)
-    loaded = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(loaded, Mapping):
-        raise ValueError(f"Invalid construction seed format in {path}: expected mapping")
-    return dict(loaded)
+        return _load_cached_constructions_spec(language)
+    return _load_seed_file(Path(path), check_purity=False)
 
 
 def _upsert(node: Any) -> TransactionOperation:
@@ -89,7 +139,7 @@ def _commit_seed_ops(
 
     ws = target.brain if isinstance(target, TieredWorkspace) else target
     resolved_grant = grant or (
-        target._system_grant if isinstance(target, TieredWorkspace) else None
+        getattr(target, "_system_grant", None) if isinstance(target, TieredWorkspace) else None
     )
     filtered = [
         op
@@ -216,8 +266,8 @@ def build_core_prior_operations(
                 precondition_pattern=s.get("precondition_pattern"),
                 postcondition_pattern=s.get("postcondition_pattern"),
                 bytecode_stream=InstructionStream.model_validate(s["bytecode_stream"]).model_dump(),
-                alpha_success=5.0,
-                beta_failure=1.0,
+                alpha_success=float(s.get("alpha_success", 5.0)),
+                beta_failure=float(s.get("beta_failure", 1.0)),
                 tags=["core_prior", "innate_skill"],
                 **kw,
             )
@@ -267,3 +317,47 @@ def hydrate_core_priors(
     if path is None:
         count += hydrate_constructions(target, grant=grant, tenant_id=tenant_id)
     return count
+
+
+def load_skills_seed(path: Path) -> list[SkillNode]:
+    """Load executable homoiconic `SkillNode`s from a `.hcir` or `.yaml` seed file."""
+    seed_path = Path(path)
+    raw_text = seed_path.read_text(encoding="utf-8")
+    if seed_path.suffix == ".hcir":
+        from hbllm.hcir.sexpr import parse_hcir
+
+        parsed = parse_hcir(raw_text)
+        if isinstance(parsed, SkillNode):
+            skills = [parsed]
+        elif isinstance(parsed, Mapping) and "skills" in parsed:
+            skills = [
+                s if isinstance(s, SkillNode) else SkillNode.model_validate(dict(s))
+                for s in parsed["skills"]
+            ]
+        else:
+            raise ValueError(f"Expected skill or seed-bundle with skills in {seed_path}")
+    else:
+        loaded = yaml.safe_load(raw_text)
+        if not isinstance(loaded, Mapping):
+            raise ValueError(f"Invalid YAML skill seed in {seed_path}")
+        skills = [SkillNode.model_validate(dict(s)) for s in loaded.get("skills", ())]
+    for sk in skills:
+        if sk.bytecode_stream is None:
+            raise ValueError(
+                f"Skill '{sk.id}' in {seed_path} is missing an executable bytecode_stream"
+            )
+    return skills
+
+
+def hydrate_skills_seed(
+    target: Any,
+    path: Path,
+    *,
+    grant: Any = None,
+    tenant_id: str | None = None,
+) -> int:
+    """Hydrate homoiconic `SkillNode`s from a `.hcir` or `.yaml` skill seed transactionally."""
+    ops = [_upsert(sk) for sk in load_skills_seed(path)]
+    return _commit_seed_ops(
+        target, ops, author="skills_seed_loader", grant=grant, tenant_id=tenant_id
+    )
