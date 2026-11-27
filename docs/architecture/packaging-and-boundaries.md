@@ -43,13 +43,12 @@ graph TD
 
 ## 3. PEP 562 Lazy Loading Architecture
 
-In monolithic Python packages, top-level imports in `__init__.py` trigger eager execution across child modules. Historically, importing an edge plugin like `plugins.developmental_adapter` transitively pulled in `RouterNode` and `MemoryNode`, which imported `fastapi`, `redis`, `qdrant-client`, `asyncpg`, and `cryptography` (148 heavy modules).
+In monolithic Python packages, top-level imports in `__init__.py` trigger eager execution across child modules. Historically, importing an edge plugin like `plugins.developmental_adapter` transitively pulled in `fastapi`, `redis`, `qdrant-client`, `asyncpg`, and `cryptography`.
 
 ### Resolution
-HBLLM core resolves this via **PEP 562 Lazy Module Exports**:
-- `hbllm/brain/__init__.py`: All 26 public symbols (`BrainFactory`, `RouterNode`, `GoalManager`, etc.) are mapped to lazy import tuples.
-- `hbllm/memory/__init__.py`: Memory backend nodes (`MemoryNode`, `ConceptExtractor`) are mapped to lazy import tuples.
-- The top-level packages export `__getattr__` and `__dir__`:
+HBLLM core resolves this via **PEP 562 Lazy Module Exports** and the retirement of the monolithic `hbllm/brain` bus graph:
+- `hbllm/memory/__init__.py`: Memory backend nodes (`MemoryNode`, `ConceptExtractor`) are mapped to lazy import tuples loaded via `__getattr__`.
+- Top-level packages export `__getattr__` and `__dir__` instead of eagerly importing server or database extras:
 
 ```python
 def __getattr__(name: str) -> Any:
@@ -63,9 +62,9 @@ def __getattr__(name: str) -> Any:
 ```
 
 ### Result
-- Directly importing `plugins.developmental_adapter` or `hbllm.hcir` now loads **0** heavy server or vector database modules.
-- The edge footprint memory overhead drops by $> 90\%$.
-- Accessing `from hbllm.brain import BrainFactory` continues to resolve on demand with 100% backward compatibility.
+- Directly importing `plugins.developmental_adapter` or `hbllm.hcir` loads **0** heavy server or vector database modules.
+- Edge footprint memory overhead drops by $> 90\%$.
+- Lazy resolution preserves fast startup across `hbllm.memory` and `hbllm.hcir`.
 
 ---
 
@@ -74,11 +73,11 @@ def __getattr__(name: str) -> Any:
 To ensure boundaries are never violated by accidental imports in PRs, automated isolation and governance suites run under `tests/unit/architecture/` and `tests/unit/core/test_dependency_boundaries.py`:
 
 1. **Layering & Boundary Isolation (`test_layering.py`, `test_dependency_boundaries.py`):**
-   - `hbllm.hcir` never imports from `hbllm.brain`.
+   - `hbllm.hcir` never imports from `hbllm.serving`.
    - Core `hbllm` never imports from `plugins/`.
    - Importing `plugins.developmental_adapter` loads **0** blacklisted optional extras (`fastapi`, `uvicorn`, `redis`, `qdrant_client`, `asyncpg`, `pgvector`, `cryptography`).
    - Core `dependencies` in `pyproject.toml` remain lean without server or vector-DB extras.
-2. **Zero-LLM Core & Substrate Hygiene (`test_loc_budget.py`, `test_m0_substrate_hygiene.py`):**
+2. **Zero-LLM Core & Substrate Hygiene (`test_m0_substrate_hygiene.py`):**
    - Enforces **`0` legacy `__path__.append` shadow shims** (`MAX_PATH_APPEND_SHIMS = 0`), shipped-wheel module resolution, and zero workspace-absent commit fallbacks.
    - Verifies via AST inspection that `hbllm/hcir/**` imports **zero** LLM client libraries or external LLM scaffolds (`openai`, `anthropic`, `litellm`, `transformers`, `plugins.llm_scaffold`, `hbllm.serving.provider`).
 3. **Permanent Homoiconic & Syscall Ratchets (`test_homoiconic_invariants.py`):**

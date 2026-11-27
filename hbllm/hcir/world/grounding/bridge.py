@@ -8,6 +8,8 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from hbllm.hcir.grounding.actions.gateway import ActionValidationGateway
 from hbllm.hcir.grounding.actions.renderers import (
     ActionRenderer,
@@ -34,6 +36,7 @@ from hbllm.hcir.grounding.contracts.enums import (
     TrafficClass,
 )
 from hbllm.hcir.grounding.contracts.observation import ObservationEnvelope
+from hbllm.hcir.grounding.contracts.quality import GroundingQuality
 from hbllm.hcir.grounding.contracts.references import (
     EntityCandidateRef,
     GroundedEntityRef,
@@ -55,6 +58,7 @@ from hbllm.hcir.grounding.predictive.predictor import (
 from hbllm.hcir.grounding.relations.relation_learner import RelationLearner
 from hbllm.hcir.grounding.tracking.tracker import ThreeTierEntityTracker
 from hbllm.hcir.kernel.transaction_manager import TransactionManager
+from hbllm.hcir.types import Scope
 from hbllm.hcir.workspace import HCIRWorkspaceState
 from hbllm.hcir.world.grounding.state import CorticalGroundingState, _gen_id
 from hbllm.hcir.world.percept import RetentionPolicy, apply_boundary_retention
@@ -97,9 +101,11 @@ class CorticalGroundingBridge:
         surprise_threshold: float = 0.35,
         services: KernelServices | None = None,
         perception_mode: str = "handcrafted",
+        enable_fuzzy_grounding: bool = False,
     ) -> None:
         self.services = services
         self.perception_mode = perception_mode
+        self.enable_fuzzy_grounding = bool(enable_fuzzy_grounding)
         self.workspace = (
             workspace
             or (services.workspace if services is not None else None)
@@ -127,9 +133,12 @@ class CorticalGroundingBridge:
             assignment_threshold=0.32,
             split_dispersion_threshold=0.48,
             merge_distance_threshold=0.14,
+            enable_fuzzy=self.enable_fuzzy_grounding,
         )
         self.feature_registry = FeatureExtractorRegistry.default(perception_mode=perception_mode)
-        self.relation_learner = RelationLearner(proximity_threshold=3.0)
+        self.relation_learner = RelationLearner(
+            proximity_threshold=3.0, enable_fuzzy=self.enable_fuzzy_grounding
+        )
         self.evaluator = EpistemicEvaluator(acceptance_threshold=acceptance_threshold)
         self.committer = HCIRCommitter(self.tx_manager)
         self.schema_inducer = SchemaInducer()
@@ -154,6 +163,9 @@ class CorticalGroundingBridge:
         self.state.cached_entity_features.clear()
         self.state.cached_entity_concepts.clear()
         self.state.cached_entity_priors.clear()
+        self.state.cached_entity_multi_concepts.clear()
+        self.state.last_fuzzy_relations.clear()
+        self.state.committed_fuzzy_assertions.clear()
         self.state.adapted_role_pairs.clear()
         self.state.promoted_concept_ids.clear()
         self.relation_learner.reset()
@@ -401,6 +413,7 @@ class CorticalGroundingBridge:
                 "sge_role_priors": merged_cached,
                 "sge_composite_matches": [],
                 "sge_concept_assignments": [],
+                "sge_fuzzy_relations": list(self.state.last_fuzzy_relations),
                 "sge_concept_splits": 0,
                 "sge_concept_merges": 0,
                 "sge_outcome_verified": False,
@@ -415,6 +428,70 @@ class CorticalGroundingBridge:
             dependency_group=f"dep_cortex_s{step}",
             candidate_pairs=self.relation_learner.last_changed_pairs,
         )
+
+        # 3b. Fuzzy Adaptive Relation Evaluation & Dual-Channel Commit (ADR 006 Phase F1)
+        fuzzy_assertions_to_commit: list[Any] = []
+        if self.enable_fuzzy_grounding:
+            nav_diam = 10.0
+            curr_grid_ctx = ctx.curr_grid if ctx is not None else None
+            if isinstance(curr_grid_ctx, np.ndarray) and curr_grid_ctx.ndim >= 2:
+                nav_diam = max(
+                    1.0, math.hypot(float(curr_grid_ctx.shape[-2]), float(curr_grid_ctx.shape[-1]))
+                )
+            fuzzy_rel_summaries: list[dict[str, Any]] = []
+            for pair_key in self.relation_learner.last_changed_pairs:
+                history = self.relation_learner._dyad_histories.get(pair_key)
+                latest_dyad = history.latest() if history is not None else None
+                if latest_dyad is None:
+                    continue
+                sub_st = entity_states.get(pair_key[0], {})
+                obj_st = entity_states.get(pair_key[1], {})
+                sub_bb = sub_st.get("bbox")
+                obj_bb = obj_st.get("bbox")
+                sub_ext = (
+                    math.hypot(float(sub_bb[2]), float(sub_bb[3]))
+                    if sub_bb and len(sub_bb) >= 4
+                    else math.sqrt(max(1.0, float(sub_st.get("size", 1))))
+                )
+                obj_ext = (
+                    math.hypot(float(obj_bb[2]), float(obj_bb[3]))
+                    if obj_bb and len(obj_bb) >= 4
+                    else math.sqrt(max(1.0, float(obj_st.get("size", 1))))
+                )
+                f_rels = self.relation_learner.evaluate_fuzzy_relations(
+                    latest_dyad,
+                    history,
+                    subject_extent=sub_ext,
+                    object_extent=obj_ext,
+                    navigable_diameter=nav_diam,
+                    contextual_scope="manipulation",
+                    snapshot_sequence=step,
+                    evidence_refs=(obs_id,),
+                )
+                for fa in f_rels:
+                    fuzzy_rel_summaries.append(
+                        {
+                            "subject": fa.subject_ref,
+                            "target": fa.target_ref,
+                            "semantics": fa.semantics,
+                            "degree": round(float(fa.degree), 4),
+                            "model_id": fa.model_id,
+                            "model_version": fa.model_version,
+                        }
+                    )
+                    f_key = f"{fa.subject_ref}:{fa.semantics}:{fa.target_ref}"
+                    prev_fa = self.state.committed_fuzzy_assertions.get(f_key)
+                    if (fa.degree >= 0.25 or prev_fa is not None) and (
+                        prev_fa is None
+                        or abs(float(fa.degree) - prev_fa[0]) >= 0.10
+                        or fa.model_version != prev_fa[1]
+                    ):
+                        fuzzy_assertions_to_commit.append(fa)
+                        self.state.committed_fuzzy_assertions[f_key] = (
+                            float(fa.degree),
+                            int(fa.model_version),
+                        )
+            self.state.last_fuzzy_relations = fuzzy_rel_summaries
 
         # 4. Epistemic Evaluation & Commit of Accepted Relations (bounded growth check)
         committed_claims: list[str] = []
@@ -442,7 +519,8 @@ class CorticalGroundingBridge:
 
         if to_commit:
             try:
-                self.committer.commit_decisions(to_commit)
+                eff_scope = Scope(tenant_id=self.workspace.tenant_id or "default")
+                self.committer.commit_decisions(to_commit, scope=eff_scope)
             except Exception as exc:
                 logger.debug("Failed to commit batch claims: %s", exc)
 
@@ -486,7 +564,8 @@ class CorticalGroundingBridge:
         feature_concept_ids: dict[int, str] = {}
         role_priors: dict[int, dict[str, float]] = {}
         infer_priors = (
-            self.perception_mode in ("learned", "snn")
+            self.enable_fuzzy_grounding
+            or self.perception_mode in ("learned", "snn")
             or (
                 self.symbolic_theory is not None
                 and self.symbolic_theory.has_prior_context_transition
@@ -511,9 +590,14 @@ class CorticalGroundingBridge:
                     ):
                         priors = self.state.cached_entity_priors[entity_id]
                     else:
-                        priors = self.concept_learner.infer_role_priors(
-                            fv, max_distance=0.35, distance_scale=0.30
-                        )
+                        if self.enable_fuzzy_grounding:
+                            priors = self.concept_learner.infer_role_priors_fuzzy(
+                                fv, graph=self.workspace.graph
+                            )
+                        else:
+                            priors = self.concept_learner.infer_role_priors(
+                                fv, max_distance=0.35, distance_scale=0.30
+                            )
                         if entity_id:
                             self.state.cached_entity_priors[entity_id] = dict(priors)
                     if priors:
@@ -526,7 +610,28 @@ class CorticalGroundingBridge:
                 if is_unmoved_cached and entity_id is not None:
                     assignment = self.state.cached_entity_concepts[entity_id]
                 else:
-                    assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
+                    if self.enable_fuzzy_grounding:
+                        multi = self.concept_learner.learn_fuzzy(
+                            fv, exemplar_entity_id=entity_id, snapshot_sequence=step
+                        )
+                        assignment = multi.primary_assignment
+                        if entity_id:
+                            self.state.cached_entity_multi_concepts[entity_id] = multi.memberships
+                        for fa in multi.assertions:
+                            f_key = f"{fa.subject_ref}:{fa.semantics}:*"
+                            prev_fa = self.state.committed_fuzzy_assertions.get(f_key)
+                            if (fa.degree >= 0.25 or prev_fa is not None) and (
+                                prev_fa is None
+                                or abs(float(fa.degree) - prev_fa[0]) >= 0.10
+                                or fa.model_version != prev_fa[1]
+                            ):
+                                fuzzy_assertions_to_commit.append(fa)
+                                self.state.committed_fuzzy_assertions[f_key] = (
+                                    float(fa.degree),
+                                    int(fa.model_version),
+                                )
+                    else:
+                        assignment = self.concept_learner.learn(fv, exemplar_entity_id=entity_id)
                     if entity_id:
                         self.state.cached_entity_concepts[entity_id] = assignment
 
@@ -537,6 +642,16 @@ class CorticalGroundingBridge:
                     self.state.episode_feature_memory[rc_feat] = fv
             except Exception as exc:
                 logger.debug("ConceptLearner.learn failed for %s: %s", fv.feature_id, exc)
+
+        if fuzzy_assertions_to_commit:
+            try:
+                eff_scope = Scope(tenant_id=self.workspace.tenant_id or "default")
+                self.committer.commit_fuzzy_assertions(
+                    fuzzy_assertions_to_commit,
+                    scope=eff_scope,
+                )
+            except Exception as exc:
+                logger.debug("Failed to commit batched fuzzy assertions: %s", exc)
 
         # Run concept maintenance (split/merge detection) periodically
         split_count = 0
@@ -554,6 +669,7 @@ class CorticalGroundingBridge:
 
         # Promote eligible concepts to authoritative HCIR state (WP3: grounded concept promotion)
         promoted_concepts: list[str] = []
+        eff_scope = Scope(tenant_id=self.workspace.tenant_id or "default")
         for concept in self.concept_store.get_all():
             cid = concept.concept_ref.id
             if cid in self.state.promoted_concept_ids:
@@ -568,9 +684,10 @@ class CorticalGroundingBridge:
                     proposal_id=prop_id,
                 )
                 try:
-                    self.committer.commit_concept_promotion(proposal, concept)
-                    promoted_concepts.append(cid)
-                    self.state.promoted_concept_ids.add(cid)
+                    tx = self.committer.commit_concept_promotion(proposal, concept, scope=eff_scope)
+                    if tx.is_committed:
+                        promoted_concepts.append(cid)
+                        self.state.promoted_concept_ids.add(cid)
                 except Exception as exc:
                     logger.debug("Failed to commit concept promotion for %s: %s", cid, exc)
 
@@ -629,6 +746,7 @@ class CorticalGroundingBridge:
                 }
                 for a in concept_assignments
             ],
+            "sge_fuzzy_relations": list(self.state.last_fuzzy_relations),
             "sge_concept_splits": split_count,
             "sge_concept_merges": merge_count,
             "sge_outcome_verified": outcome_verified,
@@ -705,10 +823,6 @@ class CorticalGroundingBridge:
                 if (feat, r_name) in seen_pairs:
                     continue
                 seen_pairs.add((feat, r_name))
-                existing_c = self.concept_store.get_concept(cid) if cid else None
-                already_had_role = (
-                    existing_c is not None and f"role:{r_name}" in existing_c.affordances
-                )
                 refreshed_fv = fv
                 pair_key = (feat, r_name)
                 if (
@@ -735,6 +849,13 @@ class CorticalGroundingBridge:
                                     timestamp=fv.timestamp,
                                 )
                                 break
+                role_tag = f"role:{r_name}"
+                prior_role_cids = {
+                    c.concept_ref.id
+                    for c in self.concept_store.get_all_concepts()
+                    if role_tag in c.affordances
+                }
+                target_promoted_c = None
                 pure_concept = self.concept_learner.bind_role_pure(
                     cid,
                     refreshed_fv,
@@ -743,21 +864,69 @@ class CorticalGroundingBridge:
                     confidence=1.0,
                 )
                 if pure_concept is not None:
-                    if not already_had_role or pure_concept.concept_ref.id != cid:
+                    if pure_concept.concept_ref.id not in prior_role_cids:
                         newly_bound = True
                     self.state.last_feature_concept_ids[feat] = pure_concept.concept_ref.id
                     cid = pure_concept.concept_ref.id
                     role_to_concept_id[r_name] = cid
                     bound += 1
+                    target_promoted_c = pure_concept
                 elif entity_id:
                     bound_concept = self.concept_learner.bind_role_to_exemplar(
                         str(entity_id), r_name
                     )
                     if bound_concept is not None:
-                        if not already_had_role:
+                        if bound_concept.concept_ref.id not in prior_role_cids:
                             newly_bound = True
                         role_to_concept_id[r_name] = bound_concept.concept_ref.id
                         bound += 1
+                        target_promoted_c = bound_concept
+
+                if (
+                    self.enable_fuzzy_grounding
+                    and target_promoted_c is not None
+                    and target_promoted_c.feature_distributions
+                ):
+                    tcid = target_promoted_c.concept_ref.id
+                    promo_key = f"{tcid}:{role_tag}"
+                    if (
+                        promo_key not in self.state.promoted_concept_ids
+                        or not self.workspace.graph.has_node(tcid)
+                    ):
+                        q = target_promoted_c.grounding_quality
+                        if q.predictive_utility < 0.85 or q.interaction_support < 0.85:
+                            target_promoted_c.update_grounding_quality(
+                                GroundingQuality(
+                                    perceptual_stability=q.perceptual_stability,
+                                    temporal_persistence=q.temporal_persistence,
+                                    relational_consistency=q.relational_consistency,
+                                    cross_modal_support=q.cross_modal_support,
+                                    predictive_utility=max(q.predictive_utility, 0.85),
+                                    interaction_support=max(q.interaction_support, 0.85),
+                                    boundary_stability=q.boundary_stability,
+                                    measurements=dict(q.measurements),
+                                )
+                            )
+                        prop = self.concept_store.lifecycle_manager.create_promotion_proposal(
+                            concept=target_promoted_c,
+                            proposal_id=f"prop_{tcid}_{uuid.uuid4().hex[:6]}",
+                            rationale=f"Empirical causal role:{r_name} grounded",
+                        )
+                        try:
+                            eff_scope = Scope(tenant_id=self.workspace.tenant_id or "default")
+                            tx = self.committer.commit_concept_promotion(
+                                prop, target_promoted_c, scope=eff_scope
+                            )
+                            if tx.is_committed:
+                                self.state.promoted_concept_ids.add(tcid)
+                                self.state.promoted_concept_ids.add(promo_key)
+                        except Exception as exc:
+                            logger.debug(
+                                "Failed to promote causal role concept %s (%s): %s",
+                                tcid,
+                                r_name,
+                                exc,
+                            )
         if "cargo" in role_to_concept_id and "receptacle" in role_to_concept_id:
             self.concept_learner.induce_composite_concept(
                 parts={

@@ -39,6 +39,7 @@ When `KernelServices.create_default()` boots, it registers capabilities across s
 | `planning_capabilities.py` | `PlanningCapabilityExecutor` | `planning.generate_candidates`, `planning.validate`, `planning.expand` | Least-privilege in-memory (`IN_PROCESS`) |
 | `routing_capabilities.py` | `RoutingCapabilityExecutor` | `routing.resolve_route`, `execution.sandbox_run` | `execution.sandbox_run` enforces `IsolationMode.SUBPROCESS` |
 | `world_capabilities.py` | `WorldKernelCapabilityExecutor` | World state inspection, prediction (`world_prediction`), & simulation capabilities | Least-privilege in-memory (`IN_PROCESS`) |
+| `math_capabilities.py` | `MathCapabilityExecutor` | Connected components, topology cuts, symmetry, geodesic/Bellman/Bayesian ALUs, and `math.fuzzy.{membership,eval,compose,hedge,bipolar}` | Stateless Layer-0 ALU (`IN_PROCESS`) |
 
 ---
 
@@ -60,7 +61,7 @@ Activated when `enable_autonomous_curiosity=True` in `CognitiveSystemConfig` and
 
 ### `BeliefConflictResolver` (`hbllm.hcir.capabilities.belief_revision`)
 
-Evaluates newly proposed `BeliefNode`s against existing graph beliefs (`evaluate_belief()`), detecting contradictions, scoring `conflict_confidence`, and proposing confidence-weighted `TransactionOperation` updates (`BeliefRevisionReport`).
+Evaluates newly proposed `BeliefNode`s against existing graph beliefs (`evaluate_belief()`), clustering observations by `(dependency_group, source_channel_id, tracklet_epoch)` into correlation-normalized `BipolarEvidenceState` (`support_share`, `refutation_share`, ignorance $\iota$, conflict $\chi$) so repeated correlated reports cannot flood independent refutations, and proposing calibrated `TransactionOperation` updates (`BeliefRevisionReport`).
 
 ---
 

@@ -88,7 +88,7 @@ response = await ril.request("tool.search", message, timeout=10.0)
 
 ### Capability-Aware Routing
 
-When a message payload contains `_target_capability`, the RIL queries the CapabilityRegistry to find the best transport:
+When a message payload contains `_target_capability`, the RIL queries the `NetworkCapabilityRegistry` to find the best transport:
 
 ```python
 msg = Message(
@@ -155,14 +155,14 @@ snapshot = engine.snapshot()
 
 ## Discovery Layer
 
-### CapabilityRegistry
+### NetworkCapabilityRegistry
 
 A read-optimized truth store answering "who can do X, and how do I reach them?":
 
 ```python
-from hbllm.network.discovery import CapabilityRegistry
+from hbllm.network.discovery import NetworkCapabilityRegistry
 
-registry = CapabilityRegistry(default_ttl=120.0)
+registry = NetworkCapabilityRegistry(default_ttl=120.0)
 registry.register("homeserver", ["llm_inference", "search"], is_local=True)
 registry.register("mobile", ["gps", "camera"], latency_ms=45.0)
 

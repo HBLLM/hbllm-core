@@ -1,8 +1,7 @@
-"""Unit tests for action modules — logic_node, fuzzy_node, mcp_client_node."""
+"""Unit tests for action modules — logic_node, mcp_client_node."""
 
 import pytest
 
-from hbllm.actions.fuzzy_node import FuzzyNode
 from hbllm.actions.logic_node import LogicNode
 from hbllm.actions.mcp_client_node import McpClientNode, McpTool
 
@@ -45,15 +44,4 @@ class TestLogicNode:
     @pytest.mark.asyncio
     async def test_on_stop(self):
         node = LogicNode(node_id="logic-test")
-        await node.on_stop()
-
-
-class TestFuzzyNode:
-    def test_init(self):
-        node = FuzzyNode(node_id="fuzzy-test")
-        assert node.node_id == "fuzzy-test"
-
-    @pytest.mark.asyncio
-    async def test_on_stop(self):
-        node = FuzzyNode(node_id="fuzzy-test")
         await node.on_stop()

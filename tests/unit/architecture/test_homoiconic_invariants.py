@@ -458,3 +458,14 @@ def test_node_budget_consolidation_preserves_system_priors_and_tenant_scope(tmp_
     summary_node = ws.graph.get_node(f"consolidated_summary_{ws.tier.value}")
     assert summary_node is not None
     assert summary_node.scope.tenant_id == tenant
+
+
+def test_legacy_fuzzy_node_and_skfuzzy_retired() -> None:
+    """Enforce ADR 006 Phase F3 retirement of legacy FuzzyNode and scikit-fuzzy."""
+    assert not (ROOT_DIR / "hbllm" / "actions" / "fuzzy_node.py").exists()
+    violations: list[str] = []
+    for path in _iter_py(ROOT_DIR / "hbllm"):
+        src = path.read_text(encoding="utf-8", errors="ignore")
+        if "fuzzy_node" in src or "FuzzyNode" in src or "skfuzzy" in src:
+            violations.append(str(path.relative_to(ROOT_DIR)))
+    assert not violations, f"Legacy FuzzyNode / skfuzzy references remain: {violations}"

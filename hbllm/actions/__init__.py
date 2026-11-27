@@ -15,7 +15,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     ),
     "ComplexityDetector": ("hbllm.actions.complexity", "ComplexityDetector"),
     "ExecutionNode": ("hbllm.actions.execution_node", "ExecutionNode"),
-    "FuzzyNode": ("hbllm.actions.fuzzy_node", "FuzzyNode"),
     "LogicNode": ("hbllm.actions.logic_node", "LogicNode"),
     "CancelTaskTool": ("hbllm.actions.scheduler_tools", "CancelTaskTool"),
     "ScheduleEventTool": ("hbllm.actions.scheduler_tools", "ScheduleEventTool"),

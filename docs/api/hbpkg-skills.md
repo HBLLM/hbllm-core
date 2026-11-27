@@ -7,7 +7,7 @@ description: "API reference for PackageBuilder, PackageManifest, SkillInstaller,
 
 The **Packages and Skills Subsystem** defines APIs for declarative neuro-symbolic skills (`hbllm.hcir.skills`) alongside `.hbpkg` package compilation, signing, and installation (`hbllm.hbpkg`, `hbllm.skills`).
 
-**Packages:** `hbllm.hcir.skills`, `hbllm.hbpkg`, `hbllm.skills`, `hbllm.brain.skills`
+**Packages:** `hbllm.hcir.skills`, `hbllm.hbpkg`, `hbllm.skills`
 
 ---
 
@@ -15,13 +15,14 @@ The **Packages and Skills Subsystem** defines APIs for declarative neuro-symboli
 
 | Class | Module | Purpose |
 |---|---|---|
-| `DeclarativeNeuroSymbolicSkill` | `hbllm.hcir.skills.declarative` | Composable `SymbolicPredicate` + `SubgoalSequence` skill DSL |
+| `DeclarativeNeuroSymbolicSkill` | `hbllm.hcir.skills.declarative` | Composable `SymbolicPredicate` + `SubgoalSequence` skill DSL (`evaluate_degree()`) |
 | `SkillInductionEngine` | `hbllm.hcir.skills.induction` | Autonomous skill synthesis from recurring trajectories |
+| `LibraryLearner` | `hbllm.hcir.skills.library_learner` | Wake–Sleep MDL anti-unification into parameterized `SkillNode` programs |
+| `HCIRSkillStore` | `hbllm.hcir.skills.skill_store` | Persistent lookup and invocation index for HCIR skill bytecode streams |
 | `HBPkgManifest` | `hbllm.hbpkg.manifest` | Dataclass representing `manifest.json` metadata, permissions & lifecycle hooks |
 | `Packager` | `hbllm.hbpkg.packager` | Compiles, verifies, and installs `.hbpkg` archives |
 | `SkillParser` | `hbllm.skills.parser` | Parses YAML frontmatter and markdown instructions from `SKILL.md` |
 | `SkillInstaller` | `hbllm.skills.installer` | Manages local package installation and version upgrades |
-| `SkillRegistry` | `hbllm.brain.skills.skill_registry` | Runtime procedural skill lookup and invocation index |
 
 ---
 
@@ -87,18 +88,13 @@ await installer.install_package("./dist/system-auditor.hbpkg")
 
 ---
 
-## `SkillRegistry`
+## `HCIRSkillStore`
 
 ```python
-from hbllm.brain.skills.skill_registry import SkillRegistry
+from hbllm.hcir.skills.skill_store import HCIRSkillStore
+from hbllm.hcir.workspace_tiers import TieredWorkspace
 
-registry = SkillRegistry()
-
-# Register a skill
-registry.register_skill(skill)
-
-# Find skill by prompt similarity
-matched_skill = registry.find_skill("Diagnose slow network latency")
-if matched_skill:
-    print(f"Found matching skill: {matched_skill.name}")
+tiers = TieredWorkspace()
+store = HCIRSkillStore(workspace=tiers.working_state, tiered_workspace=tiers)
+records = store.list_skills()
 ```

@@ -32,11 +32,13 @@ Independence Level: L1 (no LLM execution)
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from hbllm.hcir.fuzzy import RelationCompositionPolicy
 from hbllm.hcir.graph import (
     HCIREdge,
     HCIREdgeType,
@@ -51,6 +53,7 @@ from hbllm.hcir.reasoning.operators.base import (
     ResourceCost,
     ResultStatus,
 )
+from hbllm.hcir.seed.loader import load_seeded_composition_policy
 from hbllm.hcir.transactions import TransactionOp, TransactionOperation
 from hbllm.hcir.types import Provenance
 
@@ -117,11 +120,23 @@ class SpatialFact:
     entity_b: str
     relation: SpatialRelation
     confidence: float = 1.0
+    semantic_degree: float = 1.0
     source_id: str = ""
 
 
 class SpatialOperator:
     """Qualitative spatial reasoning over HCIR physical entities."""
+
+    def __init__(
+        self,
+        composition_policy: RelationCompositionPolicy | None = None,
+        *,
+        enable_fuzzy: bool = False,
+        contextual_scope: str = "default",
+    ) -> None:
+        self._composition_policy = composition_policy
+        self._enable_fuzzy = bool(enable_fuzzy)
+        self._contextual_scope = contextual_scope
 
     @property
     def operator_id(self) -> str:
@@ -190,8 +205,15 @@ class SpatialOperator:
                 ),
             )
 
-        # ── Infer new relations ──────────────────────────────────────
-        inferred = self._infer_relations(known_facts)
+        # ── Infer new relations via declarative RelationCompositionPolicy ──
+        policy = self._resolve_policy(view, self._composition_policy)
+        entity_scales = self._extract_entity_scales(view)
+        inferred = self._infer_relations(
+            known_facts,
+            policy=policy,
+            entity_scales=entity_scales,
+            contextual_scope=self._contextual_scope,
+        )
 
         all_facts = known_facts + inferred
 
@@ -228,8 +250,12 @@ class SpatialOperator:
                 edge_type=edge_type,
                 sources=[src],
                 targets=[tgt],
-                weight=fact.confidence,
-                properties={"spatial_relation": fact.relation},
+                weight=fact.semantic_degree if self._enable_fuzzy else fact.confidence,
+                properties={
+                    "spatial_relation": fact.relation.value,
+                    "semantic_degree": round(float(fact.semantic_degree), 4),
+                    "posterior_belief": round(float(fact.confidence), 4),
+                },
                 provenance=Provenance(
                     created_by=self.operator_id,
                     source_type="inferred",
@@ -251,7 +277,7 @@ class SpatialOperator:
             operator_id=self.operator_id,
             reasoning_steps=[
                 f"Extracted {len(known_facts)} known spatial facts",
-                f"Inferred {len(inferred)} new relations via transitivity/symmetry",
+                f"Inferred {len(inferred)} new relations via {policy.policy_id}",
             ],
             confidence=0.85,
         )
@@ -270,6 +296,7 @@ class SpatialOperator:
                         "relation": f.relation,
                         "b": f.entity_b,
                         "confidence": round(f.confidence, 3),
+                        "semantic_degree": round(f.semantic_degree, 3),
                     }
                     for f in all_facts[:30]
                 ],
@@ -289,6 +316,38 @@ class SpatialOperator:
     # ── Internal ─────────────────────────────────────────────────────
 
     @staticmethod
+    def _resolve_policy(
+        view: Any, fallback: RelationCompositionPolicy | None
+    ) -> RelationCompositionPolicy:
+        if fallback is not None:
+            return fallback
+        policy_node = view.get_node("prior_policy_relation_composition")
+        if policy_node is not None:
+            props = getattr(policy_node, "properties", None)
+            if isinstance(props, dict) and isinstance(props.get("policy"), dict):
+                return RelationCompositionPolicy.model_validate(props["policy"])
+        return load_seeded_composition_policy()
+
+    @staticmethod
+    def _extract_entity_scales(view: Any) -> dict[str, float]:
+        scales: dict[str, float] = {}
+        for node in view.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY):
+            props = getattr(node, "properties", None)
+            if not isinstance(props, dict):
+                continue
+            if isinstance(props.get("diameter"), (int, float)):
+                scales[node.id] = max(1e-6, float(props["diameter"]))
+            elif isinstance(props.get("extent"), (int, float)):
+                scales[node.id] = max(1e-6, float(props["extent"]))
+            elif isinstance(props.get("bbox"), (list, tuple)) and len(props["bbox"]) >= 4:
+                scales[node.id] = max(
+                    1e-6, math.hypot(float(props["bbox"][2]), float(props["bbox"][3]))
+                )
+            elif isinstance(props.get("size"), (int, float)):
+                scales[node.id] = max(1e-6, math.sqrt(max(1.0, float(props["size"]))))
+        return scales
+
+    @staticmethod
     def _extract_spatial_facts(view: Any) -> list[SpatialFact]:
         """Extract spatial relationships from HCIR edges and entity properties."""
         facts: list[SpatialFact] = []
@@ -296,28 +355,31 @@ class SpatialOperator:
         # From edges with spatial semantics
         spatial_edge_map: dict[HCIREdgeType, SpatialRelation] = {
             HCIREdgeType.PART_OF: SpatialRelation.INSIDE,
+            HCIREdgeType.LOCATED_IN: SpatialRelation.INSIDE,
+            HCIREdgeType.CONTAINS: SpatialRelation.CONTAINS,
             HCIREdgeType.SUPPORTS: SpatialRelation.SUPPORTS,
+            HCIREdgeType.ABOVE: SpatialRelation.ABOVE,
+            HCIREdgeType.BELOW: SpatialRelation.BELOW,
+            HCIREdgeType.LEFT_OF: SpatialRelation.LEFT_OF,
+            HCIREdgeType.RIGHT_OF: SpatialRelation.RIGHT_OF,
+            HCIREdgeType.NEAR: SpatialRelation.NEAR,
+            HCIREdgeType.TOUCHING: SpatialRelation.ADJACENT_TO,
         }
 
         entity_ids = {n.id for n in view.nodes_by_type(HCIRNodeType.PHYSICAL_ENTITY)}
 
         for nid in entity_ids:
             for edge in view.edges_from(nid):
-                if edge.edge_type in spatial_edge_map:
-                    for target in edge.targets:
-                        if target in entity_ids:
-                            facts.append(
-                                SpatialFact(
-                                    entity_a=nid,
-                                    entity_b=target,
-                                    relation=spatial_edge_map[edge.edge_type],
-                                    source_id=edge.id,
-                                )
-                            )
+                props = edge.properties if isinstance(edge.properties, dict) else {}
+                sem_deg = float(props.get("semantic_degree", edge.weight))
+                post_conf = float(
+                    props.get("posterior_belief", props.get("confidence", edge.weight))
+                )
+                sem_deg = max(0.0, min(1.0, sem_deg))
+                post_conf = max(0.0, min(1.0, post_conf))
 
-                # Check edge properties for spatial relations
-                if "spatial_relation" in edge.properties:
-                    rel_str = edge.properties["spatial_relation"]
+                if "spatial_relation" in props:
+                    rel_str = str(props["spatial_relation"]).lower()
                     try:
                         rel = SpatialRelation(rel_str)
                         for target in edge.targets:
@@ -327,39 +389,64 @@ class SpatialOperator:
                                         entity_a=nid,
                                         entity_b=target,
                                         relation=rel,
+                                        confidence=post_conf,
+                                        semantic_degree=sem_deg,
                                         source_id=edge.id,
                                     )
                                 )
+                        continue
                     except ValueError:
                         pass
+
+                if edge.edge_type in spatial_edge_map:
+                    for target in edge.targets:
+                        if target in entity_ids:
+                            facts.append(
+                                SpatialFact(
+                                    entity_a=nid,
+                                    entity_b=target,
+                                    relation=spatial_edge_map[edge.edge_type],
+                                    confidence=post_conf,
+                                    semantic_degree=sem_deg,
+                                    source_id=edge.id,
+                                )
+                            )
 
         return facts
 
     @staticmethod
-    def _infer_relations(known: list[SpatialFact]) -> list[SpatialFact]:
-        """Infer new relations via transitivity, symmetry, and inverses."""
-        # Build relation index: (entity_a, entity_b) → relation
-        rel_map: dict[tuple[str, str], SpatialRelation] = {}
+    def _infer_relations(
+        known: list[SpatialFact],
+        *,
+        policy: RelationCompositionPolicy | None = None,
+        entity_scales: dict[str, float] | None = None,
+        contextual_scope: str = "default",
+    ) -> list[SpatialFact]:
+        """Infer new relations via symmetry, inverses, and declarative `RelationCompositionPolicy`."""
+        eff_policy = policy or load_seeded_composition_policy()
+        scales = entity_scales or {}
+
+        rel_map: dict[tuple[str, str], SpatialFact] = {}
         for fact in known:
-            rel_map[(fact.entity_a, fact.entity_b)] = fact.relation
+            rel_map[(fact.entity_a, fact.entity_b)] = fact
 
         inferred: list[SpatialFact] = []
-        entities = list({f.entity_a for f in known} | {f.entity_b for f in known})
+        entities = sorted({f.entity_a for f in known} | {f.entity_b for f in known})
 
         # Symmetry: if R(A,B) and R is symmetric, then R(B,A)
         for fact in known:
             if fact.relation in _SYMMETRIC_RELATIONS:
                 pair = (fact.entity_b, fact.entity_a)
                 if pair not in rel_map:
-                    inferred.append(
-                        SpatialFact(
-                            entity_a=fact.entity_b,
-                            entity_b=fact.entity_a,
-                            relation=fact.relation,
-                            confidence=fact.confidence,
-                        )
+                    sym = SpatialFact(
+                        entity_a=fact.entity_b,
+                        entity_b=fact.entity_a,
+                        relation=fact.relation,
+                        confidence=fact.confidence,
+                        semantic_degree=fact.semantic_degree,
                     )
-                    rel_map[pair] = fact.relation
+                    inferred.append(sym)
+                    rel_map[pair] = sym
 
         # Inverses: if R(A,B) then R_inv(B,A)
         for fact in known:
@@ -367,17 +454,17 @@ class SpatialOperator:
                 inv = _INVERSES[fact.relation]
                 pair = (fact.entity_b, fact.entity_a)
                 if pair not in rel_map:
-                    inferred.append(
-                        SpatialFact(
-                            entity_a=fact.entity_b,
-                            entity_b=fact.entity_a,
-                            relation=inv,
-                            confidence=fact.confidence * 0.95,
-                        )
+                    inv_fact = SpatialFact(
+                        entity_a=fact.entity_b,
+                        entity_b=fact.entity_a,
+                        relation=inv,
+                        confidence=fact.confidence * 0.95,
+                        semantic_degree=fact.semantic_degree,
                     )
-                    rel_map[pair] = inv
+                    inferred.append(inv_fact)
+                    rel_map[pair] = inv_fact
 
-        # Transitivity: if R(A,B) and R(B,C) and R is transitive, then R(A,C)
+        # Policy-guided composition: R1(A, B) o R2(B, C) -> R3(A, C)
         changed = True
         max_iters = 10
         iteration = 0
@@ -388,43 +475,55 @@ class SpatialOperator:
                 for b in entities:
                     if a == b:
                         continue
-                    ab = rel_map.get((a, b))
-                    if ab is None or ab not in _TRANSITIVE_RELATIONS:
+                    fact_ab = rel_map.get((a, b))
+                    if fact_ab is None:
                         continue
                     for c in entities:
                         if c in (a, b):
                             continue
-                        bc = rel_map.get((b, c))
-                        if bc != ab:
+                        fact_bc = rel_map.get((b, c))
+                        if fact_bc is None:
                             continue
                         pair_ac = (a, c)
-                        if pair_ac not in rel_map:
-                            inferred.append(
-                                SpatialFact(
-                                    entity_a=a,
-                                    entity_b=c,
-                                    relation=ab,
-                                    confidence=0.8,
-                                )
-                            )
-                            rel_map[pair_ac] = ab
-                            changed = True
+                        if pair_ac in rel_map:
+                            continue
+                        diam_b = scales.get(b, 1.0)
+                        diam_c = scales.get(c, 1.0)
+                        comp = eff_policy.compose(
+                            fact_ab.relation.value,
+                            fact_bc.relation.value,
+                            fact_ab.semantic_degree,
+                            fact_bc.semantic_degree,
+                            contextual_scope=contextual_scope,
+                            geometry_context={
+                                "intermediate_diameter": diam_b,
+                                "target_diameter": diam_c,
+                                "reference_scale": diam_c,
+                                "same_axis_aligned": True,
+                            },
+                        )
+                        if not comp.allowed or not comp.composed_relation or comp.degree <= 0.0:
+                            continue
+                        try:
+                            composed_rel = SpatialRelation(comp.composed_relation.lower())
+                        except ValueError:
+                            continue
+                        derived = SpatialFact(
+                            entity_a=a,
+                            entity_b=c,
+                            relation=composed_rel,
+                            confidence=round(min(fact_ab.confidence, fact_bc.confidence) * 0.90, 4),
+                            semantic_degree=round(float(comp.degree), 4),
+                        )
+                        inferred.append(derived)
+                        rel_map[pair_ac] = derived
+                        changed = True
 
         return inferred
 
     @staticmethod
     def _fact_to_edge_spec(fact: SpatialFact) -> tuple[str, HCIREdgeType, str] | None:
-        """Map a spatial fact to canonical (source_id, edge_type, target_id).
-
-        Preserves asymmetric edge directionality in HCIR:
-          - A INSIDE B        => source=A, edge=PART_OF, target=B       [A is part of B]
-          - A CONTAINS B      => source=B, edge=PART_OF, target=A       [B is part of A]
-          - A SUPPORTS B      => source=A, edge=SUPPORTS, target=B      [A supports B]
-          - A SUPPORTED_BY B  => source=B, edge=SUPPORTS, target=A      [B supports A]
-          - A ON_TOP_OF B     => source=B, edge=SUPPORTS, target=A      [B supports A]
-          - A ADJACENT_TO B   => source=A, edge=CORRELATES_WITH, target=B [symmetric]
-          - A NEAR B          => source=A, edge=CORRELATES_WITH, target=B [symmetric]
-        """
+        """Map a spatial fact to canonical (source_id, edge_type, target_id)."""
         if fact.relation == SpatialRelation.INSIDE:
             return (fact.entity_a, HCIREdgeType.PART_OF, fact.entity_b)
         elif fact.relation == SpatialRelation.CONTAINS:
@@ -433,6 +532,14 @@ class SpatialOperator:
             return (fact.entity_a, HCIREdgeType.SUPPORTS, fact.entity_b)
         elif fact.relation in (SpatialRelation.SUPPORTED_BY, SpatialRelation.ON_TOP_OF):
             return (fact.entity_b, HCIREdgeType.SUPPORTS, fact.entity_a)
+        elif fact.relation == SpatialRelation.ABOVE:
+            return (fact.entity_a, HCIREdgeType.ABOVE, fact.entity_b)
+        elif fact.relation == SpatialRelation.BELOW:
+            return (fact.entity_a, HCIREdgeType.BELOW, fact.entity_b)
+        elif fact.relation == SpatialRelation.LEFT_OF:
+            return (fact.entity_a, HCIREdgeType.LEFT_OF, fact.entity_b)
+        elif fact.relation == SpatialRelation.RIGHT_OF:
+            return (fact.entity_a, HCIREdgeType.RIGHT_OF, fact.entity_b)
         elif fact.relation in (SpatialRelation.ADJACENT_TO, SpatialRelation.NEAR):
             return (fact.entity_a, HCIREdgeType.CORRELATES_WITH, fact.entity_b)
         return None

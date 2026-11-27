@@ -8,7 +8,7 @@
 
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![Rust](https://img.shields.io/badge/Rust-13%20Crates-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-623%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-420%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
   [![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-94.2%25%20Zero--Shot%20(0%20LLM%20Tokens)-cyan.svg)](#verified-benchmarks)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
@@ -18,7 +18,7 @@
 > [!NOTE]
 > **Quick Links:**
 > - 📐 **[Architecture Overview](docs/architecture/overview.md)** — Pure-HCIR Cognitive OS, 9 invariants, Homoiconic Symbolic VM (ISA v2, 12 opcodes), and single composition root (`build_cognitive_system`)
-> - 🧠 **[ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) & [ADR 006](docs/adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md)** — Implemented Phase 3 Homoiconic VM (`M0`–`M6`) and Phase 4 Fuzzy Symbolic Cognition (`F0`–`F3` target)
+> - 🧠 **[ADR 005](docs/adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) & [ADR 006](docs/adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md)** — Implemented Phase 3 Homoiconic VM (`M0`–`M6`) and Phase 4 Fuzzy Symbolic Cognition (`F0`–`F3`, `2×2` ablation verified)
 > - 🌍 **[Cortical World Model](docs/architecture/cortical-world-model.md)** — 5-stage `CorticalPipeline`, 17 world subpackages, Dirichlet/Beta posteriors (`TransitionKnowledgeBase`), and stateless Layer-0 ALUs
 > - 🗣️ **[Language & Reading](docs/architecture/language-and-reading.md)** — 100% LLM-free multilingual parser/realizer (`en`, `si`, `ta`), `ConstructionNode` grammar, 4-step unknown-instruction resolution, and Track T4 reading
 > - 🛡️ **[Security & Sandboxing](docs/security.md)** — `ConstitutionalVerifier`, two-tier capability/process sandboxing (`run_sandboxed_command`), JWT auth, and multi-tenant isolation
@@ -66,13 +66,13 @@ Instead of relying on an autoregressive transformer as the primary brain, **HBLL
 
 | Subsystem | Role | Package | Docs |
 |---|---|---|---|
-| **HCIR Cognitive OS Kernel** | 12-opcode ISA v2 VM (`$r0..$r7`, `CallStack`, `SyscallAllowlist(strict=True)`), `TieredWorkspace`, `TransactionManager`, `ConstitutionalVerifier`, `ExecutiveRuntime` | `hbllm.hcir` / `hbllm.hcir.kernel` | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
+| **HCIR Cognitive OS Kernel** | 12-opcode ISA v2 VM (`$r0..$r7`, `CallStack`, `SyscallAllowlist(strict=True)`), graded `UNIFY` / `ALPHA_CUT` `BRANCH`, `TieredWorkspace`, `TransactionManager`, `ConstitutionalVerifier`, `ExecutiveRuntime` | `hbllm.hcir` / `hbllm.hcir.kernel` | [HCIR Kernel OS](docs/architecture/hcir-kernel-os.md) |
 | **Cortical World Model** | 5-stage active inference (`Perception → Assimilation → Simulation → Deliberation → Motor`), `TransitionKnowledgeBase` | `hbllm.hcir.world` | [Cortical World Model](docs/architecture/cortical-world-model.md) |
-| **Symbol Grounding Engine** | Perceptual feature extraction (`handcrafted`, `snn`, `learned`), bipartite tracking, concept induction | `hbllm.hcir.grounding` | [Grounding](docs/architecture/grounding.md) |
-| **Language & Reading** | Non-LLM multilingual runtime (`en`, `si`, `ta`), `ConstructionNode` embodied construction grammar, 4-step unknown-instruction resolution, `HCIRGateway`, `ReadingCurriculumIngestor` | `hbllm.hcir.language` | [Language & Reading](docs/architecture/language-and-reading.md) |
-| **Composable Reasoning** | 14 immutable-snapshot operators (`Deduction`, `Abduction`, `Causal`, `Spatial`, `Analogy`, `EmbodiedCausal`, …) | `hbllm.hcir.reasoning` | [Execution Runtime](docs/architecture/cognitive-execution-runtime.md) |
+| **Symbol Grounding Engine** | Perceptual feature extraction (`handcrafted`, `snn`, `learned`), multi-prototype `ConceptLearner` (`mahalanobis_rbf`), scale-normalized `RelationLearner`, dual-channel `HCIRCommitter` | `hbllm.hcir.grounding` | [Grounding](docs/architecture/grounding.md) |
+| **Language & Reading** | Non-LLM multilingual runtime (`en`, `si`, `ta`), `ConstructionNode` grammar + gradable hedges/referent ranking, 2D epistemic verbalization, Track T4 `ReadingCurriculumIngestor` | `hbllm.hcir.language` | [Language & Reading](docs/architecture/language-and-reading.md) |
+| **Composable Reasoning** | 14 immutable-snapshot operators (`Deduction`, `Abduction`, `Causal`, `Spatial` + declarative `RelationCompositionPolicy`, `Analogy`, …) | `hbllm.hcir.reasoning` | [Execution Runtime](docs/architecture/cognitive-execution-runtime.md) |
 | **Neuromorphic SNN** | LIF neurons, STDP, STP, WTA, cortical oscillations, `NeuromodulationEngine`, SNN perception | `hbllm.hcir.snn` | [SNN Engine](docs/architecture/snn-cognitive-engine.md) |
-| **Capabilities & Curiosity** | `CommandDispatcher`, `ConceptExplainer`, `EpistemicCuriosityController`, `BeliefConflictResolver`, stateless `math.*` ALUs, sandboxed tools | `hbllm.hcir.capabilities` | [Capabilities](docs/architecture/capabilities-and-curiosity.md) |
+| **Capabilities & Curiosity** | `CommandDispatcher`, `ConceptExplainer`, `EpistemicCuriosityController`, bipolar `BeliefConflictResolver`, stateless `math.*` / `math.fuzzy.*` ALUs, sandboxed tools | `hbllm.hcir.capabilities` | [Capabilities](docs/architecture/capabilities-and-curiosity.md) |
 | **Homoiconic Skills & Seed** | Parameterized `SkillNode` (`bytecode_stream`), serializable `SymbolicExpr` ASTs, Wake–Sleep anti-unification (`LibraryLearner`), innate `.hcir` seed (`hbllm.hcir.seed`) | `hbllm.hcir.skills` | [World Model API](docs/api/world-model.md) |
 | **Security & Serving** | FastAPI REST + MCP server, per-tenant `CognitiveSystemRegistry` Pure-HCIR routing, `CognitiveBlackbox` driver, fail-closed `JWTAuthMiddleware`, two-tier subprocess sandboxing (`run_sandboxed_command`) | `hbllm.serving` / `hbllm.drivers` / `hbllm.security` | [Security](docs/security.md) |
 | **Native Rust Substrate** | 13 Rust crates (`hbllm_hcir_graph`, `hbllm_simulation_engine`, `hbllm_structure_matcher`, `hbllm_compute`, …) | `rust/` / `hbllm.native` | [Rust Kernels](docs/api/rust-kernels.md) |
@@ -97,6 +97,17 @@ Executed under the anti-tamper `eval-*` git tag gate on `benchmarks/suites/heldo
 - `continuous`: **95.0%** zero-shot (`100.0%` cross-seed transfer)
 - `stochastic_dynamic`: **95.0%** zero-shot (`89.47%` cross-seed transfer)
 - `partial_observability`: **80.0%** zero-shot (`52.63%` cross-seed transfer)
+
+### ADR 006 Fuzzy Symbolic Cognition — 2×2 Ablation (`2026-11-26`)
+
+Measured across crisp baseline **A**, fuzzy grounding **B** (`α = 0.65`), fuzzy reasoning **C**, and full **D** ([2×2 Ablation Report](reports/ablation/2026-11-26_adr006_fuzzy_2x2_ablation.md), **0 LLM tokens**):
+
+| Config | `dev` ZS (`n=20`) | `dev` CS (`n=16`) | `16×16 → 32×32` Shift (`n=20`) | Soft Unify & Compose (`n=20`) | `32×32` CPU p50 / p95 |
+|---|---|---|---|---|---|
+| **A (Crisp / Crisp)** | `0.9500` | `1.0000` | `0/20` | `0/20` | `24.73 / 34.36 ms` |
+| **B (Fuzzy / Crisp)** | `0.9500` | `1.0000` | **`20/20`** | `0/20` | `30.78 / 41.92 ms` |
+| **C (Crisp / Fuzzy)** | `0.9500` | `1.0000` | `0/20` | **`20/20`** | `25.55 / 32.53 ms` |
+| **D (Fuzzy / Fuzzy)** | `0.9500` | `1.0000` | **`20/20`** | **`20/20`** | `30.01 / 43.72 ms` |
 
 > For native simulator benchmarks (`crafter`, `minigrid`, `gym_sokoban`, `overcooked_ai_py`, `minihack`, `ai2thor`, `safety_gymnasium`, `alfworld`, `arc_agi`), see **[Benchmarks & Profiling](docs/api/benchmarks.md)**.
 
@@ -169,12 +180,12 @@ hbllm plugin list                   # List installed plugins in plugins/
 
 | Metric | Value |
 |---|---|
-| Core source modules (`hbllm/`) | **1,062** Python files (`0` `__path__.append` shims) |
-| HCIR Cognitive OS (`hbllm/hcir/`) | **422** Python files across **11** subpackages (`hbllm.hcir.seed` included) |
+| Core source modules (`hbllm/`) | **788** Python files (`0` `__path__.append` shims, legacy `hbllm/brain` retired) |
+| HCIR Cognitive OS (`hbllm/hcir/`) | **424** Python files across **12** subpackages (`hbllm.hcir.seed` & `hbllm.hcir.fuzzy` included) |
 | Cortical World Model (`hbllm/hcir/world/`) | **148** Python files across **17** domain subpackages |
 | Reasoning operators (`hbllm/hcir/reasoning/`) | **14** default composable operators (`0` LLM dependencies) |
 | Workspace tiers | **4** (`Working`, `Brain`, `Persistent`, `Meta`) |
-| Test suites | **623** core test files (`tests/`) + **70** plugin test files (`plugins/`) |
+| Test suites | **420** core test files (`tests/`) + **70** plugin test files (`plugins/`) |
 | Rust crates (`rust/`) | **13** PyO3 native acceleration crates |
 
 ---

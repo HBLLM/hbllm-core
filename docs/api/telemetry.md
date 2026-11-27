@@ -1,83 +1,81 @@
 ---
 title: "API Reference — Observability & Telemetry"
-description: "API reference for TimelineRecorder, ReplayDebugger, TraceCollector, and Prometheus observability middleware."
+description: "API reference for CognitiveTimeline, DecisionReplayEngine, ReplayDebugger, TracingMiddleware, and OpenTelemetry tracing helpers."
 ---
 
 # Observability & Telemetry API
 
 The **Observability Subsystem** provides microsecond latency tracking, causal event replay, distributed tracing, and Prometheus metrics export.
 
-**Packages:** `hbllm.telemetry`, `hbllm.observability`
+**Packages:** `hbllm.telemetry`, `hbllm.observability`, `hbllm.hcir.replay_debugger`
 
 ---
 
 ## Subsystem Index
 
-| Class | Module | Role |
+| Class / Function | Module | Role |
 |---|---|---|
-| `TimelineRecorder` | `hbllm.telemetry.timeline` | Ring buffer recording sliding window cognitive events & stage latencies |
-| `ReplayDebugger` | `hbllm.telemetry.replay` | Replays historical cognitive sessions step-by-step for root-cause analysis |
-| `TraceCollector` | `hbllm.observability.tracing` | OpenTelemetry-compatible distributed trace span collector |
-| `ObservabilityMiddleware` | `hbllm.observability.middleware` | HTTP request telemetry and latency histogram instrumentation |
+| `CognitiveTimeline` / `TimelineEntry` | `hbllm.telemetry.timeline` | Ring buffer recording chronological cognitive events & provenance |
+| `DecisionReplayEngine` / `DecisionRecord` | `hbllm.telemetry.replay` | Records and queries full decision context windows |
+| `ReplayDebugger` | `hbllm.hcir.replay_debugger` | Step-by-step deterministic replay over HCIR `InstructionStream`s with breakpoints |
+| `init_tracing` / `get_tracer` / `trace_span` | `hbllm.observability.tracing` | OpenTelemetry-compatible distributed trace span helpers |
+| `TracingMiddleware` | `hbllm.observability.middleware` | HTTP request telemetry and trace instrumentation |
 
 ---
 
-## `TimelineRecorder`
+## `CognitiveTimeline`
 
-**Module:** `hbllm.telemetry.timeline.TimelineRecorder`
+**Module:** `hbllm.telemetry.timeline.CognitiveTimeline`
 
 ```python
-from hbllm.telemetry.timeline import TimelineEvent, TimelineRecorder
+from hbllm.telemetry.timeline import CognitiveTimeline, TimelineEntry
 
-recorder = TimelineRecorder(max_events=10_000)
+timeline = CognitiveTimeline(max_entries=10_000)
 
-# Record event with latency
-recorder.record(
-    event=TimelineEvent(
-        trace_id="tr-101",
-        stage="epistemic_revision",
-        node_id="belief_manager",
-        duration_us=420,
-        metadata={"belief_id": "b-12"},
-    )
+# Record an event with causal provenance
+entry: TimelineEntry = timeline.record(
+    subsystem="epistemic_revision",
+    event_name="belief_updated",
+    data={"belief_id": "b-12"},
 )
 
-# Export recent timeline
-events = recorder.get_recent(limit=50)
+# Query recent entries
+events = timeline.query(last_n=50)
 print(f"Recorded events: {len(events)}")
 ```
 
 ---
 
-## `ReplayDebugger`
+## `DecisionReplayEngine` & `ReplayDebugger`
 
-**Module:** `hbllm.telemetry.replay.ReplayDebugger`
+**Modules:** `hbllm.telemetry.replay.DecisionReplayEngine`, `hbllm.hcir.replay_debugger.ReplayDebugger`
 
 ```python
-from hbllm.telemetry.replay import ReplayDebugger
+from hbllm.telemetry.replay import DecisionRecord, DecisionReplayEngine
 
-debugger = ReplayDebugger(db_path="./data/cognitive_events.db")
-
-# Load session for deterministic replay
-session = await debugger.load_session(session_id="sess-prod-99")
-
-async for step in session.step_forward():
-    print(f"Replaying Node: {step.node_id}, State Delta: {step.mutation}")
+engine = DecisionReplayEngine()
+engine.record(
+    DecisionRecord(
+        decision_type="plan_selection",
+        selected_capabilities=["motor.navigate"],
+        execution_result={"success": True},
+    )
+)
+records = engine.get_replay_window(start_time=0.0, end_time=1e12)
 ```
 
 ---
 
-## `TraceCollector`
+## Distributed Tracing (`hbllm.observability.tracing`)
 
-**Module:** `hbllm.observability.tracing.TraceCollector`
+**Module:** `hbllm.observability.tracing`
 
 ```python
-from hbllm.observability.tracing import TraceCollector
+from hbllm.observability.tracing import get_tracer, init_tracing, trace_span
 
-collector = TraceCollector(service_name="hbllm-core")
+init_tracing(service_name="hbllm-core")
+tracer = get_tracer("hbllm-core")
 
-with collector.start_span("cognitive_cycle") as span:
-    span.set_attribute("tenant.id", "acme-corp")
+with trace_span("cognitive_cycle", attributes={"tenant.id": "acme-corp"}) as span:
     span.set_attribute("snn.spikes", 142)
-    # Execution occurs here
 ```

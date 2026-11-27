@@ -66,6 +66,9 @@ Execute frozen evaluation suites, ablations, and latency profilers:
 # Frozen dev evaluation suite (perception: handcrafted | snn | learned)
 hbllm bench dev --perception handcrafted --episodes 5 --shared-memory --cross-seed
 
+# Evaluate ADR 006 2x2 fuzzy grounding & fuzzy reasoning axes
+hbllm bench dev --fuzzy-grounding --fuzzy-reasoning
+
 # Sealed Held-Out v2 suite (anti-tamper: requires clean HEAD with eval-* git tag)
 hbllm bench heldout --perception handcrafted
 

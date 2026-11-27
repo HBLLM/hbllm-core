@@ -43,6 +43,10 @@ class CognitiveEpistemicState:
     is_known: bool = True  # False if knowledge gap / unobserved
     raw_belief_value: Any = None
     provenance: str = ""
+    semantic_degree: float | None = None
+    degree_hedge: str | None = None
+    ignorance: float | None = None
+    conflict: float | None = None
 
 
 class EpistemicRealizationPolicy:
@@ -64,6 +68,33 @@ class EpistemicRealizationPolicy:
         self._certain_threshold = certain_threshold
         self._probable_threshold = probable_threshold
         self._plausible_threshold = plausible_threshold
+
+    def select_degree_hedge(
+        self,
+        semantic_degree: float | None,
+        explicit_hedge: str | None = None,
+    ) -> str | None:
+        """Map graded fuzzy truth degree independently of Bayesian epistemic certainty."""
+        if explicit_hedge:
+            return str(explicit_hedge).strip().lower() or None
+        if semantic_degree is None:
+            return None
+        deg = max(0.0, min(1.0, float(semantic_degree)))
+        if deg >= 0.85:
+            return None
+        if deg >= 0.55:
+            return "somewhat"
+        if deg >= 0.30:
+            return "slightly"
+        return "barely"
+
+    def evaluate_two_dimensional(
+        self, state: CognitiveEpistemicState
+    ) -> tuple[EpistemicVerbalizationLevel, str | None]:
+        """Return orthogonal `(epistemic_level, degree_hedge)` pair (ADR 006 D2)."""
+        return self.evaluate(state), self.select_degree_hedge(
+            state.semantic_degree, state.degree_hedge
+        )
 
     def evaluate(self, state: CognitiveEpistemicState) -> EpistemicVerbalizationLevel:
         """Determine verbalization level from multi-dimensional epistemic state."""

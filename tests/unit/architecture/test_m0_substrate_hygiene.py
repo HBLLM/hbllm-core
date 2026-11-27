@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import subprocess
 import sys
@@ -77,11 +78,16 @@ def test_fork_copy_on_write_isolates_node_and_edge_mutations() -> None:
     big = CognitiveGraph(enable_native_substrate=False)
     for i in range(2000):
         big.add_node(PhysicalEntityNode(id=f"n_{i}", entity_name=f"e_{i}"))
+    gc.collect()
     t0 = time.perf_counter()
     big_fork = big.fork()
     elapsed_ms = (time.perf_counter() - t0) * 1000.0
     assert big_fork.node_count == 2000
     assert elapsed_ms < 15.0, f"CognitiveGraph.fork() over 2k nodes took {elapsed_ms:.2f}ms"
+    big_fork.clear()
+    assert big_fork.node_count == 0
+    assert big.node_count == 2000
+    assert len(big.nodes_by_type(n1.node_type)) == 2000
 
 
 def test_transaction_first_class_tenant_id_and_verifier_enforcement() -> None:

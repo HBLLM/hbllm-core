@@ -95,48 +95,20 @@ The backup engine creates zero-downtime, point-in-time snapshots using SQLite's 
 ### Creating a Snapshot
 
 ```python
-import asyncio
-from hbllm.backup import BackupConfig, BackupManager
+from hbllm.backup import BackupManager
 
-
-async def create_backup():
-    manager = BackupManager(
-        config=BackupConfig(
-            data_dir="./data",
-            backup_dir="./backups",
-            retention_count=7,  # Keep last 7 backups
-            compress=True,  # Produce gzip archive
-            verify_checksum=True,  # SHA-256 validation
-        )
-    )
-
-    metadata = await manager.create_backup(label="daily-snapshot")
-    print(f"Backup created: {metadata.backup_id}")
-    print(f"Archive path: {metadata.archive_path}")
-    print(f"SHA-256: {metadata.sha256}")
-
-
-asyncio.run(create_backup())
+manager = BackupManager(data_dir="./data", backup_dir="./backups")
+archive_path = manager.create_backup(label="daily-snapshot")
+print(f"Archive path: {archive_path}")
+print(f"Verification: {manager.verify_backup(archive_path)}")
 ```
 
 ### Restoring from a Backup
 
 ```python
-import asyncio
 from hbllm.backup import BackupManager
 
-
-async def restore():
-    manager = BackupManager()
-
-    # Validate archive integrity and restore databases
-    await manager.restore_backup(
-        backup_id="backup-daily-snapshot-20260817",
-        target_dir="./data",
-        force=True,
-    )
-    print("Database restored successfully!")
-
-
-asyncio.run(restore())
+manager = BackupManager(data_dir="./data", backup_dir="./backups")
+manager.restore(archive_path="./backups/backup_daily-snapshot.tar.gz")
+print("Database restored successfully!")
 ```

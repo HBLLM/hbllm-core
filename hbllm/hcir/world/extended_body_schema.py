@@ -89,6 +89,12 @@ class ExtendedBodySchema:
         # tool_feature -> set of barrier_features it unlocks
         self.tool_barrier_affinities: dict[int, set[int]] = {}
         self.active_manipulandum: ActiveManipulandum | None = None
+        self.latent_state_signature: int = 0
+        self.seen_state_signatures: set[int] = {0}
+        self.state_conditioned_transitions: dict[int, set[tuple[tuple[int, int], Any]]] = {}
+        self.state_conditioned_loci: dict[int, set[tuple[int, int]]] = {}
+        self.transformer_state_transitions: dict[tuple[int, int], set[int]] = {}
+        self.exhausted_transformers: set[tuple[int, int]] = set()
 
     def on_boundary(self, boundary) -> None:
         """Episode lifecycle boundary handler (WP0.5). Delegates to the
@@ -106,8 +112,71 @@ class ExtendedBodySchema:
         """Reset currently held tools while optionally preserving cross-trial tool affinities."""
         self.held_tools.clear()
         self.active_manipulandum = None
+        self.latent_state_signature = 0
+        self.seen_state_signatures = {0}
+        self.state_conditioned_transitions.clear()
+        self.state_conditioned_loci.clear()
+        self.exhausted_transformers.clear()
         if not retain_dynamics:
             self.tool_barrier_affinities.clear()
+            self.transformer_state_transitions.clear()
+        else:
+            self.transformer_state_transitions = {
+                k: set() for k in self.transformer_state_transitions
+            }
+
+    def record_conditioned_block(
+        self,
+        from_pos: tuple[int, int],
+        action: Any,
+        target_pos: tuple[int, int] | None = None,
+    ) -> None:
+        """Bind a blocked transition/locus to the agent's current latent state signature."""
+        self.state_conditioned_transitions.setdefault(self.latent_state_signature, set()).add(
+            (from_pos, action)
+        )
+        if target_pos is not None:
+            self.state_conditioned_loci.setdefault(self.latent_state_signature, set()).add(
+                target_pos
+            )
+
+    def advance_latent_state(
+        self,
+        new_signature: int,
+        trigger_pos: tuple[int, int] | None = None,
+    ) -> tuple[bool, set[tuple[tuple[int, int], Any]], set[tuple[int, int]]]:
+        """Advance latent body/key state and return transitions & loci reopened under it."""
+        if new_signature == self.latent_state_signature:
+            return False, set(), set()
+        is_novel = new_signature not in self.seen_state_signatures
+        self.seen_state_signatures.add(new_signature)
+        self.latent_state_signature = new_signature
+        all_tr = (
+            set().union(*self.state_conditioned_transitions.values())
+            if self.state_conditioned_transitions
+            else set()
+        )
+        reopened_tr = all_tr - self.state_conditioned_transitions.get(new_signature, set())
+        all_loci = (
+            set().union(*self.state_conditioned_loci.values())
+            if self.state_conditioned_loci
+            else set()
+        )
+        reopened_loci = all_loci - self.state_conditioned_loci.get(new_signature, set())
+        if trigger_pos is not None:
+            seen_for_trig = self.transformer_state_transitions.setdefault(trigger_pos, set())
+            if new_signature in seen_for_trig and not reopened_tr and not reopened_loci:
+                self.exhausted_transformers.add(trigger_pos)
+            seen_for_trig.add(new_signature)
+        return is_novel, reopened_tr, reopened_loci
+
+    def active_cyclic_transformers(self) -> list[tuple[int, int]]:
+        """Return active state-transformer coordinates whose cycle is not yet exhausted."""
+        return [
+            pos
+            for pos in self.transformer_state_transitions
+            if pos not in self.exhausted_transformers
+        ]
 
     def bind_manipulandum(
         self,
@@ -245,6 +314,15 @@ class ExtendedBodySchema:
         predicates: list[CausalPredicate] = []
         if self.active_manipulandum is not None:
             predicates.append(self.active_manipulandum.to_causal_predicate())
+        if self.latent_state_signature != 0:
+            predicates.append(
+                CausalPredicate(
+                    variable="latent_state_signature",
+                    operator="==",
+                    value=self.latent_state_signature,
+                    target_entity="avatar",
+                )
+            )
         for tool in self.held_tools:
             predicates.append(tool.to_causal_predicate())
         for tool_feat, barriers in self.tool_barrier_affinities.items():

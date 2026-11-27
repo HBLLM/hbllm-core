@@ -403,6 +403,169 @@ skills:
           params:
             yield: ["$r1"]
 
+  - id: prior_skill_fuzzy_evaluate
+    skill_name: innate_fuzzy_evaluate
+    description: Evaluate a FuzzyExpr AST under an explicit FuzzyLogicProfile via Layer-0 ALU.
+    parameters:
+      - name: expr
+        required: true
+      - name: bindings
+        required: false
+        default: {}
+      - name: profile_id
+        required: false
+        default: product
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: fuzzy_evaluate
+      expr: "?expr"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.fuzzy.eval ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.fuzzy.eval
+            params:
+              expr: "$r0"
+              bindings: "$r1"
+              profile_id: "$r2"
+            bind: "$r3"
+        - opcode: RETURN
+          params:
+            yield: ["$r3"]
+
+  - id: prior_skill_fuzzy_compose
+    skill_name: innate_fuzzy_compose
+    description: Compose two graded spatial relations via declarative RelationCompositionPolicy ALU.
+    parameters:
+      - name: first_relation
+        required: true
+      - name: second_relation
+        required: true
+      - name: degree_ab
+        required: true
+      - name: degree_bc
+        required: true
+    precondition_pattern: null
+    postcondition_pattern:
+      intent: fuzzy_compose
+      first_relation: "?first_relation"
+      second_relation: "?second_relation"
+    bytecode_stream:
+      author: core_priors
+      description: Invoke math.fuzzy.compose ALU
+      instructions:
+        - opcode: EXECUTE
+          params:
+            capability: math.fuzzy.compose
+            params:
+              first_relation: "$r0"
+              second_relation: "$r1"
+              degree_ab: "$r2"
+              degree_bc: "$r3"
+            bind: "$r4"
+        - opcode: RETURN
+          params:
+            yield: ["$r4"]
+
+relation_composition_policy:
+  policy_id: default_spatial_policy
+  rules:
+    - first_relation: inside
+      second_relation: inside
+      composed_relation: inside
+      directionality: forward
+      geometric_guard: topological_closure
+      composition_operator: godel
+      attenuation_factor: 1.0
+    - first_relation: contains
+      second_relation: contains
+      composed_relation: contains
+      directionality: forward
+      geometric_guard: topological_closure
+      composition_operator: godel
+      attenuation_factor: 1.0
+    - first_relation: above
+      second_relation: above
+      composed_relation: above
+      directionality: directional_axis
+      geometric_guard: directional_alignment
+      composition_operator: product
+      attenuation_factor: 1.0
+    - first_relation: below
+      second_relation: below
+      composed_relation: below
+      directionality: directional_axis
+      geometric_guard: directional_alignment
+      composition_operator: product
+      attenuation_factor: 1.0
+    - first_relation: left_of
+      second_relation: left_of
+      composed_relation: left_of
+      directionality: directional_axis
+      geometric_guard: directional_alignment
+      composition_operator: product
+      attenuation_factor: 1.0
+    - first_relation: right_of
+      second_relation: right_of
+      composed_relation: right_of
+      directionality: directional_axis
+      geometric_guard: directional_alignment
+      composition_operator: product
+      attenuation_factor: 1.0
+    - first_relation: supports
+      second_relation: supports
+      composed_relation: supports
+      directionality: forward
+      geometric_guard: none
+      composition_operator: product
+      attenuation_factor: 0.95
+    - first_relation: supported_by
+      second_relation: supported_by
+      composed_relation: supported_by
+      directionality: forward
+      geometric_guard: none
+      composition_operator: product
+      attenuation_factor: 0.95
+    - first_relation: on_top_of
+      second_relation: on_top_of
+      composed_relation: above
+      directionality: directional_axis
+      geometric_guard: directional_alignment
+      composition_operator: product
+      attenuation_factor: 0.95
+    - first_relation: inside
+      second_relation: near
+      composed_relation: near
+      directionality: forward
+      geometric_guard: triangle_inequality_bound
+      max_scale_ratio: 0.5
+      composition_operator: attenuated_product
+      attenuation_factor: 0.85
+    - first_relation: near
+      second_relation: inside
+      composed_relation: null
+      directionality: forward
+      geometric_guard: extent_bounded
+      max_scale_ratio: 1.5
+      composition_operator: attenuated_product
+      attenuation_factor: 0.5
+    - first_relation: near
+      second_relation: near
+      composed_relation: null
+      directionality: symmetric
+      geometric_guard: none
+      composition_operator: godel
+      attenuation_factor: 0.0
+    - first_relation: adjacent_to
+      second_relation: adjacent_to
+      composed_relation: null
+      directionality: symmetric
+      geometric_guard: none
+      composition_operator: godel
+      attenuation_factor: 0.0
+
 edges:
   - id: prior_edge_cohesion_continuity
     edge_type: supports

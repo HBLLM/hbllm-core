@@ -5,6 +5,7 @@ description: "Phased implementation and 2x2 experimental validation plan for ADR
 
 # Fuzzy Symbolic Cognition Migration Plan (`F0`–`F3`)
 
+> **Status:** Implemented & Verified (`F0`–`F3` complete on `feat/fuzzy-symbolic-cognition`; 2×2 report archived at `reports/ablation/2026-11-26_adr006_fuzzy_2x2_ablation.md`)  
 > **Authority:** [ADR 006: Fuzzy Symbolic Cognition & Adaptive Semantics](../adr/0006-fuzzy-symbolic-cognition-and-adaptive-semantics.md)  
 > **Foundation Baseline:** [ADR 005: Homoiconic Symbolic VM](../adr/0005-homoiconic-symbolic-vm-and-experience-first-cognition.md) (`M0`–`M6`)  
 > **Triggering Finding:** Audit `H-3` in `reports/audit/2026-11-24_full_project_audit.md` (`grounding_bridge` `Δ = 0.0000`)
@@ -38,7 +39,7 @@ flowchart LR
 
 ## 2. Phase-by-Phase Execution Plan
 
-### Phase `F0` — Fuzzy Foundations, Versioned Models & Deterministic ALUs
+### Phase `F0` — Completed — Fuzzy Foundations, Versioned Models & Deterministic ALUs
 
 **Goal:** Freeze the mathematical primitives, HCIR contracts, bipolar evidence aggregation, versioned adaptive membership schemas, and Layer-0 `math.fuzzy.*` ALUs with zero changes to live SGE or VM behavior.
 
@@ -60,7 +61,7 @@ flowchart LR
 
 ---
 
-### Phase `F1` — Fuzzy Grounded Cognition (SGE Concepts, Adaptive Relations & Read-Path Wiring)
+### Phase `F1` — Completed — Fuzzy Grounded Cognition (SGE Concepts, Adaptive Relations & Read-Path Wiring)
 
 **Goal:** Replace winner-take-all concept assignment and scale-blind relation boxes in SGE with overlapping graded memberships and versioned adaptive models, and wire `CognitiveGraph` read paths so existing crisp reasoning consumes SGE outputs (`Experiment B`).
 
@@ -83,7 +84,7 @@ flowchart LR
 
 ---
 
-### Phase `F2` — Fuzzy Symbolic Reasoning, Declarative Relation Composition & Soft VM Unification
+### Phase `F2` — Completed — Fuzzy Symbolic Reasoning, Declarative Relation Composition & Soft VM Unification
 
 **Goal:** Enable the Homoiconic VM and reasoning operators to evaluate graded `SymbolicExpr` ASTs, rank structural matches by `semantic_degree` without weakening structural/identity invariants, compose relations safely under `RelationCompositionPolicy`, and revise beliefs via correlation-normalized bipolar conflict (`Experiments C & D`).
 
@@ -108,16 +109,17 @@ flowchart LR
 
 ---
 
-### Phase `F3` — Fuzzy Language Grounding, Multilingual Hedges & Legacy `FuzzyNode` Retirement
+### Phase `F3` — Completed — Fuzzy Language Grounding, Multilingual Hedges & Legacy `FuzzyNode` Retirement
 
 **Goal:** Treat natural-language gradable adjectives, spatial references, and hedges (`en`/`si`/`ta`) as consumers of the unified Fuzzy SGE + Fuzzy VM substrate, and retire legacy LLM/SFT `FuzzyNode`.
 
 - **Exact Files Touched:**
-  - `hbllm/hcir/language/core/grounding.py`, `hbllm/hcir/language/core/gateway.py`, `hbllm/hcir/language/core/epistemic_policy.py`
+  - `hbllm/hcir/language/core/grounding.py`, `hbllm/hcir/language/core/gateway.py`, `hbllm/hcir/language/core/epistemic_policy.py`, `hbllm/hcir/language/core/universal_engine.py`, `hbllm/hcir/language/english/realizer.py`
   - `hbllm/hcir/compiler.py`
   - `hbllm/hcir/seed/constructions_en.yaml`, `hbllm/hcir/seed/constructions_si.yaml`, `hbllm/hcir/seed/constructions_ta.yaml`
-  - `hbllm/actions/fuzzy_node.py` (remove wiring from `hbllm/brain/core/factory.py`, `hbllm/brain/wiring/nodes.py`, `hbllm/serving/api.py`, `hbllm/serving/chat.py`)
-  - `tests/unit/architecture/test_homoiconic_invariants.py`
+  - Removed `hbllm/actions/fuzzy_node.py` & `scikit-fuzzy` dependency (`hbllm/actions/__init__.py`, `hbllm/serving/chat.py`, `hbllm/serving/pipeline.py`, `pyproject.toml`)
+  - `tests/unit/architecture/test_homoiconic_invariants.py`, `tests/unit/actions/test_action_nodes_coverage.py`
+  - **New:** `tests/unit/hcir/test_fuzzy_language_grounding.py`
 - **Concrete Changes:**
   1. Update `GroundingResolver` (`grounding.py`) to rank candidate referents via `FuzzyLogicProfile` t-norms over SGE concept/relation memberships (e.g., `"the large block near the door"`), emitting `AMBIGUOUS_REFERENCE` only when the top two candidates fall within a tie margin $\Delta \mu < \epsilon$.
   2. Express gradable hedges across `en`/`si`/`ta` declaratively in `constructions_*.yaml` (`ConstructionNode` templates invoking `math.fuzzy.hedge` / `math.fuzzy.eval`) with zero hardcoded Python keyword tables (`compiler.py`).
@@ -125,7 +127,7 @@ flowchart LR
   4. Remove all runtime imports/wiring of legacy `FuzzyNode` (`scikit-fuzzy` + LLM JSON prompt wrapper) and add an invariant check in `test_homoiconic_invariants.py` barring legacy `FuzzyNode` / `skfuzzy` reintroduction into serving or core.
 - **Exit Gate:**
   - Multilingual gradable grounding tests pass across `en`, `si`, and `ta`.
-  - Zero `FuzzyNode` or `skfuzzy` runtime references in `hbllm/serving/`, `hbllm/brain/`, or `hbllm/hcir/`.
+  - Zero `FuzzyNode` or `skfuzzy` runtime references in `hbllm/serving/`, `hbllm/actions/`, or `hbllm/hcir/`.
   - Full `pytest tests/unit/architecture/ tests/unit/hcir/ -q` and `python -m hbllm bench profile` pass.
 
 ---
@@ -145,4 +147,15 @@ All four configurations run through `build_cognitive_system()` with identical `T
 - **Solve & Safety:** zero-shot solve rate, cross-seed transfer rate, generality score, exploration death count.
 - **Concept & Relation Stability:** cluster split/merge churn rate under viewpoint/scale shifts, cross-scale relation F1.
 - **Separated Latency:** raw `math.fuzzy.*` ALU median/p95 ($\mu\text{s}$), VM syscall dispatch overhead ($\mu\text{s}$), and end-to-end `32×32` step CPU p50/p95 ($\text{ms}$).
+
+---
+
+## 4. Verified Completion Summary (`F0`–`F3`, 2026-11-27)
+
+- **Commits (`feat/fuzzy-symbolic-cognition`):** `05b719a9` (`F0` + `F1`), `27a931af` (`F2` + `F1` committer/cache fix + 2×2 report), `dd5849c1` (`F3` + `FuzzyNode`/`scikit-fuzzy` retirement).
+- **2×2 Matrix Results (`reports/ablation/2026-11-26_adr006_fuzzy_2x2_ablation.md`, `0` LLM tokens, `0` errors):**
+  - **A (Crisp / Crisp):** dev ZS `19/20 (0.9500)`, dev CS `16/16 (1.0000)`, scale/appearance shift `0/20`, soft unification/composition `0/20`, `32×32` CPU `24.73 / 34.36 ms`.
+  - **B (Fuzzy / Crisp, `α=0.65`):** dev ZS `19/20 (0.9500)`, dev CS `16/16 (1.0000)`, scale/appearance shift **`20/20 (1.0000)`**, soft unification/composition `0/20`, `32×32` CPU `30.78 / 41.92 ms`.
+  - **C (Crisp / Fuzzy):** dev ZS `19/20 (0.9500)`, dev CS `16/16 (1.0000)`, scale/appearance shift `0/20`, soft unification/composition **`20/20 (1.0000)`**, `32×32` CPU `25.55 / 32.53 ms`.
+  - **D (Fuzzy / Fuzzy):** dev ZS `19/20 (0.9500)`, dev CS `16/16 (1.0000)`, scale/appearance shift **`20/20 (1.0000)`**, soft unification/composition **`20/20 (1.0000)`**, `0` false-positive compositions, `32×32` CPU `30.01 / 43.72 ms`.
 

@@ -1,8 +1,6 @@
 # Governance & Security
 
-HBLLM enforces governance at two complementary layers:
-1. **Pure-HCIR Kernel Governance (`hbllm.hcir.kernel.governance`):** `ConstitutionalVerifier`, `CommitAuthorityRegistry`, `EpistemicSafetyGate`, `GovernanceEngine`, `OwnerRuleStore`, and `PolicyEngine` govern every `TransactionManager` commit and capability invocation.
-2. **Legacy Bus Governance (`hbllm.brain.governance`):** `PolicyEngine`, `SentinelNode`, and `ConstitutionalPrinciples` govern message-bus node traffic when the serving bus is active.
+HBLLM enforces constitutional governance directly inside the **Pure-HCIR Kernel Governance** layer (`hbllm.hcir.kernel.governance`): `ConstitutionalVerifier`, `CommitAuthorityRegistry`, `EpistemicSafetyGate`, `GovernanceEngine`, `OwnerRuleStore`, and `PolicyEngine` govern every `TransactionManager` commit and capability invocation.
 
 ---
 
@@ -11,7 +9,7 @@ HBLLM enforces governance at two complementary layers:
 ```mermaid
 graph TB
     subgraph "HCIR Kernel Governance (hbllm.hcir.kernel.governance)"
-        TX["TransactionOperation / CapabilityCall"] --> CV["ConstitutionalVerifier + 6 Verification Stages"]
+        TX["TransactionOperation / CapabilityCall"] --> CV["ConstitutionalVerifier + Verification Stages"]
         CV --> GE["GovernanceEngine + EpistemicSafetyGate"]
         GE -->|"Approved"| TM["TransactionManager / CognitiveKernel"]
         GE -->|"Denied"| ROLL["Compensating Rollback + Audit"]
@@ -49,10 +47,9 @@ tx_mgr = TransactionManager(
 
 ## `PolicyEngine`
 
-::: hbllm.brain.governance.policy_engine.PolicyEngine
+**Module:** `hbllm.hcir.kernel.governance.policies.policy_engine.PolicyEngine`
 
-The governance evaluation layer. Every response passes through the PolicyEngine
-before delivery to the user.
+Evaluates declarative safety, scope, transform, and rate policies across cognitive outputs and capabilities.
 
 ### Policy Types
 
@@ -78,7 +75,12 @@ before delivery to the user.
 ### Usage
 
 ```python
-from hbllm.brain.governance.policy_engine import PolicyEngine, Policy, PolicyType, PolicyAction
+from hbllm.hcir.kernel.governance.policies.policy_engine import (
+    Policy,
+    PolicyAction,
+    PolicyEngine,
+    PolicyType,
+)
 
 engine = PolicyEngine()
 
@@ -100,7 +102,7 @@ engine.add_policy(
         name="medical-disclaimer",
         type=PolicyType.TRANSFORM,
         action=PolicyAction.APPEND,
-        content="⚠️ This is not medical advice. Consult a healthcare professional.",
+        content="This is not medical advice. Consult a healthcare professional.",
         domains=["health"],
     )
 )
@@ -113,9 +115,9 @@ result = engine.evaluate(
 )
 
 if not result.passed:
-    print(result.violations)  # ["[CRITICAL] no-harmful-instructions: ..."]
+    print(result.violations)
 else:
-    print(result.modified_text)  # May include appended disclaimers
+    print(result.modified_text)
 ```
 
 ### Loading from YAML
@@ -134,7 +136,7 @@ policies:
   - name: medical-disclaimer
     type: transform
     action: append
-    content: "⚠️ This is not medical advice."
+    content: "This is not medical advice."
     domains: ["health"]
 ```
 
@@ -148,7 +150,12 @@ print(f"Loaded {loaded} policies")
 Policies can have runtime conditions that check against sensor/state context:
 
 ```python
-from hbllm.brain.governance.policy_engine import PolicyCondition
+from hbllm.hcir.kernel.governance.policies.policy_engine import (
+    Policy,
+    PolicyAction,
+    PolicyCondition,
+    PolicyType,
+)
 
 # Only activate after 9 PM
 policy = Policy(
@@ -180,128 +187,29 @@ class PolicyResult:
 
 ---
 
-## SentinelNode
+## Owner Rules (`OwnerRuleStore`)
 
-::: hbllm.brain.governance.sentinel_node.SentinelNode
+**Module:** `hbllm.hcir.kernel.governance.policies.owner_rules`
 
-Proactive governance monitor that watches world state and takes corrective action
-when owner rules are violated. Unlike `DecisionNode` (which gates responses
-reactively), the Sentinel **actively monitors** context changes.
-
-### How It Works
-
-```mermaid
-sequenceDiagram
-    participant Sensor
-    participant Bus
-    participant Sentinel
-    participant PolicyEngine
-    participant IoT
-
-    Sensor->>Bus: context.update {door: "open", time: 21:30}
-    Bus->>Sentinel: context.update
-    Sentinel->>PolicyEngine: evaluate(state_text, context)
-    PolicyEngine-->>Sentinel: violation: "no open door after 9pm"
-    Sentinel->>Bus: sentinel.action {action: "lock_door"}
-    Bus->>IoT: Lock the door
-    Sentinel->>Bus: sensory.output {alert to owner}
-```
-
-### Bus Topics
-
-| Topic | Direction | Purpose |
-|---|---|---|
-| `context.update` | Subscribes | State changes from sensors, clock |
-| `sentinel.action` | Publishes | Corrective commands (lock door, reduce volume) |
-| `sentinel.alert` | Publishes | Warnings for non-critical issues |
-| `sensory.output` | Publishes | Owner notifications |
-
-### Message Interceptor
-
-The Sentinel installs a bus **interceptor** that evaluates every message against
-the PolicyEngine before delivery. Messages that violate policies are silently
-dropped and the sender receives an error response.
-
-### Corrective Actions
-
-The Sentinel maps rule patterns to automatic corrective commands:
-
-| Pattern | Action | Command |
-|---|---|---|
-| `*door*` | Corrective | `lock_door` |
-| `*noise*`, `*volume*` | Corrective | `reduce_volume` |
-| `*light*` | Corrective | `adjust_lights` |
-| (other) | Alert | `notify_owner` |
-
-### Query Interface
+User-defined rules parsed into structured `ParsedRule` / `Policy` objects stored per `tenant_id` in SQLite (`add_rule()`, `list_rules()`, `toggle_rule()`, `load_into_engine()`):
 
 ```python
-# Get current status
-status = await sentinel.handle_message(Message(
-    type=MessageType.QUERY,
-    payload={"action": "status"},
-    ...
-))
-# {"context": {...}, "alert_count": 3, "triggered_rules": [...]}
+from hbllm.hcir.kernel.governance.policies.owner_rules import OwnerRuleStore
+from hbllm.hcir.kernel.governance.policies.policy_engine import PolicyEngine
 
-# Get alert history
-alerts = await sentinel.handle_message(Message(
-    type=MessageType.QUERY,
-    payload={"action": "alerts", "limit": 10},
-    ...
-))
+store = OwnerRuleStore(db_path="data/owner_rules.db")
+engine = PolicyEngine()
+count = store.load_into_engine(tenant_id="tenant_1", engine=engine)
 ```
 
 ---
 
-## DecisionNode
+## Constitutional Principles (`ConstitutionalVerifier`)
 
-::: hbllm.brain.control.decision_node.DecisionNode
+Core invariants enforced on every `TransactionManager` commit regardless of tenant or configuration:
 
-The gatekeeper that separates **generation** from **execution**. After the
-Workspace has formed a consensus (selected the best thought), the DecisionNode:
-
-1. Runs **PolicyEngine evaluation** — blocks policy violations
-2. Runs **LLM-based safety classification** — flags harmful/dangerous content
-3. **Routes to execution** — dispatches to the appropriate execution channel
-
-### Execution Routing
-
-| Intent / Content | Route | Target |
-|---|---|---|
-| `speak` or `force_audio` | Audio | `sensory.audio.out` |
-| Contains ` ```python ` | Code execution | `task.execute.python` |
-| `web_search` | Browser | `task.execute.search` |
-| `tool_synthesis` | API node | `task.execute.api` |
-| `iot_command` | IoT/MQTT | `iot.publish` |
-| `mcp_tool` | MCP Client | `mcp.tool_call` |
-| (default) | Text output | `sensory.output` |
-
----
-
-## Owner Rules
-
-::: hbllm.brain.governance.owner_rules
-
-User-defined rules that the system must follow. These are loaded at startup and
-converted into `Policy` objects for the PolicyEngine.
-
-Owner rules support natural language definitions that are parsed into structured
-policies with conditions, patterns, and actions.
-
----
-
-## Constitutional Principles
-
-::: hbllm.brain.governance.constitutional_principles
-
-Core values that are always active regardless of tenant or configuration:
-
-- **Truthfulness** — never fabricate information
-- **Safety** — refuse harmful requests
-- **Privacy** — protect user data
-- **Transparency** — acknowledge limitations
-- **Helpfulness** — prioritize user's intent
-
-These form the base layer of the governance stack and cannot be overridden by
-tenant-specific policies.
+- **Truthfulness** — never commit unverified or hallucinated epistemic beliefs
+- **Governance Boundaries** — enforce `CommitAuthorityRegistry` and `SyscallAllowlist(strict=True)`
+- **Privacy & Multi-Tenancy** — enforce `Scope(tenant_id=...)` isolation across all `TieredWorkspace` tiers
+- **System Prior Protection** — preserve `SecurityLevel.SYSTEM` / `"core_prior"` seed nodes against eviction
+- **Epistemic Safety** — fail-closed gating via `EpistemicSafetyGate` when hazard/risk thresholds are exceeded

@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from hbllm.hcir.bytecode import InstructionStream
+from hbllm.hcir.fuzzy import RelationCompositionPolicy
 from hbllm.hcir.graph import (
     ConceptNode,
     ConstructionNode,
@@ -157,6 +158,15 @@ def hydrate_constructions(
     )
 
 
+def load_seeded_composition_policy(path: Path | None = None) -> RelationCompositionPolicy:
+    """Load the declarative `RelationCompositionPolicy` from `core_priors.hcir.yaml`."""
+    data = load_core_priors_spec(path)
+    raw_policy = data.get("relation_composition_policy")
+    if isinstance(raw_policy, Mapping):
+        return RelationCompositionPolicy.model_validate(dict(raw_policy))
+    return RelationCompositionPolicy.default_spatial_policy()
+
+
 def build_core_prior_operations(
     spec: Mapping[str, Any] | None = None, *, tenant_id: str | None = None
 ) -> list[TransactionOperation]:
@@ -225,6 +235,22 @@ def build_core_prior_operations(
         ops.append(
             TransactionOperation(
                 op=TransactionOp.ADD_EDGE, edge_id=edge.id, edge_data=edge.model_dump()
+            )
+        )
+    if isinstance(raw_policy := data.get("relation_composition_policy"), Mapping):
+        policy = RelationCompositionPolicy.model_validate(dict(raw_policy))
+        ops.append(
+            _upsert(
+                ConceptNode(
+                    id="prior_policy_relation_composition",
+                    label="declarative_relation_composition_policy",
+                    definition="Declarative scale- and geometry-guarded spatial relation composition rules.",
+                    domain="spatial_topology",
+                    confidence=0.99,
+                    properties={"policy": policy.model_dump()},
+                    tags=["core_prior", "composition_policy"],
+                    **kw,
+                )
             )
         )
     return ops

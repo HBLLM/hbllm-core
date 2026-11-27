@@ -7,7 +7,7 @@ description: "API reference for HBLLM's Cognitive Execution Runtime (hbllm.hcir.
 
 The **Cognitive Execution Runtime** provides formal execution semantics and composable reasoning operators over immutable graph snapshots (`FrozenGraphView`), proposing atomic state transactions without mutating live cognitive state directly.
 
-**Canonical Package:** `hbllm.hcir.reasoning` / `hbllm.hcir.reasoning.operators` *(compatibility re-exports at `hbllm.brain.reasoning`)*
+**Canonical Package:** `hbllm.hcir.reasoning` / `hbllm.hcir.reasoning.operators`
 
 ---
 

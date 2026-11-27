@@ -5,8 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from hbllm.hcir.fuzzy import (
+    FuzzyLogicProfile,
+    FuzzyProfileId,
+    MembershipDegree,
+    evaluate_membership_kernel,
+    get_fuzzy_profile,
+)
 from hbllm.hcir.registers import (
     REGISTER_NAMES,
     RegisterFile,
@@ -27,6 +34,8 @@ class NodePattern(BaseModel):
     min_confidence: float | None = None
     tags: list[str] = Field(default_factory=list)
     attributes: dict[str, Any] = Field(default_factory=dict)
+    fuzzy_memberships: dict[str, float] = Field(default_factory=dict)
+    numeric_tolerances: dict[str, dict[str, float]] = Field(default_factory=dict)
 
     @field_validator("var")
     @classmethod
@@ -41,6 +50,7 @@ class EdgePattern(BaseModel):
     source: str
     target: str
     min_weight: float | None = None
+    min_semantic_degree: float | None = None
 
 
 class GraphPattern(BaseModel):
@@ -53,8 +63,31 @@ class GraphPattern(BaseModel):
     distinct_nodes: bool = True
 
 
+class MatchResult(BaseModel):
+    """Dual-mode unification result preserving crisp validity and graded fit (ADR 006 §5)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    structure_valid: bool = True
+    binding_valid: bool = True
+    semantic_degree: MembershipDegree = 1.0
+    profile_id: FuzzyProfileId = FuzzyProfileId.PRODUCT
+    bindings: dict[str, Any] = Field(default_factory=dict)
+
+
 _GRAPH_PATTERN_KEYS = frozenset({"nodes", "edges", "any_of", "none_of", "distinct_nodes"})
-_NODE_RESERVED_KEYS = frozenset({"var", "node_type", "id", "min_confidence", "tags", "attributes"})
+_NODE_RESERVED_KEYS = frozenset(
+    {
+        "var",
+        "node_type",
+        "id",
+        "min_confidence",
+        "tags",
+        "attributes",
+        "fuzzy_memberships",
+        "numeric_tolerances",
+    }
+)
 
 
 def coerce_graph_pattern(raw: GraphPattern | Mapping[str, Any]) -> tuple[GraphPattern, bool]:
@@ -66,6 +99,20 @@ def coerce_graph_pattern(raw: GraphPattern | Mapping[str, Any]) -> tuple[GraphPa
     attrs = dict(raw.get("attributes", {})) if isinstance(raw.get("attributes"), Mapping) else {}
     attrs.update({k: v for k, v in raw.items() if k not in _NODE_RESERVED_KEYS})
     min_c = float(raw["min_confidence"]) if raw.get("min_confidence") is not None else None
+    fuzzy_mem = (
+        {str(k): float(v) for k, v in raw["fuzzy_memberships"].items()}
+        if isinstance(raw.get("fuzzy_memberships"), Mapping)
+        else {}
+    )
+    num_tols = (
+        {
+            str(k): {str(sk): float(sv) for sk, sv in v.items()}
+            for k, v in raw["numeric_tolerances"].items()
+            if isinstance(v, Mapping)
+        }
+        if isinstance(raw.get("numeric_tolerances"), Mapping)
+        else {}
+    )
     np = NodePattern(
         var=str(raw.get("var", "?node")),
         node_type=str(raw["node_type"]) if raw.get("node_type") is not None else None,
@@ -73,8 +120,20 @@ def coerce_graph_pattern(raw: GraphPattern | Mapping[str, Any]) -> tuple[GraphPa
         min_confidence=min_c,
         tags=list(raw.get("tags", [])),
         attributes=attrs,
+        fuzzy_memberships=fuzzy_mem,
+        numeric_tolerances=num_tols,
     )
     return GraphPattern(nodes=[np]), True
+
+
+def has_fuzzy_constraints(raw: GraphPattern | Mapping[str, Any]) -> bool:
+    """Return True if *raw* specifies fuzzy memberships, tolerances, or edge degree bounds."""
+    pat, _ = coerce_graph_pattern(raw)
+    if any(np.fuzzy_memberships or np.numeric_tolerances for np in pat.nodes):
+        return True
+    if any(ep.min_semantic_degree is not None for ep in pat.edges):
+        return True
+    return any(has_fuzzy_constraints(sub) for sub in pat.any_of)
 
 
 def _node_as_mapping(node: Any) -> dict[str, Any]:
@@ -175,12 +234,33 @@ def unify_dicts(
     return cur
 
 
+def _extract_fuzzy_degree(node_map: Mapping[str, Any], sem_key: str) -> tuple[bool, float]:
+    props = node_map.get("properties")
+    if isinstance(props, Mapping):
+        f_map = props.get("fuzzy_memberships")
+        if isinstance(f_map, Mapping) and sem_key in f_map:
+            entry = f_map[sem_key]
+            if isinstance(entry, Mapping) and "degree" in entry:
+                return True, max(0.0, min(1.0, float(entry["degree"])))
+            if isinstance(entry, (int, float)) and not isinstance(entry, bool):
+                return True, max(0.0, min(1.0, float(entry)))
+        if sem_key in props:
+            val = props[sem_key]
+            if isinstance(val, Mapping) and "degree" in val:
+                return True, max(0.0, min(1.0, float(val["degree"])))
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                return True, max(0.0, min(1.0, float(val)))
+    return False, 0.0
+
+
 def _match_node(
     np: NodePattern,
     node_map: Mapping[str, Any],
     bindings: dict[str, Any],
     registers: RegisterFile | None,
-) -> dict[str, Any] | None:
+    *,
+    profile: FuzzyLogicProfile | None = None,
+) -> tuple[dict[str, Any], float] | None:
     node_id = str(node_map.get("id", ""))
     cur = bindings
     if np.id is not None:
@@ -215,7 +295,39 @@ def _match_node(
         if nxt is None:
             return None
         cur = nxt
-    return cur
+
+    node_deg = 1.0
+    prof = profile or get_fuzzy_profile(FuzzyProfileId.PRODUCT)
+    for sem_key, min_deg in np.fuzzy_memberships.items():
+        found_deg, deg_val = _extract_fuzzy_degree(node_map, sem_key)
+        if not found_deg or deg_val < float(min_deg):
+            return None
+        node_deg = prof.t_norm(node_deg, deg_val)
+
+    for attr_key, tol_spec in np.numeric_tolerances.items():
+        found_attr, attr_val = _lookup_node_attr(node_map, attr_key)
+        if not found_attr or isinstance(attr_val, bool):
+            return None
+        try:
+            num_val = float(attr_val)
+        except (TypeError, ValueError):
+            return None
+        target = float(tol_spec.get("target", 0.0))
+        sigma = max(1e-6, float(tol_spec.get("sigma", 1.0)))
+        min_deg = float(tol_spec.get("min_degree", 0.0))
+        deg_val = evaluate_membership_kernel(
+            abs(num_val - target), "gaussian", {"center": 0.0, "sigma": sigma}
+        )
+        if deg_val < min_deg:
+            return None
+        node_deg = prof.t_norm(node_deg, deg_val)
+
+    if profile is not None:
+        props = node_map.get("properties")
+        if isinstance(props, Mapping) and isinstance(props.get("semantic_degree"), (int, float)):
+            node_deg = prof.t_norm(node_deg, max(0.0, min(1.0, float(props["semantic_degree"]))))
+
+    return cur, node_deg
 
 
 def _resolve_term(
@@ -230,19 +342,33 @@ def _resolve_term(
     return term
 
 
+def _edge_degree(edge: Mapping[str, Any]) -> float:
+    props = edge.get("properties")
+    if isinstance(props, Mapping) and isinstance(props.get("semantic_degree"), (int, float)):
+        raw = float(props["semantic_degree"])
+    elif isinstance(edge.get("weight"), (int, float)):
+        raw = float(edge["weight"])
+    else:
+        raw = 1.0
+    return max(0.0, min(1.0, raw))
+
+
 def _match_edges(
     edge_patterns: list[EdgePattern],
     edge_maps: list[dict[str, Any]],
     bindings: dict[str, Any],
     registers: RegisterFile | None,
-) -> list[dict[str, Any]]:
+    *,
+    profile: FuzzyLogicProfile | None = None,
+) -> list[tuple[dict[str, Any], float]]:
     if not edge_patterns:
-        return [bindings]
-    results: list[dict[str, Any]] = []
+        return [(bindings, 1.0)]
+    results: list[tuple[dict[str, Any], float]] = []
+    prof = profile or get_fuzzy_profile(FuzzyProfileId.PRODUCT)
 
-    def _bt(idx: int, cur_b: dict[str, Any]) -> None:
+    def _bt(idx: int, cur_b: dict[str, Any], cur_deg: float) -> None:
         if idx == len(edge_patterns):
-            results.append(cur_b)
+            results.append((cur_b, cur_deg))
             return
         ep = edge_patterns[idx]
         src_b = _resolve_term(ep.source, cur_b, registers)
@@ -252,6 +378,10 @@ def _match_edges(
                 continue
             if ep.min_weight is not None and float(edge.get("weight", 1.0)) < ep.min_weight:
                 continue
+            edeg = _edge_degree(edge)
+            if ep.min_semantic_degree is not None and edeg < float(ep.min_semantic_degree):
+                continue
+            nxt_deg = prof.t_norm(cur_deg, edeg) if profile is not None else cur_deg
             for s in (str(x) for x in edge.get("sources", [])):
                 if src_b is not None and s != src_b:
                     continue
@@ -263,9 +393,9 @@ def _match_edges(
                         nxt[normalize_var_name(ep.source)] = s
                     if is_symbolic_var(ep.target) and tgt_b is None:
                         nxt[normalize_var_name(ep.target)] = t
-                    _bt(idx + 1, nxt)
+                    _bt(idx + 1, nxt, nxt_deg)
 
-    _bt(0, bindings)
+    _bt(0, bindings, 1.0)
     return results
 
 
@@ -285,16 +415,131 @@ def _extract_graph_items(source: Any) -> tuple[list[dict[str, Any]], list[dict[s
     return node_maps, [_node_as_mapping(e) for e in raw_edges]
 
 
+def unify_pattern_graded(
+    source: Any,
+    raw_pattern: GraphPattern | Mapping[str, Any],
+    *,
+    initial_bindings: Mapping[str, Any] | None = None,
+    registers: RegisterFile | None = None,
+    profile_id: str | FuzzyProfileId = FuzzyProfileId.PRODUCT,
+    min_degree: float = 0.0,
+    limit: int = 32,
+) -> list[MatchResult]:
+    """Dual-mode unification: enforces crisp structure/bindings while scoring graded fit."""
+    pattern, _ = coerce_graph_pattern(raw_pattern)
+    prof = get_fuzzy_profile(profile_id)
+    base_b = dict(initial_bindings or {})
+    scan_cap = max(limit * 4, 64)
+
+    if pattern.any_of:
+        merged: list[MatchResult] = []
+        for sub in pattern.any_of:
+            merged.extend(
+                unify_pattern_graded(
+                    source,
+                    sub,
+                    initial_bindings=base_b,
+                    registers=registers,
+                    profile_id=prof.profile_id,
+                    min_degree=min_degree,
+                    limit=limit,
+                )
+            )
+        merged.sort(key=lambda m: (-m.semantic_degree, str(m.bindings.get("__primary_id__", ""))))
+        return merged[:limit]
+
+    node_maps, edge_maps = _extract_graph_items(source)
+    conf_by_id = {str(nm.get("id", "")): _node_conf(nm) for nm in node_maps}
+    solutions: list[MatchResult] = []
+
+    def _bt_nodes(idx: int, used_ids: set[str], cur_b: dict[str, Any], cur_deg: float) -> None:
+        if len(solutions) >= scan_cap:
+            return
+        if idx == len(pattern.nodes):
+            for eb, edge_deg in _match_edges(
+                pattern.edges, edge_maps, cur_b, registers, profile=prof
+            ):
+                if any(
+                    unify_pattern(source, neg, initial_bindings=eb, registers=registers, limit=1)
+                    for neg in pattern.none_of
+                ):
+                    continue
+                total_deg = prof.t_norm(cur_deg, edge_deg)
+                if total_deg < float(min_degree):
+                    continue
+                solutions.append(
+                    MatchResult(
+                        structure_valid=True,
+                        binding_valid=True,
+                        semantic_degree=total_deg,
+                        profile_id=prof.profile_id,
+                        bindings=eb,
+                    )
+                )
+                if len(solutions) >= scan_cap:
+                    return
+            return
+        np = pattern.nodes[idx]
+        for nm in node_maps:
+            nid = str(nm.get("id", ""))
+            if pattern.distinct_nodes and nid and nid in used_ids:
+                continue
+            matched = _match_node(np, nm, cur_b, registers, profile=prof)
+            if matched is None:
+                continue
+            matched_b, node_deg = matched
+            _bt_nodes(
+                idx + 1,
+                used_ids | ({nid} if nid else set()),
+                matched_b,
+                prof.t_norm(cur_deg, node_deg),
+            )
+            if len(solutions) >= scan_cap:
+                return
+
+    _bt_nodes(0, set(), base_b, 1.0)
+    solutions.sort(
+        key=lambda m: (
+            -float(m.semantic_degree),
+            -conf_by_id.get(str(m.bindings.get("__primary_id__", "")), 0.5),
+            str(m.bindings.get("__primary_id__", "")),
+        )
+    )
+    return solutions[:limit]
+
+
 def unify_pattern(
     source: Any,
     raw_pattern: GraphPattern | Mapping[str, Any],
     *,
     initial_bindings: Mapping[str, Any] | None = None,
     registers: RegisterFile | None = None,
+    fuzzy: bool = False,
+    profile_id: str | FuzzyProfileId = FuzzyProfileId.PRODUCT,
+    min_degree: float = 0.0,
     limit: int = 32,
 ) -> list[dict[str, Any]]:
     """Deterministically unify *raw_pattern* against a graph or collection of mappings."""
     pattern, _ = coerce_graph_pattern(raw_pattern)
+    if fuzzy or min_degree > 0.0 or has_fuzzy_constraints(pattern):
+        graded = unify_pattern_graded(
+            source,
+            pattern,
+            initial_bindings=initial_bindings,
+            registers=registers,
+            profile_id=profile_id,
+            min_degree=min_degree,
+            limit=limit,
+        )
+        return [
+            {
+                **m.bindings,
+                "__semantic_degree__": m.semantic_degree,
+                "__profile_id__": m.profile_id.value,
+            }
+            for m in graded
+        ]
+
     base_b = dict(initial_bindings or {})
     if pattern.any_of:
         merged: list[dict[str, Any]] = []
@@ -314,7 +559,7 @@ def unify_pattern(
         if len(solutions) >= limit:
             return
         if idx == len(pattern.nodes):
-            for eb in _match_edges(pattern.edges, edge_maps, cur_b, registers):
+            for eb, _ in _match_edges(pattern.edges, edge_maps, cur_b, registers):
                 if any(
                     unify_pattern(source, neg, initial_bindings=eb, registers=registers, limit=1)
                     for neg in pattern.none_of
@@ -329,9 +574,10 @@ def unify_pattern(
             nid = str(nm.get("id", ""))
             if pattern.distinct_nodes and nid and nid in used_ids:
                 continue
-            matched_b = _match_node(np, nm, cur_b, registers)
-            if matched_b is None:
+            matched = _match_node(np, nm, cur_b, registers)
+            if matched is None:
                 continue
+            matched_b, _ = matched
             _bt_nodes(idx + 1, used_ids | ({nid} if nid else set()), matched_b)
             if len(solutions) >= limit:
                 return

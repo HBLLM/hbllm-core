@@ -82,15 +82,16 @@ Extractors conform to the `FeatureExtractor` runtime protocol (`feature_extracto
 - **`ThreeTierEntityTracker` (`tracker.py`):** Maintains object permanence and identity across frames via `TrackletState` and `CandidateEntityState`, associating entities via `auto_associate()` and spatial distance gating.
 - **`CandidateGenerator` (`candidate_generator.py`) & `IdentityOperation` (`operations.py`):** Emit formal association, merge, split, re-identification, and alias operations.
 
-### 3.3 Concept Induction (`hbllm.hcir.grounding.concepts`)
+### 3.3 Concept & Adaptive Relation Induction (`hbllm.hcir.grounding.concepts`, `relations`)
 
-- **`ConceptLearner` (`concept_learner.py`):** Clusters perceptual feature vectors inside `WorkingConceptStore` (`store.py`), performing dynamic prototype assignment, splitting, merging, and role binding (`bind_role_to_exemplar`, `bind_linguistic_alias`).
-- **`GroundedConceptRegistry` (`registry.py`) & `ConceptLifecycleManager` (`lifecycle.py`):** Manage `GroundedConcept` prototypes (`model.py`) and promotion proposals across workspace tiers.
+- **`ConceptLearner` (`concept_learner.py`):** Clusters perceptual feature vectors inside `WorkingConceptStore` (`store.py`), performing dynamic prototype assignment, splitting, merging, and role binding (`bind_role_to_exemplar`, `bind_linguistic_alias`). Under ADR 006 (`enable_fuzzy_grounding=True`), `learn_fuzzy()` computes overlapping graded `MultiConceptMembership` scores ($\mu_C(x) \in [0, 1]$) from online Welford `(mean, variance)` distributions via dimensionless `mahalanobis_rbf` kernels, and `infer_role_priors_fuzzy()` consumes both working-store prototypes and persisted `GroundedConceptNode`s in `CognitiveGraph`.
+- **`RelationLearner` (`relation_learner.py`):** Induces crisp relations alongside continuous, context- and scale-normalized memberships (`evaluate_fuzzy_relations`: `IN`, `ABOVE`, `TOUCHING`, `NEAR`, `APPROACHING`) parameterized by immutable versioned `AdaptiveMembershipModel`s (`AdaptiveMembershipNode`) over `entity_extent`, `navigable_diameter`, and `closing_ttc`.
+- **`GroundedConceptRegistry` (`registry.py`) & `ConceptLifecycleManager` (`lifecycle.py`):** Manage `GroundedConcept` prototypes (`model.py`) and promotion proposals (`GroundedConceptNode` + `AdaptiveMembershipNode`) across workspace tiers.
 - **`RelationalGraphMatcher` (`relational_graph_matcher.py`):** Computes structural correspondences across `ObjectGraph`s.
 
-### 3.4 Transactional Commitment (`hbllm.hcir.grounding.committer`)
+### 3.4 Dual-Channel Transactional Commitment (`hbllm.hcir.grounding.committer`)
 
-- **`HCIRCommitter` (`committer.py`):** Translates grounding decisions (`commit_decision()`) into atomic `TransactionOperation` batches via `TransactionManager`.
+- **`HCIRCommitter` (`committer.py`):** Translates crisp grounding decisions (`commit_decision()`) and graded assertions (`commit_fuzzy_assertions()`) into atomic node-before-edge `TransactionOperation` batches via `TransactionManager`. `FuzzyAssertion` payloads (`degree`, `model_id`, `model_version`, `profile_id`) and Bayesian `EpistemicBelief` posteriors (`posterior_belief`, `BipolarEvidenceState`) remain strictly separate.
 
 ---
 
@@ -105,6 +106,8 @@ system = build_cognitive_system(
     CognitiveSystemConfig(
         world_id="sge_demo",
         enable_grounding=True,
+        enable_fuzzy_grounding=True,  # Overlapping concepts & scale-normalized relations
+        enable_fuzzy_reasoning=True,  # Soft VM unification & RelationCompositionPolicy
         perception_mode="snn",  # "handcrafted" | "snn" | "learned"
         memory_dir=None,
     )
@@ -112,4 +115,4 @@ system = build_cognitive_system(
 # system.bridge is attached to system.engine sharing the same KernelServices
 ```
 
-During each step, `CorticalGroundingBridge` processes perception (`process_perception`), synchronizes learned roles (`sync_theory_roles`), integrates assimilation and motor outcomes (`process_assimilation`, `process_motor`, `verify_post_action_outcome`), and handles boundary retention (`on_boundary`).
+During each step, `CorticalGroundingBridge` processes perception (`process_perception` with unmoved-entity caching and salience-gated batched commits), synchronizes learned roles (`sync_theory_roles`), integrates assimilation and motor outcomes (`process_assimilation`, `process_motor`, `verify_post_action_outcome`), and handles boundary retention (`on_boundary`).

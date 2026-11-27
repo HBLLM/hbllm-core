@@ -35,6 +35,11 @@ Priority = Annotated[float, Field(ge=0.0, le=1.0, description="Priority weight [
 #: A confidence / probability score in [0.0, 1.0].
 Confidence = Annotated[float, Field(ge=0.0, le=1.0, description="Confidence score [0.0, 1.0]")]
 
+#: A fuzzy membership / graded satisfaction degree in [0.0, 1.0] (distinct from epistemic Confidence).
+MembershipDegree = Annotated[
+    float, Field(ge=0.0, le=1.0, description="Fuzzy membership degree [0.0, 1.0]")
+]
+
 #: A cost measured in tokens (non-negative integer).
 CostMetric = Annotated[int, Field(ge=0, description="Cost in tokens")]
 

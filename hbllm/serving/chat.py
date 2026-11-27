@@ -16,7 +16,6 @@ import uuid
 from hbllm.actions.api_node import ApiNode
 from hbllm.actions.browser_node import BrowserNode
 from hbllm.actions.execution_node import ExecutionNode
-from hbllm.actions.fuzzy_node import FuzzyNode
 from hbllm.actions.logic_node import LogicNode
 from hbllm.memory.memory_node import MemoryNode
 from hbllm.network.bus import InProcessBus, MessageBus
@@ -63,7 +62,6 @@ async def async_main(args: argparse.Namespace) -> None:
         ExecutionNode(node_id="exec_01"),
         BrowserNode(node_id="browser_01"),
         LogicNode(node_id="logic_01"),
-        FuzzyNode(node_id="fuzzy_01"),
         ApiNode(node_id="api_01"),
     ]
     for node in nodes:

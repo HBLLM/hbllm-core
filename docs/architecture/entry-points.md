@@ -67,7 +67,7 @@ system: CognitiveSystem = build_cognitive_system(config)
 
 ### 2.3 Serving & Driver Entry Points
 
-- **`CognitiveSystemRegistry` (`hbllm.serving.cognitive_registry`):** Lazily provisions one isolated `CognitiveSystem` per `tenant_id` via `build_cognitive_system()`, backing `/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`, `/v1/chat/ws`, `GET /v1/memory/{session_id}`, and `GET /v1/rules` Pure-HCIR first (`X-HBLLM-Engine: pure-hcir`) before optional brain/provider fallback.
+- **`CognitiveSystemRegistry` (`hbllm.serving.cognitive_registry`):** Lazily provisions one isolated `CognitiveSystem` per `tenant_id` via `build_cognitive_system()`, backing `/v1/chat`, `/v1/chat/stream`, `/v1/chat/completions`, `/v1/chat/ws`, `GET /v1/memory/{session_id}`, and `GET /v1/rules` Pure-HCIR first (`X-HBLLM-Engine: pure-hcir`) before optional external `serving/provider.py` fallback.
 - **`CognitiveBlackbox` (`hbllm.drivers.cognitive_blackbox`):** Thin modality adapter wrapping per-source `CognitiveSystem` instances built via `build_cognitive_system()`, delegating `step()` / `adapt_to_observation()` / `reset()` directly into `AutonomousEpistemicEngine` with explicit `tenant_id` scoping.
 
 ---
@@ -101,7 +101,7 @@ Executable via `python -m hbllm [COMMAND] [ARGS]...` or `hbllm [COMMAND] [ARGS].
 ## 4. Architectural Layering Guarantees
 
 AST-level dependency and Phase 3 homoiconic boundary checks are enforced automatically in `tests/unit/architecture/`:
-- `test_layering.py`: `hbllm.hcir` never imports `hbllm.brain`; core `hbllm` never imports `plugins`.
-- `test_loc_budget.py` & `test_m0_substrate_hygiene.py`: Enforces **zero** LLM client/scaffold imports in `hbllm/hcir/**`, **0** `__path__.append` shadow shims (`MAX_PATH_APPEND_SHIMS = 0`), shipped-wheel module resolution, and `0` workspace-absent commit fallbacks.
+- `test_layering.py`: `hbllm.hcir` never imports from `hbllm.serving`; core `hbllm` never imports `plugins/`.
+- `test_m0_substrate_hygiene.py`: Enforces **zero** LLM client/scaffold imports in `hbllm/hcir/**`, **0** `__path__.append` shadow shims (`MAX_PATH_APPEND_SHIMS = 0`), shipped-wheel module resolution, and `0` workspace-absent commit fallbacks.
 - `test_homoiconic_invariants.py`: Permanently bars hardcoded lexical/color keyword tables in `compiler.py` and `world/`, blocks unallowlisted `EXECUTE` capabilities (`SyscallAllowlist(strict=True)`), enforces executable `bytecode_stream`s on all `SkillNode` producers, verifies serving/driver Pure-HCIR routing, and verifies system-prior budget preservation.
 - `test_single_composition_root.py` & `test_no_direct_sqlite.py`: Confirms runtime entry points compose through `build_cognitive_system()` and raw SQLite connections remain confined to `hbllm.persistence`, `hbllm.hcir.stores`, `hbllm.security`, and `hbllm.network.durable_bus`.

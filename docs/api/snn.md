@@ -7,7 +7,7 @@ description: "API reference for HBLLM's Spiking Neural Network modules (hbllm.hc
 
 The **SNN Neuromorphic Engine** provides spike-rate neural computation, low-power continuous perception gating, neuromodulation, and STDP plasticity inside the LLM-free HCIR substrate.
 
-**Canonical Package:** `hbllm.hcir.snn` *(compatibility re-exports at `hbllm.brain.snn`)*
+**Canonical Package:** `hbllm.hcir.snn`
 
 ---
 

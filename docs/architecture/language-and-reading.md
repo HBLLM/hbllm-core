@@ -55,18 +55,18 @@ The unified runtime orchestrates parsing, reference tracking, HCIR commitment, e
 Parses map surface text into typed `SemanticFrame` structures:
 - **`FrameType`:** `ASSERTION`, `QUERY`, `COMMAND`, etc.
 - **`ThematicRole`:** `AGENT`, `PATIENT`, `THEME`, `RECIPIENT`, `LOCATION`, `SOURCE`, `DESTINATION`, `INSTRUMENT`, `TIME`, `MANNER`, `CAUSE`, `CONDITION`, etc.
-- **`ReferenceResolver` (`core/reference.py`):** Tracks `DiscourseEntity` mentions across turns (`next_turn()`) to resolve anaphora (`"it"`, `"that"`, `"the object"`) and bind `EntityReference` slots to graph entity IDs via `GroundingResolver` (`core/grounding.py`).
+- **`ReferenceResolver` (`core/reference.py`):** Tracks `DiscourseEntity` mentions across turns (`next_turn()`) to resolve anaphora (`"it"`, `"that"`, `"the object"`) and bind `EntityReference` slots to graph entity IDs via `GroundingResolver` (`core/grounding.py`). Under ADR 006 Phase `F3`, `GroundingResolver` ranks candidate referents using declarative `gradable_adjectives`, `hedges`, and `NEAR` spatial relation `semantic_degree`s aggregated via `FuzzyLogicProfile` t-norms, raising `AMBIGUOUS_REFERENCE` only when top candidates tie within `ambiguity_tie_margin` (`0.08`).
 
 ### 2.4 `HCIRGateway` (`core/gateway.py`)
 
 Translates `GroundedSemanticFrame` instances into verified HCIR graph operations:
 - `process_assertion()` → commits `EvidenceNode` / proposition edges via `TransactionManager`.
-- `process_query()` → evaluates stored graph priors, ontology hypernyms/causes, and `TieredWorkspace` (`Brain` + `Persistent`) to emit a `CognitiveEpistemicState`.
+- `process_query()` → evaluates stored graph priors, edge `semantic_degree` + `posterior_belief`, ontology hypernyms/causes, and `TieredWorkspace` (`Brain` + `Persistent`) to emit a `CognitiveEpistemicState`.
 - `process_command()` → constructs a `GoalNode` in the workspace for either physical execution (`AutonomousEpistemicEngine`) or kernel capability dispatch (`CommandDispatcher`).
 
-### 2.5 Calibrated `EpistemicRealizationPolicy` (`core/epistemic_policy.py`)
+### 2.5 Two-Dimensional Calibrated `EpistemicRealizationPolicy` (`core/epistemic_policy.py`)
 
-Prevents overclaiming by mapping `CognitiveEpistemicState` (`confidence`, `uncertainty`, `support_count`, `contradiction_count`, `freshness`, `source_quality`, `is_known`) to calibrated hedge bands (`EpistemicVerbalizationLevel`):
+Prevents overclaiming while preserving graded semantic fit by calling `evaluate_two_dimensional()` over `CognitiveEpistemicState` (`confidence`, `uncertainty`, `support_count`, `contradiction_count`, `freshness`, `source_quality`, `is_known`, and optional `semantic_degree`), distinguishing low epistemic support (`UNCERTAIN`: *"I am not certain..."*) from high-evidence intermediate fuzzy fit (`CERTAIN` + `degree_realization` hedge across `en`/`si`/`ta`, e.g., *"The cup is somewhat near the edge."*):
 - `CERTAIN` ($\ge 0.92$, zero contradictions)
 - `PROBABLE` ($\ge 0.70$)
 - `PLAUSIBLE` ($\ge 0.40$)
@@ -74,9 +74,9 @@ Prevents overclaiming by mapping `CognitiveEpistemicState` (`confidence`, `uncer
 - `CONFLICT` / `CONTRADICTED` (conflicting evidence exceeds/matches support)
 - `INSUFFICIENT_EVIDENCE` (unknown concept or zero support)
 
-### 2.6 Embodied Construction Grammar & 4-Step Unknown-Instruction Resolution
+### 2.6 Embodied Construction Grammar & Fuzzy Hedges
 
-Bidirectional linguistic mappings (`en`, `si`, `ta`) live as homoiconic `ConstructionNode` entries hydrated from `hbllm/hcir/seed/constructions_{en,si,ta}.yaml` (`HCIRCompiler`, `hbllm.hcir.language`) rather than hardcoded Python keyword/verb lists. Transactions in `HCIRGateway` (`core/gateway.py`) and `GroundingResolver` (`core/grounding.py`) inherit `workspace.tenant_id` (`Scope(tenant_id=...)`). When an unseen instruction arrives, the VM executes the **4-Step Unknown-Instruction Resolution** pipeline:
+Bidirectional linguistic mappings (`en`, `si`, `ta`) — including declarative `hedges`, `gradable_adjectives`, `degree_realization`, `NEAR` spatial relations, and `cxn_{en,si,ta}_fuzzy_hedge` nodes — live as homoiconic `ConstructionNode` entries hydrated from `hbllm/hcir/seed/constructions_{en,si,ta}.yaml` (`HCIRCompiler`, `hbllm.hcir.language`, including `evaluate_grounded_expression()`) rather than hardcoded Python keyword/verb lists. Transactions in `HCIRGateway` (`core/gateway.py`) and `GroundingResolver` (`core/grounding.py`) inherit `workspace.tenant_id` (`Scope(tenant_id=...)`). When an unseen instruction arrives, the VM executes the **4-Step Unknown-Instruction Resolution** pipeline:
 1. **Partial Unification:** Bind known slots into `$r0..$rk` and isolate the unknown span as an `UnknownNode` `(InputTypes -> GoalConstraint)`.
 2. **Memory & Reading Recall:** `QUERY` `TieredWorkspace` (`Brain` + `Persistent`) for previously ingested definitions or hypernyms (`ReadingCurriculumIngestor`).
 3. **Structural Analogy:** Match existing `SkillNode` `(precondition -> postcondition)` schemas via `hbllm_structure_matcher` / `AnalogyOperator`.

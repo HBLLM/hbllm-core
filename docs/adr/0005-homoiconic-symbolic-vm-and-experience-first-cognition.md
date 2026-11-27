@@ -116,7 +116,7 @@ flowchart TB
 ## Consequences & Non-Negotiable Guardrails
 
 - **Latency Invariant Preserved:** Bytecode orchestrates symbolic control flow, bindings, and macro composition; tight spatial/numerical loops remain in Layer-0 Rust/SNN/NumPy ALUs so `32x32` execution stays within `CPU p95 <= 45ms`.
-- **LLM Independence Preserved:** `hbllm/hcir/**` remains 100% LLM-free (`test_loc_budget.py`). External LLMs may act only as optional meta-compilers or out-of-core development scaffolds.
+- **LLM Independence Preserved:** `hbllm/hcir/**` remains 100% LLM-free (`test_m0_substrate_hygiene.py`). External LLMs may act only as optional meta-compilers or out-of-core development scaffolds.
 - **No Surface-ID Poisoning:** Anti-unification strips episode-local color/entity IDs into relational `?role` variables at `EpisodeBoundary(same_level=False)` so learned programs transfer cleanly across seeds.
 - **Migration Tracked End-to-End:** All phases (`M0`–`M6`), dual-run compatibility rules, and exit gates are specified in [`homoiconic-vm-migration-plan.md`](../architecture/homoiconic-vm-migration-plan.md).
 

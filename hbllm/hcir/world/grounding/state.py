@@ -47,5 +47,8 @@ class CorticalGroundingState:
     cached_entity_priors: dict[str, dict[str, float]] = field(default_factory=dict)
     adapted_role_pairs: set[tuple[int, str]] = field(default_factory=set)
     promoted_concept_ids: set[str] = field(default_factory=set)
+    cached_entity_multi_concepts: dict[str, Any] = field(default_factory=dict)
+    last_fuzzy_relations: list[dict[str, Any]] = field(default_factory=list)
+    committed_fuzzy_assertions: dict[str, tuple[float, int]] = field(default_factory=dict)
     verified_outcomes_count: int = 0
     rejected_actions_count: int = 0

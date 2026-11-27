@@ -42,11 +42,25 @@ Recorded in `reports/heldout/LEDGER.md` on commit `072b4cb1` (`n = 120` unseen t
 
 **Companion `widened_dev` Gate (`9fbbf52e`, `n = 120` zero-shot / `114` transfer):** `zero_shot = 0.7750` (`generality = 0.7503`), `cross_seed_transfer = 0.9474` (`[0.8899, 0.9757]`). Compared against the Phase 2 baseline (`eval-phase2-r10` on `a26f09bd`: `0.9250` zero-shot, `111/120`, `4` deaths), Phase 3 (`eval-phase3-final`) improves zero-shot solve rate by `+0.0167` (`+2` solved tasks) and halves exploration deaths (`2` vs. `4`).
 
+### ADR 006 Fuzzy Symbolic Cognition — 2×2 Ablation (`2026-11-26`)
+
+Evaluated across `benchmarks/suites/dev.yaml`, `16×16 → 32×32` scale/appearance shift transfer (`n=20`), perturbed unification & scale-guarded spatial composition (`n=20`), and separated `math.fuzzy.*` ALU vs. VM dispatch vs. `32×32` E2E CPU profiling (`reports/ablation/2026-11-26_adr006_fuzzy_2x2_ablation.md`, **0 LLM tokens**, **0 errors**):
+
+| Config | Grounding (`F1`) | Reasoning (`F2`) | `dev` ZS (`n=20`) | `dev` CS (`n=16`) | `16×16 → 32×32` Shift (`n=20`) | Soft Unify & Compose (`n=20`) | `32×32` CPU p50 / p95 (ms) |
+|---|---|---|---|---|---|---|---|
+| **A** | Crisp | Crisp | `19/20` (`0.9500`) | `16/16` (`1.0000`) | `0/20` (`0.0000`) | `0/20` (`0.0000`) | `24.73 / 34.36` |
+| **B** | Fuzzy | Crisp (`α=0.65`) | `19/20` (`0.9500`) | `16/16` (`1.0000`) | **`20/20` (`1.0000`)** | `0/20` (`0.0000`) | `30.78 / 41.92` |
+| **C** | Crisp | Fuzzy | `19/20` (`0.9500`) | `16/16` (`1.0000`) | `0/20` (`0.0000`) | **`20/20` (`1.0000`)** | `25.55 / 32.53` |
+| **D** | Fuzzy | Fuzzy | `19/20` (`0.9500`) | `16/16` (`1.0000`) | **`20/20` (`1.0000`)** | **`20/20` (`1.0000`)** | `30.01 / 43.72` |
+
 ### CLI Usage
 
 ```bash
 # Run frozen dev benchmark suite (handcrafted | snn | learned)
 hbllm bench dev --perception handcrafted
+
+# Run dev suite with ADR 006 fuzzy grounding & fuzzy reasoning flags
+hbllm bench dev --fuzzy-grounding --fuzzy-reasoning
 
 # Run official held-out suite (requires clean git tag eval-*)
 hbllm bench heldout
@@ -388,8 +402,9 @@ python plugins/safety_gym_adapter/benchmark.py --native
 # 8. ALFWorld 6-Tier Household Reasoning Benchmark
 python plugins/alfworld_adapter/benchmark.py --native
 
-# 9. ARC-AGI-3 Official Interactive Benchmark (Official ARC API)
-python plugins/arc_agi_adapter/scripts/run_arc3_benchmark.py --games ls20 wa30 --max-levels 1
+# 9. ARC-AGI-3 Local Suite & Interactive Benchmarks
+python plugins/arc_agi_adapter/run_local_suite.py --seed 0
+python plugins/arc_agi_adapter/run_all_25_games.py
 ```
 
 ---

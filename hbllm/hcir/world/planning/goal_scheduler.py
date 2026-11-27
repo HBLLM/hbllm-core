@@ -439,7 +439,15 @@ class EpistemicGoalScheduler:
             float(priors.get("receptacle", 0.0)),
         )
         cargo_score = float(priors.get("cargo", 0.0))
-        pref_score = goal_score if has_cargo_ctx else max(goal_score, cargo_score)
+        actuator_score = max(
+            float(priors.get("actuator", 0.0)),
+            float(priors.get("switch", 0.0)),
+        )
+        pref_score = (
+            max(goal_score, actuator_score * 0.90)
+            if has_cargo_ctx
+            else max(goal_score, cargo_score, actuator_score * 0.90)
+        )
         return (pref_score, barrier_score, hazard_score)
 
     @classmethod

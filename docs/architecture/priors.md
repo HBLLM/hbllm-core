@@ -65,5 +65,5 @@ The following must **never** be hardcoded in the cognitive core:
 
 ## 4. Architectural Verification Gate
 
-Every pull request or modification to `hbllm/hcir/` and `hbllm/brain/` is audited against this document. Introducing heuristic assumptions about particular environments constitutes an architectural failure.
+Every pull request or modification to `hbllm/hcir/` and `hbllm/runtime/` is audited against this document. Introducing heuristic assumptions about particular environments constitutes an architectural failure.
 

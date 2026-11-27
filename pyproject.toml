@@ -54,7 +54,6 @@ local = [
     "safetensors>=0.4.0",
     # Reasoning engines
     "z3-solver>=4.12.0",
-    "scikit-fuzzy>=0.5.0",
     # Training
     "wandb>=0.16.0",
     "accelerate>=0.28.0",
@@ -191,6 +190,8 @@ python_version = "3.11"
 ignore_missing_imports = true
 explicit_package_bases = true
 exclude = [
+    "^build/",
+    "^dist/",
     "^plugins/(?!developmental_adapter)",
     "^experiments/",
     "^scratch/",
