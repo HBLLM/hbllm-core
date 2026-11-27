@@ -777,6 +777,7 @@ class HippocampalEpisodicCortex:
         delta.set("probe_target_steps", 0)
         delta.mutate("recent_positions", view.recent_positions).clear()
         delta.mutate("recent_actions", view.recent_actions).clear()
+        delta.mutate("grid_history", view.grid_history).clear()
         delta.set("context_epistemic_probes", 0)
         is_same_context_retry = not new_context and retain_dynamics
         if is_same_context_retry:

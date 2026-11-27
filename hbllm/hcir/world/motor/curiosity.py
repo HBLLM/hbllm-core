@@ -100,7 +100,11 @@ class EpistemicCuriosityExplorer:
             in_learned_b = (kr, kc) in engine.learned_barriers and not (
                 locus_b is not None and ev.traversable and ev.confidence > 0.0
             )
-            if ev.risk_cost >= 40.0 or feat in engine.hazard_tracker.known_lethal_features:
+            if (
+                ev.risk_cost >= 40.0
+                or feat in engine.hazard_tracker.known_lethal_features
+                or (kr, kc) in engine.current_context_hazards
+            ):
                 return False
             if in_learned_b or not ev.traversable:
                 if not engine.working_memory.body_schema.is_barrier_permeable(feat):

@@ -44,7 +44,7 @@ def run_game(
         t0 = time.perf_counter()
         state = getattr(frame, "state", None)
         sname = getattr(state, "name", str(state))
-        if sname in ("GAME_OVER", "WIN", "NOT_PLAYED"):
+        if sname == "WIN" or (agent is None and sname in ("GAME_OVER", "NOT_PLAYED")):
             action_id, data = 0, {}
             boundary = "death" if sname == "GAME_OVER" else ("win" if sname == "WIN" else "reset")
         elif agent is not None:
@@ -54,7 +54,9 @@ def run_game(
             else:
                 action_id = int(getattr(act, "value", act))
                 data = getattr(act, "data", {}) or {}
-            boundary = None
+            boundary = (
+                "death" if sname == "GAME_OVER" else ("reset" if sname == "NOT_PLAYED" else None)
+            )
         else:
             action_id, data = _policy_action(
                 policy or "round_robin", step, list(getattr(frame, "available_actions", []))
@@ -89,6 +91,9 @@ def run_game(
             break
         if sname2 == "GAME_OVER" and stagnant > 20:
             stop_reason = "game_over_loop"
+            break
+        if agent is not None and agent.is_done([frame], frame):
+            stop_reason = agent._yield_reason or "agent_yield"
             break
     return {
         "game_id": game_id,

@@ -397,3 +397,191 @@ class TestEpisodicBoundaryRoleTransfer:
         assert sum(1 for s in shared_steps[2:] if s == 100) <= 1, (
             f"Shared engine timed out repeatedly after label shift detection: steps={shared_steps}"
         )
+
+
+def test_fuzzy_actuator_priors_and_grid_history_boundary_reset() -> None:
+    import numpy as np
+
+    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.motor.effector import MotorCortexEffector
+    from hbllm.hcir.world.percept import EpisodeBoundary, EpisodeBoundaryKind
+    from hbllm.hcir.world.planning.goal_scheduler import EpistemicGoalScheduler
+
+    # 1. EpistemicGoalScheduler scores graded actuator/switch priors positively
+    priors = {7: {"actuator": 0.85}, 8: {"switch": 0.90}}
+    pref_act, _, _ = EpistemicGoalScheduler._role_scores_from_priors(priors, 7, has_cargo_ctx=False)
+    pref_sw, _, _ = EpistemicGoalScheduler._role_scores_from_priors(priors, 8, has_cargo_ctx=True)
+    assert pref_act > 0.7
+    assert pref_sw > 0.7
+
+    # 2. MotorCortexEffector prioritizes entities with high fuzzy actuator prior over equal-area distractor
+    engine = AutonomousEpistemicEngine()
+    grid = np.zeros((8, 8), dtype=int)
+    grid[1, 1] = 1  # avatar
+    grid[2, 5] = 4  # distractor entity (area 1)
+    grid[5, 2] = 7  # actuator entity (area 1)
+    engine.avatar_feature = 1
+    engine.avatar_features = {1}
+    engine.avatar_pos = (1, 1)
+    engine.bg_feature = 0
+    engine.working_memory.concept_role_priors = {7: {"actuator": 0.95}}
+
+    grounded = MotorCortexEffector.ground_effector_action(engine, grid, action=6)
+    assert grounded is not None
+    assert (grounded["y"], grounded["x"]) == (5, 2)
+
+    # 3. LEVEL_COMPLETE boundary clears grid_history to prevent cross-level shape mismatch
+    engine.grid_history.append(np.zeros((8, 8), dtype=int))
+    engine.grid_history.append(np.zeros((8, 8), dtype=int))
+    assert len(engine.grid_history) == 2
+    engine.on_boundary(
+        EpisodeBoundary(
+            kind=EpisodeBoundaryKind.LEVEL_COMPLETE,
+            retain_dynamics=True,
+            same_level=False,
+        )
+    )
+    assert len(engine.grid_history) == 0
+
+
+def test_dirichlet_walkable_posterior_resists_exogenous_timeout_death() -> None:
+    import numpy as np
+
+    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.causal.transition_kb import TransitionOutcome
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+
+    engine = AutonomousEpistemicEngine()
+    # Grid where perimeter border is color 4 and interior floor is color 3
+    grid = np.full((12, 12), 4, dtype=int)
+    grid[2:10, 2:10] = 3
+    grid[5, 5] = 2  # avatar
+    grid[5, 6] = 3  # floor ahead
+
+    engine.avatar_feature = 2
+    engine.avatar_features = {2}
+    engine.avatar_pos = (5, 5)
+    engine.bg_feature = 4
+    engine.action_dynamics[4] = ActionDynamicsModel(
+        action_id=4, delta_r=0, delta_c=1, confidence=1.0, probes_tested=5
+    )
+
+    # Record verified safe traversals on floor feature 3
+    engine.symbolic_theory.induce_walkable(3, evidence="test_floor")
+    engine.symbolic_theory.mark_verified_in_context("walkable", 3)
+    for _ in range(20):
+        engine.symbolic_theory.transition_kb.record_outcome(
+            3, TransitionOutcome.TRAVERSED, scope="feature", weight=1.0
+        )
+
+    # Register target cell (5, 6) as previously visited + active colinear exogenous gauge (resource bar)
+    engine.working_memory.visited_cells.add((5, 6))
+    for step_idx in range(4):
+        engine.working_memory.exogenous_tracker.observe_transition(
+            [(10, 9 - step_idx)], action=4, avatar_locus=(5, 5)
+        )
+    assert engine.working_memory.exogenous_tracker.has_active_colinear_gauge() is True
+
+    engine.prev_grid = grid.copy()
+    engine.last_action = 4
+    death_grid = grid.copy()
+    death_grid[5, 5] = 3
+    death_grid[5, 6] = 2
+
+    engine.assimilate_feedback(death_grid, [1, 2, 3, 4], is_failure=True)
+
+    # Floor feature 3 must remain walkable with high p_pass and must not be turned into a barrier
+    assert engine.symbolic_theory.is_walkable(3) is True
+    assert 3 not in engine.symbolic_theory.barrier_features
+    assert (5, 6) not in engine.hazard_tracker.static_lethal_positions
+    belief = engine.symbolic_theory.transition_kb.get_belief(3, scope="feature")
+    assert belief is not None
+    assert belief.dirichlet_posterior().p_pass > 0.9
+
+
+def test_state_conditioned_lock_reopens_across_cyclic_transformer_states() -> None:
+    import numpy as np
+
+    from hbllm.hcir.world.assimilation.assimilator import EpistemicFeedbackAssimilator
+    from hbllm.hcir.world.autonomous_epistemic_engine import AutonomousEpistemicEngine
+    from hbllm.hcir.world.motor_calibration import ActionDynamicsModel
+    from hbllm.hcir.world.perception.engine import PerceptionEngine
+
+    engine = AutonomousEpistemicEngine()
+    engine.avatar_feature = 2
+    engine.avatar_features = {2}
+    engine.bg_feature = 0
+    engine.symbolic_theory.induce_walkable(0, evidence="bg")
+    engine.action_dynamics[2] = ActionDynamicsModel(
+        action_id=2, delta_r=1, delta_c=0, confidence=1.0, probes_tested=5
+    )
+
+    grid = np.zeros((10, 10), dtype=int)
+    grid[3, 3] = 2  # avatar next to bounded conditional gate
+    grid[4, 3] = 6  # bounded conditional gate
+    grid[3, 7] = 8  # cyclic transformer pad
+    grid[8, 1] = 2  # distant state indicator sharing avatar color
+
+    # 1. Blocked against bounded gate under initial state S_0=0
+    engine.avatar_pos = (3, 3)
+    engine.prev_grid = grid.copy()
+    engine.last_action = 2
+    engine.failed_transitions.add(((3, 3), 2))
+    engine.working_memory.habenular_ior.failed_transitions.add(((3, 3), 2))
+    engine.exhausted_candidate_goals.add((4, 3))
+    EpistemicFeedbackAssimilator._record_conditioned_block_if_gate(
+        engine, grid, (3, 3), 2, bg=0, H=10, W=10
+    )
+
+    # 2. Avatar steps onto pad (3, 7) and distant indicator at (8, 2) mutates to 2 (State S_1)
+    prev_pad = grid.copy()
+    prev_pad[3, 3] = 0
+    prev_pad[3, 6] = 2
+    curr_pad = prev_pad.copy()
+    curr_pad[3, 6] = 0
+    curr_pad[3, 7] = 2
+    curr_pad[8, 1] = 0
+    curr_pad[8, 2] = 2  # indicator shifted in-place (<= 3.5 px) sharing avatar color 2
+
+    engine.prev_grid = prev_pad
+    engine.avatar_pos = (3, 7)
+    diff = PerceptionEngine.compute_frame_diff(prev_pad, curr_pad)
+    EpistemicFeedbackAssimilator._assimilate_state_mutations_and_cargo(
+        engine,
+        curr_pad,
+        diff,
+        action=4,
+        action_data=None,
+        is_effector_action=False,
+        is_known_displacement=True,
+        available_actions=[1, 2, 3, 4],
+        is_success=False,
+        is_failure=False,
+        landing_cells_now=[(3, 7)],
+        prev_avatar_pos=(3, 6),
+        bg=0,
+        H=10,
+        W=10,
+    )
+
+    # Gate (3, 3) + action 2 & target (4, 3) must re-open under S_1 != 0, and pad 8 becomes actuator
+    assert engine.working_memory.body_schema.latent_state_signature != 0
+    assert ((3, 3), 2) not in engine.failed_transitions
+    assert ((3, 3), 2) not in engine.working_memory.habenular_ior.failed_transitions
+    assert (4, 3) not in engine.exhausted_candidate_goals
+    assert 8 in engine.symbolic_theory.actuator_features
+
+    # 3. Under S_1, if gate (3, 3)+action 2 still fails, transformer (3, 7) re-arms to cycle to S_2
+    engine.exhausted_candidate_goals.add((3, 7))
+    engine.symbolic_theory.mark_locus_explored((3, 7), reason="test")
+    EpistemicFeedbackAssimilator._record_conditioned_block_if_gate(
+        engine, curr_pad, (3, 3), 2, bg=0, H=10, W=10
+    )
+    assert (3, 7) not in engine.exhausted_candidate_goals
+
+    # 4. Cycling back to an already-seen state with no newly reopened transitions marks transformer exhausted
+    sig_s1 = engine.working_memory.body_schema.latent_state_signature
+    engine.working_memory.body_schema.advance_latent_state(sig_s1 + 999, trigger_pos=(3, 7))
+    engine.working_memory.body_schema.record_conditioned_block((3, 3), 2, target_pos=(4, 3))
+    engine.working_memory.body_schema.advance_latent_state(sig_s1, trigger_pos=(3, 7))
+    assert (3, 7) in engine.working_memory.body_schema.exhausted_transformers

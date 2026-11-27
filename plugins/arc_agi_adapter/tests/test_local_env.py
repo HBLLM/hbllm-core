@@ -106,3 +106,27 @@ def test_extract_grid_rejects_1d():
     bad = type("F", (), {"frame": [1, 2, 3]})()  # flat ints -> 1D
     with pytest.raises((ValueError, TypeError)):
         agent._extract_grid(bad)
+
+
+def test_nav_basic_multi_level_shape_transition_wins():
+    from plugins.arc_agi_adapter.my_agent import MyAgent
+    from plugins.arc_agi_adapter.run_local_suite import run_game
+
+    g = LocalEnv(0).make("nav_basic")
+    agent = MyAgent(card_id="test", game_id="nav_basic", seed=0)
+    res = run_game(g, "nav_basic", agent, max_steps=150)
+    assert res["state"] == "WIN"
+    assert res["levels_completed"] == 2
+    assert agent.decision_exceptions == 0
+
+
+def test_death_reset_learns_hazard_and_wins():
+    from plugins.arc_agi_adapter.my_agent import MyAgent
+    from plugins.arc_agi_adapter.run_local_suite import run_game
+
+    g = LocalEnv(0).make("death_reset")
+    agent = MyAgent(card_id="test", game_id="death_reset", seed=0)
+    res = run_game(g, "death_reset", agent, max_steps=100)
+    assert res["state"] == "WIN"
+    assert res["levels_completed"] == 1
+    assert agent.decision_exceptions == 0

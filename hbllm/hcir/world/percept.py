@@ -601,6 +601,10 @@ class ExogenousSignalTracker:
         for loc in loci:
             self.exogenous_loci.add(loc)
 
+    def has_active_colinear_gauge(self, min_ticks: int = 3) -> bool:
+        """Return True when an exogenous 1D progress/resource gauge has been empirically observed."""
+        return any(tk[1] >= min_ticks for tk in self._colinear_tracks.values())
+
     def observe_transition(
         self,
         mutated_loci: list[PlaceLocus] | set[PlaceLocus],

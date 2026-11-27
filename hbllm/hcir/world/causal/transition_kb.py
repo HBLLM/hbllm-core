@@ -242,6 +242,18 @@ class TransitionBelief:
             delta_goal=float(delta0) + self.counts.get(_OUT_TERMINAL_WIN, 0.0),
         )
 
+    def resists_single_fatal_override(
+        self,
+        min_pass_obs: float = 3.0,
+        min_pass_prob: float = 0.75,
+    ) -> bool:
+        """Return True when empirical pass evidence strongly outweighs lethal evidence under Dirichlet posterior."""
+        trav = self.counts.get(_OUT_TRAVERSED, 0.0) + self.counts.get(_OUT_TERMINAL_WIN, 0.0)
+        if trav < min_pass_obs:
+            return False
+        post = self.dirichlet_posterior()
+        return bool(post.p_pass >= min_pass_prob and post.alpha_pass > post.gamma_lethal * 3.0)
+
     def to_belief_node(self) -> BeliefNode:
         """Serialize this transition belief as a canonical HCIR ``BeliefNode``."""
         serialized_key, key_kind, node_id = _belief_node_id(self.scope, self.context_key)

@@ -240,6 +240,8 @@ class MyAgent(Agent):
         self.instructions = instructions
         self._seed = kwargs.get("seed")
         self.enable_grounding: bool = kwargs.get("enable_grounding", True)
+        self.enable_fuzzy_grounding: bool = kwargs.get("enable_fuzzy_grounding", True)
+        self.enable_fuzzy_reasoning: bool = kwargs.get("enable_fuzzy_reasoning", True)
         from hbllm.runtime.bootstrap import CognitiveSystemConfig, build_cognitive_system
 
         self.system = build_cognitive_system(
@@ -248,6 +250,8 @@ class MyAgent(Agent):
                 seed=self._seed,
                 instructions=instructions,
                 enable_grounding=self.enable_grounding,
+                enable_fuzzy_grounding=self.enable_fuzzy_grounding,
+                enable_fuzzy_reasoning=self.enable_fuzzy_reasoning,
                 memory_dir=None,
             )
         )
@@ -609,6 +613,8 @@ class MyAgent(Agent):
                         instructions=self.instructions,
                         seed=self._seed,
                         enable_grounding=self.enable_grounding,
+                        enable_fuzzy_grounding=self.enable_fuzzy_grounding,
+                        enable_fuzzy_reasoning=self.enable_fuzzy_reasoning,
                         memory_dir=None,
                     )
                 )

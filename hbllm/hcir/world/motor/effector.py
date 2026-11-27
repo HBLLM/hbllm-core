@@ -254,6 +254,24 @@ class MotorCortexEffector:
             )
         )
 
+    @staticmethod
+    def _role_prior_bias(rp_map: dict[int, dict[str, float]], feat_id: int) -> float:
+        """Score a candidate feature using graded actuator/switch vs. hazard/barrier priors."""
+        rp = rp_map.get(int(feat_id))
+        if rp is None:
+            return 0.0
+        act_deg = max(
+            float(rp.get("actuator", 0.0)),
+            float(rp.get("switch", 0.0)),
+            float(rp.get("receptacle", 0.0)) * 0.7,
+            float(rp.get("goal", 0.0)) * 0.5,
+        )
+        avoid_deg = max(
+            float(rp.get("hazard", 0.0)),
+            float(rp.get("barrier", 0.0)),
+        )
+        return 80.0 * act_deg - 60.0 * avoid_deg
+
     @classmethod
     def ground_effector_action(
         cls,
@@ -297,6 +315,7 @@ class MotorCortexEffector:
                 logger.debug("Engine-local target scorer %s failed: %s", scorer, e)
 
         # 2. Relational Structural Affordances (Optical Targets, Receptacles, Alignment Sockets)
+        rp_map = engine.working_memory.concept_role_priors
         structural_goals = PerceptionEngine.detect_structural_goals(
             curr_grid,
             bg=bg,
@@ -314,7 +333,10 @@ class MotorCortexEffector:
                     and not cls._is_exogenous_or_boundary(engine, sr, sc, curr_grid, bg)
                 ):
                     vis = engine.entity_visit_counts.get(f"actuate_{sr}_{sc}", 0)
-                    actuation_candidates.append((sr, sc, 180.0 - float(vis) * 15.0))
+                    role_prior_bias = cls._role_prior_bias(rp_map, feat)
+                    actuation_candidates.append(
+                        (sr, sc, 180.0 + role_prior_bias - float(vis) * 15.0)
+                    )
 
         # 3. Modal Manipulandum Destination Affordances:
         # If an external manipulandum is currently focused, prioritize destination sockets/receptacles
@@ -354,6 +376,7 @@ class MotorCortexEffector:
                 saliency = 100.0 / math.log2(2 + max(1, e.area))
                 affordance_bonus = 60.0 if (cr, cc) in engine.effective_actuation_targets else 0.0
                 feat_bias = 40.0 if e.feature_id in engine.effective_features else 0.0
+                role_prior_bias = cls._role_prior_bias(rp_map, int(e.feature_id))
                 telic_bonus = (
                     150.0
                     if (
@@ -371,7 +394,13 @@ class MotorCortexEffector:
                     engine.avatar_pos, action, action_data={"x": cc, "y": cr}
                 )
                 cand_score = (
-                    saliency + affordance_bonus + feat_bias + telic_bonus - ior_penalty - haben_pen
+                    saliency
+                    + affordance_bonus
+                    + feat_bias
+                    + role_prior_bias
+                    + telic_bonus
+                    - ior_penalty
+                    - haben_pen
                 )
                 actuation_candidates.append((cr, cc, cand_score))
 

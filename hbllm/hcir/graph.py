@@ -143,9 +143,14 @@ class SubstrateDivergenceError(RuntimeError):
 class _CoWMappingView(Mapping[str, Any]):
     """Read-only mapping view that materializes CoW node/edge clones on item lookup."""
 
-    def __init__(self, backing: dict[str, Any], getter: Any) -> None:
-        self._backing = backing
+    def __init__(self, graph: CognitiveGraph, kind: str, getter: Any) -> None:
+        self._graph = graph
+        self._is_nodes = kind == "nodes"
         self._getter = getter
+
+    @property
+    def _backing(self) -> dict[str, Any]:
+        return self._graph._nodes if self._is_nodes else self._graph._edges
 
     def __getitem__(self, key: str) -> Any:
         val = self._getter(key)
@@ -228,6 +233,8 @@ class CognitiveGraph:
         self._native_last_error: str | None = None
 
         # ── Copy-on-write fork state (WP4) ──
+        self._cow_nodes: bool = False
+        self._cow_edges: bool = False
         self._cow_indexes: bool = False
         self._cow_shared: bool = False
         self._owned_nodes: set[str] = set()
@@ -251,8 +258,22 @@ class CognitiveGraph:
 
     # ── Node Operations ──────────────────────────────────────────────
 
+    def _detach_nodes(self) -> None:
+        """Copy-on-write: detach shared primary node dictionary before writing."""
+        if self._cow_nodes:
+            self._nodes = dict(self._nodes)
+            self._cow_nodes = False
+
+    def _detach_edges(self) -> None:
+        """Copy-on-write: detach shared primary edge dictionary before writing."""
+        if self._cow_edges:
+            self._edges = dict(self._edges)
+            self._cow_edges = False
+
     def _materialize_indexes(self) -> None:
-        """Copy-on-write: detach shared index structures on first branch mutation."""
+        """Copy-on-write: detach shared primary and secondary structures on first branch mutation."""
+        self._detach_nodes()
+        self._detach_edges()
         if not self._cow_indexes:
             return
         self._edges_by_source = {k: set(v) for k, v in self._edges_by_source.items()}
@@ -416,6 +437,7 @@ class CognitiveGraph:
         """Retrieve a node by ID.  O(1)."""
         node = self._nodes.get(node_id)
         if node is not None and self._cow_shared and node_id not in self._owned_nodes:
+            self._detach_nodes()
             node = node.model_copy(deep=True)
             self._nodes[node_id] = node
             self._owned_nodes.add(node_id)
@@ -432,14 +454,14 @@ class CognitiveGraph:
     def nodes(self) -> Mapping[str, HCIRNode]:
         """Read-only mapping view of nodes (mutate via TransactionManager)."""
         if self._cow_shared:
-            return _CoWMappingView(self._nodes, self.get_node)
+            return _CoWMappingView(self, "nodes", self.get_node)
         return MappingProxyType(self._nodes)
 
     @property
     def edges(self) -> Mapping[str, HCIREdge]:
         """Read-only mapping view of edges (mutate via TransactionManager)."""
         if self._cow_shared:
-            return _CoWMappingView(self._edges, self.get_edge)
+            return _CoWMappingView(self, "edges", self.get_edge)
         return MappingProxyType(self._edges)
 
     def all_nodes(self) -> Iterator[HCIRNode]:
@@ -528,6 +550,7 @@ class CognitiveGraph:
     def get_edge(self, edge_id: str) -> HCIREdge | None:
         edge = self._edges.get(edge_id)
         if edge is not None and self._cow_shared and edge_id not in self._owned_edges:
+            self._detach_edges()
             edge = edge.model_copy(deep=True)
             self._edges[edge_id] = edge
             self._owned_edges.add(edge_id)
@@ -975,25 +998,47 @@ class CognitiveGraph:
         return {t: len(ids) for t, ids in self._idx_by_type.items() if ids}
 
     def clear(self) -> None:
-        """Reset the graph to an empty state."""
-        self._nodes.clear()
-        self._edges.clear()
-        for s in self._idx_by_type.values():
-            s.clear()
-        for s in self._idx_by_category.values():
-            s.clear()
-        for s in self._idx_by_lifecycle.values():
-            s.clear()
-        self._idx_by_scope.clear()
-        self._idx_by_tag.clear()
-        self._edges_by_source.clear()
-        self._edges_by_target.clear()
-        self._node_digests.clear()
-        self._edge_digests.clear()
+        """Reset the graph to an empty state (copy-on-write safe)."""
+        if self._dirty_nodes is not None:
+            self._dirty_nodes.update(self._nodes.keys())
+        if self._dirty_edges is not None:
+            self._dirty_edges.update(self._edges.keys())
+        if self._cow_nodes or self._cow_edges or self._cow_indexes or self._cow_shared:
+            self._nodes = {}
+            self._edges = {}
+            self._idx_by_type = {t: set() for t in HCIRNodeType}
+            self._idx_by_category = {c: set() for c in CognitiveCategory}
+            self._idx_by_lifecycle = {l: set() for l in NodeLifecycle}
+            self._idx_by_scope = {}
+            self._idx_by_tag = {}
+            self._edges_by_source = {}
+            self._edges_by_target = {}
+            self._node_digests = {}
+            self._edge_digests = {}
+            self._cow_nodes = False
+            self._cow_edges = False
+            self._cow_indexes = False
+            self._cow_shared = False
+            self._owned_nodes = set()
+            self._owned_edges = set()
+        else:
+            self._nodes.clear()
+            self._edges.clear()
+            for s in self._idx_by_type.values():
+                s.clear()
+            for s in self._idx_by_category.values():
+                s.clear()
+            for s in self._idx_by_lifecycle.values():
+                s.clear()
+            self._idx_by_scope.clear()
+            self._idx_by_tag.clear()
+            self._edges_by_source.clear()
+            self._edges_by_target.clear()
+            self._node_digests.clear()
+            self._edge_digests.clear()
+            self._owned_nodes.clear()
+            self._owned_edges.clear()
         self._content_digest = 0
-        self._cow_shared = False
-        self._owned_nodes.clear()
-        self._owned_edges.clear()
         if self._native_adapter is not None:
             try:
                 from hbllm.hcir.native_adapter import NativeGraphAdapter
@@ -1071,11 +1116,14 @@ class CognitiveGraph:
 
     def fork(self) -> CognitiveGraph:
         """Create a structural-sharing copy-on-write fork of this graph in < 1 ms (WP4)."""
-        forked = CognitiveGraph(enable_native_substrate=False)
+        cls = type(self)
+        forked = cls.__new__(cls)
         forked._enable_native_substrate = self._enable_native_substrate
-        forked._nodes = dict(self._nodes)
-        forked._edges = dict(self._edges)
-        # Copy-on-write: parent and child share index dicts until either mutates
+        forked._native_divergence_count = 0
+        forked._native_last_error = None
+        forked._nodes = self._nodes
+        forked._edges = self._edges
+        # Copy-on-write: parent and child share primary and index dicts until either mutates
         forked._edges_by_source = self._edges_by_source
         forked._edges_by_target = self._edges_by_target
         forked._idx_by_type = self._idx_by_type
@@ -1086,6 +1134,10 @@ class CognitiveGraph:
         forked._node_digests = self._node_digests
         forked._edge_digests = self._edge_digests
         forked._content_digest = self._content_digest
+        forked._cow_nodes = True
+        self._cow_nodes = True
+        forked._cow_edges = True
+        self._cow_edges = True
         forked._cow_indexes = True
         self._cow_indexes = True
         forked._cow_shared = True
@@ -1097,11 +1149,14 @@ class CognitiveGraph:
         forked._dirty_nodes = set()
         forked._dirty_edges = set()
         forked._fork_parent = self
+        forked._fork_base_version = None
         if self._native_adapter is not None:
             try:
                 forked._native_adapter = self._native_adapter.snapshot()
             except Exception:
                 forked._native_adapter = None
+        else:
+            forked._native_adapter = None
         return forked
 
     def subgraph(self, node_ids: set[str] | list[str] | Iterator[str]) -> CognitiveGraph:
