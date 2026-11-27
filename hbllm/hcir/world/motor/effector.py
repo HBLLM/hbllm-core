@@ -569,7 +569,10 @@ class MotorCortexEffector:
         # Ventral Stream Invariant: When an embodied displacement avatar is present and all
         # targeted actuation candidates are exhausted / quiescent, inhibit targeted actuation
         # and return None so deliberation and exploration switch back to locomotion.
-        if engine.avatar_pos is not None and engine.has_displacement_capabilities():
+        has_registered_space = bool(engine.action_affordances or engine.action_dynamics)
+        if engine.avatar_pos is not None and (
+            not has_registered_space or engine.has_displacement_capabilities()
+        ):
             if action is not None:
                 engine.inhibited_actions[action] = max(engine.inhibited_actions.get(action, 0), 6)
             return None

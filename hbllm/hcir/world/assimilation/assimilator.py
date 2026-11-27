@@ -3469,7 +3469,16 @@ class EpistemicFeedbackAssimilator:
                                 cand_feat_int,
                                 target_pos,
                             )
-                    if not is_exogenous_depletion:
+                    is_unobserved_bg_failure = bool(
+                        terminal is None
+                        and curr_grid is not None
+                        and curr_grid.shape == _prev_grid.shape
+                        and np.array_equal(curr_grid, _prev_grid)
+                        and not is_direct_contact
+                        and not candidate_cells
+                        and (direct_feat == _bg_feature or direct_feat == bg)
+                    )
+                    if not is_exogenous_depletion and not is_unobserved_bg_failure:
                         view.exhausted_candidate_goals.add(target_pos)
                         lg = get_engine_state_attr(view, "learned_goal_positions", None)
                         if isinstance(lg, set):
