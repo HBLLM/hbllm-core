@@ -200,19 +200,19 @@ During task planning, the system employs an **Epsilon-Greedy Multi-Armed Bandit*
 
 ---
 
-## 8. DigitalTwin — Ephemeral Operational State (ADR 002)
+## 8. Ephemeral Operational Runtime State (`KernelTelemetry` & `WorkspaceTier.META`)
 
 !!! info "Architecture Decision"
-    See **[ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md)** for the rationale behind the SelfModel / DigitalTwin separation.
+    See **[ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md)** for the rationale behind separating persistent self-competence from live operational telemetry (historically named `DigitalTwin`, now unified into the Pure-HCIR kernel).
 
-The **DigitalTwin** (`brain/self_model/digital_twin.py`) decouples **persistent self-competence identity** from **live operational runtime state**.
+In the Pure-HCIR Cognitive OS, live operational telemetry is decoupled from durable self-competence via **`KernelTelemetry`** (`hbllm.hcir.kernel.telemetry`), **`CognitiveTimeline`** (`hbllm.telemetry.timeline`), and ephemeral **`WorkspaceTier.META`** statistics (`TieredWorkspace.populate_meta_stats()`):
 
-| Aspect | SelfModel | DigitalTwin |
+| Aspect | Durable Self-Competence | Live Operational Telemetry |
 |---|---|---|
-| **Purpose** | Enduring competence, calibration, ethics, capabilities | Live hardware, tasks, devices, cluster state |
-| **Persistence** | Durable, survives restarts | **Ephemeral** — rebuilt on every startup |
-| **Memory consolidation** | Tracked through learning cycles | **Excluded** from consolidation |
-| **Example data** | Competence profiles, Brier scores, capability records | CPU %, active goals, loaded plugins, connected IoT devices |
+| **Purpose** | Enduring competence, calibration, ethics, capabilities | Live stage timings, active goals, tier counts, device presence |
+| **Persistence** | Durable across restarts (`Persistent` / `Meta` HCIR tiers) | **Ephemeral** — computed live from kernel & subsystem state |
+| **Memory consolidation** | Tracked through consolidation cycles | **Excluded** from episodic/semantic consolidation |
+| **Example data** | Competence profiles, Brier scores, `AutonomyTracker` metrics | Step latency histograms, active goals, loaded plugins, connected devices |
 
 ### Invariant
-> The DigitalTwin is **disposable and rebuildable**. After a restart, it is reconstructed from active subsystem queries — never from persistent storage, ensuring live runtime telemetry never pollutes long-term memory.
+> Ephemeral runtime telemetry is **rebuildable on startup**. After a restart, operational snapshots are reconstructed directly from live kernel queries so transient telemetry never pollutes long-term episodic or semantic memory.

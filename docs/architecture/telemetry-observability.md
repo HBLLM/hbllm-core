@@ -67,9 +67,9 @@ Captures the **complete decision context** — not just the event, but everythin
 - **Causal chain tracing**: Follow `parent_event_id` links backward to root cause
 - **JSONL export/import**: Offline replay and debugging
 
-### 3. Universal Causal Provenance (`brain/core/provenance.py`)
+### 3. Universal Causal Provenance (`hbllm/telemetry/provenance.py` & `hbllm/hcir/types.py`)
 
-Every cognitive event carries standardized `ProvenanceMetadata`:
+Every cognitive event carries standardized `ProvenanceMetadata` (`hbllm.telemetry.provenance`) alongside HCIR node `Provenance` (`hbllm.hcir.types`):
 
 ```
 event_id            → Globally unique UUID4
@@ -114,6 +114,6 @@ The developmental learning plugin exposes `DevelopmentalTelemetryEmitter` (`plug
 - [HCIR Kernel OS](./hcir-kernel-os.md) — `KernelTelemetry` health probes, `AutonomyTracker`, and `ExecutiveRuntime` instrumentation
 - [Cortical World Model](./cortical-world-model.md) — per-stage `CorticalPipeline` timing (`stage_timings_ms`) and `hbllm bench profile`
 - [Developmental Learning](./developmental-learning.md) — active causal discovery and curriculum telemetry
-- [Self-Model](./self-model.md) — persistent identity (complementary to DigitalTwin)
+- [Self-Model](./self-model.md) — persistent competence identity vs. ephemeral runtime telemetry
 - [Packaging & Boundaries](./packaging-and-boundaries.md) — core-runtime vs optional extras segregation
 - [ADR 002: Operational Architecture](../adr/0002-operational-architecture-and-governance.md) — design decisions

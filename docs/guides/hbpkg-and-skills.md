@@ -136,6 +136,5 @@ asyncio.run(main())
 ## Autonomous Skill Induction
 
 Beyond pre-written `SKILL.md` bundles, HBLLM automatically synthesizes declarative skills inside the Pure-HCIR core:
-- **`DeclarativeNeuroSymbolicSkill`** (`hbllm.hcir.skills.declarative`): Expresses skills as composable `SymbolicPredicate` signatures paired with `SubgoalSequence` instructions compiled into `InstructionStream`s.
-- **`SkillInductionEngine`** (`hbllm.hcir.skills.induction`) & **`SkillMacroChunker`** (`hbllm.hcir.reasoning.operators.skill_chunker`): Induce reusable macro skills from recurring trajectories and store them in `PrefrontalWorkingMemory.procedural_library` and `TieredWorkspace`.
-- Legacy bus nodes (`hbllm.brain.skills.skill_compiler_node`, `hbllm.brain.skills.skill_induction_node`) remain for legacy MessageBus deployments.
+- **`DeclarativeNeuroSymbolicSkill`** (`hbllm.hcir.skills.declarative`): Expresses skills as composable `SymbolicPredicate` signatures (`evaluate_degree()`) paired with `SubgoalSequence` instructions compiled into `InstructionStream`s.
+- **`SkillInductionEngine`** (`hbllm.hcir.skills.induction`), **`LibraryLearner`** (`hbllm.hcir.skills.library_learner`), & **`SkillMacroChunker`** (`hbllm.hcir.reasoning.operators.skill_chunker`): Induce and anti-unify reusable parameterized `SkillNode` bytecode programs from recurring trajectories and store them in `HCIRSkillStore`, `PrefrontalWorkingMemory.procedural_library`, and `TieredWorkspace`.

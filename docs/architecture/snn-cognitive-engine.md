@@ -7,7 +7,7 @@ description: "Architecture of HBLLM's Spiking Neural Network subsystem (hbllm.hc
 
 > **Core Thesis:** Continuous temporal integration, novelty gating, lateral competition, and online reward modulation require sub-millisecond spiking dynamics — not autoregressive LLM forward passes.
 
-The core **SNN Cognitive Engine** lives directly inside **`hbllm.hcir.snn`** (with compatibility re-exports at `hbllm.brain.snn` and optional expression helpers in `hbllm.brain.snn.expression`). It powers neuromodulation inside `build_cognitive_system()`, spiking visual/audio gating, and `SNNPerceptualFeatureExtractor` (`perception_mode="snn"`).
+The core **SNN Cognitive Engine** lives directly inside **`hbllm.hcir.snn`**. It powers neuromodulation inside `build_cognitive_system()`, spiking visual/audio gating, and `SNNPerceptualFeatureExtractor` (`perception_mode="snn"`).
 
 ---
 

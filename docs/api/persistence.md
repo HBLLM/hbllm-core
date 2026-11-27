@@ -20,7 +20,7 @@ The **Persistence Subsystem** provides managed async connection pools, workload-
 | `SQLiteProfile` | `hbllm.persistence.sqlite_profiles` | Tuned PRAGMA sets (WAL, mmap_size, cache_size, synchronous) |
 | `ProfileManager` | `hbllm.persistence.sqlite_profiles` | Workload-to-profile resolver |
 | `BackupManager` | `hbllm.backup` | Point-in-time database snapshotting, compression, and verification |
-| `BackupConfig` | `hbllm.backup` | Retention count, compression level, and target directory settings |
+| `BackupManifest` | `hbllm.backup` | Manifest metadata tracking backup ID, files, size, and SHA-256 checksum |
 
 ---
 
@@ -47,23 +47,15 @@ await service.shutdown()
 ## `BackupManager`
 
 ```python
-import asyncio
-from hbllm.backup import BackupConfig, BackupManager
+from hbllm.backup import BackupManifest, BackupManager
 
-manager = BackupManager(
-    config=BackupConfig(
-        data_dir="./data",
-        backup_dir="./backups",
-        retention_count=10,
-        compress=True,
-    )
-)
+manager = BackupManager(data_dir="./data", backup_dir="./backups")
 
-# Create an atomic snapshot
-metadata = await manager.create_backup(label="pre-migration")
-print(f"Created backup {metadata.backup_id} (size: {metadata.size_bytes} bytes)")
+# Create an atomic compressed archive
+archive_path = manager.create_backup(label="pre-migration")
+print(f"Created backup archive: {archive_path}")
 
-# Verify checksum
-is_valid = await manager.verify_backup(metadata.backup_id)
-print(f"Checksum valid: {is_valid}")
+# Verify archive checksum & manifest integrity
+verification = manager.verify_backup(archive_path)
+print(f"Checksum valid: {verification}")
 ```

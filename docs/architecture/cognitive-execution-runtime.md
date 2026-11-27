@@ -7,7 +7,7 @@ description: "Architecture deep-dive into HBLLM's Cognitive Execution Runtime: 1
 
 > **Core Architectural Rule:** *Operators calculate. HCIR decides what becomes reality.*
 
-The **Cognitive Execution Runtime** (`hbllm.hcir.reasoning`, with compatibility re-exports at `hbllm.brain.reasoning`) is the CPU-like execution layer for HBLLM cognition. It provides the formal execution semantics and pipeline orchestrator for composable reasoning operators to execute over immutable snapshots of canonical cognitive state without owning or directly mutating that state.
+The **Cognitive Execution Runtime** (`hbllm.hcir.reasoning`) is the CPU-like execution layer for HBLLM cognition. It provides the formal execution semantics and pipeline orchestrator for composable reasoning operators to execute over immutable snapshots of canonical cognitive state without owning or directly mutating that state.
 
 ```text
                  HCIR (Canonical Cognitive State)
@@ -251,7 +251,8 @@ Meta-Test — Zero LLM Calls:
 ## Python Usage Example
 
 ```python
-from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIREdgeType, PhysicalEntityNode
+from hbllm.hcir.graph import CognitiveGraph, HCIREdge, HCIREdgeType
+from hbllm.hcir.nodes import PhysicalEntityNode
 from hbllm.hcir.reasoning.operators import (
     OperatorRegistry,
     ProblemType,

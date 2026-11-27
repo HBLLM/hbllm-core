@@ -12,7 +12,7 @@ description: "Event-sourced, 100% LLM-free neuro-symbolic cognitive operating sy
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Rust](https://img.shields.io/badge/Rust-13%20Crates-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/Tests-623%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/Tests-420%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
 [![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-94.2%25%20Zero--Shot-cyan.svg)](api/benchmarks.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://github.com/hbllm/hbllm-core/blob/master/LICENSE.md)
 

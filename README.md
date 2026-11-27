@@ -8,7 +8,7 @@
 
   [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
   [![Rust](https://img.shields.io/badge/Rust-13%20Crates-orange.svg)](https://www.rust-lang.org/)
-  [![Tests](https://img.shields.io/badge/Tests-623%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
+  [![Tests](https://img.shields.io/badge/Tests-420%20Core%20%2B%2070%20Plugin%20Suites-brightgreen.svg)](#)
   [![Held-Out v2](https://img.shields.io/badge/Held--Out%20v2-94.2%25%20Zero--Shot%20(0%20LLM%20Tokens)-cyan.svg)](#verified-benchmarks)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 </div>
@@ -180,12 +180,12 @@ hbllm plugin list                   # List installed plugins in plugins/
 
 | Metric | Value |
 |---|---|
-| Core source modules (`hbllm/`) | **1,062** Python files (`0` `__path__.append` shims) |
-| HCIR Cognitive OS (`hbllm/hcir/`) | **422** Python files across **11** subpackages (`hbllm.hcir.seed` included) |
+| Core source modules (`hbllm/`) | **788** Python files (`0` `__path__.append` shims, legacy `hbllm/brain` retired) |
+| HCIR Cognitive OS (`hbllm/hcir/`) | **424** Python files across **12** subpackages (`hbllm.hcir.seed` & `hbllm.hcir.fuzzy` included) |
 | Cortical World Model (`hbllm/hcir/world/`) | **148** Python files across **17** domain subpackages |
 | Reasoning operators (`hbllm/hcir/reasoning/`) | **14** default composable operators (`0` LLM dependencies) |
 | Workspace tiers | **4** (`Working`, `Brain`, `Persistent`, `Meta`) |
-| Test suites | **623** core test files (`tests/`) + **70** plugin test files (`plugins/`) |
+| Test suites | **420** core test files (`tests/`) + **70** plugin test files (`plugins/`) |
 | Rust crates (`rust/`) | **13** PyO3 native acceleration crates |
 
 ---

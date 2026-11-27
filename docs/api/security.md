@@ -14,15 +14,15 @@ tenant isolation, encryption at rest, and immutable audit trails.
 | Module | Class | Purpose |
 |--------|-------|---------|
 | `identity.py` | `NodeIdentity` | Ed25519 cryptographic identity per node |
-| `identity_resolver.py` | `IdentityResolver` | Resolve node IDs to public keys |
-| `rbac.py` | `RBACEngine` | Role-based access control with permissions |
-| `tenant_guard.py` | `TenantGuard` | Per-tenant data isolation enforcer |
+| `identity_resolver.py` | `resolve_sovereign_identity` | Resolve node identity and provenance tuples |
+| `rbac.py` | `RBACGuard` | Role-based access control (`Role`, `Permission`) |
+| `tenant_guard.py` | `TenantContext`, `require_tenant` | Per-tenant context isolation and enforcement |
 | `tenant_interceptor.py` | `TenantInterceptor` | Bus-level tenant context injection |
 | `tenant_registry.py` | `TenantRegistry` | Tenant lifecycle management |
 | `audit_trail.py` | `AuditTrail` | Cryptographically hash-chained immutable audit ledger |
-| `encryption.py` | `EncryptionManager` | AES-256-GCM encryption at rest |
-| `secrets.py` | `SecretStore` | Secure credential storage |
-| `trust.py` | `TrustStore` | Peer trust level management |
+| `encryption.py` | `EncryptionVault` | Fernet / PBKDF2 encryption at rest |
+| `secrets.py` | `SecretProvider`, `get_secret_provider` | Pluggable secret resolution (env, Vault, AWS Secrets Manager) |
+| `trust.py` | `TrustInterceptor` | Bus trust validation middleware |
 | `trust_chain.py` | `TrustChain` | Hierarchical trust delegation |
 
 ## NodeIdentity
@@ -45,56 +45,51 @@ is_valid = identity.verify(peer_public_key, b"message payload", signature)
 pub_key_hex = identity.public_key_hex
 ```
 
-## RBACEngine
+## `RBACGuard`
 
-Role-based access control with hierarchical permissions:
+Role-based access control with hierarchical roles (`Role`) and permissions (`Permission`):
 
 ```python
-from hbllm.security.rbac import RBACEngine
+from hbllm.security.rbac import Permission, RBACGuard, Role
 
-rbac = RBACEngine()
-
-# Define roles
-rbac.create_role("admin", permissions=["*"])
-rbac.create_role("user", permissions=["read", "write", "query"])
-rbac.create_role("viewer", permissions=["read", "query"])
+rbac = RBACGuard(db_path="data/rbac.db")
 
 # Assign roles
-rbac.assign_role(tenant_id="tenant_1", user_id="alice", role="admin")
+rbac.assign_role(tenant_id="tenant_1", user_id="alice", role=Role.ADMIN)
 
 # Check permissions
-allowed = rbac.check_permission(
+allowed = rbac.check(
     tenant_id="tenant_1",
     user_id="alice",
-    permission="write",
+    permission=Permission.MEMORY_WRITE,
 )  # True
 ```
 
-## TenantGuard
+## `TenantContext` & `require_tenant`
 
 Enforces strict data isolation between tenants at every layer:
 
 ```python
-from hbllm.security.tenant_guard import TenantGuard
+from hbllm.security.tenant_guard import TenantContext, require_tenant
 
-guard = TenantGuard()
 
-# Validate tenant context
-guard.enforce(tenant_id="tenant_1", resource_tenant="tenant_1")  # OK
-guard.enforce(tenant_id="tenant_1", resource_tenant="tenant_2")  # Raises
+@require_tenant
+def read_tenant_record(tenant_id: str) -> str:
+    return tenant_id
 
-# Scope a database query
-query = guard.scope_query(base_query, tenant_id="tenant_1")
+
+with TenantContext(tenant_id="tenant_1", user_id="alice"):
+    assert read_tenant_record(tenant_id="tenant_1") == "tenant_1"
 ```
 
 ### Isolation Guarantees
 
 | Layer | Mechanism |
 |-------|-----------|
-| **Memory** | Tenant-scoped SQLite databases |
+| **Memory** | Tenant-scoped SQLite databases and `Scope(tenant_id=...)` workspace partitions |
 | **Bus** | `TenantInterceptor` tags all messages with tenant context |
 | **API** | JWT claims carry tenant_id, validated on every request |
-| **Encryption** | Per-tenant encryption keys via `EncryptionManager` |
+| **Encryption** | Vault encryption via `EncryptionVault` |
 | **Quotas** | Per-tenant resource limits (DB rows, rate limits) |
 
 ## AuditTrail
@@ -125,62 +120,45 @@ entries = audit.query(
 )
 ```
 
-## EncryptionManager
+## `EncryptionVault`
 
-AES-256-GCM encryption for data at rest:
+Authenticated encryption for sensitive payloads at rest:
 
 ```python
-from hbllm.security.encryption import EncryptionManager
+from hbllm.security.encryption import EncryptionVault
 
-enc = EncryptionManager(master_key="...")
+vault = EncryptionVault.from_env()
 
-# Encrypt sensitive data
-ciphertext = enc.encrypt(b"sensitive memory content", tenant_id="tenant_1")
-
-# Decrypt
-plaintext = enc.decrypt(ciphertext, tenant_id="tenant_1")
+ciphertext = vault.encrypt("sensitive memory content")
+plaintext = vault.decrypt(ciphertext)
 ```
 
-## SecretStore
+## `SecretProvider`
 
-Secure credential storage with environment variable fallback:
+Secure credential lookup across environment variables, HashiCorp Vault, and AWS Secrets Manager:
 
 ```python
-from hbllm.security.secrets import SecretStore
+from hbllm.security.secrets import get_secret_provider
 
-store = SecretStore()
-
-# Store a secret
-store.set("OPENAI_API_KEY", "sk-...", tenant_id="tenant_1")
-
-# Retrieve (checks store → env vars → raises)
-key = store.get("OPENAI_API_KEY", tenant_id="tenant_1")
+secrets = get_secret_provider()
+api_key = secrets.get("OPENAI_API_KEY")
 ```
 
-## TrustStore & TrustChain
+## `TrustInterceptor` & `TrustChain`
 
-Manage peer trust levels in distributed swarms:
+Validates peer message authenticity and delegates hierarchical trust on the message bus (`hbllm.security.trust`, `hbllm.security.trust_chain`):
 
 ```python
-from hbllm.security.trust import TrustStore
+from hbllm.security.trust_chain import TrustChain
 
-trust = TrustStore()
-
-# Set trust level for a peer (0-100)
-trust.set_trust("peer_node_1", level=80)
-
-# Check if peer is trusted above threshold
-is_trusted = trust.is_trusted("peer_node_1", min_level=50)  # True
-
-# Revoke trust
-trust.revoke("peer_node_1")
+chain = TrustChain()
 ```
 
 ## Bus Topics
 
 | Topic | Publisher | Description |
 |-------|----------|-------------|
-| `security.audit` | AuditLog | New audit log entry |
-| `security.alert` | TenantGuard | Tenant isolation violation attempt |
-| `security.trust.change` | TrustStore | Peer trust level changed |
-| `security.key.rotate` | EncryptionManager | Encryption key rotation event |
+| `security.audit` | `AuditTrail` | New audit log entry |
+| `security.alert` | `TenantContext` | Tenant isolation violation attempt |
+| `security.trust.change` | `TrustInterceptor` | Peer trust level changed |
+| `security.key.rotate` | `EncryptionVault` | Encryption key rotation event |

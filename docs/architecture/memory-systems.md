@@ -164,9 +164,9 @@ bob_episodes = await backend.recall_episodes(query="secret", tenant_id="bob")
 
 ---
 
-## Memory Consolidation (Sleep Cycle)
+## Memory Consolidation (`ExecutiveRuntime`)
 
-During idle periods, the `SleepCycleNode` runs consolidation:
+During idle periods, `ExecutiveRuntime.run_offline_consolidation()` (`hbllm.hcir.kernel.executive_runtime`) runs consolidation:
 
 1. **Replay** — High-salience episodic memories are replayed from the working tier
 2. **Promote** — Salient nodes are promoted from working → brain → persistent

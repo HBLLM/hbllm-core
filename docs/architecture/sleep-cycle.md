@@ -2,7 +2,7 @@
 
 The **Lifelong Continual Learning Substrate** enables HBLLM to accumulate experience, concepts, vocabulary, and relational schemas across long operating lifetimes without catastrophic forgetting, representational drift, or unchecked graph entropy.
 
-Unlike stateless language models that forget every interaction after a session ends, HBLLM mirrors human cognitive consolidation by executing multi-stage offline sleep cycles orchestrated by the `SleepCycleNode`.
+Unlike stateless language models that forget every interaction after a session ends, HBLLM mirrors human cognitive consolidation by executing multi-stage offline consolidation cycles orchestrated by `ExecutiveRuntime.run_offline_consolidation()` (`hbllm.hcir.kernel.executive_runtime`).
 
 ```text
                                 REAL-WORLD INTERACTION
@@ -119,9 +119,9 @@ Before any candidate schema or concept update is committed to the slow consolida
 
 ---
 
-## 5. Multi-Stage Operational Sleep Cycle Sequence
+## 5. Multi-Stage Operational Consolidation Sequence
 
-The `SleepCycleNode` executes an automated 5-stage consolidation sequence when the system enters idle mode:
+`ExecutiveRuntime.run_offline_consolidation()` executes an automated multi-stage consolidation sequence during idle windows (`start_autonomous_loop()`):
 
 ### Stage 1: Memory Replay & Knowledge Consolidation
 - **Selective Replay & Compaction:** Folds active `EpisodeNode` entries into durable `ConceptNode` and `BeliefNode` representations.
@@ -151,18 +151,14 @@ The `SleepCycleNode` executes an automated 5-stage consolidation sequence when t
 
 ## 6. Execution & Triggers
 
-Consolidation cycles can be triggered via three mechanisms:
+Offline consolidation can be triggered via two mechanisms:
 
-1. **Auto-Trigger (Idle Timeout):** Automatically activates when no user query is detected for a configurable duration (default: 6 hours). Wakes up immediately if a live query arrives.
-2. **Bus Trigger (`/dream`):** Any node or CLI can publish to `system.sleep.force` for an immediate cycle:
+1. **Autonomous Idle Loop:** `ExecutiveRuntime.start_autonomous_loop()` (`hbllm.hcir.kernel.executive_runtime`) triggers `run_offline_consolidation()` automatically when no live execution cycle is active.
+2. **Direct Runtime Invocation:** Trigger an immediate consolidation cycle programmatically:
    ```python
-   await bus.publish(
-       "system.sleep.force",
-       Message(type=MessageType.QUERY, source_node_id="cli", topic="system.sleep.force", payload={}),
-   )
+   report = await system.runtime.run_offline_consolidation()
    ```
-3. **ExecutiveRuntime Idle Consolidation:**
-   `ExecutiveRuntime.run_offline_consolidation()` (`hbllm.hcir.kernel.executive_runtime`) triggers prioritized episodic replay (`HippocampalPrioritizedReplayBuffer` in `hbllm.hcir.world.episodic.replay`), `TieredWorkspace` promotion/hygiene (`enforce_node_budgets()`, `compact_event_stores()`, `run_memory_hygiene_cycle()`), and background skill consolidation automatically during idle windows (`start_autonomous_loop()`).
+   This runs `HippocampalPrioritizedReplayBuffer` (`hbllm.hcir.world.episodic.replay`), Wake–Sleep `LibraryLearner` anti-unification (`hbllm.hcir.skills.library_learner`), and `TieredWorkspace` budget/memory hygiene (`enforce_node_budgets()`, `compact_event_stores()`, `run_memory_hygiene_cycle()`).
 
 ---
 

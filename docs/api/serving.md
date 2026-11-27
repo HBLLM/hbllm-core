@@ -42,25 +42,12 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-### `POST /v1/brain/process`
+### `GET /v1/cognitive/telemetry`
 
-Full cognitive pipeline endpoint (activates all brain nodes):
-
-```bash
-curl -X POST http://localhost:8000/v1/brain/process \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Design a microservices architecture for our e-commerce platform",
-    "tenant_id": "tenant-001"
-  }'
-```
-
-### `GET /v1/brain/stats`
-
-Live cognitive subsystem metrics:
+Live cognitive subsystem telemetry:
 
 ```bash
-curl http://localhost:8000/v1/brain/stats
+curl http://localhost:8000/v1/cognitive/telemetry
 ```
 
 ### `GET /health`
@@ -201,7 +188,7 @@ Endpoints are organized into modular routers:
 | `memory_router` | `routes/memory.py` | `/v1/memory/*`, `/v1/sync/*`, `/v1/feedback/*`, `/v1/knowledge/*`, `/v1/rules` |
 | `notifications_router`| `routes/notifications.py` | `/v1/notifications/*`, `/v1/notifications/stream` (SSE channel) |
 | `studio_router` | `studio/` | `/studio/cognitive/*`, `/studio/emotion/*`, `/studio/hcir/*`, `/studio/perception/*`, `/studio/persona/*` |
-| Core API | `api.py` | `/v1/chat/completions`, `/v1/brain/process`, `/v1/audio/*`, `/v1/benchmarks/*` |
+| Core API | `api.py` | `/v1/chat/completions`, `/v1/chat`, `/v1/cognitive/telemetry`, `/v1/audio/*`, `/v1/benchmarks/*` |
 
 ### Dependency Injection
 
@@ -256,12 +243,11 @@ async def my_endpoint(brain=Depends(get_brain)):
 
 **Module:** `hbllm.serving.daemon.CognitiveDaemon`
 
-Long-running daemon process that boots the full Brain with AutonomyCore running
-and keeps it alive as a background service. Manages the complete lifecycle:
+Long-running daemon process that boots the canonical `CognitiveSystem` via `build_cognitive_system()`, starts `ExecutiveRuntime` and `ProactiveProcessor`, and optionally serves HTTP. Manages the complete lifecycle:
 
-1. Boot Brain via BrainFactory
-2. Start AutonomyCore (cognitive heartbeat)
-3. Start ProactiveProcessor (output bridge)
+1. Boot `CognitiveSystem` via `build_cognitive_system()`
+2. Start `ExecutiveRuntime` (cognitive heartbeat & idle consolidation)
+3. Start `ProactiveProcessor` (output bridge)
 4. Optionally start HTTP server (FastAPI)
 5. Run until shutdown signal (SIGTERM/SIGINT)
 6. Graceful drain and persist state

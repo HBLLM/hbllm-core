@@ -127,7 +127,7 @@ flowchart LR
   4. Remove all runtime imports/wiring of legacy `FuzzyNode` (`scikit-fuzzy` + LLM JSON prompt wrapper) and add an invariant check in `test_homoiconic_invariants.py` barring legacy `FuzzyNode` / `skfuzzy` reintroduction into serving or core.
 - **Exit Gate:**
   - Multilingual gradable grounding tests pass across `en`, `si`, and `ta`.
-  - Zero `FuzzyNode` or `skfuzzy` runtime references in `hbllm/serving/`, `hbllm/brain/`, or `hbllm/hcir/`.
+  - Zero `FuzzyNode` or `skfuzzy` runtime references in `hbllm/serving/`, `hbllm/actions/`, or `hbllm/hcir/`.
   - Full `pytest tests/unit/architecture/ tests/unit/hcir/ -q` and `python -m hbllm bench profile` pass.
 
 ---

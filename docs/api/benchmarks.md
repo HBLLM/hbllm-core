@@ -402,8 +402,9 @@ python plugins/safety_gym_adapter/benchmark.py --native
 # 8. ALFWorld 6-Tier Household Reasoning Benchmark
 python plugins/alfworld_adapter/benchmark.py --native
 
-# 9. ARC-AGI-3 Official Interactive Benchmark (Official ARC API)
-python plugins/arc_agi_adapter/scripts/run_arc3_benchmark.py --games ls20 wa30 --max-levels 1
+# 9. ARC-AGI-3 Local Suite & Interactive Benchmarks
+python plugins/arc_agi_adapter/run_local_suite.py --seed 0
+python plugins/arc_agi_adapter/run_all_25_games.py
 ```
 
 ---

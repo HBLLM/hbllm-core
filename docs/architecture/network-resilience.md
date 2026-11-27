@@ -137,13 +137,14 @@ Intelligently routes queries based on complexity analysis, available node health
 
 ### Distributed Tracing
 
-OpenTelemetry instrumentation for cross-node message flows:
+OpenTelemetry instrumentation (`OTEL_ENABLED=1`) and metrics for cross-node message flows live in `hbllm.network.tracing` (with ASGI/HTTP tracing via `hbllm.observability.middleware.TracingMiddleware`):
 
 ```python
-from hbllm.network.tracing import TracingMiddleware
+from hbllm.network.tracing import BusMetrics, trace_span
 
-# Automatically adds spans for publish/subscribe/request
-bus.add_interceptor(TracingMiddleware())
+metrics = BusMetrics()
+with trace_span("bus.dispatch", attributes={"topic": "query.route"}):
+    metrics.record_publish("query.route")
 ```
 
 ### Plugin Manager
